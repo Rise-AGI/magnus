@@ -1,5 +1,4 @@
-import torch
-import time
+from library import *
 
 def perform_bandwidth_test(src_device, dst_device, size_mb=1024):
     """

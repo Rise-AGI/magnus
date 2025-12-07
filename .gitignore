@@ -1,20 +1,18 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Front End: React
 
-# Virtual environments
-.venv
 
-run*.py
-run*.sh
-!scripts/**
-scripts/**/**__pycache__**
-api_keys.json
-documents/
-configs/
+
+# Back End: Python
+back_end/**/__pycache__/
+back_end/*.py[oc]
+back_end/.venv
+back_end/run*.py
+back_end/run*.sh
+back_end/!scripts/**
+back_end/scripts/**/**__pycache__**
+back_end/configs/
+
+# Others
 nohup*
 slurm*.out
+documents/

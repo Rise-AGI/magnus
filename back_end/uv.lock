@@ -192,6 +192,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "pywheels" },
+    { name = "ruamel-yaml" },
     { name = "torch" },
     { name = "torchvision" },
 ]
@@ -199,6 +200,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "pywheels", specifier = ">=0.8.3.2" },
+    { name = "ruamel-yaml", specifier = ">=0.18.16" },
     { name = "torch", specifier = ">=2.9.1" },
     { name = "torchvision", specifier = ">=0.24.1" },
 ]
@@ -597,6 +599,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1a/4d/5bd9e592b624ac6a613d2f2e690d42e5f5a22d80e3fd8c5c318e5eb5886c/pywheels-0.8.3.2.tar.gz", hash = "sha256:aff5bf08f2b418b65ab3b4a99745b0d981f6d94e9dedd9dc342934a0fc820ed3", size = 35979, upload-time = "2025-11-29T12:07:14.16Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ca/d0/1ade345906feacf1dd8dad3425943bbc4c8092616994b967717bdc430f80/pywheels-0.8.3.2-py3-none-any.whl", hash = "sha256:9d20d5c2fbb7412005f257c785251c582d45d31197485705f4609c0c69b65b71", size = 43113, upload-time = "2025-11-29T12:07:12.745Z" },
+]
+
+[[package]]
+name = "ruamel-yaml"
+version = "0.18.16"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/c7/ee630b29e04a672ecfc9b63227c87fd7a37eb67c1bf30fe95376437f897c/ruamel.yaml-0.18.16.tar.gz", hash = "sha256:a6e587512f3c998b2225d68aa1f35111c29fad14aed561a26e73fab729ec5e5a", size = 147269, upload-time = "2025-10-22T17:54:02.346Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/73/bb1bc2529f852e7bf64a2dec885e89ff9f5cc7bbf6c9340eed30ff2c69c5/ruamel.yaml-0.18.16-py3-none-any.whl", hash = "sha256:048f26d64245bae57a4f9ef6feb5b552a386830ef7a826f235ffb804c59efbba", size = 119858, upload-time = "2025-10-22T17:53:59.012Z" },
 ]
 
 [[package]]

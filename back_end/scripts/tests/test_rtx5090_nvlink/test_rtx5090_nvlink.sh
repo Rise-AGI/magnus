@@ -12,4 +12,4 @@ nvidia-smi -L
 
 echo "=== 开始 Python 侦测 ==="
 PYTHONUNBUFFERED=1
-python -m scripts.tests.test_rtx5090_nvlink.test_rtx5090_nvlink
+uv run -m scripts.tests.test_rtx5090_nvlink.test_rtx5090_nvlink
