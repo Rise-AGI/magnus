@@ -1,5 +1,19 @@
-# Front End: React
-
+# Front End: Next.js
+front_end/node_modules
+front_end/.pnp
+front_end/.pnp.js
+front_end/.yarn/install-state.gz
+front_end/coverage
+front_end/.next/
+front_end/out/
+front_end/build
+front_end/*.pem
+front_end/npm-debug.log*
+front_end/yarn-debug.log*
+front_end/yarn-error.log*
+front_end/.env*.local
+front_end/.vercel
+front_end/*.tsbuildinfo
 
 
 # Back End: Python
@@ -12,7 +26,9 @@ back_end/!scripts/**
 back_end/scripts/**/**__pycache__**
 back_end/configs/
 
+
 # Others
 nohup*
 slurm*.out
 documents/
+.DS_Store
