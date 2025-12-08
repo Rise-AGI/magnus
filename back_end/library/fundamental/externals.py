@@ -21,6 +21,9 @@ from tqdm import tqdm
 from time import sleep
 from copy import deepcopy
 from pathlib import Path
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from datetime import datetime
 from functools import partial
 from random import normalvariate
@@ -51,6 +54,8 @@ __all__ = [
     "sleep",
     "random",
     "FastAPI",
+    "Depends",
+    "Session",
     "APIRouter",
     "hashlib",
     "uvicorn",
@@ -65,6 +70,7 @@ __all__ = [
     "traceback",
     "threading",
     "seperator",
+    "BaseModel",
     "HTTPException",
     "multiprocessing",
     "get_time_stamp",

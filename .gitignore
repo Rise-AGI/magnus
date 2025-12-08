@@ -35,3 +35,4 @@ nohup*
 slurm*.out
 documents/
 .DS_Store
+.vscode/
