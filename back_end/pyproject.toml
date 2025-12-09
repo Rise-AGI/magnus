@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.124.0",
     "httpx>=0.28.1",
+    "pyjwt>=2.10.1",
     "pywheels>=0.8.3.2",
     "ruamel-yaml>=0.18.16",
     "sqlalchemy>=2.0.44",

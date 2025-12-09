@@ -1,6 +1,6 @@
 // front_end/src/lib/config.ts
 
 
-// 全栈统一配置注入环境，前端通过环境变量获取后端地址
-const API_PORT = process.env.SERVER_PORT;
+const API_PORT = process.env.NEXT_PUBLIC_SERVER_PORT;
 export const API_BASE = `http://127.0.0.1:${API_PORT}`;
+export const FEISHU_APP_ID = process.env.NEXT_PUBLIC_FEISHU_APP_ID;

@@ -5,6 +5,9 @@ from library import *
 __all__ = [
     "JobSubmission",
     "JobResponse",
+    "FeishuLoginRequest",
+    "UserInfo",
+    "LoginResponse",
 ]
 
 
@@ -28,3 +31,23 @@ class JobResponse(JobSubmission):
 
     class Config:
         from_attributes = True # 兼容 ORM 对象读取
+
+
+class FeishuLoginRequest(BaseModel):
+    code: str
+
+
+class UserInfo(BaseModel):
+    id: str
+    name: str
+    avatar_url: Optional[str] = None
+    email: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserInfo
