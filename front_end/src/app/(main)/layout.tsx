@@ -12,11 +12,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="min-h-screen bg-[#050505]">
-      {/* 1. Sidebar 永远显示，包含了登录按钮 */}
+      {/* 永远显示，包含了登录按钮 */}
       <Sidebar />
 
       <div className="pl-64">
-        {/* 2. Header 永远显示，提供了基础导航 */}
+        {/* Header 永远显示，提供了基础导航 */}
         <Header />
 
         <main className="p-8">

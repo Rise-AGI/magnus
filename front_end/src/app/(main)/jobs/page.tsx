@@ -15,7 +15,7 @@ interface User {
   id: string;
   name: string;
   avatar_url?: string;
-  email?: string; // ✅ 新增：用于筛选器显示邮箱
+  email?: string; // Added for filter display
 }
 
 interface Job {
@@ -80,13 +80,13 @@ export default function JobsPage() {
 
   // --- Data States ---
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]); // ✅ 新增：用户列表
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   
   // --- Filter & Pagination States ---
   const [searchQuery, setSearchQuery] = useState(""); 
   const [debouncedQuery, setDebouncedQuery] = useState(""); 
-  const [selectedUserId, setSelectedUserId] = useState(""); // ✅ 替换旧的 userFilter
+  const [selectedUserId, setSelectedUserId] = useState(""); 
   
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -110,11 +110,16 @@ export default function JobsPage() {
   // --- 2. Build Filter Options ---
   const userFilterOptions = useMemo(() => {
     return [
-      { label: "All Users", value: "" },
+      { 
+        label: "All Users", 
+        value: "", 
+        icon: "/api/logo" // Magnus Logo
+      },
       ...allUsers.map(u => ({
         label: u.name,
         value: u.id,
-        meta: u.email || "No Email"
+        meta: u.email || "",
+        icon: u.avatar_url   // 用户真实头像
       }))
     ];
   }, [allUsers]);
@@ -132,7 +137,6 @@ export default function JobsPage() {
         params.append("search", debouncedQuery.trim());
       }
 
-      // ✅ 传 creator_id 给后端
       if (selectedUserId) {
         params.append("creator_id", selectedUserId);
       }
@@ -224,7 +228,6 @@ export default function JobsPage() {
       </div>
 
       {/* Filters & Search */}
-      {/* ✅ 修复：relative z-20 确保下拉菜单浮在表格上方 */}
       <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-1.5 mb-6 flex items-center gap-2 backdrop-blur-sm relative z-20">
         <div className="relative flex-1 group">
            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
@@ -238,7 +241,7 @@ export default function JobsPage() {
         </div>
         <div className="h-6 w-px bg-zinc-800"></div>
         
-        {/* ✅ Dynamic User Filter */}
+        {/* Dynamic User Filter */}
         <div className="w-56"> 
           <SearchableSelect
              value={selectedUserId}
@@ -251,7 +254,6 @@ export default function JobsPage() {
       </div>
 
       {/* Table & Pagination Container */}
-      {/* ✅ 修复：relative z-10 确保层级正确 */}
       <div className="border border-zinc-800 rounded-xl bg-zinc-900/30 min-h-[400px] shadow-sm flex flex-col relative z-10">
         {loading ? (
            <div className="flex flex-col items-center justify-center flex-1 h-80 text-zinc-500 gap-3">
@@ -287,7 +289,11 @@ export default function JobsPage() {
                       {/* Task / Task ID */}
                       <td className="px-6 py-4 align-top whitespace-normal break-all">
                         <div className="flex flex-col gap-1.5">
-                          <span className="font-semibold text-zinc-200 text-base">{job.task_name}</span>
+                          <CopyableText 
+                            text={job.task_name} 
+                            variant="text" 
+                            className="font-semibold text-zinc-200 text-base" 
+                          />
                           <div className="flex items-center gap-2">
                             <CopyableText text={job.id} className="text-[10px] uppercase tracking-wider" />
                           </div>

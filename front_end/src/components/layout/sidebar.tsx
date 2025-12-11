@@ -18,18 +18,23 @@ export function Sidebar() {
 
   return (
     <aside className="w-64 h-screen fixed left-0 top-0 border-r border-zinc-800 bg-zinc-950/50 backdrop-blur-xl flex flex-col z-50">
-      {/* Logo Area */}
-      <div className="h-16 flex items-center px-6 border-b border-zinc-800 bg-zinc-900/20">
-        <div className="font-bold text-xl tracking-tighter text-zinc-100 flex items-center gap-2">
-           {/* 可以加个小Logo */}
+      <div className="h-16 flex items-center justify-between px-8 border-b border-zinc-800 bg-zinc-900/20">
+        {/* Title: Removed 'flex gap-2' to fix the spacing issue */}
+        <div className="font-bold text-xl tracking-tighter text-zinc-100 cursor-default select-none">
           Magnus<span className="text-blue-500">Platform</span>
         </div>
+        
+        {/* Logo: Added via API tunnel */}
+        <img 
+          src="/api/logo" 
+          alt="Magnus Logo" 
+          className="w-7 h-7 rounded-full object-cover border border-zinc-700/50 shadow-sm opacity-90 hover:opacity-100 transition-opacity" 
+        />
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 py-6 px-3 space-y-1">
         {NAV_ITEMS.map((item) => {
-          // 简单的路由匹配逻辑：如果是根路径或以该路径开头
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
           
           return (
@@ -82,9 +87,8 @@ export function Sidebar() {
               {/* Name Info */}
               <div className="flex-1 min-w-0 flex flex-col justify-center">
                 <p className="text-sm font-semibold text-zinc-200 truncate leading-none mb-1">{user.name}</p>
-                {/* ✅ 改动：不再显示 Researcher，而是显示邮箱，如果太长就截断 */}
                 <p className="text-[10px] text-zinc-500 truncate font-mono" title={user.email || ""}>
-                    {user.email || "No Email"}
+                    {user.email || ""}
                 </p>
               </div>
 
