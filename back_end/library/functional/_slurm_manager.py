@@ -1,7 +1,11 @@
+# back_end/library/functional/_slurm_manager.py
+import time
 import shutil
-import subprocess
 import logging
+import traceback
+import subprocess
 from typing import Optional
+
 
 __all__ = [
     "SlurmManager",
@@ -9,59 +13,49 @@ __all__ = [
     "SlurmResourceError",
 ]
 
+
 logger = logging.getLogger(__name__)
 
+
 class SlurmError(Exception):
-    """SLURM 通用错误"""
     pass
+
 
 class SlurmResourceError(SlurmError):
-    """资源不足错误 (对应 --immediate 失败)"""
     pass
 
+
 class SlurmManager:
-    """
-    SLURM 集群管理器 (Wrapper) - Strict Mode
-    
-    职责：
-    1. 提交任务 (sbatch)
-    2. 查询资源 (sinfo)
-    3. 管理任务状态 (squeue/scancel)
-    
-    注意：
-    - 此类在初始化时会严格检查 SLURM 命令 (sbatch, squeue, scancel, sinfo)。
-    - 如果环境不满足，直接抛出 RuntimeError。
-    """
-    
-    def __init__(self) -> None:
-        # 严格环境检查
-        required_cmds = ["sbatch", "squeue", "scancel", "sinfo"]
-        missing_cmds = [cmd for cmd in required_cmds if shutil.which(cmd) is None]
+
+    def __init__(
+        self
+    )-> None:
         
-        if missing_cmds:
+        # 严格环境检查
+        required_commands = ["sbatch", "squeue", "scancel", "sinfo"]
+        missing_commands = [command for command in required_commands if shutil.which(command) is None]
+        if missing_commands:
             error_msg = (
-                f"CRITICAL: SLURM commands not found: {', '.join(missing_cmds)}. "
+                f"CRITICAL: SLURM commands not found: {', '.join(missing_commands)}. "
                 "Magnus requires a valid SLURM environment to operate."
             )
             logger.critical(error_msg)
             raise RuntimeError(error_msg)
 
-    def get_cluster_free_gpus(self) -> int:
-        """
-        获取集群当前空闲 GPU 总数
-        """
+    
+    def get_cluster_free_gpus(
+        self
+    )-> int:
+        
         try:
             # 获取所有 idle 或 mixed 节点的 GPU 信息
-            # sinfo -h -o "%G %t" -> "gpu:A100:8 idle"
-            cmd = ["sinfo", "-h", "-o", "%G %t"]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            
+            command = ["sinfo", "-h", "-o", "%G %t"]
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
             total_free = 0
             for line in result.stdout.strip().split('\n'):
                 parts = line.split()
                 if len(parts) < 2:
                     continue
-                
                 gres, state = parts[0], parts[1]
                 
                 # 简单粗暴的解析：如果是 idle，假设该节点所有 GPU 空闲
@@ -79,117 +73,152 @@ class SlurmManager:
             logger.error(f"Failed to execute sinfo: {e.stderr}")
             return 0
         except Exception as e:
-            logger.error(f"Error querying cluster resources: {e}")
+            logger.error(f"Error querying cluster resources: {e}\n调用栈：\n{traceback.format_exc()}")
             return 0
-
-    def submit_job(self, entry_command: str, gpus: int) -> str:
-        """
-        提交任务 (手动模拟 Immediate 模式)
+    
+    
+    def submit_job(
+        self,
+        entry_command: str, 
+        gpus: int,
+        job_name: str,
+        gpu_type: Optional[str] = None,
+        output_path: Optional[str] = None,
+        slurm_latency: int = 1,
+    ) -> str:
         
-        策略变更：
-        由于 sbatch 可能不支持 --immediate，改为：
-        1. 正常提交任务。
-        2. 等待 1 秒让 Slurm 调度。
-        3. 检查状态。
-        4. 如果是 PENDING (说明资源不够)，立即 scancel 并报错。
-        5. 如果是 RUNNING，成功返回。
         """
-        import time # 记得在文件头部导入 time
-
-        # 构造 sbatch 命令 (去掉了 --immediate)
-        cmd = [
+        提交任务 (通过 Stdin 管道)
+        
+        策略:
+        1. 构造完整的 Shell 脚本内容。
+        2. 构造 sbatch 参数 (支持指定型号、自定义日志路径)。
+        3. 通过 Stdin 管道传给 sbatch。
+        4. 模拟 Immediate 模式：提交后等待检查，若 PENDING 则强制取消。
+        """
+        
+        entry_command = f"sleep {slurm_latency + 1}" + "\n" + entry_command
+        script_content = f"#!/bin/bash\n\n{entry_command}"
+        
+        command = [
             "sbatch",
             "--parsable",
-            # "--immediate", # ❌ 移除这个不兼容的参数
-            f"--gres=gpu:{gpus}", # 如果之后还需要指定型号，改这里，例如 f"--gres=gpu:rtx5090:{gpus}"
-            "--output=magnus_%j.log",
-            "--error=magnus_%j.err",
-            "--job-name=magnus_job",
-            "--wrap", entry_command
+            f"--job-name={job_name}",
         ]
+
+        # 利用默认行为：不设置 error 则 stderr 合并到 output
+        log_file = output_path if output_path else "magnus_%j.log"
+        command.append(f"--output={log_file}")
+
+        # 处理 GPU 资源
+        if gpus > 0:
+            if gpu_type and gpu_type != "cpu":
+                command.append(f"--gres=gpu:{gpu_type}:{gpus}")
+            else:
+                command.append(f"--gres=gpu:{gpus}")
 
         job_id = None
         try:
-            # 1. 提交
+            gpu_info = f"{gpu_type}:{gpus}" if (gpu_type and gpus > 0) else f"{gpus}"
+            logger.info(f"🚀 Submitting '{job_name}' via stdin (GPUs: {gpu_info})...")
+            
             result = subprocess.run(
-                cmd, 
+                command, 
+                input=script_content,
                 capture_output=True, 
                 text=True, 
                 check=True
             )
+            
             job_id = result.stdout.strip()
+
+            time.sleep(slurm_latency)
             
-            # 2. 给 Slurm 调度器一点反应时间 (1秒通常足够)
-            time.sleep(1) 
-            
-            # 3. 检查状态
             status = self.check_job_status(job_id)
             
-            # 4. 判定
             if status == "PENDING":
-                # 核心逻辑：如果是排队中，说明资源不足（或者是碎片化导致无法分配）
-                # 我们必须撤回任务，保持 "Magnus 控制排队" 的原则
-                logger.warning(f"Job {job_id} is PENDING in Slurm (simulated immediate failure). Cancelling...")
-                self.kill_job(job_id)
+                logger.warning(f"⚠️ Job {job_id} is PENDING (Resource unavailable). Triggering Immediate Kill...")
+                self.kill_job(job_id) 
                 raise SlurmResourceError("Resources unavailable immediately (Simulated)")
-                
-            elif status == "FAILED" or status == "UNKNOWN":
+            
+            elif status in ["FAILED", "UNKNOWN", "BOOT_FAIL", "NODE_FAIL"]:
                 raise SlurmError(f"Job failed immediately after submission (Status: {status})")
-                
-            # 如果是 RUNNING 或 COMPLETED，说明成功抢到了资源
+            
             return job_id
             
         except subprocess.CalledProcessError as e:
-            logger.error(f"sbatch failed: {e.stderr}")
+            logger.error(f"❌ sbatch execution failed: {e.stderr}")
             raise SlurmError(f"Submission failed: {e.stderr}")
+        
         except SlurmResourceError:
-            raise # 直接抛出给上层处理
+            raise
+        
         except Exception as e:
-            # 兜底：如果有 ID 且发生意外，尝试清理
+            logger.error(f"❌ Unexpected submission error: {e}")
             if job_id:
-                self.kill_job(job_id)
-            logger.error(f"Unexpected submission error: {e}")
+                logger.warning(f"🧹 Cleaning up job {job_id} due to unexpected error...")
+                try:
+                    self.kill_job(job_id)
+                except:
+                    pass
             raise SlurmError(f"Unexpected error: {e}")
 
-    def check_job_status(self, slurm_job_id: str) -> str:
+    
+    def check_job_status(
+        self, 
+        slurm_job_id: str,
+    )-> str:
+        
         """
-        查询任务状态
+        查询 slurm 任务状态
         返回: PENDING | RUNNING | COMPLETED | FAILED | UNKNOWN
         """
-        # 使用 squeue 查询活跃任务状态
-        cmd = ["squeue", "-h", "-j", slurm_job_id, "-o", "%t"]
+        
+        command = ["squeue", "-h", "-j", slurm_job_id, "-o", "%t"]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(command, capture_output=True, text=True)
             state = result.stdout.strip()
             
             if not state:
                 # squeue 查不到，说明任务已经不在队列中（结束了）
                 # 这里默认它 COMPLETED，因为如果是 FAILED 通常会有记录
-                # *注：更严谨的做法是去查 sacct，但在简单场景下这样足够
                 return "COMPLETED"
 
             # 映射 SLURM 状态码
-            # R=Running, PD=Pending, CG=Completing, CD=Completed, F=Failed, CA=Cancelled
+            # R=Running, PD=Pending, CG=Completing, CD=Completed, 
+            # F=Failed, CA=Cancelled, TO=Timeout
             mapping = {
                 "R": "RUNNING",
                 "PD": "PENDING",
                 "CG": "RUNNING",
                 "CD": "COMPLETED",
                 "F": "FAILED",
-                "CA": "FAILED", 
-                "TO": "FAILED" # Timeout
+                "CA": "FAILED",
+                "TO": "FAILED",
             }
             return mapping.get(state, "UNKNOWN")
-            
+        
         except Exception as e:
             logger.error(f"Failed to check job status {slurm_job_id}: {e}")
             return "UNKNOWN"
 
-    def kill_job(self, slurm_job_id: str) -> None:
+    
+    def kill_job(
+        self, 
+        slurm_job_id: str
+    )-> None:
+        
         """
         终止任务 (scancel)
         """
+        
+        command = [
+            "scancel",
+            "--signal=KILL",
+            slurm_job_id,
+        ]
+        
         try:
-            subprocess.run(["scancel", slurm_job_id], check=False)
-        except Exception as e:
-            logger.error(f"scancel failed for job {slurm_job_id}: {e}")
+            subprocess.run(command, check=False)
+        except Exception as error:
+            logger.error(f"scancel failed for job {slurm_job_id}: {error}")

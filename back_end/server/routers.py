@@ -1,24 +1,25 @@
+# back_end/server/routers.py
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
-
-# 导入本地模块
 from library import *
 from . import database
 from . import models
-from .models import JobStatus, JobType # 明确导入枚举
+from .models import JobStatus, JobType
 from .schemas import *
 from ._github_client import github_client
 from ._jwt_signer import jwt_signer
 from ._feishu_client import feishu_client
 from ._magnus_config import magnus_config
 
+
 __all__ = [
     "router",
 ]
+
 
 router = APIRouter()
 

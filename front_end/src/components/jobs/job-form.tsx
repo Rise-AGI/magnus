@@ -8,8 +8,8 @@ import { client } from "@/lib/api";
 const MAX_GPU_COUNT = 8;
 
 const GPU_TYPES = [
-  { label: "NVIDIA GeForce RTX 5090", value: "RTX_5090", meta: "32GB • Blackwell" },
-  { label: "CPU Only", value: "CPU", meta: "Host Memory" },
+  { label: "NVIDIA GeForce RTX 5090", value: "rtx5090", meta: "32GB • Blackwell" },
+  { label: "CPU Only", value: "cpu", meta: "Host Memory" },
 ];
 
 const JOB_TYPES = [
@@ -85,12 +85,9 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
         setHasScanned(true); 
         fetchBranches();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
   // --- Handlers ---
-
-  // 核心修复：手动处理 GPU 类型切换逻辑，替代 useEffect
   const handleGpuTypeChange = (val: string) => {
     setGpuType(val);
     if (val === 'CPU') {

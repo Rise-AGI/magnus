@@ -2,16 +2,31 @@
 import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
+from pywheels.file_tools import guarantee_file_exist
 from .database import SessionLocal
 from .models import Job, JobStatus, JobType
 from library.functional._slurm_manager import SlurmManager, SlurmResourceError
+from ._magnus_config import magnus_config
+
+
+__all__ = [
+    "scheduler",
+]
+
+
+magnus_workspace_path = f"{magnus_config['server']['root']}/workspace"
+guarantee_file_exist(magnus_workspace_path, is_directory=True)
 
 
 logger = logging.getLogger(__name__)
 
+
 class MagnusScheduler:
-    def __init__(self):
-        # 初始化 SLURM 管理器 (严格模式，无 SLURM 环境会报错)
+    
+    def __init__(
+        self,
+    ):
+        # 初始化 SLURM 管理器；严格模式，无 SLURM 环境会报错
         try:
             self.slurm = SlurmManager()
             self.enabled = True
@@ -19,13 +34,15 @@ class MagnusScheduler:
             logger.critical(f"Scheduler disabled due to missing SLURM: {e}")
             self.enabled = False
 
-    def tick(self):
+    
+    def tick(
+        self,
+    ):
         """
         调度器心跳：同步状态 -> 决策调度
-        注意：此方法是同步的，将在后台线程中运行
+        此方法是同步的，将在后台线程中运行
         """
-        if not self.enabled:
-            return
+        if not self.enabled: return
 
         # 为每次 tick 创建独立的 DB 会话
         with SessionLocal() as db:
@@ -35,13 +52,17 @@ class MagnusScheduler:
             except Exception as e:
                 logger.error(f"Scheduler tick failed: {e}", exc_info=True)
 
-    def _sync_reality(self, db: Session):
+    
+    def _sync_reality(
+        self, 
+        db: Session,
+    ):
+        
         """
         第一阶段：同步现实世界 (SLURM) 的状态到数据库
         """
         # 获取所有我们认为正在运行的任务
         running_jobs = db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
-        
         for job in running_jobs:
             if not job.slurm_job_id:
                 # 异常数据修复
@@ -66,55 +87,51 @@ class MagnusScheduler:
             
         db.commit()
 
-    def _make_decisions(self, db: Session):
-        """
-        第二阶段：调度决策 (排队与抢占) - Debug Enhanced
-        """
-        # 1. 获取资源
-        real_free_gpus = self.slurm.get_cluster_free_gpus()
-        # logger.info(f"🔎 [Tick] Free GPUs: {real_free_gpus}")
+    
+    def _make_decisions(
+        self, 
+        db: Session,
+    ):
         
-        # 2. 获取候选者
+        """
+        第二阶段：调度决策 (排队与抢占)
+        """
+        
+        real_free_gpus = self.slurm.get_cluster_free_gpus()
+        
         candidates = db.query(Job).filter(
             Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
         ).all()
-        
-        if not candidates:
-            return
+        if not candidates: return
 
-        # 排序
         priority_map = {
             JobType.A1: 4, JobType.A2: 3,
             JobType.B1: 2, JobType.B2: 1
         }
-        candidates.sort(key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()), reverse=True)
+        candidates.sort(
+            key = lambda x: (priority_map[x.job_type], -x.created_at.timestamp()), 
+            reverse = True,
+        )
 
         for job in candidates:
-            logger.info(f"🤔 Considering Job {job.id} | Type: {job.job_type} | Need: {job.gpu_count} | Status: {job.status}")
             
-            # === 情况 A: 资源充足 ===
+            # 资源充足
             if real_free_gpus >= job.gpu_count:
-                logger.info(f"✅ Resource sufficient ({real_free_gpus} >= {job.gpu_count}). Starting Job {job.id}...")
                 if self._start_job(db, job):
                     real_free_gpus -= job.gpu_count
             
-            # === 情况 B: 尝试抢占 ===
+            # 资源不充足，但是是 A 类，可以抢 B 类
             elif job.job_type in [JobType.A1, JobType.A2]:
                 needed = job.gpu_count - real_free_gpus
-                logger.info(f"⚔️ Attempting preemption for Job {job.id}. Need {needed} more GPUs.")
-                
                 # 寻找受害者
                 potential_victims = db.query(Job).filter(
                     Job.status == JobStatus.RUNNING,
                     Job.job_type.in_([JobType.B1, JobType.B2])
                 ).all()
-                
-                logger.info(f"👀 Found {len(potential_victims)} potential victims (B-Class Running jobs).")
-
-                # LIFO 排序
+                # LIFO 排序，干掉晚上机的 B 类、而不是搞掉跑了很长时间的 B 类
                 potential_victims.sort(
-                    key=lambda x: x.start_time.timestamp() if x.start_time else 0, 
-                    reverse=True
+                    key = lambda x: x.start_time.timestamp() if x.start_time else 0, 
+                    reverse = True,
                 )
                 
                 victims = []
@@ -125,40 +142,45 @@ class MagnusScheduler:
                         break
                     victims.append(v)
                     recovered_gpus += v.gpu_count
-                    logger.info(f"   -> Candidate Victim: {v.id} (Type: {v.job_type}, GPUs: {v.gpu_count})")
-                
                 if recovered_gpus >= needed:
-                    logger.info(f"💀 EXECUTE PREEMPTION: Killing {len(victims)} jobs to free {recovered_gpus} GPUs.")
-                    
-                    # 1. 处决
-                    for v in victims:
-                        self._kill_and_pause(db, v)
-                    
-                    # 2. 模拟资源释放
+                    # 处决
+                    for v in victims: self._kill_and_pause(db, v)
+                    # 模拟资源释放
                     real_free_gpus += recovered_gpus
-                    
-                    # 3. 启动大哥
-                    # ⚠️ 关键修正：抢占后启动失败不应回滚资源，因为受害者已经死了，资源确实会空出来
-                    # 这里的逻辑是：即便这次启动失败（比如Slurm还没反应过来），
-                    # 下次Tick时资源就会变成 Free，大哥就能正常上位了。
+                    # 启动大哥
                     if self._start_job(db, job):
                         real_free_gpus -= job.gpu_count
                     else:
-                        logger.warning(f"⚠️ Preemption done but start failed (Slurm delay?). Job {job.id} will retry next tick.")
+                        pass
                 else:
-                    logger.info(f"❌ Preemption failed: Not enough B-Class jobs (Recoverable: {recovered_gpus}, Needed: {needed}).")
-
+                    pass
             else:
-                logger.info(f"💤 Job {job.id} is Low Priority ({job.job_type}) and resources are full. Waiting.")
+                pass
 
-    def _start_job(self, db: Session, job: Job) -> bool:
+    def _start_job(
+        self, 
+        db: Session, 
+        job: Job
+    )-> bool:
+        
         """
         原子操作：提交 SLURM + 更新 DB
         """
+        
+        job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
+        guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
+        
         try:
-            # 这里的 submit_job 使用了 --immediate
+            # 这里的 submit_job 模拟了 --immediate 模式
             # 如果资源不足，会抛出 SlurmResourceError
-            slurm_id = self.slurm.submit_job(job.entry_command, job.gpu_count)
+            slurm_id = self.slurm.submit_job(
+                entry_command = job.entry_command, 
+                gpus = job.gpu_count,
+                job_name = job.task_name,
+                gpu_type = job.gpu_type,
+                output_path = f"{job_working_table}/slurm/output.txt",
+                slurm_latency = magnus_config["server"]["scheduler"]["slurm_latency"],
+            )
             
             job.status = JobStatus.RUNNING
             job.slurm_job_id = slurm_id
@@ -173,14 +195,20 @@ class MagnusScheduler:
             logger.warning(f"Job {job.id} submission failed: Resources unavailable immediately.")
             return False
             
-        except Exception as e:
+        except Exception as error:
             # 其他严重错误 (比如 sbatch 命令写错)
-            logger.error(f"Job {job.id} submission error: {e}")
+            logger.error(f"Job {job.id} submission error: {error}")
             job.status = JobStatus.FAILED
             db.commit()
             return False
-
-    def _kill_and_pause(self, db: Session, job: Job):
+    
+    
+    def _kill_and_pause(
+        self, 
+        db: Session, 
+        job: Job,
+    ):
+        
         """
         残忍操作：Kill SLURM Job -> 标记为 Paused
         """
@@ -190,8 +218,8 @@ class MagnusScheduler:
         
         job.status = JobStatus.PAUSED
         job.slurm_job_id = None
-        job.start_time = None # 清除运行时间
+        job.start_time = None
         db.commit()
 
-# 全局单例
+
 scheduler = MagnusScheduler()
