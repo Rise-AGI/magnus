@@ -106,7 +106,7 @@ class MagnusScheduler:
 
         priority_map = {
             JobType.A1: 4, JobType.A2: 3,
-            JobType.B1: 2, JobType.B2: 1
+            JobType.B1: 2, JobType.B2: 1,
         }
         candidates.sort(
             key = lambda x: (priority_map[x.job_type], -x.created_at.timestamp()), 
@@ -156,7 +156,8 @@ class MagnusScheduler:
                     pass
             else:
                 pass
-
+    
+    
     def _start_job(
         self, 
         db: Session, 
@@ -180,6 +181,7 @@ class MagnusScheduler:
                 gpu_type = job.gpu_type,
                 output_path = f"{job_working_table}/slurm/output.txt",
                 slurm_latency = magnus_config["server"]["scheduler"]["slurm_latency"],
+                overwrite_output = False,
             )
             
             job.status = JobStatus.RUNNING

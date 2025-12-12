@@ -85,6 +85,7 @@ class SlurmManager:
         gpu_type: Optional[str] = None,
         output_path: Optional[str] = None,
         slurm_latency: int = 1,
+        overwrite_output: bool = True,
     ) -> str:
         
         """
@@ -109,7 +110,8 @@ class SlurmManager:
         # 利用默认行为：不设置 error 则 stderr 合并到 output
         log_file = output_path if output_path else "magnus_%j.log"
         command.append(f"--output={log_file}")
-
+        if not overwrite_output: command.append("--open-mode=append")
+        
         # 处理 GPU 资源
         if gpus > 0:
             if gpu_type and gpu_type != "cpu":
