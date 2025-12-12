@@ -1,4 +1,3 @@
-// front_end/src/components/jobs/job-form.tsx
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -6,8 +5,8 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { client } from "@/lib/api"; 
 
-// --- Constants ---
-const MAX_GPU_COUNT = 8; // 稍微调大一点上限，方便测试
+const MAX_GPU_COUNT = 8;
+
 const GPU_TYPES = [
   { label: "NVIDIA GeForce RTX 5090", value: "RTX_5090", meta: "32GB • Blackwell" },
   { label: "CPU Only", value: "CPU", meta: "Host Memory" },
@@ -20,7 +19,6 @@ const JOB_TYPES = [
   { label: "B2 - 次优可抢", value: "B2", meta: "Preemptible (Low)" },
 ];
 
-// --- Types ---
 interface Branch { name: string; commit_sha: string; }
 interface Commit { sha: string; message: string; author: string; date: string; }
 
@@ -45,10 +43,9 @@ interface JobFormProps {
 }
 
 export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobFormProps) {
-  // --- State Initialization ---
+  // State Initialization
   const [taskName, setTaskName] = useState(initialData?.taskName || "");
   const [description, setDescription] = useState(initialData?.description || "");
-
   const [namespace, setNamespace] = useState(initialData?.namespace || "PKU-Plasma");
   const [repoName, setRepoName] = useState(initialData?.repoName || "");
   
@@ -59,8 +56,11 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
   const [selectedCommit, setSelectedCommit] = useState(initialData?.commit_sha || "");
   const [command, setCommand] = useState(initialData?.entry_command || "");
   
+  // Logic: 如果初始数据是 0 GPU，强制类型为 CPU，防止前端状态不一致
   const [gpuCount, setGpuCount] = useState(initialData?.gpu_count ?? 1);
-  const [gpuType, setGpuType] = useState(initialData?.gpu_type || ""); 
+  const [gpuType, setGpuType] = useState(
+    initialData?.gpu_type || (initialData?.gpu_count === 0 ? "CPU" : "")
+  ); 
   
   const [jobType, setJobType] = useState(initialData?.job_type || "A2");
 
@@ -70,24 +70,7 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const isMounted = useRef(false);
-
-  // --- Logic: GPU/CPU 联动 ---
-  useEffect(() => {
-    if (!isMounted.current) {
-        isMounted.current = true;
-        return;
-    }
-    if (gpuType === 'CPU') {
-        setGpuCount(0);
-    } else {
-        // 只有在用户手动切换类型时，才把 0 恢复为 1
-        if (gpuCount === 0) setGpuCount(1);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gpuType]); 
-
-  // --- Logic: Auto-Height Textarea ---
+  // Auto-resize textarea
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (textareaRef.current) {
@@ -96,13 +79,27 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
     }
   }, [command]);
 
-  // --- Logic: Init for Clone Mode ---
+  // Init for Clone Mode
   useEffect(() => {
     if (mode === 'clone' && initialData) {
         setHasScanned(true); 
         fetchBranches();
     }
-  }, []); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
+
+  // --- Handlers ---
+
+  // 核心修复：手动处理 GPU 类型切换逻辑，替代 useEffect
+  const handleGpuTypeChange = (val: string) => {
+    setGpuType(val);
+    if (val === 'CPU') {
+        setGpuCount(0);
+    } else {
+        // 如果从 CPU (0) 切回 GPU，且当前数量为 0，则自动设为 1
+        if (gpuCount === 0) setGpuCount(1);
+    }
+  };
 
   const clearError = (field: string) => {
     if (errorField === field) { setErrorField(null); setErrorMessage(null); }
@@ -113,7 +110,6 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
-  // --- API 1: Fetch Branches ---
   const fetchBranches = async () => {
     if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace is required"); return; }
     if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo Name is required"); return; }
@@ -141,7 +137,7 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
     }
   };
 
-  // --- API 2: Fetch Commits ---
+  // Fetch commits when branch changes
   useEffect(() => {
     if (!selectedBranch || !hasScanned) return;
 
@@ -160,12 +156,9 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
     fetchCommits();
   }, [selectedBranch, hasScanned, namespace, repoName, mode]);
 
-
-  // --- API 3: Submit Job ---
   const handleLaunch = async () => {
     setErrorField(null); setErrorMessage(null);
 
-    // Validation
     if (!taskName.trim()) { setErrorField("taskName"); setErrorMessage("⚠️ Task Name is required"); scrollToError("field-taskName"); return; }
     if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace required"); scrollToError("field-namespace"); return; }
     if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo required"); scrollToError("field-repo"); return; }
@@ -189,9 +182,7 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
     };
     
     try {
-      await client("/api/jobs/submit", {
-        json: payload 
-      });
+      await client("/api/jobs/submit", { json: payload });
       onSuccess(); 
     } catch (e: any) {
       console.error(e);
@@ -203,7 +194,7 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
   return (
     <div className="flex flex-col gap-8">
 
-      {/* --- Section 1: Task Info --- */}
+      {/* Task Info */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
             Task Information
@@ -236,7 +227,7 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
         </div>
       </div>
       
-      {/* --- Section 2: Code Source --- */}
+      {/* Code Source */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
             Code Source
@@ -294,14 +285,13 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
         </div>
       </div>
 
-      {/* --- Section 3: Job Scheduling (✅ 独立顶级板块) --- */}
+      {/* Job Scheduling */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
             Job Scheduling
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
         
-        {/* 优先级选择器单独放在这里，不再和资源混淆 */}
         <SearchableSelect 
             label="Job Priority" 
             value={jobType} 
@@ -312,7 +302,7 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
         />
       </div>
 
-      {/* --- Section 4: Compute Resources (仅包含 GPU) --- */}
+      {/* Compute Resources */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
             Compute Resources
@@ -321,7 +311,9 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
         
         <div className="grid grid-cols-1 gap-4">
             <SearchableSelect 
-                label="GPU Accelerator" value={gpuType} onChange={setGpuType} 
+                label="GPU Accelerator" 
+                value={gpuType} 
+                onChange={handleGpuTypeChange} 
                 options={GPU_TYPES}
                 placeholder="Select GPU model..."
                 className="mb-4"
@@ -337,7 +329,7 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
         </div>
       </div>
 
-      {/* --- Section 5: Execution --- */}
+      {/* Execution */}
       <div id="field-command">
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
             Execution
@@ -358,7 +350,7 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
         </div>
       </div>
 
-      {/* --- Action Bar --- */}
+      {/* Action Bar */}
       <div className="mt-4 pt-6 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-4">
         {errorMessage ? (
              <span className="text-red-500 text-xs font-bold animate-pulse text-center sm:text-left">{errorMessage}</span>
