@@ -4,7 +4,6 @@
 ![Python](https://img.shields.io/badge/Python-3.14+-green)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-teal)
-![License](https://img.shields.io/badge/License-MIT-yellow)
 
 **Magnus** 是一个为 PKU-Plasma 设计的全栈机器学习训练平台，集成了智能调度、集群管理、用户认证等企业级功能。
 
@@ -116,7 +115,7 @@ Magnus-Platform/
 ```yaml
 server:
   root: /data/zycai/magnus_data        # 数据存储根目录
-  port: 8017                           # 服务器端口
+  port: 8017                           # 服务器端口，可自由设置
   database: 
     path: /data/zycai/magnus-database  # 数据库路径
   jwt_signer:
@@ -285,13 +284,6 @@ python test_rtx5090_nvlink.py
 2. **集群管理页面** - 任务队列监控
 3. **日志系统** - 任务执行日志收集和展示
 
-### 📋 待开发功能
-1. **多集群支持** - 跨多个 SLURM 集群调度
-2. **资源配额** - 用户/团队资源限制
-3. **计费系统** - GPU 使用时长计费
-4. **高级调度策略** - 基于历史数据的智能调度
-5. **邮件/飞书通知** - 任务状态变更通知
-
 ## 🤝 贡献指南
 
 欢迎贡献代码！请遵循以下步骤：
@@ -301,21 +293,6 @@ python test_rtx5090_nvlink.py
 3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 开启 Pull Request
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 📞 联系方式
-
-如有问题或建议，请通过以下方式联系：
-
-- **项目维护者**: PKU-Plasma 团队
-- **问题反馈**: [GitHub Issues](https://github.com/PKU-Plasma/magnus/issues)
-
-## 🙏 致谢
-
-感谢所有为 Magnus 项目做出贡献的开发者！
 
 ---
 
