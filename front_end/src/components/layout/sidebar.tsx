@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, Rocket, Activity, Server, LogIn, LogOut, User as UserIcon } from "lucide-react";
 import { useAuth } from "@/context/auth-context"; 
+import Image from "next/image";
 
 const NAV_ITEMS = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -25,11 +26,14 @@ export function Sidebar() {
         </div>
         
         {/* Logo: Added via API tunnel */}
-        <img 
-          src="/api/logo" 
-          alt="Magnus Logo" 
-          className="w-7 h-7 rounded-full object-cover border border-zinc-700/50 shadow-sm opacity-90 hover:opacity-100 transition-opacity" 
-        />
+          <Image
+            src="/api/logo"
+            alt="Magnus Logo"
+            width={28}
+            height={28}
+            className="rounded-full object-cover border border-zinc-700/50 shadow-sm opacity-90 hover:opacity-100 transition-opacity"
+            unoptimized
+          />
       </div>
 
       {/* Navigation */}

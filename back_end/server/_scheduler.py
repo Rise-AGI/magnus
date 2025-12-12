@@ -1,3 +1,4 @@
+# back_end/server/_scheduler.py
 import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -71,7 +72,7 @@ class MagnusScheduler:
         """
         # 1. 获取资源
         real_free_gpus = self.slurm.get_cluster_free_gpus()
-        logger.info(f"🔎 [Tick] Free GPUs: {real_free_gpus}")
+        # logger.info(f"🔎 [Tick] Free GPUs: {real_free_gpus}")
         
         # 2. 获取候选者
         candidates = db.query(Job).filter(
