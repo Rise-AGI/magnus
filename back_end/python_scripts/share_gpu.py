@@ -15,7 +15,6 @@ def log(msg, level="INFO"):
     """带时间戳并强制刷新的日志函数"""
     timestamp = datetime.now().strftime("%H:%M:%S")
     icon = "[*]" if level == "INFO" else "[!]"
-    # flush=True 保证日志即时输出，替代 sys.stdout.reconfigure
     print(f"{icon} {timestamp} {msg}", flush=True)
 
 def get_free_port():
@@ -30,6 +29,7 @@ def get_free_port():
 def get_target_user_pubkey(username):
     log(f"开始寻找用户 '{username}' 的 SSH 公钥...")
     
+    # 搜索路径顺序：先找 RSA，再找 ED25519
     possible_paths = [
         Path(f"/home/{username}/.ssh/id_rsa.pub"),
         Path(f"/home/{username}/.ssh/id_ed25519.pub"),
@@ -53,12 +53,11 @@ def get_target_user_pubkey(username):
     return None
 
 def main():
-    parser = argparse.ArgumentParser(description="Magnus GPU Sharing (Debug Mode)")
+    parser = argparse.ArgumentParser(description="Magnus GPU Sharing (User-Level SSHD)")
     parser.add_argument("username", type=str, help="接收 GPU 权限的目标用户名")
     args = parser.parse_args()
     target_user = args.username
 
-    # 初始化变量，防止 finally 块报错
     process = None
     work_dir = None
 
@@ -68,7 +67,6 @@ def main():
     try:
         # 1. 检查 SSHD
         sshd_path = shutil.which("sshd") or "/usr/sbin/sshd"
-        log(f"检测 sshd 路径: {sshd_path}")
         if not os.path.exists(sshd_path):
             log("错误: 未找到 sshd 程序", "ERROR")
             sys.exit(1)
@@ -86,7 +84,6 @@ def main():
 
         # 4. 生成 Host Key
         host_key_path = work_path / "ssh_host_rsa_key"
-        log("正在生成临时 Host Key...")
         subprocess.check_call(
             ["ssh-keygen", "-t", "rsa", "-f", str(host_key_path), "-N", "", "-q"],
             stdout=sys.stdout, stderr=sys.stderr
@@ -98,7 +95,7 @@ def main():
         auth_keys_path.chmod(0o600)
         log("已配置 authorized_keys")
 
-        # 6. 配置 SSHD
+        # 6. 配置 SSHD (关键修改: StrictModes no)
         port = get_free_port()
         pid_file = work_path / "sshd.pid"
         
@@ -114,19 +111,19 @@ def main():
         X11Forwarding yes
         PrintMotd no
         LogLevel DEBUG1
+        StrictModes no
         ClientAliveInterval 60
         ClientAliveCountMax 3
         """
         
         config_path = work_path / "sshd_config"
         config_path.write_text(sshd_config)
-        log(f"生成配置文件: {config_path}")
 
         # 7. 启动 SSHD
         log(f"正在尝试启动 sshd (端口 {port})...")
         process = subprocess.Popen(
             [sshd_path, "-f", str(config_path), "-D", "-e"], 
-            stderr=sys.stderr, # 错误直接输出到屏幕
+            stderr=sys.stderr,
             stdout=sys.stdout
         )
         
@@ -134,10 +131,8 @@ def main():
         if process.poll() is not None:
             log(f"错误: sshd 启动失败，返回码: {process.returncode}", "ERROR")
             sys.exit(1)
-        else:
-            log("sshd 启动成功，进程正在运行")
 
-        # 8. 获取 IP
+        # 8. 获取连接信息
         hostname = os.uname().nodename
         try:
             ip = socket.gethostbyname(hostname)
@@ -145,19 +140,19 @@ def main():
             ip = hostname
         current_user = os.getenv("USER")
         
-        # 打印邀请码
         print("\n" + "="*60, flush=True)
         print(f"🎉 隧道建立成功！GPU 环境已共享给 {target_user}", flush=True)
         print("="*60, flush=True)
         print("请把下面这行命令发给你的师兄/同学：\n", flush=True)
+        # 提示用户如果有多把钥匙，可能需要指定 -i
         print(f"   ssh -p {port} -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no {current_user}@{ip}", flush=True)
-        print("\n" + "="*60, flush=True)
+        print("\n   (如果报错 Permission denied，请尝试加上 -i ~/.ssh/id_rsa 指定私钥)", flush=True)
+        print("="*60, flush=True)
         
         # 9. 保活
-        log("进入保活循环... (按 Ctrl+C 停止)")
         while True:
             if process.poll() is not None:
-                log(f"警告: sshd 进程意外退出 (Code: {process.returncode})", "ERROR")
+                log(f"警告: sshd 进程意外退出", "ERROR")
                 break
             time.sleep(10)
 
@@ -166,17 +161,13 @@ def main():
     except Exception as e:
         log(f"发生未捕获异常: {e}", "ERROR")
     finally:
-        # 安全清理
         if process and process.poll() is None:
-            log("正在终止 sshd 进程...")
             process.terminate()
-        
         if work_dir and os.path.exists(work_dir):
             try:
                 shutil.rmtree(work_dir)
-                log("临时目录已清理")
-            except Exception as e:
-                log(f"清理临时目录失败: {e}", "ERROR")
+            except:
+                pass
 
 if __name__ == "__main__":
     main()
