@@ -126,9 +126,9 @@ def main():
     username = args.username
 
     # 1. 权限自检
-    if os.geteuid() != 0:
-        log("错误: 必须以 ROOT 身份运行此脚本 (用于修改 ACL)", "ERROR")
-        sys.exit(1)
+    # if os.geteuid() != 0:
+    #     log("错误: 必须以 ROOT 身份运行此脚本 (用于修改 ACL)", "ERROR")
+    #     sys.exit(1)
 
     # 2. 探测 GPU
     gpu_ids = get_physical_gpus()
