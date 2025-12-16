@@ -163,7 +163,7 @@ export default function DashboardPage() {
                         <tr 
                         key={job.id} 
                         onClick={() => router.push(`/jobs/${job.id}`)}
-                        className="hover:bg-zinc-800/40 transition-colors group cursor-pointer"
+                        className="hover:bg-zinc-800/40 transition-colors group"
                         >
                         <td className="px-6 py-4 align-top whitespace-normal break-all">
                             <div className="flex flex-col gap-1.5">
