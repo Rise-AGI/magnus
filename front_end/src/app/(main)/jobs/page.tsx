@@ -133,7 +133,7 @@ export default function JobsPage() {
     setDrawerMode("clone");
     setSelectedJobId(job.id);
     setCloneData({
-        taskName: `${job.task_name}-copy`,
+        taskName: job.task_name,
         description: job.description || "",
         namespace: job.namespace, 
         repoName: job.repo_name,
@@ -143,6 +143,9 @@ export default function JobsPage() {
         gpu_count: job.gpu_count,
         gpu_type: job.gpu_type,
         job_type: job.job_type,
+        cpu_count: job.cpu_count,
+        memory_demand: job.memory_demand,
+        runner: job.runner,
     });
     setIsDrawerOpen(true);
   };

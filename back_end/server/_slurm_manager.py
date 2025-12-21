@@ -127,8 +127,10 @@ class SlurmManager:
         output_path: Optional[str] = None,
         slurm_latency: int = 1,
         overwrite_output: bool = True,
-        user: Optional[str] = None,
-    ) -> str:
+        runner: Optional[str] = None, 
+        cpu_count: Optional[int] = None,
+        memory_demand: Optional[str] = None,
+    )-> str:
         
         """
         提交任务 (Mock Immediate Mode)
@@ -163,9 +165,12 @@ class SlurmManager:
                 command.append(f"--gres=gpu:{gpu_type}:{gpus}")
             else:
                 command.append(f"--gres=gpu:{gpus}")
-                
-        if user is not None:
-            command.append(f"--uid={user}")
+        
+        if memory_demand is not None: command.append(f"--mem={memory_demand}") 
+        if cpu_count is not None: command.append(f"--cpus-per-task={cpu_count}")
+        if runner is not None: 
+            command.append(f"--uid={runner}")
+            command.append(f"--gid={runner}")
 
         job_id = None
         
@@ -292,7 +297,6 @@ class SlurmManager:
         
         command = [
             "scancel",
-            "--signal=KILL",
             slurm_job_id,
         ]
         

@@ -65,6 +65,9 @@ class Job(Base):
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cpu_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    memory_demand: Mapped[str | None] = mapped_column(String, default=None)
+    runner: Mapped[str | None] = mapped_column(String, nullable=None)
     
     
 class ClusterSnapshot(Base):

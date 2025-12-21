@@ -2,6 +2,7 @@
 import os
 import logging
 import traceback
+import subprocess
 from datetime import datetime
 from sqlalchemy.orm import Session
 from pywheels.file_tools import guarantee_file_exist, delete_file
@@ -227,20 +228,32 @@ class MagnusScheduler:
     def _start_job(
         self, 
         db: Session, 
-        job: Job
+        job: Job,
     ) -> bool:
         """
         原子操作：提交 SLURM + 更新 DB
         使用 Python Wrapper 自动处理带认证的 Git Clone
         """
         
-        default_user = "magnus"
+        # magnus 这个用户名写死就挺好，效仿 slurm
+        user_magnus = "magnus"
+        effective_runner = job.runner if job.runner is not None \
+                            else user_magnus
         
         job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
         
         magnus_uv_cache = f"{magnus_config['server']['root']}/uv_cache"
         guarantee_file_exist(magnus_uv_cache, is_directory=True)
+        
+        acl_cmd = [
+            "setfacl", "-R",
+            "-m", f"u:{effective_runner}:rwx",
+            "-d", "-m", f"u:{user_magnus}:rwx",
+            "-d", "-m", f"u:{effective_runner}:rwx",
+            job_working_table
+        ]
+        subprocess.run(acl_cmd, check=True)
         
         # 定义成功信标路径
         success_marker_path = f"{job_working_table}/.magnus_success"
@@ -309,6 +322,8 @@ def main():
         
         # 拿到原始命令
         user_cmd_str = {repr(job.entry_command)}
+        if "sudo" in user_cmd_str:
+            raise RuntimeError("Error: Not privileged.")
         
         # 拿到环境配置 (由外部注入)
         conda_shell_script_path = {repr(conda_shell_script_path)}
@@ -316,7 +331,7 @@ def main():
         
         # 构造组合拳命令：source 脚本 -> 激活环境 -> 执行用户命令
         full_command = " && ".join([
-            f"export HOME=/home/{default_user}",
+            f"export HOME=/home/{effective_runner}",
             f"source '{{conda_shell_script_path}}'",
             f"conda activate {{execution_conda_environment}}",
             "unset VIRTUAL_ENV",
@@ -369,7 +384,9 @@ if __name__ == "__main__":
                 output_path = f"{job_working_table}/slurm/output.txt",
                 slurm_latency = magnus_config["server"]["scheduler"]["slurm_latency"],
                 overwrite_output = False,
-                user = default_user,
+                runner = effective_runner,
+                cpu_count = job.cpu_count,
+                memory_demand = job.memory_demand,
             )
             
             job.status = JobStatus.RUNNING

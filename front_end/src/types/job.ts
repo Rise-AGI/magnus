@@ -22,4 +22,7 @@ export interface Job {
   job_type: string;
   created_at: string;
   slurm_job_id?: string;
+  cpu_count?: number | null;
+  memory_demand?: string | null;
+  runner?: string | null;
 }

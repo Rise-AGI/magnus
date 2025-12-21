@@ -317,7 +317,7 @@ async def get_cluster_stats(
                 slurm_job_id = slurm_id,
                 start_time = start_dt,
                 created_at = start_dt,
-                user = mock_user
+                user = mock_user,
             )
             final_running_jobs.append(mock_job)
 

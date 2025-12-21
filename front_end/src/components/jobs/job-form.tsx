@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { client } from "@/lib/api"; 
@@ -34,6 +35,9 @@ export interface JobFormData {
   gpu_count: number;
   gpu_type: string;
   job_type: string;
+  cpu_count?: number | null;
+  memory_demand?: string | null;
+  runner?: string | null;
 }
 
 interface JobFormProps {
@@ -69,6 +73,12 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
   
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  
+  const [cpuCount, setCpuCount] = useState<number>(0);
+  const [memoryDemand, setMemoryDemand] = useState<string>(initialData?.memory_demand || "");
+  const [runner, setRunner] = useState<string>(initialData?.runner || "");
 
   // Auto-resize textarea
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -174,6 +184,9 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
       gpu_count: gpuCount, 
       gpu_type: gpuType,
       job_type: jobType, 
+      cpu_count: cpuCount ? cpuCount : null,
+      memory_demand: memoryDemand.trim() ? memoryDemand.trim() : null,
+      runner: runner.trim() ? runner.trim() : null,
     };
     
     try {
@@ -322,6 +335,71 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
                 disabled={gpuType === 'cpu'} 
             />
         </div>
+
+
+        {/* Advanced Options (Collapsible) */}
+        <div className="pt-2">
+          <button 
+            type="button" 
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors select-none group"
+          >
+            <div className="text-zinc-600 group-hover:text-zinc-300 transition-colors">
+              {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            </div>
+            <span>Advanced</span>
+          </button>
+          
+          {showAdvanced && (
+            <div className="mt-3 pl-1 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in slide-in-from-top-1 duration-200">
+              
+              {/* CPU Count Override */}
+              <div>
+                <NumberStepper 
+                  label="CPU Cores"
+                  value={cpuCount} 
+                  onChange={setCpuCount}
+                  min={0}
+                  max={128}
+                />
+                <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">
+                  Set to <span className="text-zinc-400 font-mono">0</span> to use partition default.
+                </p>
+              </div>
+
+              {/* Memory Override */}
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                  Memory
+                </label>
+                <input 
+                  type="text"
+                  className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+                  value={memoryDemand} 
+                  placeholder="Default: 1600M"
+                  onChange={e => setMemoryDemand(e.target.value)} 
+                />
+              </div>
+
+              {/* Runner Override */}
+              <div className="sm:col-span-2">
+                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                  Run As User
+                </label>
+                <div className="relative">
+                    <input 
+                    type="text"
+                    className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 font-mono"
+                    value={runner} 
+                    placeholder="Default: magnus"
+                    onChange={e => setRunner(e.target.value)} 
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* Execution */}

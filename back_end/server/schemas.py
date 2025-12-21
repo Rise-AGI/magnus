@@ -35,6 +35,9 @@ class JobSubmission(BaseModel):
     gpu_type: str
     gpu_count: int = 1
     job_type: JobType = JobType.A2
+    cpu_count: Optional[int] = None
+    memory_demand: Optional[str] = None
+    runner: Optional[str] = None
 
 
 class JobResponse(JobSubmission):
@@ -45,6 +48,9 @@ class JobResponse(JobSubmission):
     start_time: Optional[datetime] = None
     created_at: datetime
     user: Optional[UserInfo] = None 
+    cpu_count: Optional[int] = None
+    memory_demand: Optional[str] = None
+    runner: Optional[str] = None
     class Config: from_attributes = True
 
 

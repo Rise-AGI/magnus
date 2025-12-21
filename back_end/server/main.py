@@ -14,7 +14,18 @@ from .database import *
 from ._scheduler import scheduler
 
 
+class EndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        # 屏蔽高频噪音
+        return not any(x in msg for x in [
+            "GET /api/jobs",
+            "GET /api/cluster/stats",
+            "/logs HTTP",
+            "OPTIONS /api",
+        ])
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 logger = logging.getLogger(__name__)
 
 
