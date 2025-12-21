@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box } from "lucide-react";
+import { ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw } from "lucide-react";
 import { client } from "@/lib/api";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { POLL_INTERVAL } from "@/lib/config";
@@ -11,6 +11,9 @@ import { Job } from "@/types/job";
 import { formatBeijingTime } from "@/lib/utils";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
+import RenderMarkdown from "@/components/ui/render-markdown";
+import { JobDrawer } from "@/components/jobs/job-drawer";
+import { JobFormData } from "@/components/jobs/job-form";
 
 export default function JobDetailsPage() {
   const params = useParams();
@@ -44,7 +47,14 @@ export default function JobDetailsPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [logs, setLogs] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'console' | 'description'>('console');
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  // --- Clone State ---
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [cloneData, setCloneData] = useState<JobFormData | null>(null);
+  // 新增：用于强制刷新 Form 的 Key
+  const [cloneKey, setCloneKey] = useState(0);
 
   // 1. 获取任务详情 (支持轮询)
   useEffect(() => {
@@ -82,6 +92,28 @@ export default function JobDetailsPage() {
     return () => clearInterval(interval);
   }, [jobId]);
 
+  const handleClone = () => {
+    if (!job) return;
+    setCloneData({
+        taskName: job.task_name, 
+        description: job.description || "",
+        namespace: job.namespace,
+        repoName: job.repo_name,
+        branch: job.branch,
+        commit_sha: job.commit_sha,
+        entry_command: job.entry_command,
+        gpu_count: job.gpu_count,
+        gpu_type: job.gpu_type,
+        job_type: job.job_type,
+        cpu_count: job.cpu_count,
+        memory_demand: job.memory_demand,
+        runner: job.runner,
+    });
+    // 强制 key 变化，触发 Form 重新挂载以读取 initialData
+    setCloneKey(prev => prev + 1);
+    setIsDrawerOpen(true);
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center h-[50vh] text-zinc-500">Loading Job Context...</div>;
   }
@@ -108,22 +140,19 @@ export default function JobDetailsPage() {
           Back to Jobs
         </button>
 
-        {/* 顶部 Header 区域 - 优化布局 */}
+        {/* 顶部 Header 区域 */}
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-          <div className="flex-1 min-w-0 pr-8"> {/* 增加右侧 padding 防止拥挤 */}
+          <div className="flex-1 min-w-0 pr-8"> 
             
             {/* 任务名 & 优先级 */}
             <div className="flex items-center gap-4 mb-3 group">
               <CopyableText 
                 text={job.task_name} 
                 variant="text"
-                // !w-auto 覆盖默认的 w-full，确保 Badge 能紧跟在后面
-                // 继承原有的 H1 样式，并保留 CopyableText 的 hover:text-blue-400 交互效果
                 className="!w-auto text-3xl font-bold text-white tracking-tight leading-tight"
               />
               <div className="flex-shrink-0">
                   <JobPriorityBadge type={job.job_type} />
-                  {/* TitleCopyButton 已移除，功能集成在左侧标题中 */}
               </div>
             </div>
             
@@ -142,7 +171,7 @@ export default function JobDetailsPage() {
           
           </div>
           
-          {/* 状态大卡片 - 保持靠右 */}
+          {/* 状态大卡片 */}
           <div className="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
             <JobStatusBadge status={job.status} size="md" />
             <div className="flex flex-col">
@@ -160,17 +189,28 @@ export default function JobDetailsPage() {
                   <span className="text-base font-mono text-zinc-200">{job.slurm_job_id}</span>
                </div>
             )}
+            
+            {/* Clone Button - 位于状态卡片右侧，通过 border 分隔 */}
+            <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center">
+                <button
+                    onClick={handleClone}
+                    className="group flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/50 hover:border-zinc-600 transition-all shadow-sm active:scale-95"
+                    title="Clone this job"
+                >
+                    <RefreshCw className="w-5 h-5 text-zinc-400 group-hover:text-white transition-colors" />
+                </button>
+            </div>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* 左侧：配置详情 */}
-        <div className="lg:col-span-1 space-y-6">
+        {/* 左侧：配置详情 - 使用 flex 布局对齐高度 */}
+        <div className="lg:col-span-1 flex flex-col gap-6 lg:h-[650px]">
           
-          {/* 代码信息 */}
-          <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
+          {/* 代码信息 (固定高度，不压缩) */}
+          <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <GitBranch className="w-4 h-4 text-zinc-400" />
               <h3 className="text-sm font-semibold text-zinc-200">Repository</h3>
@@ -203,7 +243,6 @@ export default function JobDetailsPage() {
               </div>
               
               <div className="grid grid-cols-1 gap-4">
-                  
                   {/* Branch */}
                   <div>
                     <div className="flex items-center gap-2 mb-1.5">
@@ -249,13 +288,12 @@ export default function JobDetailsPage() {
                         />
                     </div>
                   </div>
-
               </div>
             </div>
           </div>
 
-          {/* 资源配置 */}
-          <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
+          {/* 资源配置 (固定高度，不压缩) */}
+          <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <Cpu className="w-4 h-4 text-zinc-400" />
               <h3 className="text-sm font-semibold text-zinc-200">Resources</h3>
@@ -274,13 +312,14 @@ export default function JobDetailsPage() {
             </div>
           </div>
 
-           {/* 入口命令 */}
-           <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
+           {/* 入口命令 (自动填充剩余空间，高度对齐) */}
+           <div className="flex-1 min-h-0 flex flex-col bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
+            <div className="shrink-0 px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <Terminal className="w-4 h-4 text-zinc-400" />
               <h3 className="text-sm font-semibold text-zinc-200">Entry Command</h3>
             </div>
-            <div className="p-4 bg-zinc-950 min-h-[80px]">
+            {/* 内容区域：Flex填充 + 滚动 */}
+            <div className="flex-1 overflow-auto p-4 bg-zinc-950 custom-scrollbar">
               <CopyableText 
                 text={job.entry_command} 
                 variant="text" 
@@ -291,50 +330,101 @@ export default function JobDetailsPage() {
 
         </div>
 
-        {/* 右侧：实时日志 */}
+        {/* 右侧：实时日志 & 描述 */}
         <div className="lg:col-span-2 flex flex-col h-[650px] bg-[#0c0c0e] border border-zinc-800 rounded-xl overflow-hidden shadow-2xl">
-          <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-               <Terminal className="w-4 h-4 text-zinc-400" />
-               <h3 className="text-sm font-semibold text-zinc-200">Console Output</h3>
-               {/* 正在跑的时候显示个呼吸灯，提示用户这是"活"的 */}
-               {job.status === 'Running' && (
-                  <span className="flex h-2 w-2 ml-2 relative">
+          
+          {/* Tab Header - 纯文字，无按钮感 */}
+          <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between select-none">
+            <div className="flex items-center gap-6">
+              
+              {/* Console Tab */}
+              <div 
+                onClick={() => setActiveTab('console')}
+                className={`flex items-center gap-2 text-sm font-semibold transition-colors cursor-pointer
+                  ${activeTab === 'console' ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                <Terminal className={`w-4 h-4 ${activeTab === 'console' ? 'text-zinc-400' : 'text-zinc-600'}`} />
+                <span>Console Output</span>
+                {/* 呼吸灯：只要是 Running 就显示，无论切到哪个 Tab */}
+                {job.status === 'Running' && (
+                  <span className="flex h-1.5 w-1.5 relative ml-0.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
                   </span>
-               )}
+                )}
+              </div>
+
+              {/* Description Tab */}
+              <div 
+                onClick={() => setActiveTab('description')}
+                className={`flex items-center gap-2 text-sm font-semibold transition-colors cursor-pointer
+                  ${activeTab === 'description' ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                <AlignLeft className={`w-4 h-4 ${activeTab === 'description' ? 'text-zinc-400' : 'text-zinc-600'}`} />
+                <span>Description</span>
+              </div>
+
             </div>
             
-            {/* Running 时提示正在自动刷新 */}
+            {/* Live Indicator Text */}
             {job.status === 'Running' && (
-                <div className="text-xs text-zinc-500 font-medium flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500/50"></span>
-                    Live
-                </div>
+               <div className="text-xs text-zinc-500 font-medium flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500/50"></span>
+                  Live
+               </div>
             )}
           </div>
           
-          <div className="flex-1 overflow-auto p-5 custom-scrollbar font-mono text-xs leading-5">
-            {logs ? (
-              <pre className="text-zinc-300 whitespace-pre-wrap break-all">
-                {logs}
-              </pre>
+          {/* Content Area */}
+          <div className="flex-1 overflow-auto p-5 custom-scrollbar">
+            {activeTab === 'console' ? (
+              <div className="font-mono text-xs leading-5">
+                {logs ? (
+                  <pre className="text-zinc-300 whitespace-pre-wrap break-all">
+                    {logs}
+                  </pre>
+                ) : (
+                   <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
+                      <Terminal className="w-10 h-10 opacity-20" />
+                      <p>
+                        {['Pending', 'Running'].includes(job.status) 
+                          ? "Waiting for output..." 
+                          : "No output generated during execution"}
+                      </p>
+                   </div>
+                )}
+                <div ref={logEndRef} />
+              </div>
             ) : (
-               <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3">
-                  <Terminal className="w-10 h-10 opacity-20" />
-                  <p>
-                    {['Pending', 'Running'].includes(job.status) 
-                      ? "Waiting for output..." 
-                      : "No output generated during execution"}
-                  </p>
-               </div>
+              // Description Content (Markdown)
+              <div className="min-h-[200px]">
+                {job.description ? (
+                  <RenderMarkdown content={job.description} />
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[200px] italic">
+                    <AlignLeft className="w-8 h-8 opacity-20" />
+                    No description provided for this task.
+                  </div>
+                )}
+              </div>
             )}
-            <div ref={logEndRef} />
           </div>
+
         </div>
 
       </div>
+
+      <JobDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        onSuccess={() => {
+            setIsDrawerOpen(false);
+            router.push('/jobs');
+        }}
+        mode="clone"
+        initialData={cloneData}
+        formKey={`clone-${jobId}-${cloneKey}`} 
+      />
     </div>
   );
 }

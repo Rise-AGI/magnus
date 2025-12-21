@@ -284,9 +284,6 @@ export default function JobsPage() {
                             <div className="flex items-center gap-2">
                               <CopyableText text={job.id} className="text-[10px] tracking-wider" />
                             </div>
-                            {job.description && (
-                              <p className="text-zinc-500 text-xs line-clamp-1 mt-0.5">{job.description}</p>
-                            )}
                           </div>
                         </td>
 

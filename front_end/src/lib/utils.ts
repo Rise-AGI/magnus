@@ -1,4 +1,6 @@
 // front_end/src/lib/utils.ts
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export function formatBeijingTime(isoString: string | undefined | null) {
   if (!isoString) return "--";
@@ -12,4 +14,8 @@ export function formatBeijingTime(isoString: string | undefined | null) {
     minute: '2-digit',
     hour12: false
   }).replace(/\//g, '-');
+}
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
 }

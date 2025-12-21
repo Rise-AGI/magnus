@@ -7,7 +7,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { client } from "@/lib/api"; 
 
-const MAX_GPU_COUNT = 8;
+const MAX_GPU_COUNT = 3;
 
 const GPU_TYPES = [
   { label: "NVIDIA GeForce RTX 5090", value: "rtx5090", meta: "32GB • Blackwell" },
@@ -80,12 +80,22 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
   const [memoryDemand, setMemoryDemand] = useState<string>(initialData?.memory_demand || "");
   const [runner, setRunner] = useState<string>(initialData?.runner || "");
 
-  // Auto-resize textarea
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const commandRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize for Description
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    if (descriptionRef.current) {
+      descriptionRef.current.style.height = 'auto';
+      descriptionRef.current.style.height = `${descriptionRef.current.scrollHeight}px`;
+    }
+  }, [description]);
+
+  // Auto-resize for Command
+  useEffect(() => {
+    if (commandRef.current) {
+      commandRef.current.style.height = 'auto';
+      commandRef.current.style.height = `${commandRef.current.scrollHeight}px`;
     }
   }, [command]);
 
@@ -226,10 +236,12 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
           <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
             Description <span className="text-zinc-600 normal-case ml-1">(Optional)</span>
           </label>
-          <input 
-            className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+          <textarea 
+            ref={descriptionRef}
+            className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500/50 focus:shadow-[0_0_15px_rgba(59,130,246,0.1)] outline-none transition-all placeholder-zinc-700 resize-none overflow-hidden min-h-[42px]"
             value={description} 
             placeholder="Brief description of this experiment..."
+            rows={1}
             onChange={e => setDescription(e.target.value)} 
           />
         </div>
@@ -412,8 +424,8 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
         <div className="relative group">
             <span className="absolute left-3 top-3 text-zinc-600 select-none font-mono text-sm">$</span>
             <textarea 
-                ref={textareaRef}
-                className={`w-full bg-zinc-950 border px-3 pl-7 py-3 rounded-lg text-green-400 font-mono text-sm focus:border-green-500/50 outline-none shadow-inner min-h-[100px] leading-relaxed placeholder-zinc-800 resize-none overflow-hidden
+                ref={commandRef}
+                className={`w-full bg-zinc-950 border px-3 pl-7 py-3 rounded-lg text-green-400 font-mono text-sm focus:border-green-500/50 focus:shadow-[0_0_15px_rgba(34,197,94,0.1)] outline-none shadow-inner min-h-[100px] leading-relaxed placeholder-zinc-800 resize-none overflow-hidden
                 ${errorField === 'command' ? 'animate-shake border-red-500' : 'border-zinc-800'}`}
                 value={command} 
                 placeholder="python train.py ..."
