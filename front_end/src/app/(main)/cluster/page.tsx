@@ -59,6 +59,9 @@ export default function ClusterPage() {
         gpu_count: job.gpu_count,
         gpu_type: job.gpu_type,
         job_type: job.job_type,
+        cpu_count: job.cpu_count,
+        memory_demand: job.memory_demand,
+        runner: job.runner,
     });
     setIsDrawerOpen(true);
   };
