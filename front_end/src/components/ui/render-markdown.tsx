@@ -1,8 +1,7 @@
 // front_end/src/components/ui/render-markdown.tsx
+"use client";
 
 {/* 感谢 @wjsoj 卫同学！love you ❤ */}
-
-"use client";
 
 import Markdown from "react-markdown";
 import remarkMath from "remark-math";
