@@ -31,14 +31,14 @@ def main():
             print(f"{PREFIX} Invalid duration format. Using infinite mode.")
 
     # 2. Get Environment Info
-    user = os.environ.get("USER", "unknown")
+    user = os.environ.get("SLURM_JOB_USER", "unknown")
     job_id = os.environ.get("SLURM_JOB_ID", "N/A")
     node_name = os.environ.get("SLURMD_NODENAME", os.uname().nodename)
     
     # 3. Print Welcome Banner (Clean Text Mode)
     print("="*60, flush=True)
     print(f"{PREFIX} Debug Session Started", flush=True)
-    print(f"{PREFIX} User:      {user}", flush=True)
+    print(f"{PREFIX} For User:      {user}", flush=True)
     print(f"{PREFIX} Node:      {node_name}", flush=True)
     print(f"{PREFIX} Job ID:    {job_id}", flush=True)
     
@@ -46,12 +46,9 @@ def main():
     print(f"{PREFIX} Duration:  {duration_str}", flush=True)
     print("-" * 60, flush=True)
     print(f"   To connect to this session, run the following command", flush=True)
-    print(f"   on your local terminal (or the login node):", flush=True)
+    print(f"   on {node_name}:", flush=True)
     print(f"", flush=True)
-    if job_id != "N/A":
-        print(f"       sudo magnus-connect {job_id}", flush=True)
-    else:
-        print(f"       sudo magnus-connect", flush=True)
+    print(f"       magnus-connect", flush=True)
     print(f"", flush=True)
     print("="*60, flush=True)
 
