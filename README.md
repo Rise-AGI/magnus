@@ -37,42 +37,107 @@
 ## 📁 项目结构
 
 ```
+```
 Magnus-Platform/
 ├── configs/                    # 配置文件目录
 │   └── magnus_config.yaml     # 主配置文件
 ├── back_end/                  # Python 后端服务
 │   ├── server/               # FastAPI 服务器
+│   │   ├── __init__.py
+│   │   ├── _feishu_client.py # 飞书客户端
+│   │   ├── _github_client.py # GitHub客户端
+│   │   ├── _jwt_signer.py    # JWT签名器
+│   │   ├── _magnus_config.py # 配置加载器
 │   │   ├── _scheduler.py     # 核心调度器模块
+│   │   ├── _slurm_manager.py # SLURM集群管理器
+│   │   ├── database.py       # 数据库连接
+│   │   ├── main.py           # 应用入口 (含调度器后台任务)
 │   │   ├── models.py         # 数据库模型 (含枚举类型)
 │   │   ├── routers.py        # API 路由定义
-│   │   ├── schemas.py        # Pydantic 数据模型
-│   │   ├── _slurm_manager.py # slurm 接口
-│   │   └── main.py           # 应用入口 (含调度器后台任务)
+│   │   └── schemas.py        # Pydantic 数据模型
 │   ├── library/              # 核心库模块
 │   │   ├── functional/       # 功能模块
+│   │   │   ├── __init__.py
 │   │   │   └── feishu_tools.py  # 飞书工具
 │   │   └── fundamental/      # 基础工具模块
-│   ├── python_scripts/      # 脚本目录
-│   │   └── tests/           # 测试工具
+│   │       ├── __init__.py
+│   │       ├── externals.py
+│   │       ├── github_tools.py  # GitHub工具
+│   │       ├── jwt_tools.py     # JWT工具
+│   │       ├── typing.py
+│   │       └── yaml_tools.py    # YAML工具
+│   ├── python_scripts/       # 脚本目录
+│   │   ├── magnus_debug.py   # 调试脚本
+│   │   └── tests/            # 测试工具
+│   │       ├── test_github_tools.py
+│   │       ├── test_magnus_basic.py
 │   │       └── test_rtx5090_nvlink.py  # GPU互联测试
 │   ├── pyproject.toml        # Python 项目配置
-│   └── run.sh               # SLURM测试脚本
-└── front_end/               # Next.js 前端应用
-    ├── src/app/             # Next.js App Router
-    │   ├── (main)/          # 主应用页面组
-    │   │   ├── jobs/       # 任务管理页面
-    │   │   ├── dashboard/  # 仪表板页面
-    │   │   └── cluster/    # 集群管理页面
-    │   ├── auth/           # 认证相关页面
-    │   └── api/            # Next.js API Routes
-    ├── src/components/      # 可复用组件
-    │   ├── jobs/           # 任务相关组件
-    │   ├── layout/         # 布局组件
-    │   ├── auth/           # 认证组件
-    │   └── ui/             # UI基础组件
-    ├── src/context/        # React Context
-    ├── src/lib/            # 工具库
-    └── src/types/          # TypeScript 类型定义
+│   ├── uv.lock               # UV依赖锁文件
+│   └── .python-version       # Python版本指定
+├── front_end/               # Next.js 前端应用
+│   ├── src/app/             # Next.js App Router
+│   │   ├── (main)/          # 主应用页面组
+│   │   │   ├── cluster/     # 集群管理页面
+│   │   │   │   └── page.tsx
+│   │   │   ├── dashboard/   # 仪表板页面
+│   │   │   │   └── page.tsx
+│   │   │   ├── jobs/        # 任务管理页面
+│   │   │   │   ├── [id]/    # 任务详情页面
+│   │   │   │   │   └── page.tsx
+│   │   │   │   └── page.tsx
+│   │   │   └── layout.tsx   # 主布局组件
+│   │   ├── auth/            # 认证相关页面
+│   │   │   └── callback/    # 飞书回调页面
+│   │   │       └── page.tsx
+│   │   ├── api/             # Next.js API Routes
+│   │   │   └── logo/        # Logo API
+│   │   │       └── route.ts
+│   │   ├── globals.css      # 全局样式
+│   │   ├── icon.png         # 应用图标
+│   │   ├── layout.tsx       # 根布局组件
+│   │   └── page.tsx         # 首页 (重定向到/jobs)
+│   ├── src/components/      # 可复用组件
+│   │   ├── auth/            # 认证组件
+│   │   │   └── login-required.tsx  # 登录要求组件
+│   │   ├── jobs/            # 任务相关组件
+│   │   │   ├── job-drawer.tsx      # 任务抽屉组件
+│   │   │   ├── job-form.tsx        # 任务表单组件
+│   │   │   ├── job-priority-badge.tsx  # 任务优先级徽章
+│   │   │   └── job-status-badge.tsx    # 任务状态徽章
+│   │   ├── layout/          # 布局组件
+│   │   │   ├── header.tsx           # 页面头部
+│   │   │   ├── notifications-popover.tsx  # 通知弹窗
+│   │   │   └── sidebar.tsx          # 侧边栏
+│   │   └── ui/              # UI基础组件
+│   │       ├── confirmation-dialog.tsx    # 确认对话框
+│   │       ├── copyable-text.tsx          # 可复制文本
+│   │       ├── number-stepper.tsx         # 数字步进器
+│   │       ├── pagination-controls.tsx    # 分页控件
+│   │       ├── render-markdown.tsx        # Markdown渲染器
+│   │       ├── searchable-select.tsx      # 可搜索选择器
+│   │       └── user-avatar.tsx            # 用户头像
+│   ├── src/context/         # React Context
+│   │   └── auth-context.tsx # 认证上下文
+│   ├── src/lib/             # 工具库
+│   │   ├── api.ts           # API客户端
+│   │   ├── config.ts        # 前端配置
+│   │   └── utils.ts         # 工具函数
+│   ├── src/types/           # TypeScript 类型定义
+│   │   ├── auth.ts          # 认证相关类型
+│   │   └── job.ts           # 任务相关类型
+│   ├── public/              # 静态资源
+│   │   └── images/          # 图片资源
+│   │       └── slurm_avatar.png  # SLURM头像
+│   ├── package.json         # 前端依赖配置
+│   ├── tsconfig.json        # TypeScript配置
+│   ├── next.config.mjs      # Next.js配置
+│   ├── tailwind.config.ts   # Tailwind CSS配置
+│   ├── postcss.config.mjs   # PostCSS配置
+│   ├── start-dev.mjs        # 开发启动脚本
+│   └── .eslintrc.json       # ESLint配置
+└── scripts/                 # 脚本
+    └── deploy.sh            # 部署脚本
 ```
 
 ## 🛠️ 技术栈
