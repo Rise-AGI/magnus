@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity } from "lucide-react";
 import { client } from "@/lib/api";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { POLL_INTERVAL } from "@/lib/config";
@@ -14,6 +14,12 @@ import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { useJobOperations } from "@/hooks/use-job-operations";
+
+// --- 定义后端返回的 GPU 指标类型 ---
+interface GpuMetric {
+  index: number;
+  utilization: number;
+}
 
 export default function JobDetailsPage() {
   const params = useParams();
@@ -46,8 +52,9 @@ export default function JobDetailsPage() {
   
   const [job, setJob] = useState<Job | null>(null);
   const [logs, setLogs] = useState<string>("");
+  const [gpuMetrics, setGpuMetrics] = useState<GpuMetric[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'console' | 'description'>('console');
+  const [activeTab, setActiveTab] = useState<'console' | 'description' | 'metrics'>('console');
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // --- Hook 注入: 仅需处理 Clone 逻辑 ---
@@ -91,6 +98,25 @@ export default function JobDetailsPage() {
     return () => clearInterval(interval);
   }, [jobId]);
 
+  // 3. 轮询 GPU 指标 (仅在切换到指标页且任务运行时)
+  useEffect(() => {
+    if (activeTab !== 'metrics' || !job || job.status !== 'Running') return;
+
+    const fetchMetrics = async () => {
+      try {
+        const data = await client(`/api/jobs/${jobId}/metrics`);
+        // 预期后端返回结构: GpuMetric[]
+        setGpuMetrics(Array.isArray(data) ? data : (data.gpus || []));
+      } catch (e) {
+        // 忽略错误
+      }
+    };
+
+    fetchMetrics();
+    const interval = setInterval(fetchMetrics, POLL_INTERVAL);
+    return () => clearInterval(interval);
+  }, [jobId, activeTab, job?.status]);
+
   if (loading) {
     return <div className="flex items-center justify-center h-[50vh] text-zinc-500">Loading Job Context...</div>;
   }
@@ -105,7 +131,7 @@ export default function JobDetailsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto pb-20">
+    <div className="max-w-6xl mx-auto pb-20 px-4 lg:px-0">
       
       <style jsx global>{`
         ::-webkit-scrollbar { display: none; }
@@ -312,14 +338,13 @@ export default function JobDetailsPage() {
 
         </div>
 
-        {/* 右侧：实时日志 & 描述 */}
+        {/* 右侧卡片：控制台/描述/指标 (通过 activeTab 切换) */}
         <div className="lg:col-span-2 flex flex-col h-[700px] bg-[#0c0c0e] border border-zinc-800 rounded-xl overflow-hidden shadow-2xl">
           
-          {/* Tab Header */}
+          {/* Tab 导航栏 */}
           <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between select-none">
             <div className="flex items-center gap-6">
               
-              {/* Console Tab */}
               <div 
                 onClick={() => setActiveTab('console')}
                 className={`flex items-center gap-2 text-sm font-semibold transition-colors cursor-pointer
@@ -327,7 +352,6 @@ export default function JobDetailsPage() {
               >
                 <Terminal className={`w-4 h-4 ${activeTab === 'console' ? 'text-zinc-400' : 'text-zinc-600'}`} />
                 <span>Console Output</span>
-                {/* 呼吸灯 */}
                 {job.status === 'Running' && (
                   <span className="flex h-1.5 w-1.5 relative ml-0.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -336,7 +360,6 @@ export default function JobDetailsPage() {
                 )}
               </div>
 
-              {/* Description Tab */}
               <div 
                 onClick={() => setActiveTab('description')}
                 className={`flex items-center gap-2 text-sm font-semibold transition-colors cursor-pointer
@@ -346,9 +369,17 @@ export default function JobDetailsPage() {
                 <span>Description</span>
               </div>
 
+              <div 
+                onClick={() => setActiveTab('metrics')}
+                className={`flex items-center gap-2 text-sm font-semibold transition-colors cursor-pointer
+                  ${activeTab === 'metrics' ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+              >
+                <Activity className={`w-4 h-4 ${activeTab === 'metrics' ? 'text-zinc-400' : 'text-zinc-600'}`} />
+                <span>Metrics</span>
+              </div>
+
             </div>
             
-            {/* Live Indicator Text */}
             {job.status === 'Running' && (
                <div className="text-xs text-zinc-500 font-medium flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500/50"></span>
@@ -357,35 +388,75 @@ export default function JobDetailsPage() {
             )}
           </div>
           
-          {/* Content Area */}
+          {/* 内容展示区 */}
           <div className="flex-1 overflow-auto p-5 custom-scrollbar">
-            {activeTab === 'console' ? (
+            {activeTab === 'console' && (
               <div className="font-mono text-xs leading-5">
                 {logs ? (
                   <pre className="text-zinc-300 whitespace-pre-wrap break-all">
                     {logs}
                   </pre>
                 ) : (
-                   <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
-                      <Terminal className="w-10 h-10 opacity-20" />
-                      <p>
-                        {['Pending', 'Running'].includes(job.status) 
-                          ? "Waiting for output..." 
-                          : "No output generated during execution"}
-                      </p>
-                   </div>
+                    <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
+                       <Terminal className="w-10 h-10 opacity-20" />
+                       <p>
+                         {['Pending', 'Running'].includes(job.status) 
+                           ? "Waiting for output..." 
+                           : "No output generated during execution"}
+                       </p>
+                    </div>
                 )}
                 <div ref={logEndRef} />
               </div>
-            ) : (
-              // Description Content (Markdown)
+            )}
+
+            {activeTab === 'description' && (
               <div className="min-h-[200px]">
                 {job.description ? (
                   <RenderMarkdown content={job.description} />
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[200px] italic">
                     <AlignLeft className="w-8 h-8 opacity-20" />
-                    No description provided for this task.
+                    No description provided.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'metrics' && (
+              <div className="space-y-6 max-w-2xl mx-auto py-4">
+                {job.gpu_type !== 'CPU' ? (
+                  gpuMetrics.length > 0 ? (
+                    gpuMetrics.map((gpu) => (
+                      <div key={gpu.index} className="bg-zinc-900/30 border border-zinc-800/50 rounded-xl p-6">
+                        <div className="flex justify-between items-end mb-4">
+                          <div className="flex items-center gap-3">
+                            <Cpu className="w-4 h-4 text-zinc-500" />
+                            <span className="text-sm font-bold text-zinc-200">GPU {gpu.index}</span>
+                          </div>
+                          <span className={`font-mono text-2xl font-bold tracking-tight ${gpu.utilization > 80 ? 'text-orange-400' : 'text-blue-400'}`}>
+                            {gpu.utilization}%
+                          </span>
+                        </div>
+                        <div className="h-2.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800/50 relative">
+                          <div 
+                            className={`h-full transition-all duration-700 ease-out shadow-[0_0_15px_rgba(59,130,246,0.3)]
+                              ${gpu.utilization > 80 ? 'bg-orange-500' : 'bg-blue-600'}`}
+                            style={{ width: `${gpu.utilization}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[300px]">
+                      <Activity className="w-8 h-8 opacity-20" />
+                      <p className="text-sm">Collecting performance metrics...</p>
+                    </div>
+                  )
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[300px] italic">
+                    <Cpu className="w-8 h-8 opacity-20" />
+                    Metrics only available for GPU tasks.
                   </div>
                 )}
               </div>

@@ -1,13 +1,15 @@
 # back_end/server/_scheduler.py
 import os
+import json
 import logging
 import traceback
 import subprocess
 from datetime import datetime
 from sqlalchemy.orm import Session
+from typing import Any, List, Dict
 from pywheels.file_tools import guarantee_file_exist, delete_file
 from .database import SessionLocal
-from .models import Job, JobStatus, JobType, ClusterSnapshot
+from .models import *
 from ._slurm_manager import SlurmManager, SlurmResourceError
 from ._magnus_config import magnus_config
 
@@ -58,7 +60,7 @@ class MagnusScheduler:
             except Exception as e:
                 logger.error(f"Scheduler tick failed: {e}", exc_info=True)
                 
-        
+    
     def _record_snapshot(
         self, 
         db: Session,
@@ -104,7 +106,7 @@ class MagnusScheduler:
         db: Session,
     ):
         """
-        第一阶段：同步现实世界 (SLURM) 的状态到数据库
+        同步状态并收割指标
         """
         # 获取所有我们认为正在运行的任务
         running_jobs = db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
@@ -114,6 +116,10 @@ class MagnusScheduler:
                 logger.warning(f"Job {job.id} is RUNNING but has no slurm_id. Marking FAILED.")
                 job.status = JobStatus.FAILED
                 continue
+            
+            # 收割利用率数据入库
+            # 这里有一个不同频的问题，强迫症难受，但问题不大，冲 MVP 先不管了
+            self._harvest_job_metrics(db, job)
 
             # 询问 SLURM 真实状态
             real_status = self.slurm_manager.check_job_status(job.slurm_job_id)
@@ -145,6 +151,45 @@ class MagnusScheduler:
             # 如果是 PENDING/RUNNING，保持不变，信任 SLURM
             
             db.commit()
+            
+    
+    def _harvest_job_metrics(
+        self, 
+        db: Session,
+        job: Job,
+    )-> None:
+        """
+        持久化瞬时 GPU 状态到 JobMetric 表
+        """
+        status_path = f"{magnus_workspace_path}/jobs/{job.id}/gpu_status.json"
+        if not os.path.exists(status_path):
+            return
+        
+        try:
+            with open(status_path, "r", encoding="utf-8") as f:
+                raw_data: List[Dict[str, Any]] = json.load(f)
+            
+            # For robustness
+            processed_status = []
+            for i in range(job.gpu_count):
+                if i < len(raw_data):
+                    processed_status.append(raw_data[i])
+                else:
+                    processed_status.append({
+                        "index": i, 
+                        "utilization_gpu": 0, 
+                        "utilization_memory": 0,
+                    })
+
+            metric_record = JobMetric(
+                job_id = job.id,
+                timestamp = datetime.utcnow(),
+                status_json = json.dumps(processed_status)
+            )
+            db.add(metric_record)
+            
+        except Exception as e:
+            logger.error(f"Failed to harvest metrics for job {job.id}: {e}")
 
     
     def _make_decisions(
@@ -237,16 +282,16 @@ class MagnusScheduler:
         """
         原子操作：提交 SLURM + 更新 DB
         使用 Python Wrapper 自动处理带认证的 Git Clone
+        [Magnus Update] 内置轻量级 GPU Spy Thread
         """
         
         # magnus 这个用户名写死就挺好，效仿 slurm
         user_magnus = "magnus"
         effective_runner = job.runner if job.runner is not None \
                             else user_magnus
-        
+         
         job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
-        
         acl_cmd = [
             "setfacl", "-R",
             "-m", f"u:{effective_runner}:rwx",
@@ -258,7 +303,6 @@ class MagnusScheduler:
         
         magnus_uv_cache = f"{magnus_config['server']['root']}/uv_cache/{effective_runner}"
         guarantee_file_exist(magnus_uv_cache, is_directory=True)
-
         acl_cmd_cache = [
             "setfacl",
             "-m", f"u:{effective_runner}:rwx",
@@ -267,28 +311,73 @@ class MagnusScheduler:
         ]
         subprocess.run(acl_cmd_cache, check=True)
         
-        # 定义成功信标路径
-        success_marker_path = f"{job_working_table}/.magnus_success"
+        gpu_status_path = f"{job_working_table}/gpu_status.json"
+        try:
+            with open(gpu_status_path, "w", encoding="utf-8") as f:
+                f.write("[]")
+            os.chmod(gpu_status_path, 0o666)
+        except Exception as e:
+            logger.error(
+                f"Failed to initialize gpu_status.json: {e}.\nTraceback:\n{traceback.format_exc()}"
+            )
         
-        # 清理旧信标
+        success_marker_path = f"{job_working_table}/.magnus_success"
         if os.path.exists(success_marker_path):
             try:
                 os.remove(success_marker_path)
             except OSError:
                 pass
         
-        # 用 ssh 连 github
         auth_repo_url = f"git@github.com:{job.namespace}/{job.repo_name}.git"
         
+        spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
         conda_shell_script_path = magnus_config["server"]["scheduler"]["conda_shell_script_path"]
         execution_conda_environment = magnus_config["server"]["scheduler"]["execution_conda_environment"]
 
-        # 构造 Python Wrapper 脚本内容
+        # Python Wrapper
         wrapper_content = f"""import os
 import sys
 import traceback
 import subprocess
+import threading
+import time
+import json
 
+# 轻量级 GPU 监控线程
+def _spy_gpu_thread(
+    status_path, 
+):
+    interval = {spy_gpu_interval}
+    while True:
+        try:
+            cmd = [
+                "nvidia-smi", 
+                "--query-gpu=index,utilization.gpu,utilization.memory", 
+                "--format=csv,noheader,nounits"
+            ]
+            output = subprocess.check_output(cmd, encoding="utf-8", timeout=2)
+            
+            gpu_list = []
+            for line in output.strip().split('\\n'):
+                if not line.strip(): continue
+                parts = line.split(',')
+                if len(parts) == 3:
+                    gpu_list.append({{
+                        "index": int(parts[0].strip()),
+                        "utilization_gpu": int(parts[1].strip()),
+                        "utilization_memory": int(parts[2].strip())
+                    }})
+            
+            temp_path = status_path + ".tmp"
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(gpu_list, f)
+            
+            os.replace(temp_path, status_path)
+            
+        except Exception:
+            pass
+            
+        time.sleep(interval)
 
 def main():
 
@@ -299,6 +388,7 @@ def main():
     work_dir = {repr(job_working_table)}
     repo_dir = os.path.join(work_dir, "repository")
     marker_path = {repr(success_marker_path)}
+    gpu_status_path = {repr(gpu_status_path)}
     
     user_cmd_str = {repr(job.entry_command)}
     if "sudo" in user_cmd_str:
@@ -308,8 +398,16 @@ def main():
     if effective_runner == "root":
         raise RuntimeError("Error: Not privileged.")
     
-    # --- 阶段 1: 准备代码环境 ---
-    # 保持 stdout 干净，除非出错才打印到 stderr
+    try:
+        spy = threading.Thread(
+            target = _spy_gpu_thread, 
+            args = (gpu_status_path, ), 
+            daemon = True,
+        )
+        spy.start()
+    except Exception as e:
+        print(f"Magnus Warning: Failed to start GPU spy: {{e}}", file=sys.stderr)
+
     try:
         # Clone 指定分支，--single-branch 减少下载量
         subprocess.check_call(
@@ -335,16 +433,10 @@ def main():
         print(f"Magnus System Error: {{error}}", file=sys.stderr)
         sys.exit(1)
 
-    # --- 阶段 2: 执行用户命令 ---
     try:
-        # 切换到仓库根目录
         os.chdir(repo_dir)
-        
-        # 拿到环境配置 (由外部注入)
         conda_shell_script_path = {repr(conda_shell_script_path)}
         execution_conda_environment = {repr(execution_conda_environment)}
-        
-        # 构造组合拳命令：source 脚本 -> 激活环境 -> 执行用户命令
         full_command = " && ".join([
             "set -e",
             f"export HOME=/home/{{effective_runner}}",
@@ -354,8 +446,7 @@ def main():
             "export UV_CACHE_DIR={magnus_uv_cache}",
             f"{{user_cmd_str}}"
         ])
-        
-        # 显式调用 /bin/bash 执行（sh 不支持 source）
+
         ret_code = subprocess.call(
             full_command,
             shell = True,
@@ -363,12 +454,10 @@ def main():
         )
         
         if ret_code == 0:
-            # 成功：创建信标
             with open(marker_path, "w") as f:
                 f.write("success")
             sys.exit(0)
         else:
-            # 失败：原样返回退出码，SLURM 会捕获
             sys.exit(ret_code)
     
     except Exception as error:
@@ -425,8 +514,8 @@ if __name__ == "__main__":
 
     
     def _kill_and_pause(
-        self, 
-        db: Session, 
+        self,
+        db: Session,
         job: Job,
     ):
         """

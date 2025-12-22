@@ -37,7 +37,6 @@
 ## 📁 项目结构
 
 ```
-```
 Magnus-Platform/
 ├── configs/                    # 配置文件目录
 │   └── magnus_config.yaml     # 主配置文件

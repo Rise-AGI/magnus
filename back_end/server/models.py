@@ -1,16 +1,18 @@
 import secrets
 import enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Integer, String, DateTime, Text, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Integer, String, DateTime, Text, ForeignKey, Enum as SQLEnum, JSON
 from datetime import datetime
 from .database import Base
 
 
 __all__ = [
-    "JobType",
-    "JobStatus",
     "User",
     "Job",
+    "JobType",
+    "JobStatus",
+    "JobMetric",
+    "ClusterSnapshot",
 ]
 
 
@@ -68,7 +70,20 @@ class Job(Base):
     cpu_count: Mapped[int | None] = mapped_column(Integer, default=None)
     memory_demand: Mapped[str | None] = mapped_column(String, default=None)
     runner: Mapped[str | None] = mapped_column(String, nullable=None)
-    
+    metrics: Mapped[list["JobMetric"]] = relationship(
+        back_populates = "job", 
+        cascade = "all, delete-orphan",
+    )
+
+
+class JobMetric(Base):
+    __tablename__ = "job_metrics"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    status_json: Mapped[str] = mapped_column(Text)
+    job: Mapped["Job"] = relationship(back_populates="metrics")
+ 
     
 class ClusterSnapshot(Base):
     __tablename__ = "cluster_snapshots"

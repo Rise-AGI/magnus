@@ -196,6 +196,38 @@ async def get_job_logs(
     except Exception as e:
         logger.error(f"Error reading log file for {job_id}: {e}")
         return {"logs": f"Error reading logs: {str(e)}"}
+    
+    
+@router.get(
+    "/jobs/{job_id}/metrics",
+)
+async def get_job_metrics(
+    job_id: str, 
+    db: Session = Depends(database.get_db),
+) -> List[Dict[str, Any]]:
+    latest_metric: Optional[models.JobMetric] = db.query(models.JobMetric)\
+        .filter(models.JobMetric.job_id == job_id)\
+        .order_by(models.JobMetric.timestamp.desc())\
+        .first()
+
+    if not latest_metric:
+        return []
+
+    try:
+        metrics: List[Dict[str, Any]] = json.loads(latest_metric.status_json)
+        # 映射后端 utilization_gpu 到前端预期的 utilization 字段
+        formatted_metrics = [
+            {
+                "index": m.get("index"),
+                "utilization": m.get("utilization_gpu", 0),
+            }
+            for m in metrics
+        ]
+        return formatted_metrics
+
+    except Exception as e:
+        logger.error(f"Failed to parse metrics for job {job_id}: {e}")
+        return []
 
 
 @router.post("/jobs/{job_id}/terminate")

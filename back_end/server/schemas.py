@@ -8,6 +8,7 @@ from .models import JobType, JobStatus
 __all__ = [
     "JobSubmission",
     "JobResponse",
+    "JobMetricResponse",
     "PagedJobResponse",
     "FeishuLoginRequest",
     "UserInfo",
@@ -52,6 +53,12 @@ class JobResponse(JobSubmission):
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
+    class Config: from_attributes = True
+    
+    
+class JobMetricResponse(BaseModel):
+    timestamp: datetime
+    status_json: str
     class Config: from_attributes = True
 
 
