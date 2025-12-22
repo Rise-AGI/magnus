@@ -12,12 +12,9 @@ import rehypeRaw from "rehype-raw";
 import remarkParse from "remark-parse";
 import rehypeStringify from "rehype-stringify";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import {
-  vscDarkPlus,
-} from "react-syntax-highlighter/dist/esm/styles/prism";
-import { useState } from "react";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { cn } from "@/lib/utils";
-import { Copy, ChevronDown, ChevronRight } from "lucide-react";
+import { CopyableText } from "@/components/ui/copyable-text";
 
 export default function RenderMarkdown({ content }: { content: string }) {
 
@@ -141,15 +138,7 @@ export default function RenderMarkdown({ content }: { content: string }) {
     code: (props: any) => {
       const { children, className, node, ...rest } = props;
       const match = /language-(\w+)/.exec(className || "");
-      const [copied, setCopied] = useState(false);
-
-      const handleCopy = async () => {
-        if (typeof children === "string") {
-          await navigator.clipboard.writeText(children);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        }
-      };
+      const codeString = String(children).replace(/\n$/, "");
 
       return match ? (
         <div className="relative group mt-6 rounded-lg overflow-hidden border border-zinc-800">
@@ -157,55 +146,26 @@ export default function RenderMarkdown({ content }: { content: string }) {
             <span className="text-xs font-mono text-zinc-400">
               {match[1]}
             </span>
-            <button
-              onClick={handleCopy}
-              className="relative flex items-center gap-1 text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              <Copy className="h-3.5 w-3.5" />
-              {copied && (
-                <span className="absolute right-0 -top-8 px-2 py-1 text-xs text-zinc-900 font-semibold bg-green-400 rounded shadow animate-in fade-in zoom-in duration-200">
-                  Copied!
-                </span>
-              )}
-            </button>
+            <CopyableText 
+              text="Copy"
+              copyValue={codeString}
+              variant="id"
+              className="text-zinc-500 hover:text-zinc-300"
+            />
           </div>
           <SyntaxHighlighter
             {...rest}
             PreTag="div"
-            children={String(children).replace(/\n$/, "")}
+            children={codeString}
             language={match[1]}
             style={vscDarkPlus}
-            customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', background: '#09090b' }} // zinc-950
+            customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', background: '#09090b' }} 
           />
         </div>
       ) : (
         <code {...rest} className={cn("bg-zinc-800/50 px-1.5 py-0.5 rounded text-zinc-200 font-mono text-xs border border-zinc-700/50", className)}>
           {children}
         </code>
-      );
-    },
-    think: ({ ...props }: any) => {
-      const [isOpen, setIsOpen] = useState(true);
-
-      return (
-        <div className="mb-4 rounded-lg border border-purple-500/20 bg-purple-500/5 overflow-hidden">
-          <button
-            onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center w-full px-4 py-2 text-left bg-purple-500/10 hover:bg-purple-500/20 transition-colors text-purple-200"
-          >
-            {isOpen ? (
-              <ChevronDown className="h-4 w-4 mr-2 opacity-50" />
-            ) : (
-              <ChevronRight className="h-4 w-4 mr-2 opacity-50" />
-            )}
-            <span className="font-medium text-xs uppercase tracking-wider opacity-80">Reasoning Process</span>
-          </button>
-          {isOpen && (
-            <div className="p-4 text-xs text-zinc-300 leading-relaxed border-t border-purple-500/10">
-              {props.children}
-            </div>
-          )}
-        </div>
       );
     },
   };
