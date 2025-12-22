@@ -13,6 +13,7 @@ __all__ = [
     "UserInfo",
     "LoginResponse",
     "ClusterStatsResponse",
+    "DashboardJobsResponse",
 ]
 
 
@@ -77,8 +78,16 @@ class ClusterResources(BaseModel):
     used: int
     class Config: from_attributes = True
 
+
 class ClusterStatsResponse(BaseModel):
     resources: ClusterResources
     running_jobs: List[JobResponse]
+    total_running: int
     pending_jobs: List[JobResponse]
+    total_pending: int
     class Config: from_attributes = True
+    
+    
+class DashboardJobsResponse(BaseModel):
+    items: List[JobResponse]
+    total: int

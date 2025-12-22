@@ -250,18 +250,20 @@ def _scheduler_sort_key(job):
     response_model = ClusterStatsResponse,
 )
 async def get_cluster_stats(
+    running_skip: int = 0,
+    running_limit: int = 10,
+    pending_skip: int = 0,
+    pending_limit: int = 10,
     db: Session = Depends(database.get_db),
 ):
     
     # --- 1. 获取 Slurm 真理 (Absolute Truth) ---
-    # 核心原则：Running 列表必须完全由 Slurm 决定，解决手动 scancel 后数据库状态滞后的 Bug
     slurm_manager = SlurmManager()
     all_slurm_tasks = slurm_manager.get_all_running_tasks()
     
     running_slurm_ids = [task["id"] for task in all_slurm_tasks]
 
     # --- 2. 数据库元数据匹配 ---
-    # 拿着 Slurm 的名单去数据库里"认领"任务 (Enrichment)
     magnus_jobs_orm = []
     if running_slurm_ids:
         magnus_jobs_orm = db.query(models.Job).filter(
@@ -271,22 +273,20 @@ async def get_cluster_stats(
     magnus_job_map = {job.slurm_job_id: job for job in magnus_jobs_orm}
 
     # --- 3. 构造最终列表 ---
-    final_running_jobs: List[JobResponse] = []
+    all_running_jobs: List[JobResponse] = []
     
     for task in all_slurm_tasks:
         slurm_id = task["id"]
         
         if slurm_id in magnus_job_map:
             # Case A: Magnus 任务
-            # 使用数据库元数据，但强制状态为 Running (以 Slurm 为准)
             job_orm = magnus_job_map[slurm_id]
             job_resp = JobResponse.model_validate(job_orm)
             job_resp.status = JobStatus.RUNNING
-            final_running_jobs.append(job_resp)
+            all_running_jobs.append(job_resp)
             
         else:
             # Case B: External 任务
-            # 现场 Mock 对象，绝不入库
             mock_user = UserInfo(
                 id = f"slurm_{task['user']}",
                 name = f"{task['user']} (slurm)",
@@ -319,31 +319,38 @@ async def get_cluster_stats(
                 created_at = start_dt,
                 user = mock_user,
             )
-            final_running_jobs.append(mock_job)
+            all_running_jobs.append(mock_job)
 
-    # --- 4. 排序 ---
-    # 规则: Magnus 任务在上，External 任务在下；各组内按时间倒序
-    magnus_group = [j for j in final_running_jobs if j.job_type != JobType.EXTERNAL]
-    external_group = [j for j in final_running_jobs if j.job_type == JobType.EXTERNAL]
+    # --- 4. 排序 & 资源计算 (基于全量数据) ---
+    magnus_group = [j for j in all_running_jobs if j.job_type != JobType.EXTERNAL]
+    external_group = [j for j in all_running_jobs if j.job_type == JobType.EXTERNAL]
     
     magnus_group.sort(key = lambda x: x.start_time or datetime.min, reverse = True)
     external_group.sort(key = lambda x: x.start_time or datetime.min, reverse = True)
     
-    sorted_running_jobs = magnus_group + external_group
+    sorted_all_running = magnus_group + external_group
 
-    # --- 5. Pending Jobs ---
-    # Pending 状态依然以数据库为准，配合 Scheduler 的调度逻辑
+    # 计算资源 (必须使用分页前的全量数据)
+    n1_free = slurm_manager.get_cluster_free_gpus()
+    n2_used = sum(job.gpu_count for job in sorted_all_running)
+    display_total = n1_free + n2_used
+
+    # --- 5. Running 列表分页切片 ---
+    total_running = len(sorted_all_running)
+    paginated_running = sorted_all_running[running_skip : running_skip + running_limit]
+
+    # --- 6. Pending Jobs 处理与分页 ---
     pending_jobs_orm = db.query(models.Job).filter(
         models.Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
     ).all()
     
+    # 保持原有调度器排序逻辑
     pending_jobs_orm.sort(key = _scheduler_sort_key, reverse = True)
-    pending_jobs = [JobResponse.model_validate(job) for job in pending_jobs_orm]
-
-    # --- 6. 资源计算 ---
-    n1_free = slurm_manager.get_cluster_free_gpus()
-    n2_used = sum(job.gpu_count for job in sorted_running_jobs)
-    display_total = n1_free + n2_used
+    
+    total_pending = len(pending_jobs_orm)
+    paginated_pending_orm = pending_jobs_orm[pending_skip : pending_skip + pending_limit]
+    
+    paginated_pending = [JobResponse.model_validate(job) for job in paginated_pending_orm]
 
     return {
         "resources": {
@@ -353,40 +360,54 @@ async def get_cluster_stats(
             "free": n1_free,
             "used": n2_used,
         },
-        "running_jobs": sorted_running_jobs,
-        "pending_jobs": pending_jobs,
+        "running_jobs": paginated_running,
+        "total_running": total_running,
+        "pending_jobs": paginated_pending,
+        "total_pending": total_pending,
     }
 
 
-@router.get("/dashboard/my-active-jobs", response_model=List[JobResponse])
+@router.get(
+    "/dashboard/my-active-jobs",
+    response_model = DashboardJobsResponse,
+)
 async def get_my_active_jobs(
+    skip: int = 0,
+    limit: int = 5,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     """
     Dashboard 专用：获取当前用户“活跃”的任务
-    逻辑：Running 在顶端(按开始时间)，Pending/Paused 在下方(按调度优先级)
+    支持分页：先获取全量数据进行复杂排序，再内存切片
     """
     
-    # 1. 获取 Running 任务
+    # 获取 Running 任务
     running_orm = db.query(models.Job).filter(
         models.Job.user_id == current_user.id,
         models.Job.status == JobStatus.RUNNING
     ).order_by(models.Job.start_time.desc()).all()
     
-    # 2. 获取排队任务
+    # 获取排队任务
     queued_orm = db.query(models.Job).filter(
         models.Job.user_id == current_user.id,
         models.Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
     ).all()
     
-    # 3. 对排队任务应用调度排序
-    queued_orm.sort(key=_scheduler_sort_key, reverse=True)
+    # 对排队任务应用调度排序
+    queued_orm.sort(key = _scheduler_sort_key, reverse = True)
     
-    # 4. 合并并强制序列化 (User 懒加载)
+    # 合并全量列表
     all_jobs_orm = running_orm + queued_orm
     
-    return [JobResponse.model_validate(job) for job in all_jobs_orm]
+    # 计算总数与切片 (Pagination)
+    total_count = len(all_jobs_orm)
+    paginated_orm = all_jobs_orm[skip : skip + limit]
+    
+    return {
+        "items": [JobResponse.model_validate(job) for job in paginated_orm],
+        "total": total_count,
+    }
 
 
 @router.get("/dashboard/stats")

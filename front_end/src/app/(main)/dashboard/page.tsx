@@ -9,10 +9,9 @@ import { POLL_INTERVAL } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
-
-// Refactoring Imports
 import { useJobOperations } from "@/hooks/use-job-operations";
 import { JobTable } from "@/components/jobs/job-table";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 
 interface DashboardStats {
   total_occupancy_24h: number;
@@ -50,27 +49,45 @@ export default function DashboardPage() {
   const { user: currentUser } = useAuth();
   
   const [activeJobs, setActiveJobs] = useState<Job[]>([]);
+  const [totalJobs, setTotalJobs] = useState(0);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
 
   const fetchDashboardData = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
+      const params = new URLSearchParams({
+        skip: ((currentPage - 1) * pageSize).toString(),
+        limit: pageSize.toString(),
+      });
       const [jobsData, statsData] = await Promise.all([
-        client("/api/dashboard/my-active-jobs"),
+        client(`/api/dashboard/my-active-jobs?${params.toString()}`), 
         client("/api/dashboard/stats").catch(e => {
             console.warn("Failed to fetch stats", e);
             return null;
         })
       ]);
-      setActiveJobs(jobsData);
+      if (jobsData && jobsData.items) {
+          setActiveJobs(jobsData.items);
+          setTotalJobs(jobsData.total);
+      } else {
+          if (Array.isArray(jobsData)) {
+              setActiveJobs(jobsData);
+              setTotalJobs(jobsData.length);
+          }
+      }
+
       if (statsData) setStats(statsData);
     } catch (e) {
       console.error("Failed to fetch dashboard data", e);
     } finally {
       if (!isBackground) setLoading(false);
     }
-  }, []);
+  }, [currentPage, pageSize]);
 
   // Hook 注入
   const { 
@@ -121,14 +138,34 @@ export default function DashboardPage() {
             My Active Jobs
         </div>
         
-        {/* Replaced Active Tasks Table */}
-        <JobTable 
-          jobs={activeJobs}
-          loading={loading && activeJobs.length === 0}
-          onClone={handleCloneJob}
-          onTerminate={onClickTerminate}
-          emptyMessage="No active jobs."
-        />
+        <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
+            <JobTable 
+              jobs={activeJobs}
+              loading={loading && activeJobs.length === 0}
+              onClone={handleCloneJob}
+              onTerminate={onClickTerminate}
+              emptyMessage="No active jobs."
+              className="border-none min-h-[300px]"
+            />
+            
+            {/* 分页组件 */}
+            {totalJobs > 0 && (
+                 <div className="px-4 pb-2 bg-zinc-900/30">
+                    <PaginationControls 
+                      currentPage={currentPage}
+                      totalPages={Math.ceil(totalJobs / pageSize)}
+                      pageSize={pageSize}
+                      totalItems={totalJobs}
+                      onPageChange={setCurrentPage}
+                      onPageSizeChange={(newSize) => {
+                          setPageSize(newSize);
+                          setCurrentPage(1);
+                      }}
+                      pageSizeOptions={[5, 10, 20]}
+                    />
+                </div>
+            )}
+        </div>
       </div>
 
       {/* Dialogs */}

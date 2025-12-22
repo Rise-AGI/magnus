@@ -8,10 +8,9 @@ import { Job } from "@/types/job";
 import { POLL_INTERVAL } from "@/lib/config";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
-
-// Refactoring Imports
 import { useJobOperations } from "@/hooks/use-job-operations";
 import { JobTable } from "@/components/jobs/job-table";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 
 interface ClusterStats {
   resources: {
@@ -22,26 +21,43 @@ interface ClusterStats {
     used: number;
   };
   running_jobs: Job[];
+  total_running: number;
   pending_jobs: Job[];
+  total_pending: number;
 }
 
 export default function ClusterPage() {
   const [stats, setStats] = useState<ClusterStats | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Running Jobs Pagination State
+  const [runningPage, setRunningPage] = useState(1);
+  const [runningSize, setRunningSize] = useState(5);
+
+  // Pending Jobs Pagination State
+  const [pendingPage, setPendingPage] = useState(1);
+  const [pendingSize, setPendingSize] = useState(5);
+
   const fetchStats = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const data = await client("/api/cluster/stats");
+      // 构造两组分页参数
+      const params = new URLSearchParams({
+        running_skip: ((runningPage - 1) * runningSize).toString(),
+        running_limit: runningSize.toString(),
+        pending_skip: ((pendingPage - 1) * pendingSize).toString(),
+        pending_limit: pendingSize.toString(),
+      });
+
+      const data = await client(`/api/cluster/stats?${params.toString()}`);
       setStats(data);
     } catch (e) {
       console.error("Failed to fetch cluster stats", e);
     } finally {
       if (!isBackground) setLoading(false);
     }
-  }, []);
+  }, [runningPage, runningSize, pendingPage, pendingSize]);
 
-  // Hook 注入
   const { 
     drawerProps, 
     terminateDialogProps, 
@@ -55,10 +71,13 @@ export default function ClusterPage() {
     return () => clearInterval(interval);
   }, [fetchStats]);
 
+  // 当 loading 且没有任何数据时显示 Loading 状态
+  // (如果已经有 stats 数据但在做后台刷新，则保留显示旧数据)
   if (loading && !stats) {
     return <div className="p-8 text-zinc-500">Loading cluster status...</div>;
   }
 
+  // 安全检查，防止 stats 为空时渲染
   if (!stats) return null;
 
   return (
@@ -67,12 +86,13 @@ export default function ClusterPage() {
         ::-webkit-scrollbar { display: none; }
         html { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
+      
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">Cluster Status</h1>
         <p className="text-zinc-500 text-sm mt-1">Real-time resource monitoring and queue status.</p>
       </div>
 
-      {/* Resource Cards (保留) */}
+      {/* Resource Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Cpu className="w-24 h-24 text-emerald-500" /></div>
@@ -84,41 +104,84 @@ export default function ClusterPage() {
         </div>
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
           <div className="flex items-center gap-2 text-blue-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">Active Jobs</span></div>
-          <div className="text-4xl font-bold text-white">{stats.running_jobs.length}</div>
+          {/* 这里显示 Total Running 而不是当前页的长度 */}
+          <div className="text-4xl font-bold text-white">{stats.total_running}</div>
           <p className="text-zinc-500 text-xs mt-2">Currently executing on cluster</p>
         </div>
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
           <div className="flex items-center gap-2 text-amber-400 mb-2"><Clock className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">Queue Depth</span></div>
-          <div className="text-4xl font-bold text-white">{stats.pending_jobs.length}</div>
+          {/* 这里显示 Total Pending */}
+          <div className="text-4xl font-bold text-white">{stats.total_pending}</div>
           <p className="text-zinc-500 text-xs mt-2">Jobs waiting for resources</p>
         </div>
       </div>
 
       <div className="flex flex-col gap-10">
-        {/* Running Jobs Table */}
+        
+        {/* === Running Jobs Section === */}
         <div className="flex flex-col gap-4">
           <h2 className="text-lg font-bold text-white flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>Running Jobs</h2>
-          <JobTable 
-             jobs={stats.running_jobs}
-             loading={false} // Stats 整体 loading，这里不需要单独 loading
-             onClone={handleCloneJob}
-             onTerminate={onClickTerminate}
-             emptyMessage="No running jobs."
-             className="min-h-[175px]"
-          />
+          
+          <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
+            <JobTable 
+              jobs={stats.running_jobs}
+              loading={false}
+              onClone={handleCloneJob}
+              onTerminate={onClickTerminate}
+              emptyMessage="No running jobs."
+              className="border-none -h-[175px]"
+            />
+            
+            {stats.total_running > 0 && (
+              <div className="px-4 pb-2 bg-zinc-900/30">
+                <PaginationControls 
+                  currentPage={runningPage}
+                  totalPages={Math.ceil(stats.total_running / runningSize)}
+                  pageSize={runningSize}
+                  totalItems={stats.total_running}
+                  onPageChange={setRunningPage}
+                  onPageSizeChange={(newSize) => {
+                    setRunningSize(newSize);
+                    setRunningPage(1);
+                  }}
+                  pageSizeOptions={[5, 10, 20]}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Pending Jobs Table */}
+        {/* === Pending Jobs Section === */}
         <div className="flex flex-col gap-4">
-           <h2 className="text-lg font-bold text-white flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-amber-500"></span>Queued Jobs</h2>
-           <JobTable 
-             jobs={stats.pending_jobs}
-             loading={false}
-             onClone={handleCloneJob}
-             onTerminate={onClickTerminate}
-             emptyMessage="Queue is empty."
-             className="min-h-[175px]"
-          />
+          <h2 className="text-lg font-bold text-white flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-amber-500"></span>Queued Jobs</h2>
+          
+          <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
+            <JobTable 
+              jobs={stats.pending_jobs}
+              loading={false}
+              onClone={handleCloneJob}
+              onTerminate={onClickTerminate}
+              emptyMessage="Queue is empty."
+              className="border-none min-h-[175px]"
+            />
+            
+            {stats.total_pending > 0 && (
+              <div className="px-4 pb-2 bg-zinc-900/30">
+                <PaginationControls 
+                  currentPage={pendingPage}
+                  totalPages={Math.ceil(stats.total_pending / pendingSize)}
+                  pageSize={pendingSize}
+                  totalItems={stats.total_pending}
+                  onPageChange={setPendingPage}
+                  onPageSizeChange={(newSize) => {
+                    setPendingSize(newSize);
+                    setPendingPage(1);
+                  }}
+                  pageSizeOptions={[5, 10, 20]}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

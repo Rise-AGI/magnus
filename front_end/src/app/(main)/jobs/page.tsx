@@ -141,33 +141,37 @@ export default function JobsPage() {
           />
         </div>
       </div>
+      
+      <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl overflow-hidden backdrop-blur-sm">
+        
+        {/* Table Area */}
+        <JobTable 
+          jobs={jobs}
+          loading={loading}
+          onClone={handleCloneJob}
+          onTerminate={onClickTerminate}
+          className="border-none min-h-[400px]" 
+        />
 
-      {/* Table Area (Replaced with Component) */}
-      <JobTable 
-        jobs={jobs}
-        loading={loading}
-        onClone={handleCloneJob}
-        onTerminate={onClickTerminate}
-      />
+        {/* Pagination */}
+        {jobs.length > 0 && (
+          <div className="px-6 py-2 border-zinc-900/30">
+            <PaginationControls 
+              currentPage={currentPage}
+              totalPages={Math.ceil(totalItems / pageSize)}
+              pageSize={pageSize}
+              totalItems={totalItems}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(newSize) => {
+                 setPageSize(newSize);
+                 setCurrentPage(1);
+              }}
+            />
+          </div>
+        )}
+      </div>
 
-      {/* Pagination */}
-      {jobs.length > 0 && (
-        <div className="mt-4 px-6 bg-zinc-900/30 border border-zinc-800 rounded-xl py-2">
-          <PaginationControls 
-            currentPage={currentPage}
-            totalPages={Math.ceil(totalItems / pageSize)}
-            pageSize={pageSize}
-            totalItems={totalItems}
-            onPageChange={setCurrentPage}
-            onPageSizeChange={(newSize) => {
-               setPageSize(newSize);
-               setCurrentPage(1);
-            }}
-          />
-        </div>
-      )}
-
-      {/* Dialogs (Inject Props directly) */}
+      {/* Dialogs */}
       <JobDrawer {...drawerProps} />
       <ConfirmationDialog {...terminateDialogProps} />
     </div>

@@ -1,6 +1,7 @@
 // front_end/src/components/ui/pagination-controls.tsx
 "use client";
 
+import { useMemo } from "react";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 
@@ -11,14 +12,10 @@ interface PaginationProps {
   totalItems: number;
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
+  pageSizeOptions?: number[];
 }
 
-const PAGE_SIZE_OPTIONS = [
-  { label: "10", value: "10" },
-  { label: "20", value: "20" },
-  { label: "50", value: "50" },
-  { label: "100", value: "100" },
-];
+const DEFAULT_PAGE_SIZES = [10, 20, 50, 100];
 
 export function PaginationControls({
   currentPage,
@@ -27,8 +24,16 @@ export function PaginationControls({
   totalItems,
   onPageChange,
   onPageSizeChange,
+  pageSizeOptions = DEFAULT_PAGE_SIZES,
 }: PaginationProps) {
   
+  const selectOptions = useMemo(() => {
+    return pageSizeOptions.map((size) => ({
+      label: size.toString(),
+      value: size.toString(),
+    }));
+  }, [pageSizeOptions]);
+
   const getPageNumbers = () => {
     const pages = [];
     if (totalPages <= 7) {
@@ -57,10 +62,9 @@ export function PaginationControls({
         <div className="flex items-center gap-2">
           <span className="hidden sm:inline whitespace-nowrap text-xs">Rows:</span>
           <div className="w-[70px]">
-            {/* ✅ 修复：向上弹出 + 极简模式 */}
             <SearchableSelect
               value={pageSize.toString()}
-              options={PAGE_SIZE_OPTIONS}
+              options={selectOptions} 
               onChange={(val) => onPageSizeChange(Number(val))}
               placeholder={pageSize.toString()}
               placement="top"
