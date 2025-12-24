@@ -16,6 +16,7 @@ import { UserAvatar } from "@/components/ui/user-avatar";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { POLL_INTERVAL } from "@/lib/config";
 
 import Editor from "react-simple-code-editor";
 import { highlight, languages } from "prismjs";
@@ -515,8 +516,8 @@ export default function BlueprintsPage() {
 
   useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);
 
-  const fetchBlueprints = useCallback(async () => {
-    setLoading(true);
+  const fetchBlueprints = useCallback(async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const skip = (currentPage - 1) * pageSize;
       const params = new URLSearchParams({
@@ -525,10 +526,7 @@ export default function BlueprintsPage() {
       });
       if (debouncedQuery.trim()) params.append("search", debouncedQuery.trim());
       if (selectedUserId) params.append("creator_id", selectedUserId);
-
-      // Now strictly expecting { items: [], total: number }
       const response = await client(`/api/blueprints?${params.toString()}`);
-      
       setBlueprints(response.items.map((b: any) => ({ 
           ...b, 
           updatedAt: b.updated_at || b.updatedAt,
@@ -538,7 +536,7 @@ export default function BlueprintsPage() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }, [currentPage, pageSize, debouncedQuery, selectedUserId, allUsers]);
 
