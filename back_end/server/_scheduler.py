@@ -278,61 +278,70 @@ class MagnusScheduler:
         self, 
         db: Session, 
         job: Job,
-    ) -> bool:
+    )-> bool:
+        
         """
         原子操作：提交 SLURM + 更新 DB
         使用 Python Wrapper 自动处理带认证的 Git Clone
         [Magnus Update] 内置轻量级 GPU Spy Thread
         """
         
-        # magnus 这个用户名写死就挺好，效仿 slurm
-        user_magnus = "magnus"
-        effective_runner = job.runner if job.runner is not None \
-                            else user_magnus
-         
-        job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
-        guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
-        acl_cmd = [
-            "setfacl", "-R",
-            "-m", f"u:{effective_runner}:rwx",
-            "-d", "-m", f"u:{user_magnus}:rwx",
-            "-d", "-m", f"u:{effective_runner}:rwx",
-            job_working_table
-        ]
-        subprocess.run(acl_cmd, check=True)
-        
-        magnus_uv_cache = f"{magnus_config['server']['root']}/uv_cache/{effective_runner}"
-        guarantee_file_exist(magnus_uv_cache, is_directory=True)
-        acl_cmd_cache = [
-            "setfacl",
-            "-m", f"u:{effective_runner}:rwx",
-            "-d", "-m", f"u:{effective_runner}:rwx",
-            magnus_uv_cache
-        ]
-        subprocess.run(acl_cmd_cache, check=True)
-        
-        gpu_status_path = f"{job_working_table}/gpu_status.json"
         try:
-            with open(gpu_status_path, "w", encoding="utf-8") as f:
-                f.write("[]")
-            os.chmod(gpu_status_path, 0o666)
-        except Exception as e:
-            logger.error(
-                f"Failed to initialize gpu_status.json: {e}.\nTraceback:\n{traceback.format_exc()}"
-            )
         
-        success_marker_path = f"{job_working_table}/.magnus_success"
-        if os.path.exists(success_marker_path):
+            # magnus 这个用户名写死就挺好，效仿 slurm
+            user_magnus = "magnus"
+            effective_runner = job.runner if job.runner is not None \
+                                else user_magnus
+            
+            job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
+            guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
+            acl_cmd = [
+                "setfacl", "-R",
+                "-m", f"u:{effective_runner}:rwx",
+                "-d", "-m", f"u:{user_magnus}:rwx",
+                "-d", "-m", f"u:{effective_runner}:rwx",
+                job_working_table,
+            ]
+            subprocess.run(acl_cmd, check=True)
+            
+            magnus_uv_cache = f"{magnus_config['server']['root']}/uv_cache/{effective_runner}"
+            guarantee_file_exist(magnus_uv_cache, is_directory=True)
+            acl_cmd_cache = [
+                "setfacl",
+                "-m", f"u:{effective_runner}:rwx",
+                "-d", "-m", f"u:{effective_runner}:rwx",
+                magnus_uv_cache,
+            ]
+            subprocess.run(acl_cmd_cache, check=True)
+            
+            gpu_status_path = f"{job_working_table}/gpu_status.json"
             try:
-                os.remove(success_marker_path)
-            except OSError:
-                pass
-        
-        auth_repo_url = f"git@github.com:{job.namespace}/{job.repo_name}.git"
-        
-        spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
-        conda_shell_script_path = magnus_config["server"]["scheduler"]["conda_shell_script_path"]
-        execution_conda_environment = magnus_config["server"]["scheduler"]["execution_conda_environment"]
+                with open(gpu_status_path, "w", encoding="utf-8") as f:
+                    f.write("[]")
+                os.chmod(gpu_status_path, 0o666)
+            except Exception as e:
+                logger.error(
+                    f"Failed to initialize gpu_status.json: {e}.\nTraceback:\n{traceback.format_exc()}"
+                )
+            
+            success_marker_path = f"{job_working_table}/.magnus_success"
+            if os.path.exists(success_marker_path):
+                try:
+                    os.remove(success_marker_path)
+                except OSError:
+                    pass
+            
+            auth_repo_url = f"git@github.com:{job.namespace}/{job.repo_name}.git"
+            
+            spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
+            conda_shell_script_path = magnus_config["server"]["scheduler"]["conda_shell_script_path"]
+            execution_conda_environment = magnus_config["server"]["scheduler"]["execution_conda_environment"]
+            
+        except Exception as error:
+            logger.error(f"Job {job.id} submission error: {error}\nTraceback:\n{traceback.format_exc()}")
+            job.status = JobStatus.FAILED
+            db.commit()
+            return False
 
         # Python Wrapper
         wrapper_content = f"""import os

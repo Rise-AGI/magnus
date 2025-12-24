@@ -108,9 +108,9 @@ async def submit_job(
     job_dict = job_data.model_dump()
     
     db_job = models.Job(
-        **job_dict, 
-        user_id=current_user.id,
-        status=JobStatus.PENDING 
+        **job_dict,
+        user_id = current_user.id,
+        status = JobStatus.PENDING 
     )
     
     db.add(db_job)
@@ -692,7 +692,7 @@ async def run_blueprint(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    # ... (保持不变)
+    
     bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
@@ -700,19 +700,15 @@ async def run_blueprint(
     try:
         job_submission = blueprint_manager.execute(
             bp.code, 
-            params, 
-            context_user_name=current_user.name
+            params,
         )
         
         job_dict = job_submission.model_dump()
         
-        # 强制修正一些字段
         db_job = models.Job(
             **job_dict,
-            user_id=current_user.id,
-            status=models.JobStatus.PENDING,
-            # 如果蓝图里没有指定 runner，默认用当前用户的名字(magnus 逻辑)
-            runner=job_dict.get("runner") 
+            user_id = current_user.id,
+            status = models.JobStatus.PENDING,
         )
         
         db.add(db_job)

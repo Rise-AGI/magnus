@@ -136,3 +136,5 @@ class BlueprintParamSchema(BaseModel):
     min: Optional[int] = None
     max: Optional[int] = None
     description: Optional[str] = None
+    step: Optional[float] = None
+    placeholder: Optional[str] = None

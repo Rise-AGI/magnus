@@ -3,8 +3,6 @@ import logging
 from typing import Any, Dict, List, Annotated, get_origin, get_args
 from datetime import datetime
 from pydantic import ValidationError
-
-# 注入给 Blueprint 代码的上下文
 from .models import JobType
 from .schemas import JobSubmission, BlueprintParamSchema
 
@@ -28,65 +26,76 @@ class BlueprintManager:
             "Any": Any,
         }
 
-    def _compile_code(self, code: str) -> dict:
+    def _compile_code(self, code: str, extra_globals: Dict[str, Any]) -> dict:
         """
-        编译并执行代码定义，返回局部变量字典（包含函数定义）。
+        编译并执行代码定义。
+        关键修改：exec 的 globals 和 locals 使用同一个字典，
+        确保函数定义时能捕获到同一层级定义的 Type Alias (如 UserName)。
         """
-        local_scope = {}
+
+        scope = self.execution_globals.copy()
+        
+        if extra_globals:
+            scope.update(extra_globals)
+
         try:
-            exec(code, self.execution_globals, local_scope)
+            exec(code, scope, scope)
         except Exception as e:
             raise ValueError(f"Syntax Error in Blueprint: {e}")
         
-        if "generate_job" not in local_scope:
+        if "generate_job" not in scope:
             raise ValueError("Blueprint must define a function named 'generate_job'")
         
-        return local_scope
+        return scope
 
     def analyze_signature(self, code: str) -> List[BlueprintParamSchema]:
         """
         静态分析 generate_job 函数的签名，生成前端表单 Schema。
         """
-        local_scope = self._compile_code(code)
+        local_scope = self._compile_code(code, extra_globals={})
         func = local_scope["generate_job"]
+        
         sig = inspect.signature(func)
         
         params_schema = []
 
         for name, param in sig.parameters.items():
-            if name == "user_name": continue  # 自动注入参数，前端不可见
 
             schema = BlueprintParamSchema(
                 key=name,
-                label=name.replace("_", " ").title(), # simple title case
-                type="text", # fallback
+                label=name.replace("_", " ").title(),
+                type="text",
                 default=param.default if param.default != inspect.Parameter.empty else None
             )
 
-            # 解析类型注解 Annotated[type, metadata]
             annotation = param.annotation
-            if get_origin(annotation) is Annotated:
+            
+            origin = get_origin(annotation)
+            
+            if origin is Annotated:
                 base_type, meta = get_args(annotation)
                 
-                # 1. 类型推断
+                # 基础类型判断
                 if base_type is int:
                     schema.type = "number"
                 elif base_type is bool:
                     schema.type = "boolean"
                 elif base_type is str:
-                    schema.type = "text" # default
+                    schema.type = "text"
                 
-                # 2. 元数据提取 (metadata 应该是一个 dict)
+                # 元数据提取
                 if isinstance(meta, dict):
                     if "label" in meta: schema.label = meta["label"]
                     if "description" in meta: schema.description = meta["description"]
                     if "min" in meta: schema.min = meta["min"]
                     if "max" in meta: schema.max = meta["max"]
+                    if "step" in meta: schema.step = meta["step"]
+                    if "placeholder" in meta: schema.placeholder = meta["placeholder"]
                     if "options" in meta: 
                         schema.type = "select"
                         schema.options = meta["options"]
             
-            # 普通类型推断 (非 Annotated)
+            # 3. 普通类型兜底
             elif annotation is int:
                 schema.type = "number"
             elif annotation is bool:
@@ -96,26 +105,16 @@ class BlueprintManager:
             
         return params_schema
 
-    def execute(self, code: str, inputs: Dict[str, Any], context_user_name: str) -> JobSubmission:
-        """
-        执行 Blueprint，生成 JobSubmission 对象。
-        """
-        local_scope = self._compile_code(code)
+    def execute(self, code: str, inputs: Dict[str, Any]) -> JobSubmission:
+        
+        local_scope = self._compile_code(code, extra_globals={})
         func = local_scope["generate_job"]
         
-        # 注入系统级参数
-        call_args = {**inputs}
-        
-        # 检查函数是否接受 user_name (向后兼容)
         sig = inspect.signature(func)
-        if "user_name" in sig.parameters:
-            call_args["user_name"] = context_user_name
-
+        call_args = {k: v for k, v in inputs.items() if k in sig.parameters}
+        
         try:
-            # 执行用户代码
             result = func(**call_args)
-            
-            # 校验返回结果
             if isinstance(result, dict):
                 return JobSubmission(**result)
             elif isinstance(result, JobSubmission):

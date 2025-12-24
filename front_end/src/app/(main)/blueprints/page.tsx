@@ -27,12 +27,14 @@ import "prismjs/themes/prism-okaidia.css";
 interface BlueprintParam {
   key: string;
   label: string;
-  type: 'text' | 'number' | 'select' | 'boolean';
+  type: "text" | "number" | "boolean" | "select";
   default?: any;
   options?: string[];
-  description?: string;
   min?: number;
   max?: number;
+  step?: number;
+  placeholder?: string;
+  description?: string;
 }
 
 interface Blueprint {
@@ -59,23 +61,62 @@ interface User {
 
 const DEFAULT_CODE_TEMPLATE = `from typing import Annotated
 
+UserName = Annotated[str, {
+    "label": "User Name",
+    "placeholder": "e.g. liuchang",
+}]
+
+GpuCount = Annotated[int, {
+    "label": "GPU Count",
+    "min": 1, 
+    "max": 8, 
+}]
+
+Timeout = Annotated[str, {
+    "label": "Timeout After",
+    "placeholder": "e.g. 120 or infinity",
+    "description": "Integer in minutes or 'infinity' for no time limit."
+}]
+
 def generate_job(
-    user_name: str,
-    gpu_count: Annotated[int, {"min": 1, "max": 8, "label": "GPU Count"}] = 1,
-    task_suffix: Annotated[str, {"description": "Suffix for task name"}] = "demo"
+    user_name: UserName,
+    gpu_count: GpuCount = 1,
+    timeout: Timeout = "infinity",
 ) -> JobSubmission:
     
+    timeout_value = timeout.strip().lower()
+    
+    command_suffix = ""
+    if timeout_value != "infinity":
+        command_suffix = f" {int(timeout_value)}"
+        
+    entry_command = f"""cd back_end/python_scripts
+python magnus_debug.py{command_suffix}"""
+
+    time_display = "无限" if timeout_value == "infinity" else f"{int(timeout_value)}分钟"
+    
+    description = f"""## Magnus 占卡调试任务
+- 使用人：{user_name}
+- GPU数量：{gpu_count}
+- 使用时长：{time_display}
+- 使用方式：
+
+\`\`\`bash
+magnus-connect
+\`\`\`"""
+
     return JobSubmission(
-        task_name=f"BP-{task_suffix}",
-        description=f"Created by {user_name}",
-        namespace="PKU-Plasma",
-        repo_name="magnus",
-        branch="main",
-        commit_sha="HEAD",
-        entry_command="python back_end/python_scripts/magnus_debug.py",
-        gpu_count=gpu_count,
-        gpu_type="rtx5090",
-        job_type=JobType.A2
+        task_name = "Magnus Debug",
+        description = description,
+        namespace = "PKU-Plasma",
+        repo_name = "magnus",
+        branch = "main",
+        commit_sha = "HEAD",
+        entry_command = entry_command,
+        gpu_count = gpu_count,
+        gpu_type = "rtx5090",
+        job_type = JobType.A2,
+        runner = user_name,
     )
 `;
 
@@ -383,9 +424,8 @@ function BlueprintTable({
 
                             return (
                                 <tr 
-                                    key={bp.id} 
-                                    onClick={() => onRun(bp)} 
-                                    className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0 cursor-pointer"
+                                    key={bp.id}
+                                    className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                                 >
                                     <td className="px-6 py-4 align-top whitespace-normal break-all">
                                         <div className="flex flex-col gap-1.5">
@@ -540,7 +580,11 @@ export default function BlueprintsPage() {
     }
   }, [currentPage, pageSize, debouncedQuery, selectedUserId, allUsers]);
 
-  useEffect(() => { fetchBlueprints(); }, [fetchBlueprints]);
+  useEffect(() => {
+    fetchBlueprints();
+    const intervalId = setInterval(() => fetchBlueprints(true), POLL_INTERVAL);
+    return () => clearInterval(intervalId);
+  }, [fetchBlueprints]);
 
   const handleOpenRunDialog = async (bp: Blueprint) => {
     setSelectedBlueprint(bp);
@@ -574,8 +618,8 @@ export default function BlueprintsPage() {
 
   const handleClone = (bp: Blueprint) => {
       setEditorData({
-          id: `${bp.id}-copy`,
-          title: `Copy of ${bp.title}`,
+          id: bp.id,
+          title: bp.title,
           description: bp.description,
           code: bp.code
       });
@@ -749,56 +793,85 @@ export default function BlueprintsPage() {
             </div>
             
             <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar">
-               {isLoadingSchema ? (
-                   <div className="py-10 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-zinc-600"/></div>
-               ) : paramsSchema.length === 0 ? (
-                   <div className="text-center text-zinc-500 py-4">No parameters required.</div>
-               ) : (
-                   paramsSchema.map((param) => (
-                    <div key={param.key} className="space-y-1.5">
-                      <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
-                        {param.label || param.key}
-                      </label>
-                      {param.type === 'number' ? (
-                          <NumberStepper
-                            label="" 
-                            value={Number(formValues[param.key])}
-                            onChange={(val) => setFormValues({...formValues, [param.key]: val})}
-                            min={param.min ?? 0}
-                            max={param.max ?? 128}
-                          />
-                      ) : param.type === 'select' ? (
-                        <div className="relative">
-                          <select
-                            value={formValues[param.key]}
-                            onChange={(e) => setFormValues({...formValues, [param.key]: e.target.value})}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-blue-500 transition-all appearance-none"
-                          >
-                            {param.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                          </select>
-                           <div className="absolute right-3 top-3 pointer-events-none text-zinc-500"><Terminal className="w-4 h-4" /></div>
-                        </div>
-                      ) : param.type === 'boolean' ? (
+            {isLoadingSchema ? (
+                <div className="py-10 flex justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-zinc-600" />
+                </div>
+            ) : paramsSchema.length === 0 ? (
+                <div className="text-center text-zinc-500 py-4">No parameters required.</div>
+            ) : (
+                paramsSchema.map((param) => (
+                <div key={param.key} className="space-y-1.5">
+                    <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                    {param.label || param.key}
+                    </label>
+
+                    {/* 1. 数字类型 */}
+                    {param.type === "number" ? (
+                    <NumberStepper
+                        label=""
+                        value={Number(formValues[param.key])}
+                        onChange={(val) => setFormValues({ ...formValues, [param.key]: val })}
+                        min={param.min}
+                        max={param.max}
+                    />
+                    ) : param.type === "select" ? (
+                    /* 2. 下拉选择类型 */
+                    <div className="relative">
                         <select
-                            value={String(formValues[param.key])}
-                            onChange={(e) => setFormValues({...formValues, [param.key]: e.target.value === 'true'})}
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-blue-500 transition-all appearance-none"
-                          >
-                            <option value="true">True</option>
-                            <option value="false">False</option>
-                          </select>
-                      ) : (
-                        <input
-                          type="text"
-                          value={formValues[param.key]}
-                          onChange={(e) => setFormValues({...formValues, [param.key]: e.target.value})}
-                          className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
-                        />
-                      )}
-                      {param.description && <p className="text-[11px] text-zinc-500 mt-1 ml-0.5">{param.description}</p>}
+                        value={formValues[param.key]}
+                        onChange={(e) =>
+                            setFormValues({ ...formValues, [param.key]: e.target.value })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-blue-500 transition-all appearance-none"
+                        >
+                        {param.options?.map((opt) => (
+                            <option key={opt} value={opt}>
+                            {opt}
+                            </option>
+                        ))}
+                        </select>
+                        <div className="absolute right-3 top-3 pointer-events-none text-zinc-500">
+                        <Terminal className="w-4 h-4" />
+                        </div>
                     </div>
-                  ))
-               )}
+                    ) : param.type === "boolean" ? (
+                    /* 3. 布尔类型 */
+                    <select
+                        value={String(formValues[param.key])}
+                        onChange={(e) =>
+                        setFormValues({
+                            ...formValues,
+                            [param.key]: e.target.value === "true",
+                        })
+                        }
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-blue-500 transition-all appearance-none"
+                    >
+                        <option value="true">True</option>
+                        <option value="false">False</option>
+                    </select>
+                    ) : (
+                    /* 4. 默认文本类型 */
+                    <input
+                        type="text"
+                        value={formValues[param.key]}
+                        onChange={(e) =>
+                        setFormValues({ ...formValues, [param.key]: e.target.value })
+                        }
+                        placeholder={param.placeholder}
+                        className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+                    />
+                    )}
+
+                    {/* 描述信息 */}
+                    {param.description && (
+                    <p className="text-[11px] text-zinc-500 mt-1 ml-0.5">
+                        {param.description}
+                    </p>
+                    )}
+                </div>
+                ))
+            )}
             </div>
 
             <div className="px-6 py-4 bg-zinc-900/50 border-t border-zinc-800 flex justify-end gap-3 flex-shrink-0">

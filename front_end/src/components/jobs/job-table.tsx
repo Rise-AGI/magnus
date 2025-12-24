@@ -77,7 +77,7 @@ export function JobTable({
                 <tr
                   key={job.id}
                   onClick={() => router.push(`/jobs/${job.id}`)}
-                  className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0 cursor-pointer"
+                  className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >
                   {/* Task Name & ID */}
                   <td className="px-6 py-4 align-top whitespace-normal break-all">

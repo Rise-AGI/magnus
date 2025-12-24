@@ -35,6 +35,7 @@ back_end/scripts/**/**__pycache__**
 # Others
 *nohup*
 *slurm*
+!back_end/python_scripts/blueprints/magnus-slurm.py
 documents/
 .DS_Store
 .vscode/
