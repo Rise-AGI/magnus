@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Magnus Platform",
-  description: "PKU-Plasma Infrastructure",
+  description: "PKU-PHY Infrastructure",
 };
 
 export default function RootLayout({

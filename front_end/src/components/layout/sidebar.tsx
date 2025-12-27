@@ -100,7 +100,7 @@ export function Sidebar() {
         </div>
 
         <div className="px-2 pb-1 text-[10px] tracking-wider text-zinc-600 flex justify-between items-center font-medium">
-          <span>PKU-Plasma</span>
+          <span>PKU-PHY</span>
           <div className="flex items-center gap-1.5">
             <Server className="w-3 h-3" />
             <span>v0.1.0</span>

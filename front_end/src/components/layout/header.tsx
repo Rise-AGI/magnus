@@ -83,7 +83,7 @@ export function Header() {
                   {user.name}
                 </div>
                 <div className="text-xs text-zinc-500 font-mono">
-                  {user.email || "PKU-Plasma"}
+                  {user.email || "PKU-PHY"}
                 </div>
               </div>
               
