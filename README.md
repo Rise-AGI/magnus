@@ -34,6 +34,18 @@
 - **实时轮询**: 自动刷新任务状态
 - **智能表单**: 支持任务克隆和配置复用
 
+### 🎨 蓝图系统 (Blueprint System)
+- **Python 函数即表单**: 编写 Python 函数自动生成前端表单
+- **类型注解驱动**: 使用 Python 类型注解定义表单字段
+- **动态参数解析**: 自动解析函数签名生成参数配置界面
+- **代码即配置**: 将任务配置逻辑封装为可复用的 Python 代码
+
+### ⚡ 弹性服务 (Elastic Services)
+- **独立于调度器**: 服务作为独立自动机运行
+- **按需弹性伸缩**: 根据流量自动 scale up/scale to zero
+- **稳定 API 端点**: 对外提供稳定的 HTTP API 接口
+- **端口动态分配**: 自动分配 MAGNUS_PORT 并转发到服务实例
+
 ## 📁 项目结构
 
 ```
@@ -49,6 +61,7 @@ Magnus-Platform/
 │   │   ├── _jwt_signer.py                                 # JWT签名器
 │   │   ├── _magnus_config.py                              # 配置加载器
 │   │   ├── _scheduler.py                                  # 核心调度器模块
+│   │   ├── _service_manager.py                            # 弹性服务管理器
 │   │   ├── _slurm_manager.py                              # SLURM集群管理器
 │   │   ├── database.py                                    # 数据库连接
 │   │   ├── main.py                                        # 应用入口
@@ -92,6 +105,10 @@ Magnus-Platform/
 │   │   │   │   ├── [id]/                                  # 任务详情页面
 │   │   │   │   │   └── page.tsx
 │   │   │   │   └── page.tsx
+│   │   │   ├── services/                                  # 弹性服务管理页面
+│   │   │   │   └── page.tsx
+│   │   │   ├── tools/                                     # 工具页面
+│   │   │   │   └── page.tsx
 │   │   │   └── layout.tsx                                 # 主布局组件
 │   │   ├── auth/                                          # 认证相关页面
 │   │   │   └── callback/                                  # 飞书回调页面
@@ -114,7 +131,12 @@ Magnus-Platform/
 │   │   │   ├── job-drawer.tsx                             # 任务抽屉组件
 │   │   │   ├── job-form.tsx                               # 任务表单组件
 │   │   │   ├── job-priority-badge.tsx                     # 任务优先级徽章
-│   │   │   └── job-status-badge.tsx                       # 任务状态徽章
+│   │   │   ├── job-status-badge.tsx                       # 任务状态徽章
+│   │   │   └── job-table.tsx                              # 任务表格
+│   │   ├── services/                                      # 服务相关组件
+│   │   │   ├── service-drawer.tsx                         # 服务抽屉组件
+│   │   │   ├── service-form.tsx                           # 服务表单组件
+│   │   │   └── service-table.tsx                          # 服务表格
 │   │   ├── layout/                                        # 布局组件
 │   │   │   ├── header.tsx                                 # 页面头部
 │   │   │   ├── notifications-popover.tsx                  # 通知弹窗
@@ -122,6 +144,10 @@ Magnus-Platform/
 │   │   └── ui/                                            # UI基础组件
 │   │       ├── confirmation-dialog.tsx                    # 确认对话框
 │   │       ├── copyable-text.tsx                          # 可复制文本
+│   │       ├── dynamic-form/                              # 动态表单组件
+│   │       │   ├── index.tsx                              # 动态表单主组件
+│   │       │   └── types.ts                               # 动态表单类型定义
+│   │       ├── drawer.tsx                                 # 抽屉组件
 │   │       ├── number-stepper.tsx                         # 数字步进器
 │   │       ├── pagination-controls.tsx                    # 分页控件
 │   │       ├── render-markdown.tsx                        # Markdown渲染器
@@ -129,6 +155,8 @@ Magnus-Platform/
 │   │       └── user-avatar.tsx                            # 用户头像
 │   ├── src/context/                                       # React Context
 │   │   └── auth-context.tsx                               # 认证上下文
+│   ├── src/hooks/                                         # 自定义 Hooks
+│   │   └── use-job-operations.tsx                         # 任务操作 Hook
 │   ├── src/lib/                                           # 工具库
 │   │   ├── api.ts                                         # API客户端
 │   │   ├── blueprint-defaults.ts                          # Blueprint 默认模板
@@ -137,7 +165,8 @@ Magnus-Platform/
 │   ├── src/types/                                         # TypeScript 类型定义
 │   │   ├── auth.ts                                        # 认证相关类型
 │   │   ├── blueprint.ts                                   # Blueprint 相关类型
-│   │   └── job.ts                                         # 任务相关类型
+│   │   ├── job.ts                                         # 任务相关类型
+│   │   └── service.ts                                     # 服务相关类型
 │   ├── public/                                            # 静态资源
 │   │   └── images/                                        # 图片资源
 │   │       └── slurm_avatar.png                           # SLURM头像
@@ -176,6 +205,99 @@ Magnus-Platform/
 - **图标库**: Lucide React
 - **状态管理**: React Context
 - **代码质量**: ESLint + TypeScript
+
+## 🎨 蓝图系统 (Blueprint System)
+
+### 开发体验：Python 函数即前端表单
+
+Magnus 的蓝图系统提供了一种革命性的开发体验：**编写一个 Python 函数，自动生成前端表单，嵌入后端逻辑**。
+
+#### 核心特性：
+1. **代码即配置**: 将复杂的任务配置逻辑封装为可复用的 Python 代码
+2. **类型驱动**: 使用 Python 类型注解自动生成表单字段和验证规则
+3. **动态解析**: 系统自动解析函数签名，生成对应的前端表单界面
+4. **参数分组**: 支持通过注解元数据对参数进行逻辑分组和范围限定
+
+#### 示例蓝图代码：
+```python
+from typing import Annotated
+
+UserName = Annotated[str, {
+    "label": "User Name",
+    "placeholder": "enter your username on liustation2 here",
+    "allow_empty": False,
+}]
+
+GpuCount = Annotated[int, {
+    "label": "GPU Count",
+    "min": 1, 
+    "max": 3, 
+}]
+
+def generate_job(
+    user_name: UserName,
+    gpu_count: GpuCount = 1,
+) -> JobSubmission:
+    return JobSubmission(
+        task_name = "Magnus Debug",
+        description = f"调试任务 - 使用人：{user_name}",
+        namespace = "PKU-Plasma",
+        repo_name = "magnus",
+        branch = "main",
+        entry_command = "python magnus_debug.py",
+        gpu_count = gpu_count,
+        gpu_type = "rtx5090",
+        job_type = JobType.A2,
+        runner = user_name,
+    )
+```
+
+#### 支持的参数类型：
+- **文本输入**: `Annotated[str, {"label": "...", "placeholder": "..."}]`
+- **数字输入**: `Annotated[int, {"min": 1, "max": 10}]`
+- **布尔选择**: `bool`
+- **下拉选择**: `Literal["option1", "option2"]`
+- **参数分组**: `{"scope": "Advanced Options"}`
+
+#### 工作流程：
+1. **编写蓝图**: 在 Blueprint 编辑器中编写 Python 函数
+2. **自动解析**: 系统解析函数签名生成表单 Schema
+3. **用户填写**: 用户在前端表单中填写参数
+4. **动态生成**: 系统调用函数生成完整的 Job 配置
+5. **提交执行**: 自动提交到调度系统执行
+
+## ⚡ 弹性服务 (Elastic Services)
+
+### 独立于调度器的自动机系统
+
+Magnus 的服务系统是一个独立于任务调度器的弹性计算单元，专为需要长期运行、按需伸缩的应用场景设计。
+
+#### 核心特性：
+1. **独立运行**: 服务作为独立的自动机运行，不受调度器心跳周期影响
+2. **弹性伸缩**: 根据流量自动 scale up/scale to zero
+3. **稳定端点**: 对外提供稳定的 HTTP API 接口，内部自动转发
+4. **端口管理**: 自动分配 MAGNUS_PORT 并建立端口转发
+
+#### 服务生命周期：
+```
+1. 服务创建 → 定义服务配置（代码仓库、资源需求等）
+2. 端口分配 → 系统自动分配唯一的 MAGNUS_PORT
+3. 任务启动 → 创建对应的 SLURM 任务运行服务代码
+4. 流量检测 → 监控服务访问活动，检测空闲状态
+5. 弹性伸缩 → 空闲超时自动停止，有请求时自动重启
+```
+
+#### 使用场景：
+- **长期运行的服务**: Jupyter Notebook、Gradio 应用、API 服务
+- **交互式应用**: 需要用户交互的 Web 应用
+- **按需计算**: 流量波动大的服务，节省资源成本
+- **团队协作**: 共享的计算环境和服务端点
+
+#### 技术实现：
+- **服务管理器**: 独立的后台进程监控服务状态
+- **端口转发**: 通过分配的 MAGNUS_PORT 建立稳定的访问通道
+- **反饥饿机制**: 防止服务因短暂空闲被误终止
+- **状态持久化**: 服务配置和状态持久化到数据库
 
 ## 🚀 快速开始
 
@@ -327,43 +449,45 @@ npm run dev
 ### 用户管理
 - `GET /api/users` - 获取所有注册用户列表
 
-## 🧪 测试工具
+## 🔐 安全与隔离特性
 
-### GPU 互联测试
-项目包含 GPU 互联测试工具，用于检测 GPU 间的数据传输性能：
+Magnus 在设计之初就将安全性与资源隔离作为核心考量，特别是在开放 Python 代码执行（Blueprints）和弹性服务（Elastic Services）的场景下：
 
-```bash
-cd back_end/python_scripts/tests
-python test_rtx5090_nvlink.py
-```
+1. **全链路身份鉴权**:
+* **飞书 OAuth 2.0**: 企业级单点登录，确保只有组织内成员可访问。
+* **JWT 令牌轮换**: 采用 7 天有效期的 Access Token，所有 API 端点均受 `login_required` 依赖保护。
 
-测试内容包括：
-- P2P 访问权限检查
-- GPU 间带宽测量
-- 互联质量评估报告
+2. **蓝图类型安全**:
+* **静态类型强校验**: 基于 Python `Annotated` 和 `Pydantic` 进行严格的参数验证，在代码执行前拦截非法输入。
+* **参数范围限制**: 通过元数据（Metadata）强制限制数值范围和选项集合，防止参数越界风险。
 
-## 🔐 安全特性
+3. **网络与资源隔离**:
+* **动态端口沙箱**: 弹性服务（Elastic Services）不直接暴露物理端口，而是通过系统自动分配的 `MAGNUS_PORT` 进行流量转发。
+* **SLURM 环境隔离**: 所有计算任务均在 SLURM 严格管理的 cgroup 环境中运行，防止资源超卖和越权访问。
 
-1. **JWT 令牌认证**: 所有受保护 API 都需要有效令牌
-2. **飞书 OAuth 2.0**: 企业级身份验证
-3. **SQL 注入防护**: SQLAlchemy ORM 自动防护
-4. **CORS 配置**: 跨域资源共享控制
-5. **敏感信息加密**: 配置文件中的密钥安全管理
+4. **数据安全**:
+* **ORM 防护**: 使用 SQLAlchemy ORM 层自动过滤 SQL 注入攻击。
+* **密钥管理**: 敏感配置与代码逻辑分离，支持通过环境变量注入系统密钥。
 
 ## 📈 项目状态
 
-### ✅ 已完成功能
-1. **完整的集群调度系统** (智能调度器 + SLURM 集成)
-2. **四级优先级系统** (A1/A2/B1/B2 + 抢占机制)
-3. **实时状态同步** (SLURM ↔ 数据库双向同步)
-4. **飞书认证系统** (OAuth 2.0 + JWT)
-5. **现代化 Web 界面** (Next.js + Tailwind CSS)
-6. **GPU 互联测试工具** (带宽测量和诊断)
+### ✅ 已完成核心模块
 
-### 🚧 进行中功能
-1. **仪表板页面** - GPU 使用情况统计
-2. **集群管理页面** - 任务队列监控
-3. **日志系统** - 任务执行日志收集和展示
+1. **下一代调度系统**: 实现 A1/A2/B1/B2 四级优先级抢占式调度与 2s 级心跳决策。
+2. **蓝图系统 (Blueprint System)**: 完成 "Python 函数即表单" 引擎，支持代码热加载与动态 UI 生成。
+3. **弹性服务 (Elastic Services)**: 实现基于流量的 Scale-to-Zero 自动伸缩与独立自动机管理。
+4. **现代化交互界面**: 基于 Next.js 14 + Tailwind 的响应式控制台，集成飞书用户画像。
+5. **企业级基础设施**: 完成数据库双向同步、飞书认证集成及 SLURM 集群深度对接。
+
+### 🚧 开发中功能
+
+1. **高级监控仪表板**:
+* 集群 GPU 细粒度使用率统计与可视化。
+* 用户资源配额消耗趋势分析。
+
+2. **Magnus Tools**:
+* 基于 Blueprint 和 Service 的二次封装层。
+* 为大语言模型提供标准化的调用接口，实现自然语言控制计算资源。
 
 ## 🤝 贡献指南
 
