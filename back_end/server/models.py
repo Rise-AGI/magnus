@@ -49,7 +49,6 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     token: Mapped[str | None] = mapped_column(String, nullable=True)
-    
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
     services: Mapped[list["Service"]] = relationship(back_populates="owner")
 
@@ -61,26 +60,21 @@ class Job(Base):
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
     user: Mapped["User"] = relationship(back_populates="jobs")
-    
     namespace: Mapped[str] = mapped_column(String)
     repo_name: Mapped[str] = mapped_column(String)
     branch: Mapped[str] = mapped_column(String)
     commit_sha: Mapped[str] = mapped_column(String)
     entry_command: Mapped[str] = mapped_column(Text)
-    
     gpu_count: Mapped[int] = mapped_column(Integer)
     gpu_type: Mapped[str] = mapped_column(String)
     cpu_count: Mapped[int | None] = mapped_column(Integer, default=None)
     memory_demand: Mapped[str | None] = mapped_column(String, default=None)
-    
     status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PENDING)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.A2)
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     runner: Mapped[str | None] = mapped_column(String, nullable=None)
-    
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    
     metrics: Mapped[list["JobMetric"]] = relationship(
         back_populates="job", 
         cascade="all, delete-orphan",
@@ -130,11 +124,14 @@ class Service(Base):
     assigned_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     request_timeout: Mapped[int] = mapped_column(Integer, default=60)
     idle_timeout: Mapped[int] = mapped_column(Integer, default=30)
+    max_concurrency: Mapped[int] = mapped_column(Integer, default=64)
     namespace: Mapped[str] = mapped_column(String)
     repo_name: Mapped[str] = mapped_column(String)
     branch: Mapped[str] = mapped_column(String)
     commit_sha: Mapped[str] = mapped_column(String)
     entry_command: Mapped[str] = mapped_column(Text)
+    job_task_name: Mapped[str] = mapped_column(String, nullable=False)
+    job_description: Mapped[str] = mapped_column(String, nullable=False)
     gpu_count: Mapped[int] = mapped_column(Integer, default=1)
     gpu_type: Mapped[str] = mapped_column(String)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.B2)

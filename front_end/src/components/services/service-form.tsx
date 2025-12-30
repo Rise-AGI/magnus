@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ChevronDown, ChevronRight, Info } from "lucide-react";
+import { ChevronDown, ChevronRight, Info, Layers } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { client } from "@/lib/api"; 
@@ -32,12 +32,18 @@ export interface ServiceFormData {
   
   request_timeout: number;
   idle_timeout: number;
+  max_concurrency: number;
 
   namespace: string;
   repo_name: string;
   branch: string;
   commit_sha: string;
   entry_command: string;
+  
+  // Job Metadata
+  job_task_name: string;
+  job_description: string;
+
   gpu_count: number;
   gpu_type: string;
   job_type: string;
@@ -55,16 +61,21 @@ interface ServiceFormProps {
 export default function ServiceForm({ initialData, onCancel, onSuccess }: ServiceFormProps) {
   const data = initialData as ServiceFormData; 
 
-  // Service Identity
+  // === Service Identity ===
   const [serviceId, setServiceId] = useState(data?.id || "");
   const [name, setName] = useState(data?.name || "");
   const [description, setDescription] = useState(data?.description || "");
   
-  // Service Config
+  // === Service Policies ===
   const [requestTimeout, setRequestTimeout] = useState(data?.request_timeout ?? 60);
   const [idleTimeout, setIdleTimeout] = useState(data?.idle_timeout ?? 30);
+  const [maxConcurrency, setMaxConcurrency] = useState(data?.max_concurrency ?? 50);
 
-  // Job Template
+  // === Job Identity ===
+  const [jobTaskName, setJobTaskName] = useState(data?.job_task_name || "");
+  const [jobDescription, setJobDescription] = useState(data?.job_description || "");
+
+  // === Code Source ===
   const [namespace, setNamespace] = useState(data?.namespace || "PKU-Plasma");
   const [repoName, setRepoName] = useState(data?.repo_name || "");
   
@@ -75,29 +86,51 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
   const [selectedCommit, setSelectedCommit] = useState(data?.commit_sha || "");
   const [command, setCommand] = useState(data?.entry_command || "");
   
+  // === Resources ===
   const [gpuCount, setGpuCount] = useState(data?.gpu_count ?? 1);
   const [gpuType, setGpuType] = useState(data?.gpu_type || "rtx5090"); 
   const [jobType, setJobType] = useState(data?.job_type || "A2");
 
+  // === UI States ===
   const [loading, setLoading] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
-  
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // === Advanced Overrides ===
   const [cpuCount, setCpuCount] = useState<number>(0);
   const [memoryDemand, setMemoryDemand] = useState<string>(data?.memory_demand || "");
   const [runner, setRunner] = useState<string>(data?.runner || "");
 
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  // Refs for auto-resize textareas
+  const jobDescriptionRef = useRef<HTMLTextAreaElement>(null);
   const commandRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-resize
+  // Auto-resize for Job Description (Multi-line allowed)
   useEffect(() => {
-    if (descriptionRef.current) { descriptionRef.current.style.height = 'auto'; descriptionRef.current.style.height = `${descriptionRef.current.scrollHeight}px`; }
-    if (commandRef.current) { commandRef.current.style.height = 'auto'; commandRef.current.style.height = `${commandRef.current.scrollHeight}px`; }
-  }, [description, command]);
+    if (jobDescriptionRef.current) {
+      jobDescriptionRef.current.style.height = 'auto';
+      jobDescriptionRef.current.style.height = `${jobDescriptionRef.current.scrollHeight}px`;
+    }
+  }, [jobDescription]);
+
+  // Auto-resize for Command
+  useEffect(() => {
+    if (commandRef.current) {
+      commandRef.current.style.height = 'auto';
+      commandRef.current.style.height = `${commandRef.current.scrollHeight}px`;
+    }
+  }, [command]);
+
+  // Sync Service Name -> Job Task Name (Convenience)
+  const handleServiceNameChange = (val: string) => {
+    setName(val);
+    clearError('name');
+    if (!initialData && !jobTaskName) {
+        setJobTaskName(val);
+    }
+  };
 
   const handleGpuTypeChange = (val: string) => {
     setGpuType(val);
@@ -142,8 +175,13 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
 
     // Validations
     if (!serviceId.trim()) { setErrorField("serviceId"); setErrorMessage("⚠️ ID is required"); scrollToError("field-serviceId"); return; }
-    if (!/^[a-z0-9-]+$/.test(serviceId)) { setErrorField("serviceId"); setErrorMessage("⚠️ ID must be lowercase slug (a-z, 0-9, -)"); scrollToError("field-serviceId"); return; }
+    if (!/^[a-z0-9-]+$/.test(serviceId)) { setErrorField("serviceId"); setErrorMessage("⚠️ ID must be lowercase slug"); scrollToError("field-serviceId"); return; }
     if (!name.trim()) { setErrorField("name"); setErrorMessage("⚠️ Name is required"); scrollToError("field-name"); return; }
+    
+    // Job Metadata Validations
+    if (!jobTaskName.trim()) { setErrorField("jobTaskName"); setErrorMessage("⚠️ Job Task Name is required"); scrollToError("field-jobTaskName"); return; }
+    
+    // Repo Validations
     if (!namespace.trim() || !repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo required"); return; }
     if (!hasScanned) { setErrorMessage("⚠️ Please Scan Repo"); return; }
     if (!selectedBranch || !selectedCommit) { setErrorMessage("⚠️ Select Branch/Commit"); return; }
@@ -153,13 +191,20 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
       id: serviceId,
       name,
       description,
+      
       request_timeout: requestTimeout,
       idle_timeout: idleTimeout,
+      max_concurrency: maxConcurrency,
+      
       namespace,
       repo_name: repoName,
       branch: selectedBranch,
       commit_sha: selectedCommit,
       entry_command: command,
+      
+      job_task_name: jobTaskName,
+      job_description: jobDescription, // Allow empty if user wants
+
       gpu_count: gpuCount,
       gpu_type: gpuType,
       job_type: jobType,
@@ -205,7 +250,6 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
                 placeholder="e.g. jupyter-lab-01"
                 onChange={e => { setServiceId(e.target.value); clearError('serviceId'); }} 
             />
-            {isEdit && <p className="text-[10px] text-zinc-600 mt-1">ID cannot be changed after creation.</p>}
         </div>
 
         <div className="mb-4" id="field-name">
@@ -216,7 +260,7 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
                 className={inputClass(errorField === 'name')}
                 value={name} 
                 placeholder="e.g. My Interactive Environment"
-                onChange={e => { setName(e.target.value); clearError('name'); }} 
+                onChange={e => handleServiceNameChange(e.target.value)} 
             />
         </div>
 
@@ -224,62 +268,101 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
           <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
             Description
           </label>
-          <textarea 
-            ref={descriptionRef}
-            className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500/50 focus:shadow-[0_0_15px_rgba(59,130,246,0.1)] outline-none transition-all placeholder-zinc-700 resize-none overflow-hidden min-h-[42px]"
+          {/* 单行 Input，严禁换行 */}
+          <input 
+            className={inputClass(false)}
             value={description || ""} 
-            placeholder="Service description..."
-            rows={1}
+            placeholder="Service description (Single line)"
             onChange={e => setDescription(e.target.value)} 
           />
         </div>
       </div>
 
-      {/* 2. Lifecycle Policy */}
+      {/* 2. Lifecycle & Traffic */}
       <div>
          <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Lifecycle Policy
+            Lifecycle & Traffic
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
          </h3>
          
-         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+         {/* 这里的 Grid 保持 3 列是因为它们都是小控件，且逻辑相关 */}
+         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-                 {/* [修改] 使用 NumberStepper */}
                  <NumberStepper 
-                    label="Idle Timeout (Minutes)"
-                    value={idleTimeout}
-                    onChange={setIdleTimeout}
-                    min={0}
-                    max={1440} // 24 hours
+                   label="Idle Timeout (Mins)"
+                   value={idleTimeout}
+                   onChange={setIdleTimeout}
+                   min={0}
+                   max={1440}
                  />
-                 <div className="flex items-start gap-1.5 mt-2">
-                    <Info className="w-3.5 h-3.5 text-zinc-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-[11px] text-zinc-500 leading-tight">
-                        Auto-terminate after X mins of no traffic. Set <span className="font-mono text-zinc-400">0</span> to disable.
-                    </p>
-                 </div>
+                 <p className="text-[11px] text-zinc-500 mt-2">Auto-stop. 0 to disable.</p>
             </div>
             <div>
                 <NumberStepper 
-                  label="Request Timeout (Seconds)"
+                  label="Req Timeout (Secs)"
                   value={requestTimeout}
                   onChange={setRequestTimeout}
                   min={10}
                   max={300}
                 />
-                <div className="flex items-start gap-1.5 mt-2">
-                    <Info className="w-3.5 h-3.5 text-zinc-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-[11px] text-zinc-500 leading-tight">
-                        Max wait time for service cold-start.
-                    </p>
-                 </div>
+                 <p className="text-[11px] text-zinc-500 mt-2">Cold-start budget.</p>
+            </div>
+            <div>
+                <NumberStepper 
+                  label="Max Concurrency"
+                  value={maxConcurrency}
+                  onChange={setMaxConcurrency}
+                  min={1}
+                  max={1000}
+                />
+                <p className="text-[11px] text-zinc-500 mt-2">Simultaneous requests.</p>
             </div>
          </div>
       </div>
 
-      {/* 3. Driver Config */}
+      {/* 3. Job Identity (Underlying) - Aligned with Job Form */}
       <div>
-        <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">Driver Config</h3>
+        <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
+            <Layers className="w-4 h-4 text-zinc-500" />
+            Underlying Job Config
+            <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
+        </h3>
+        
+        <div className="mb-4" id="field-jobTaskName">
+            <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'jobTaskName' ? 'text-red-500' : 'text-zinc-500'}`}>
+                Job Task Name <span className="text-red-500">*</span>
+            </label>
+            <input 
+                className={inputClass(errorField === 'jobTaskName')}
+                value={jobTaskName} 
+                placeholder="e.g. magnus-jupyter-worker"
+                onChange={e => { setJobTaskName(e.target.value); clearError('jobTaskName'); }} 
+            />
+        </div>
+
+        <div className="mb-4">
+            <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                Job Description <span className="text-zinc-600 normal-case ml-1">(Optional)</span>
+            </label>
+            {/* 多行 Textarea，允许换行，与 Job Form 一致 */}
+            <textarea 
+                ref={jobDescriptionRef}
+                className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500/50 focus:shadow-[0_0_15px_rgba(59,130,246,0.1)] outline-none transition-all placeholder-zinc-700 resize-none overflow-hidden min-h-[42px]"
+                value={jobDescription} 
+                placeholder="Worker process description..."
+                rows={1}
+                onChange={e => setJobDescription(e.target.value)} 
+            />
+        </div>
+      </div>
+
+      {/* 4. Code Source - Aligned with Job Form */}
+      <div>
+        <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
+            Code Source
+            <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
+        </h3>
+        
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div id="field-namespace">
              <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'namespace' ? 'text-red-500' : 'text-zinc-500'}`}>Namespace</label>
@@ -290,10 +373,12 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
              <input className={inputClass(errorField === 'repo')} value={repoName} onChange={e => { setRepoName(e.target.value); clearError('repo'); }} />
           </div>
         </div>
+
         <button onClick={fetchBranches} disabled={loading} className="w-full bg-zinc-900 hover:bg-zinc-800 text-zinc-300 py-2.5 rounded-lg text-sm font-medium transition-all active:scale-[0.98] disabled:opacity-50 mb-6 border border-zinc-800 flex justify-center items-center gap-2">
             {loading ? <><span className="w-4 h-4 border-2 border-zinc-500 border-t-white rounded-full animate-spin"></span>Scanning...</> : "Scan Repository"}
         </button>
-        <div className="grid grid-cols-1 gap-4">
+
+        <div className="grid grid-cols-1 gap-0">
           <SearchableSelect 
             label="Branch" 
             disabled={!hasScanned} 
@@ -302,6 +387,7 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
             options={branches.map(b => ({ label: b.name, value: b.name }))} 
             hasError={errorField === 'branch'}
             placeholder="Select branch..."
+            className="mb-4"
           />
           <SearchableSelect 
             label="Commit" 
@@ -311,11 +397,12 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
             options={commits.map(c => ({ label: c.message, value: c.sha, meta: `${c.sha.substring(0, 7)} • ${c.author}` }))}
             hasError={errorField === 'commit'}
             placeholder="Select commit..."
+            className="mb-4"
           />
         </div>
       </div>
 
-      {/* 4. Resources & Command */}
+      {/* 5. Resources - Aligned with Job Form */}
       <div>
          <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
             Compute Resources
@@ -348,7 +435,7 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
          </div>
          
          {/* Advanced (Collapsed) */}
-         <div className="pt-2 mb-0 mt-4">
+         <div className="pt-2">
           <button type="button" onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors select-none group">
             <div className="text-zinc-600 group-hover:text-zinc-300 transition-colors">
                 {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -375,7 +462,7 @@ export default function ServiceForm({ initialData, onCancel, onSuccess }: Servic
         </div>
       </div>
 
-      {/* Execution */}
+      {/* 6. Execution - Aligned with Job Form */}
       <div id="field-command">
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
             Execution

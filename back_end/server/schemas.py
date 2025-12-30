@@ -156,15 +156,14 @@ class BlueprintParamSchema(BaseModel):
     
     
 class ServiceCreate(BaseModel):
-    id: str = Field(..., description="Slug ID for the service, e.g., 'my-notebook'")
+    id: str = Field(..., description="Slug ID for the service")
     name: str
     description: Optional[str] = None
-    
-    # Service Config
     request_timeout: int = 60
     idle_timeout: int = 30
-    
-    # Job Config
+    max_concurrency: int = 64
+    job_task_name: str
+    job_description: str
     namespace: str
     repo_name: str
     branch: str
@@ -172,16 +171,13 @@ class ServiceCreate(BaseModel):
     entry_command: str
     gpu_count: int = 1
     gpu_type: str
-    
-    # === 补全缺失的配置 ===
-    job_type: JobType = JobType.A2 # 新增: 优先级
-    
+    job_type: JobType = JobType.A2
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
 
+
 class ServiceResponse(ServiceCreate):
-    # ... (保持不变，因为继承了 ServiceCreate，会自动包含 job_type)
     owner_id: str
     is_active: bool
     last_activity_time: datetime
@@ -189,7 +185,6 @@ class ServiceResponse(ServiceCreate):
     assigned_port: Optional[int] = None
     current_job: Optional[JobResponse] = None
     owner: Optional[UserInfo] = None
-    
     class Config: from_attributes = True
     
     

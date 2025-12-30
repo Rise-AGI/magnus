@@ -14,11 +14,14 @@ export interface Service {
   owner?: User;
   request_timeout: number;
   idle_timeout: number;
+  max_concurrency: number;
   namespace: string;
   repo_name: string;
   branch: string;
   commit_sha: string;
   entry_command: string;
+  job_task_name: string;
+  job_description: string;
   gpu_count: number;
   gpu_type: string;
   job_type: string;
