@@ -91,7 +91,7 @@ export function ServiceTable({
               } else {
                  statusNode = (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20 animate-pulse">
-                      Idle (Scale 0)
+                      Idle (No Job)
                     </span>
                  );
               }
