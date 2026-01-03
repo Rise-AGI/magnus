@@ -64,45 +64,64 @@ export function ServiceTable({
           <tbody className="divide-y divide-zinc-800/50">
             {services.map((svc) => {
               const isOwner = currentUser?.id === svc.owner_id;
-              
-              // [Fix] 补全 fallback 对象的 avatar_url 字段
-              const displayUser = svc.owner || { 
-                id: svc.owner_id, 
-                name: "Unknown", 
-                feishu_open_id: "", 
+
+              const displayUser = svc.owner || {
+                id: svc.owner_id,
+                name: "Unknown",
+                feishu_open_id: "",
                 email: "",
-                avatar_url: null 
+                avatar_url: null
               };
 
-              // 决定 Status 显示逻辑
               let statusNode;
+
               if (!svc.is_active) {
-                 statusNode = (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-500 border border-zinc-700">
-                      Inactive
-                    </span>
-                 );
-              } else if (svc.current_job) {
-                 statusNode = (
-                   <div className="scale-90">
-                     <JobStatusBadge status={svc.current_job.status} />
-                   </div>
-                 );
+                // Manual Inactive State
+                statusNode = (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-500 border border-zinc-700">
+                    Inactive
+                  </span>
+                );
               } else {
-                 statusNode = (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20 animate-pulse">
-                      Idle (No Job)
+                // Active State Check
+                const currentStatus = svc.current_job?.status;
+                const isJobAlive = currentStatus && ["Pending", "Running", "Paused"].includes(currentStatus);
+
+                if (isJobAlive) {
+                  // Active Job Running
+                  statusNode = (
+                    <div className="scale-90">
+                      <JobStatusBadge status={currentStatus} />
+                    </div>
+                  );
+                } else {
+                  // Idle State (Active service but no live job / Scale-to-Zero)
+                  statusNode = (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                      <span className="relative flex h-2 w-2 mr-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
+                      </span>
+                      Idle
                     </span>
-                 );
+                  );
+                }
               }
 
               return (
-                <tr key={svc.id} className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0">
+                <tr
+                  key={svc.id}
+                  className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
+                >
                   {/* Column 1: Service / ID */}
                   <td className="px-6 py-4 align-top whitespace-normal break-all">
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-2">
-                        <CopyableText text={svc.name} variant="text" className="font-semibold text-zinc-200 text-base" />
+                        <CopyableText
+                          text={svc.name}
+                          variant="text"
+                          className="font-semibold text-zinc-200 text-base"
+                        />
                       </div>
                       <div className="flex items-center gap-2">
                         <CopyableText text={svc.id} className="text-[10px] tracking-wider" />
@@ -110,7 +129,7 @@ export function ServiceTable({
                     </div>
                   </td>
 
-                  {/* Column 2: Description (支持换行) */}
+                  {/* Column 2: Description */}
                   <td className="px-6 py-4 align-top whitespace-normal">
                     <p className="text-zinc-400 text-sm leading-relaxed line-clamp-2 break-words">
                       {svc.description || <span className="text-zinc-600 italic">No description provided.</span>}
@@ -127,13 +146,13 @@ export function ServiceTable({
                   {/* Column 4: Creator / Updated at */}
                   <td className="px-6 py-4 align-top">
                     <div className="flex justify-center">
-                      <UserAvatar 
+                      <UserAvatar
                         user={{
-                            ...displayUser,
-                            email: displayUser.email || undefined,
-                            avatar_url: displayUser.avatar_url || undefined
-                        }} 
-                        subText={formatBeijingTime(svc.updated_at)} 
+                          ...displayUser,
+                          email: displayUser.email || undefined,
+                          avatar_url: displayUser.avatar_url || undefined
+                        }}
+                        subText={formatBeijingTime(svc.updated_at)}
                       />
                     </div>
                   </td>
@@ -141,36 +160,41 @@ export function ServiceTable({
                   {/* Column 5: Actions */}
                   <td className="px-6 py-4 align-middle text-right">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
-                      
-                      {/* Clone / Edit Button: 所有人可见 (Clone)，Owner 点击是 Edit */}
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); onClone(svc); }} 
-                        className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm" 
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClone(svc);
+                        }}
+                        className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
                         title={isOwner ? "Edit Service" : "Clone Service"}
                       >
                         <RefreshCw className="w-4 h-4" />
                       </button>
 
-                      {/* [Magnus Fix] Toggle Button: 仅 Owner 可见 */}
                       {isOwner && (
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); onToggle(svc); }} 
-                            className={`p-2 rounded-lg transition-colors border shadow-sm ${
-                            svc.is_active 
-                                ? "bg-teal-900/20 hover:bg-teal-900/40 text-teal-400 border-teal-500/20" 
-                                : "bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 border-zinc-700/50"
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggle(svc);
+                          }}
+                          className={`p-2 rounded-lg transition-colors border shadow-sm ${svc.is_active
+                              ? "bg-teal-900/20 hover:bg-teal-900/40 text-teal-400 border-teal-500/20"
+                              : "bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 border-zinc-700/50"
                             }`}
-                            title={svc.is_active ? "Stop Service" : "Start Service"}
+                          title={svc.is_active ? "Stop Service" : "Start Service"}
                         >
-                            <Power className="w-4 h-4" />
+                          <Power className="w-4 h-4" />
                         </button>
                       )}
 
-                      {/* Delete Button: 仅 Owner 可见 */}
                       {isOwner && (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); onDelete(svc); }} 
-                          className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30" 
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(svc);
+                          }}
+                          className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />

@@ -21,18 +21,19 @@ from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse
 from .._service_manager import service_manager
 from .._magnus_config import magnus_config
+from .._scheduler import scheduler
 from .auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# 防止同一服务的并发创建冲突
+# Prevent concurrent creation conflicts for the same service
 _service_spawn_locks = defaultdict(asyncio.Lock)
 
-# 流量控制信号量字典
+# Flow control semaphores
 _service_semaphores: Dict[str, asyncio.Semaphore] = {}
 
-# --- Pydantic 快照模型 ---
+
 class ServiceSnapshot(BaseModel):
     id: str
     max_concurrency: int
@@ -48,7 +49,6 @@ class ServiceSnapshot(BaseModel):
     commit_sha: str
     gpu_count: int
     gpu_type: str
-    # [Fix] 允许为空，与 SQLAlchemy Model 保持一致
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
@@ -57,46 +57,77 @@ class ServiceSnapshot(BaseModel):
     class Config:
         from_attributes = True
 
-# --- 同步辅助函数区 (自带 Session 生命周期) ---
 
 def _get_service_snapshot_standalone(service_id: str) -> ServiceSnapshot:
-    """独立的获取快照函数"""
     with SessionLocal() as db:
         service = db.query(Service).filter(Service.id == service_id).first()
         if not service:
             raise HTTPException(status_code=404, detail="Service not found")
         if not service.is_active:
             raise HTTPException(status_code=503, detail="Service is inactive")
-        
+
         # Keep-Alive
         service.last_activity_time = datetime.utcnow()
         db.commit()
-        
-        # 转换为 Pydantic
+
         return ServiceSnapshot.model_validate(service)
 
+
+def _check_active_status_standalone(service_id: str) -> bool:
+    with SessionLocal() as db:
+        service = db.query(Service.is_active).filter(Service.id == service_id).first()
+        return service.is_active if service else False
+
+
+def _shutdown_service_resources_sync(service_id: str, db: Session):
+    service = db.query(Service).filter(Service.id == service_id).first()
+    if not service:
+        return
+
+    # Delegate to Scheduler to terminate the Job
+    if service.current_job_id:
+        job = db.query(models.Job).filter(models.Job.id == service.current_job_id).first()
+        
+        if job and job.status in [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.PAUSED]:
+            try:
+                logger.info(f"Terminating job {job.id} for service {service.id} via Scheduler...")
+                scheduler.terminate_job(db, job)
+            except Exception as e:
+                logger.error(f"Failed to terminate job {job.id} during service shutdown: {e}")
+
+    # Clean up Service runtime state
+    service.assigned_port = None
+    service.current_job_id = None
+    service.last_activity_time = datetime.utcnow()
+
+    # Note: We do not delete the semaphore from memory here as requests might be releasing it.
+    
+    db.flush()
+
+
 def _try_revive_service_standalone(service_id: str) -> Tuple[str, int]:
-    """独立的拉起函数"""
     with SessionLocal() as db:
         service = db.query(Service).filter(Service.id == service_id).first()
         if not service:
             raise HTTPException(status_code=404, detail="Service not found (during revive)")
-            
+        if not service.is_active:
+            raise HTTPException(status_code=503, detail="Service stopped by user (spawn aborted).")
+
         current_job = service.current_job
-        
+
         should_revive = False
         if not current_job:
             should_revive = True
         elif current_job.status in [JobStatus.FAILED, JobStatus.TERMINATED, JobStatus.SUCCESS]:
             should_revive = True
-        
-        # Path A: 不需要重启
+
+        # Path A: No restart needed
         if not should_revive:
             if current_job is None or service.assigned_port is None:
                 raise HTTPException(status_code=500, detail="State Error: Service active but no job/port.")
             return current_job.id, service.assigned_port
 
-        # Path B: 需要重启
+        # Path B: Restart needed
         try:
             port = service_manager.allocate_port(db)
 
@@ -129,13 +160,14 @@ def _try_revive_service_standalone(service_id: str) -> Tuple[str, int]:
             service.current_job_id = new_job.id
             service.assigned_port = port
             db.commit()
-            
+
             logger.info(f"Service {service.id} revived with Job {new_job.id} on port {port}")
             return new_job.id, port
 
         except Exception as e:
             logger.error(f"Failed to revive service {service.id}: {e}")
             raise HTTPException(status_code=500, detail=f"Service spawn failed: {e}")
+
 
 def _check_socket_sync(host: str, port: int, timeout: float = 0.5) -> bool:
     try:
@@ -144,18 +176,20 @@ def _check_socket_sync(host: str, port: int, timeout: float = 0.5) -> bool:
     except (ConnectionRefusedError, socket.timeout, OSError):
         return False
 
+
 def _refresh_status_standalone(job_id: str, service_id: str) -> str:
     with SessionLocal() as db:
         job = db.query(models.Job).filter(models.Job.id == job_id).first()
         if not job:
             return JobStatus.TERMINATED
-        
+
         service = db.query(models.Service).filter(models.Service.id == service_id).first()
         if service:
             service.last_activity_time = datetime.utcnow()
             db.commit()
-        
+
         return job.status
+
 
 def _update_activity_standalone(service_id: str):
     with SessionLocal() as db:
@@ -164,9 +198,11 @@ def _update_activity_standalone(service_id: str):
             service.last_activity_time = datetime.utcnow()
             db.commit()
 
-# --- API 路由区 ---
 
-@router.post("/services", response_model=ServiceResponse)
+@router.post(
+    "/services",
+    response_model=ServiceResponse
+)
 def create_service(
     service_data: ServiceCreate,
     db: Session = Depends(database.get_db),
@@ -178,7 +214,11 @@ def create_service(
     if existing:
         if existing.owner_id != current_user.id:
             raise HTTPException(status_code=403, detail="You cannot modify a service created by another user.")
-        
+
+        was_active = existing.is_active
+        will_be_active = data.get("is_active", was_active)
+
+        # Handle concurrency limit changes
         if service_data.max_concurrency != existing.max_concurrency:
             if existing.id in _service_semaphores:
                 del _service_semaphores[existing.id]
@@ -188,6 +228,12 @@ def create_service(
             setattr(existing, k, v)
         existing.owner_id = current_user.id
         existing.updated_at = datetime.utcnow()
+
+        # Execute resource cleanup if toggled from Active -> Inactive
+        if was_active and not will_be_active:
+            _shutdown_service_resources_sync(existing.id, db)
+            logger.info(f"Service {existing.id} toggled OFF, resources cleaned up.")
+
         db.commit()
         db.refresh(existing)
         return existing
@@ -217,6 +263,8 @@ def delete_service(
     if svc.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="You do not have permission to delete this service")
 
+    _shutdown_service_resources_sync(service_id, db)
+
     db.delete(svc)
     db.commit()
 
@@ -226,7 +274,10 @@ def delete_service(
     return {"message": "Service deleted successfully"}
 
 
-@router.get("/services", response_model=PagedServiceResponse)
+@router.get(
+    "/services",
+    response_model=PagedServiceResponse
+)
 def list_services(
     skip: int = 0,
     limit: int = 20,
@@ -272,17 +323,16 @@ async def proxy_service_request(
     path: str,
     request: Request,
 ) -> StreamingResponse:
-    
-    # 1. 基础检查
+    # 1. Validation
     service_snap = await asyncio.to_thread(_get_service_snapshot_standalone, service_id)
 
-    # 2. 获取或创建信号量
+    # 2. Semaphore Management
     if service_snap.id not in _service_semaphores:
         _service_semaphores[service_snap.id] = asyncio.Semaphore(service_snap.max_concurrency)
 
     sem = _service_semaphores[service_snap.id]
 
-    # 3. SLA 控制
+    # 3. SLA Budget
     start_time = datetime.utcnow()
     total_budget = service_snap.request_timeout
 
@@ -290,7 +340,7 @@ async def proxy_service_request(
         elapsed = (datetime.utcnow() - start_time).total_seconds()
         return max(0.0, total_budget - elapsed)
 
-    # 4. 流量控制
+    # 4. Traffic Control (Acquire)
     try:
         await asyncio.wait_for(sem.acquire(), timeout=get_remaining_time())
     except asyncio.TimeoutError:
@@ -300,9 +350,17 @@ async def proxy_service_request(
         )
 
     try:
-        # === 进入流量控制区 ===
+        # === Critical Section ===
 
-        # 5. 检查与拉起 (Spawn Logic)
+        # Double-Check: Ensure service is still active after waiting in queue
+        is_active_now = await asyncio.to_thread(_check_active_status_standalone, service_id)
+        if not is_active_now:
+            raise HTTPException(
+                status_code=503,
+                detail="Service was stopped while request was queued."
+            )
+
+        # 5. Spawn Logic
         if get_remaining_time() <= 0:
             raise HTTPException(status_code=504, detail="Timeout while waiting for concurrency slot")
 
@@ -312,7 +370,7 @@ async def proxy_service_request(
             )
             service_snap.assigned_port = assigned_port
 
-        # 6. 等待就绪 (Wait Logic)
+        # 6. Wait Logic
         is_ready = False
 
         while get_remaining_time() > 0:
@@ -333,7 +391,7 @@ async def proxy_service_request(
                 socket_ok = await asyncio.to_thread(
                     _check_socket_sync, "127.0.0.1", service_snap.assigned_port
                 )
-                
+
                 if socket_ok:
                     is_ready = True
                     break
@@ -346,9 +404,9 @@ async def proxy_service_request(
         if not is_ready:
             raise HTTPException(status_code=504, detail="Service startup timed out")
 
-        # 7. 转发请求 (Forward Logic)
+        # 7. Forward Request
         service_config = magnus_config.get("server", {}).get("services", {})
-        
+
         proxy_timeout = httpx.Timeout(
             connect=service_config.get("proxy_connect_timeout", 2.0),
             read=service_config.get("proxy_read_timeout", 600.0),
