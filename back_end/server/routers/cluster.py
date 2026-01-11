@@ -12,6 +12,11 @@ from ..models import JobStatus, JobType
 from ..schemas import ClusterStatsResponse, JobResponse, DashboardJobsResponse, UserInfo
 from .._slurm_manager import SlurmManager
 from .auth import get_current_user
+from .._magnus_config import magnus_config
+
+
+_node_name = magnus_config["cluster"]["name"]
+_gpu_model = magnus_config["cluster"]["resources"]["gpus"][0]["label"]
 
 
 router = APIRouter()
@@ -140,8 +145,8 @@ def get_cluster_stats(
 
     return {
         "resources": {
-            "node": "liustation",
-            "gpu_model": "RTX 5090",
+            "node": _node_name,
+            "gpu_model": _gpu_model,
             "total": display_total,
             "free": n1_free,
             "used": n2_used,
