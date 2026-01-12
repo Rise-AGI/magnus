@@ -17,6 +17,9 @@ from .._scheduler import scheduler
 from .auth import get_current_user
 
 
+_node_name = magnus_config["cluster"]["name"]
+
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -123,7 +126,7 @@ def get_job_logs(
             return {
                 "logs": (
                     "Job has failed for systematic reasons. "
-                    f"Please check if you have access to user {effective_user} on liustation2."
+                    f"Please check if you have access to user {effective_user} on {_node_name}."
                 )
             }
         return {"logs": "Waiting for output stream... (Job might be PENDING or Initializing)"}
