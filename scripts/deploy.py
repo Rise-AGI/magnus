@@ -67,6 +67,8 @@ def deploy():
 
     # 3. Launch Backend (UV)
     print("🔄 Launching Backend (UV)...")
+    be_env = os.environ.copy()
+    be_env["PYTHONUNBUFFERED"] = "1"
     be_log = open(BE_LOG_PATH, "w")
     be_proc = subprocess.Popen(
         ["uv", "run", "-m", "server.main", "--deliver"],
@@ -74,6 +76,7 @@ def deploy():
         stdout=be_log,
         stderr=be_log,
         start_new_session=True,
+        env = be_env,
     )
     print(f"✅ Backend started [PID: {be_proc.pid}] -> {BE_LOG_PATH.name}")
 
