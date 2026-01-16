@@ -1,6 +1,7 @@
 # back_end/server/routers/sdk.py
 import logging
 from typing import Dict, Any
+from datetime import datetime
 from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,7 +11,8 @@ from .. import database
 from .. import models
 from .._blueprint_manager import blueprint_manager
 from ..routers.auth import get_current_user
-from library.fundamental.json_tools import deserialize_json
+from ..routers.blueprints import _compute_signature_hash
+from library.fundamental.json_tools import deserialize_json, serialize_json
 
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,8 @@ def submit_blueprint_sdk(
         raise HTTPException(status_code=404, detail=f"Blueprint {blueprint_id} not found")
 
     final_params = request.parameters.copy()
-    
+
+    pref = None
     if request.use_preference:
         pref = db.query(models.BlueprintUserPreference).filter(
             models.BlueprintUserPreference.user_id == current_user.id,
@@ -46,6 +49,7 @@ def submit_blueprint_sdk(
             try:
                 cached = deserialize_json(pref.cached_params)
                 if isinstance(cached, dict):
+                    # 优先级：CLI 显式传入 > 数据库缓存
                     base_params = cached.copy()
                     base_params.update(final_params)
                     final_params = base_params
@@ -67,6 +71,32 @@ def submit_blueprint_sdk(
         )
 
         db.add(db_job)
+        
+        # 任务提交成功后，自动保存/更新偏好
+        # 即使 request.use_preference=False, 成功运行的参数也值得被记录
+        if pref is None:
+            # 如果之前没查过或者不存在，再查一次以确定是 update 还是 insert
+            pref = db.query(models.BlueprintUserPreference).filter(
+                models.BlueprintUserPreference.user_id == current_user.id,
+                models.BlueprintUserPreference.blueprint_id == blueprint_id,
+            ).first()
+
+        current_hash = _compute_signature_hash(bp.code)
+        serialized_params = serialize_json(final_params)
+
+        if pref:
+            pref.blueprint_hash = current_hash
+            pref.cached_params = serialized_params
+            pref.updated_at = datetime.utcnow()
+        else:
+            new_pref = models.BlueprintUserPreference(
+                user_id=current_user.id,
+                blueprint_id=blueprint_id,
+                blueprint_hash=current_hash,
+                cached_params=serialized_params,
+            )
+            db.add(new_pref)
+
         db.commit()
         db.refresh(db_job)
         
