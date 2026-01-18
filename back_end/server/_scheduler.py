@@ -349,6 +349,9 @@ class MagnusScheduler:
             spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
             conda_shell_script_path = magnus_config["server"]["scheduler"]["conda_shell_script_path"]
             execution_conda_environment = magnus_config["server"]["scheduler"]["execution_conda_environment"]
+            
+            user_token = job.user.token
+            if user_token is None: user_token = ""
         
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}\nTraceback:\n{traceback.format_exc()}")
@@ -406,6 +409,7 @@ def main():
     repo_url = {repr(auth_repo_url)}
     branch = {repr(job.branch)}
     commit_sha = {repr(job.commit_sha)}
+    user_token = {repr(user_token)}
     
     work_dir = {repr(job_working_table)}
     repo_dir = os.path.join(work_dir, "repository")
@@ -474,6 +478,8 @@ def main():
             f"conda activate {{execution_conda_environment}}",
             "unset VIRTUAL_ENV",
             "export UV_CACHE_DIR={magnus_uv_cache}",
+            f"export MAGNUS_TOKEN={{magnus_token}}",
+            f"export MAGNUS_RESULT={{result_marker_path}}",
         ]
         # 无论是否有结果，只要执行到这里，就写入 .magnus_success
         epilogue_command = f\"\"\"
