@@ -202,7 +202,6 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
                 value={formData.id}
                 onChange={e => { setFormData({ ...formData, id: e.target.value }); clearError('id'); }}
                 placeholder="e.g. my-debug-tool"
-                // [Magnus Update] 这里允许修改 ID，不再锁定
                 className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 
                     ${errorField === 'id' ? 'animate-shake border-red-500' : 'border-zinc-800'}`}
               />

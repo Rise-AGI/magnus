@@ -1,6 +1,7 @@
 // front_end/src/components/blueprints/blueprint-table.tsx
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Play, RefreshCw, Trash2, FileCode, Loader2 } from "lucide-react";
 import { formatBeijingTime } from "@/lib/utils";
 import { CopyableText } from "@/components/ui/copyable-text";
@@ -25,9 +26,10 @@ export function BlueprintTable({
   onDelete,
   emptyMessage = "No blueprints found.",
 }: BlueprintTableProps) {
+
+  const router = useRouter();
   const { user: currentUser } = useAuth();
 
-  // [修改] 背景色改为 bg-zinc-900/40，并添加 backdrop-blur-sm
   if (loading) {
     return (
       <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 gap-3 min-h-[400px]">
@@ -37,7 +39,6 @@ export function BlueprintTable({
     );
   }
 
-  // [修改] 背景色改为 bg-zinc-900/40，并添加 backdrop-blur-sm
   if (data.length === 0) {
     return (
       <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 min-h-[400px]">
@@ -46,8 +47,7 @@ export function BlueprintTable({
       </div>
     );
   }
-
-  // [修改] 背景色改为 bg-zinc-900/40，并添加 backdrop-blur-sm
+  
   return (
     <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col overflow-hidden min-h-[400px]">
       <div className="overflow-x-auto w-full">
@@ -72,7 +72,11 @@ export function BlueprintTable({
               };
 
               return (
-                <tr key={bp.id} className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0">
+                <tr 
+                  key={bp.id} 
+                  onClick={() => router.push(`/blueprints/${bp.id}`)} 
+                  className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
+                >
                   <td className="px-6 py-4 align-top whitespace-normal break-all">
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-2">

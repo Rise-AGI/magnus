@@ -57,6 +57,16 @@ export default function JobsPage() {
   } = useJobOperations({ onSuccess: fetchJobs });
 
   useEffect(() => {
+    const justLaunched = sessionStorage.getItem('magnus_new_job');
+    if (justLaunched) {
+      sessionStorage.removeItem('magnus_new_job');
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 100);
+    }
+  }, []);
+
+  useEffect(() => {
     const fetchUsers = async () => {
       try {
         const users = await client("/api/users");

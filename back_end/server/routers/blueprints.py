@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 
 from .. import database
@@ -136,6 +136,25 @@ def list_blueprints(
                  .all()
 
     return {"total": total, "items": items}
+
+
+@router.get(
+    "/blueprints/{blueprint_id}",
+    response_model=BlueprintResponse,
+)
+def get_blueprint(
+    blueprint_id: str,
+    db: Session = Depends(database.get_db),
+):
+    blueprint = db.query(models.Blueprint)\
+        .options(joinedload(models.Blueprint.user))\
+        .filter(models.Blueprint.id == blueprint_id)\
+        .first()
+    
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+        
+    return blueprint
 
 
 @router.get(

@@ -39,6 +39,18 @@ export default function BlueprintsPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
+    const justCreated = sessionStorage.getItem('magnus_new_blueprint');
+    
+    if (justCreated) {
+      sessionStorage.removeItem('magnus_new_blueprint');
+      
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 100);
+    }
+  }, []);
+
+  useEffect(() => {
     const fetchUsers = async () => { try { const u = await client("/api/users"); setAllUsers(u); } catch (e) { console.error(e); } };
     fetchUsers();
   }, []);

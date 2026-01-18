@@ -145,6 +145,8 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
         }).catch(err => console.warn("Failed to save preference:", err));
       }
 
+      sessionStorage.setItem('magnus_new_job', 'true');
+      router.refresh();
       router.push('/jobs');
     } catch (e: any) {
       setErrorMessage(`Error: ${e.message}`);
@@ -165,7 +167,6 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
       isOpen={!!blueprint}
       onClose={onClose}
       title={blueprint?.title}
-      description="Configure parameters to launch this task"
       icon={<Terminal className="w-5 h-5 text-blue-500" />}
       width="w-[600px]"
     >

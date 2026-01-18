@@ -108,6 +108,7 @@ class Blueprint(Base):
     description: Mapped[str] = mapped_column(String)
     code: Mapped[str] = mapped_column(Text)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    user: Mapped["User"] = relationship("User")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
