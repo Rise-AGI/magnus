@@ -133,28 +133,13 @@ class MagnusScheduler:
                     logger.info(f"Job {job.id} completed successfully (Marker Verified).")
                     job.status = JobStatus.SUCCESS
 
-                    # 2. 尝试获取结果 (Data Flow) [Magnus Update]
                     result_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_result"
                     if os.path.exists(result_path):
-                        try:
-                            # 限制读取 64KB，防止撑爆 DB
-                            with open(result_path, "r", encoding="utf-8") as f:
-                                content = f.read(65536).strip()
-                            
-                            if content:
-                                job.result = content
-                                logger.info(f"Job {job.id} captured result ({len(content)} bytes).")
-                                log_path = f"{magnus_workspace_path}/jobs/{job.id}/slurm/output.txt"
-                                try:
-                                    with open(log_path, "a", encoding="utf-8") as log_f:
-                                        log_f.write(f"\n\n{'='*20} MAGNUS RESULT {'='*20}\n")
-                                        log_f.write(content)
-                                        log_f.write(f"\n{'='*55}\n")
-                                except Exception as e:
-                                    logger.warning(f"Failed to append result to log for Job {job.id}: {e}")
-                        except Exception as e:
-                            # 读取结果失败不应影响任务本身的 Success 状态，仅记录警告
-                            logger.warning(f"Failed to read result for Job {job.id}: {e}")
+                        # 标记结果已就绪
+                        job.result = ".magnus_result" 
+                        logger.info(f"Job {job.id} result file confirmed on disk.")
+                    else:
+                        job.result = None
 
                 else:
                     # 信标不存在 -> 任务消失但未打卡 -> 视为失败 (scancel/crash)
@@ -491,11 +476,7 @@ def main():
             "export UV_CACHE_DIR={magnus_uv_cache}",
         ]
         # 无论是否有结果，只要执行到这里，就写入 .magnus_success
-        # 如果 MAGNUS_RESULT 存在且非空，写入 .magnus_result
         epilogue_command = f\"\"\"
-if [ ! -z "$MAGNUS_RESULT" ]; then
-    echo -n "$MAGNUS_RESULT" > {{result_marker_path}}
-fi
 echo -n "success" > {{success_marker_path}}
 \"\"\"
 
@@ -626,7 +607,6 @@ if __name__ == "__main__":
             delete_file(os.path.join(job_working_table, "repository"))
             delete_file(os.path.join(job_working_table, "wrapper.py"))
             delete_file(os.path.join(job_working_table, ".magnus_success"))
-            delete_file(os.path.join(job_working_table, ".magnus_result"))
         except Exception as error:
             logger.warning(
                 f"Clean up working table of job {job_id} failed:\n{error}\n"

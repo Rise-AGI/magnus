@@ -1,7 +1,7 @@
 // front_end/src/components/jobs/job-form.tsx
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
@@ -13,6 +13,7 @@ import {
   DEFAULT_MEMORY, 
   DEFAULT_RUNNER 
 } from "@/lib/config";
+
 const GPU_TYPES = [
   ...PHYSICAL_GPUS,
   { label: "CPU Only", value: "cpu", meta: "Host Memory" },
@@ -51,7 +52,7 @@ interface JobFormProps {
   onSuccess: () => void;
 }
 
-export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobFormProps) {
+const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuccess }: JobFormProps, ref) {
   const [taskName, setTaskName] = useState(initialData?.taskName || "");
   const [description, setDescription] = useState(initialData?.description || "");
   const [namespace, setNamespace] = useState(initialData?.namespace || "PKU-Plasma");
@@ -64,7 +65,6 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
   const [selectedCommit, setSelectedCommit] = useState(initialData?.commit_sha || "");
   const [command, setCommand] = useState(initialData?.entry_command || "");
   
-  // 0 GPU 强制设为 CPU 类型
   const [gpuCount, setGpuCount] = useState(initialData?.gpu_count ?? 1);
   const [gpuType, setGpuType] = useState(
     initialData?.gpu_type || (initialData?.gpu_count === 0 ? "cpu" : PHYSICAL_GPUS[0].value)
@@ -86,6 +86,66 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
 
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const commandRef = useRef<HTMLTextAreaElement>(null);
+  const actionRef = useRef<HTMLDivElement>(null);
+
+  // === Imperative Handle for Clipboard Actions ===
+  useImperativeHandle(ref, () => ({
+    getPayload: () => {
+      return {
+        task_name: taskName,
+        description: description,
+        namespace: namespace,
+        repo_name: repoName,
+        branch: selectedBranch,
+        commit_sha: selectedCommit,
+        entry_command: command,
+        gpu_count: gpuCount,
+        gpu_type: gpuType,
+        job_type: jobType,
+        cpu_count: cpuCount,
+        memory_demand: memoryDemand,
+        runner: runner,
+      };
+    },
+    applyPayload: (payload: any) => {
+      if (!payload) return;
+
+      // Identity
+      if (payload.task_name !== undefined) setTaskName(payload.task_name);
+      else if (payload.name !== undefined) setTaskName(payload.name); // Compatibility
+
+      if (payload.description !== undefined) setDescription(payload.description);
+
+      // Git Source
+      if (payload.namespace !== undefined) setNamespace(payload.namespace);
+      if (payload.repo_name !== undefined) setRepoName(payload.repo_name);
+      else if (payload.repoName !== undefined) setRepoName(payload.repoName);
+
+      if (payload.branch !== undefined) setSelectedBranch(payload.branch);
+      if (payload.commit_sha !== undefined) setSelectedCommit(payload.commit_sha);
+      if (payload.entry_command !== undefined) setCommand(payload.entry_command);
+      
+      // Bypass scan requirement if repo info is present
+      if (payload.repo_name || payload.repoName) {
+        setHasScanned(true);
+      }
+
+      // Resources
+      if (payload.gpu_count !== undefined) setGpuCount(payload.gpu_count);
+      if (payload.gpu_type !== undefined) setGpuType(payload.gpu_type);
+      if (payload.job_type !== undefined) setJobType(payload.job_type);
+      
+      // Advanced
+      if (payload.cpu_count !== undefined) setCpuCount(payload.cpu_count);
+      if (payload.memory_demand !== undefined) setMemoryDemand(payload.memory_demand);
+      if (payload.runner !== undefined) setRunner(payload.runner);
+
+      // Auto-scroll to actions
+      setTimeout(() => {
+        actionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 100);
+    }
+  }));
 
   // Auto-resize for Description
   useEffect(() => {
@@ -440,9 +500,8 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
             />
         </div>
       </div>
-
-      {/* Action Bar */}
-      <div className="mt-4 pt-6 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-4">
+      
+      <div ref={actionRef} className="mt-4 pt-6 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-4">
         {errorMessage ? (
              <span className="text-red-500 text-xs font-bold animate-pulse text-center sm:text-left">{errorMessage}</span>
         ) : (
@@ -467,4 +526,6 @@ export default function JobForm({ mode, initialData, onCancel, onSuccess }: JobF
 
     </div>
   );
-}
+});
+
+export default JobForm;

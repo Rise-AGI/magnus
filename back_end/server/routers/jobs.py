@@ -95,9 +95,30 @@ def get_job_detail(
     job_id: str,
     db: Session = Depends(database.get_db),
 ):
+    
+    MAX_RESULT_PREVIEW_SIZE = 1024 * 1024
+    
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # [Magnus Patch] 
+    if job.result == ".magnus_result":
+        workspace = magnus_config['server']['root']
+        result_path = f"{workspace}/workspace/jobs/{job.id}/.magnus_result"
+        
+        content: str = ""
+        if os.path.exists(result_path):
+            try:
+                with open(result_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read(MAX_RESULT_PREVIEW_SIZE)
+                if os.path.getsize(result_path) > MAX_RESULT_PREVIEW_SIZE:
+                    content += "\n... (Content truncated, please download full file) ..."
+            except Exception as e:
+                content = f"<Error reading result: {str(e)}>"
+        # 临时覆写 ORM 对象属性，不 commit 到 DB
+        job.result = content
+
     return job
 
 

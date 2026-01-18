@@ -1,9 +1,10 @@
 // front_end/src/components/blueprints/blueprint-editor.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Loader2, Terminal, RefreshCw, DraftingCompass, Save } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
+import { ConfigClipboard } from "@/components/ui/config-clipboard";
 
 import Editor from "react-simple-code-editor";
 import { highlight, languages } from "prismjs";
@@ -40,7 +41,6 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
     }
   }, [isOpen, initialData]);
 
-  // [Magnus Update] 判断是否是针对原始 ID 的操作 (Update)
   // 如果是 Clone 模式进入，且 ID 未发生变更，则视为 Update 操作
   const isOriginalId = mode === 'clone' && formData.id === initialData.id;
 
@@ -127,6 +127,37 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
     }, 0);
   };
 
+  const handleGetPayload = () => {
+    return {
+      id: formData.id,
+      title: formData.title,
+      description: formData.description,
+      code: formData.code,
+    };
+  };
+
+  const handleApplyPayload = (payload: any) => {
+    if (!payload || typeof payload !== 'object') return;
+
+    setFormData((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        const k = key as keyof EditorData;
+        if (payload[k] !== undefined && payload[k] !== null) {
+          (next as any)[k] = payload[k];
+        }
+      });
+      
+      return next;
+    });
+
+    setTimeout(() => {
+      actionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+  };
+
+  const actionRef = useRef<HTMLDivElement>(null);
+
   return (
     <Drawer
       isOpen={isOpen}
@@ -134,6 +165,13 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
       title={mode === 'create' ? "Create Blueprint" : "Clone / Update Blueprint"}
       icon={mode === 'create' ? <DraftingCompass className="w-5 h-5 text-blue-500" /> : <RefreshCw className="w-5 h-5 text-purple-500" />}
       width="w-full max-w-4xl"
+      actions={
+        <ConfigClipboard 
+          kind="magnus/blueprint"
+          onGetPayload={handleGetPayload}
+          onApplyPayload={handleApplyPayload}
+        />
+      }
     >
       <div className="flex flex-col min-h-full">
         <div className="flex-1 space-y-8 pb-4">
@@ -206,7 +244,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
           </div>
         </div>
 
-        <div className="mt-auto pt-6 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-4 pb-1">
+        <div ref={actionRef} className="mt-auto pt-6 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-4 pb-1">
           {errorMessage ? (
             <span className="text-red-500 text-xs font-bold animate-pulse">{errorMessage}</span>
           ) : (
@@ -224,11 +262,8 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
               {isSaving ? (
                  <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                 // [Magnus Update] 图标和文字逻辑：Update用保存图标，Create/Clone用原逻辑
                  isOriginalId ? <Save className="w-4 h-4" /> : (mode === 'create' ? <DraftingCompass className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />)
               )}
-              
-              {/* [Magnus Update] 按钮文字逻辑 */}
               {isOriginalId ? "Update Blueprint" : (mode === 'create' ? "Create Blueprint" : "Clone Blueprint")}
             </button>
           </div>
