@@ -117,14 +117,16 @@ function FormField({
           className="mb-0"
         />
       ) : field.type === "boolean" ? (
-        <select
+        <SearchableSelect
           value={String(value)}
-          onChange={(e) => onChange(field.key, e.target.value === "true")}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-blue-500 transition-all appearance-none"
-        >
-          <option value="true">True</option>
-          <option value="false">False</option>
-        </select>
+          onChange={(val) => onChange(field.key, val === "true")}
+          options={[
+            { label: "True", value: "true" },
+            { label: "False", value: "false" }
+          ]}
+          placeholder="Select boolean..."
+          className="mb-0"
+        />
       ) : (
         <DynamicStringInput 
           field={field} 
@@ -151,7 +153,16 @@ export function DynamicForm({
   emptyMessage = "No parameters required.",
   errorField = null
 }: DynamicFormProps) {
-  const [expandedScopes, setExpandedScopes] = useState<Record<string, boolean>>({});
+  const [expandedScopes, setExpandedScopes] = useState<Record<string, boolean>>(() => {
+    const defaults: Record<string, boolean> = {};
+    schema.forEach(f => {
+      // Auto-expand scope if it contains mandatory fields
+      if (f.scope && f.allow_empty === false) {
+        defaults[f.scope] = true;
+      }
+    });
+    return defaults;
+  });
 
   useEffect(() => {
     if (errorField) {
@@ -192,17 +203,19 @@ export function DynamicForm({
 
   return (
     <div className="space-y-6">
-      <div className="space-y-5">
-        {mainFields.map(field => (
-          <FormField 
-            key={field.key} 
-            field={field} 
-            value={values[field.key]} 
-            onChange={onChange}
-            isError={errorField === field.key}
-          />
-        ))}
-      </div>
+      {mainFields.length > 0 && (
+        <div className="space-y-5">
+          {mainFields.map(field => (
+            <FormField 
+              key={field.key} 
+              field={field} 
+              value={values[field.key]} 
+              onChange={onChange}
+              isError={errorField === field.key}
+            />
+          ))}
+        </div>
+      )}
 
       {sortedScopeNames.map(scopeName => {
         const isExpanded = !!expandedScopes[scopeName];
