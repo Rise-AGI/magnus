@@ -128,6 +128,7 @@ export function ServiceTable({
               return (
                 <tr
                   key={svc.id}
+                  onClick={() => router.push(`/services/${svc.id}`)}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >
                   {/* Column 1: Service / ID */}
@@ -148,7 +149,7 @@ export function ServiceTable({
 
                   {/* Column 2: Description */}
                   <td className="px-6 py-4 align-top whitespace-normal">
-                    <p className="text-zinc-400 text-sm leading-relaxed line-clamp-2 break-words">
+                    <p className="text-zinc-400 text-sm leading-relaxed break-all">
                       {svc.description || <span className="text-zinc-600 italic">No description provided.</span>}
                     </p>
                   </td>

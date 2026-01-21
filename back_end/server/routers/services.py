@@ -303,9 +303,8 @@ def list_services(
     owner_id: Optional[str] = None,
     active_only: bool = False,
     sort_by: str = Query("activity", regex="^(activity|updated)$"),
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
 ) -> Dict[str, Any]:
-    # ... (Same as original code) ...
     query = db.query(models.Service)
 
     if search:
@@ -331,6 +330,19 @@ def list_services(
 
     items = query.offset(skip).limit(limit).all()
     return {"total": total, "items": items}
+
+
+@router.get("/services/{service_id}", response_model=ServiceResponse)
+def get_service(
+    service_id: str,
+    db: Session = Depends(database.get_db),
+) -> models.Service:
+    service = db.query(models.Service).filter(models.Service.id == service_id).first()
+
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    return service
 
 
 # === [Modified] Standalone Auth Logic for Proxy ===

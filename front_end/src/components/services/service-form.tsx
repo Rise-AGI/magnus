@@ -357,12 +357,14 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
           <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'description' ? 'text-red-500' : 'text-zinc-500'}`}>
             DESCRIPTION <span className="text-red-500">*</span>
           </label>
-          <input 
+          <input
             className={inputClass(errorField === 'description')}
-            value={description || ""} 
+            value={description || ""}
             placeholder="Service description (Single line)"
-            onChange={e => { setDescription(e.target.value); clearError('description'); }} 
+            maxLength={200}
+            onChange={e => { setDescription(e.target.value); clearError('description'); }}
           />
+          <p className="text-[10px] text-zinc-600 mt-1">{(description || "").length}/200</p>
         </div>
       </div>
 

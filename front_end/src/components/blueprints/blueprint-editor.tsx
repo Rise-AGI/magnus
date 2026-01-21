@@ -216,9 +216,11 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
                 value={formData.description}
                 onChange={e => { setFormData({ ...formData, description: e.target.value }); clearError('description'); }}
                 placeholder="Brief description..."
-                className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 
+                maxLength={200}
+                className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700
                     ${errorField === 'description' ? 'animate-shake border-red-500' : 'border-zinc-800'}`}
               />
+              <p className="text-[10px] text-zinc-600 mt-1">{formData.description.length}/200</p>
             </div>
           </div>
 

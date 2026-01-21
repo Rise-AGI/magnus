@@ -221,9 +221,31 @@ export default function JobDetailsPage() {
               </span>
             </div>
             {job.slurm_job_id && (
-              <div className="ml-4 pl-6 border-l border-zinc-700/50 flex flex-col">
+              <div className="ml-4 pl-4 border-l border-zinc-700/50 flex flex-col">
                 <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Slurm ID</span>
                 <span className="text-base font-mono text-zinc-200">{job.slurm_job_id}</span>
+              </div>
+            )}
+
+            {/* Owner */}
+            {job.user && (
+              <div className="ml-4 pl-4 border-l border-zinc-700/50 flex items-center gap-3">
+                {job.user.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={job.user.avatar_url}
+                    alt={job.user.name}
+                    className="w-8 h-8 rounded-full border border-zinc-700/50 object-cover shadow-sm"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/30">
+                    {job.user.name.substring(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex flex-col">
+                  <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Creator</span>
+                  <span className="text-sm font-medium text-zinc-200">{job.user.name}</span>
+                </div>
               </div>
             )}
 
