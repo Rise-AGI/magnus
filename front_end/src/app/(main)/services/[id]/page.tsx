@@ -312,7 +312,7 @@ export default function ServiceDetailsPage() {
                 </div>
               )}
               <div className="flex flex-col">
-                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Owner</span>
+                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Manager</span>
                 <span className="text-sm font-medium text-zinc-200">{displayUser.name}</span>
               </div>
             </div>

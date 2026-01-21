@@ -59,7 +59,7 @@ export function ServiceTable({
               <th className="px-6 py-4 font-medium w-[25%]">Service / Service ID</th>
               <th className="px-6 py-4 font-medium w-[45%]">Description</th>
               <th className="px-6 py-4 font-medium w-[15%] text-center">Job Status</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">Creator / Updated at</th>
+              <th className="px-6 py-4 font-medium w-[15%] text-center">Manager / Updated at</th>
               <th className="px-6 py-4 font-medium text-right w-[15%]"></th>
             </tr>
           </thead>
