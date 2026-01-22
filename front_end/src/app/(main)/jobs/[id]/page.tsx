@@ -232,13 +232,6 @@ export default function JobDetailsPage() {
                 {job.status.toUpperCase()}
               </span>
             </div>
-            {job.slurm_job_id && (
-              <div className="ml-4 pl-4 border-l border-zinc-700/50 flex flex-col">
-                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Slurm ID</span>
-                <span className="text-base font-mono text-zinc-200">{job.slurm_job_id}</span>
-              </div>
-            )}
-
             {/* Owner */}
             {job.user && (
               <div className="ml-4 pl-4 border-l border-zinc-700/50 flex items-center gap-3">

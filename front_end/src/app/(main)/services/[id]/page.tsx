@@ -290,13 +290,6 @@ export default function ServiceDetailsPage() {
               </span>
             </div>
 
-            {service.assigned_port && (
-              <div className="ml-4 pl-4 border-l border-zinc-700/50 flex flex-col">
-                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Port</span>
-                <span className="text-base font-mono text-zinc-200">{service.assigned_port}</span>
-              </div>
-            )}
-
             {/* Owner */}
             <div className="ml-4 pl-4 border-l border-zinc-700/50 flex items-center gap-3">
               {displayUser.avatar_url ? (
