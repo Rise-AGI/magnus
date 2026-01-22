@@ -1,6 +1,6 @@
 // front_end/src/components/ui/dynamic-form/types.ts
 
-export type FieldType = "text" | "number" | "boolean" | "select";
+export type FieldType = "text" | "number" | "float" | "boolean" | "select";
 
 export interface FieldOption {
   label: string;

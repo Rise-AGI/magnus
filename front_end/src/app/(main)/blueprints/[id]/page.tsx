@@ -162,6 +162,37 @@ export default function BlueprintDetailsPage() {
           return;
         }
       }
+
+      if (param.type === 'float') {
+        const val = formValues[param.key];
+        const strVal = String(val ?? "").trim();
+        if (strVal === "") continue;
+
+        const num = Number(strVal);
+        if (isNaN(num)) {
+          setRunFieldErr(param.key);
+          setRunError(`⚠️ ${param.label || param.key} must be a valid number`);
+          const el = document.getElementById(`field-${param.key}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+
+        if (param.min !== undefined && num < param.min) {
+          setRunFieldErr(param.key);
+          setRunError(`⚠️ ${param.label || param.key} must be ≥ ${param.min}`);
+          const el = document.getElementById(`field-${param.key}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+
+        if (param.max !== undefined && num > param.max) {
+          setRunFieldErr(param.key);
+          setRunError(`⚠️ ${param.label || param.key} must be ≤ ${param.max}`);
+          const el = document.getElementById(`field-${param.key}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+      }
     }
 
     setIsRunning(true);

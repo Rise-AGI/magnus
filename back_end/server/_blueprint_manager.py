@@ -94,6 +94,12 @@ class BlueprintManager:
                 if "min" in meta_dict: schema.min = meta_dict["min"]
                 if "max" in meta_dict: schema.max = meta_dict["max"]
 
+            elif base_type is float:
+                schema.type = "float"
+                if "min" in meta_dict: schema.min = meta_dict["min"]
+                if "max" in meta_dict: schema.max = meta_dict["max"]
+                if "placeholder" in meta_dict: schema.placeholder = meta_dict["placeholder"]
+
             elif base_type is bool:
                 schema.type = "boolean"
 

@@ -73,6 +73,42 @@ function DynamicStringInput({
   return <input type="text" {...commonProps} />;
 }
 
+
+function DynamicFloatInput({
+  field,
+  value,
+  onChange,
+  hasError
+}: {
+  field: FieldSchema;
+  value: string;
+  onChange: (val: string) => void;
+  hasError?: boolean;
+}) {
+  const [isFocused, setIsFocused] = useState(false);
+
+  const baseClasses = cn(
+    "w-full bg-zinc-950 border px-3 py-2.5 rounded-lg text-sm font-mono transition-all outline-none placeholder-zinc-700",
+    hasError
+      ? "border-red-500 animate-shake"
+      : "border-zinc-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
+  );
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
+      placeholder={field.placeholder || "e.g. 3.14, 1e-5"}
+      className={baseClasses}
+      spellCheck={false}
+    />
+  );
+}
+
+
 function FormField({ 
   field, 
   value, 
@@ -103,6 +139,13 @@ function FormField({
           onChange={(val) => onChange(field.key, val)}
           min={field.min}
           max={field.max}
+        />
+      ) : field.type === "float" ? (
+        <DynamicFloatInput
+          field={field}
+          value={String(value ?? "")}
+          onChange={(val) => onChange(field.key, val)}
+          hasError={isError}
         />
       ) : field.type === "select" ? (
         <SearchableSelect

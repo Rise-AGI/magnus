@@ -125,6 +125,35 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
           return;
         }
       }
+
+      if (param.type === 'float') {
+        const val = formValues[param.key];
+        const strVal = String(val ?? "").trim();
+
+        if (strVal === "") continue;
+
+        const num = Number(strVal);
+        if (isNaN(num)) {
+          setErrorField(param.key);
+          setErrorMessage(`⚠️ ${param.label || param.key} must be a valid number`);
+          scrollToError(param.key);
+          return;
+        }
+
+        if (param.min !== undefined && num < param.min) {
+          setErrorField(param.key);
+          setErrorMessage(`⚠️ ${param.label || param.key} must be ≥ ${param.min}`);
+          scrollToError(param.key);
+          return;
+        }
+
+        if (param.max !== undefined && num > param.max) {
+          setErrorField(param.key);
+          setErrorMessage(`⚠️ ${param.label || param.key} must be ≤ ${param.max}`);
+          scrollToError(param.key);
+          return;
+        }
+      }
     }
 
     setIsRunning(true);
