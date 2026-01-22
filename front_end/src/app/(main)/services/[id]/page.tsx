@@ -213,7 +213,7 @@ export default function ServiceDetailsPage() {
   } else if (hasLiveJob) {
     statusNode = (
       <div
-        onClick={() => router.push(`/jobs/${service.current_job!.id}?from=services`)}
+        onClick={() => router.push(`/jobs/${service.current_job!.id}?from=services&id=${service.id}`)}
         className="cursor-pointer hover:opacity-80 transition-opacity"
       >
         <JobStatusBadge status={currentJobStatus!} size="md" />

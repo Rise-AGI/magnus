@@ -30,14 +30,26 @@ export default function JobDetailsPage() {
   const isSlurmTask = decodeURIComponent(jobId).endsWith("(slurm)");
 
   const fromSource = searchParams.get("from") || "jobs";
-  const BACK_NAV_CONFIG: Record<string, { path: string; label: string }> = {
-    services: { path: "/services", label: "Back to Services" },
-    cluster:  { path: "/cluster",  label: "Back to Cluster" },
-    dashboard:{ path: "/dashboard",label: "Back to Dashboard" },
-    jobs:     { path: "/jobs",     label: "Back to Jobs" },
+  const fromId = searchParams.get("id");
+
+
+  const getBackNav = (): { path: string; label: string } => {
+    if (fromSource === "services") {
+      return fromId
+        ? { path: `/services/${fromId}`, label: "Back to Service" }
+        : { path: "/services", label: "Back to Services" };
+    }
+
+    const config: Record<string, { path: string; label: string }> = {
+      cluster:   { path: "/cluster",   label: "Back to Cluster" },
+      dashboard: { path: "/dashboard", label: "Back to Dashboard" },
+      jobs:      { path: "/jobs",      label: "Back to Jobs" },
+    };
+    return config[fromSource] || config["jobs"];
   };
-  const navConfig = BACK_NAV_CONFIG[fromSource] || BACK_NAV_CONFIG["jobs"];
-  const { path: backDestination, label: backLabel } = navConfig;
+
+
+  const { path: backDestination, label: backLabel } = getBackNav();
 
   const [job, setJob] = useState<Job | null>(null);
   const [logs, setLogs] = useState<string>("");
