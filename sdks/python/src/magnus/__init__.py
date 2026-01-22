@@ -10,7 +10,7 @@ __all__ = [
     # Core Client
     "MagnusClient",
     "configure",
-    
+
     # Functional API
     "submit_blueprint",
     "submit_blueprint_async",
@@ -18,7 +18,13 @@ __all__ = [
     "run_blueprint_async",
     "call_service",
     "call_service_async",
-    
+    "list_jobs",
+    "list_jobs_async",
+    "get_job",
+    "get_job_async",
+    "terminate_job",
+    "terminate_job_async",
+
     # Exceptions
     "MagnusError",
     "AuthenticationError",
@@ -239,6 +245,108 @@ class MagnusClient:
             
             await asyncio.sleep(poll_interval)
 
+    # === Job Management Methods ===
+
+    def list_jobs(
+        self,
+        limit: int = 20,
+        skip: int = 0,
+        search: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """
+        列出当前用户的任务。
+        返回 {"total": int, "items": List[JobInfo]}
+        """
+        params: Dict[str, Any] = {"limit": limit, "skip": skip}
+        if search:
+            params["search"] = search
+
+        try:
+            resp = self.http.get("/jobs", params=params, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while listing jobs.")
+
+
+    async def list_jobs_async(
+        self,
+        limit: int = 20,
+        skip: int = 0,
+        search: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"limit": limit, "skip": skip}
+        if search:
+            params["search"] = search
+
+        try:
+            resp = await self.ahttp.get("/jobs", params=params, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while listing jobs.")
+
+
+    def get_job(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """
+        获取单个任务的详细信息。
+        """
+        try:
+            resp = self.http.get(f"/jobs/{job_id}", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting job info.")
+
+
+    async def get_job_async(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = await self.ahttp.get(f"/jobs/{job_id}", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting job info.")
+
+
+    def terminate_job(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """
+        终止指定任务。
+        """
+        try:
+            resp = self.http.post(f"/jobs/{job_id}/terminate", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while terminating job.")
+
+
+    async def terminate_job_async(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = await self.ahttp.post(f"/jobs/{job_id}/terminate", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while terminating job.")
+
+
     # === Service Methods ===
 
     def call_service(
@@ -344,8 +452,54 @@ def call_service(
     return default_client.call_service(service_id, payload, timeout)
 
 async def call_service_async(
-    service_id: str, 
-    payload: Union[Dict[str, Any], str, bytes], 
+    service_id: str,
+    payload: Union[Dict[str, Any], str, bytes],
     timeout: float = 60.0
 ) -> Any:
     return await default_client.call_service_async(service_id, payload, timeout)
+
+
+def list_jobs(
+    limit: int = 20,
+    skip: int = 0,
+    search: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.list_jobs(limit, skip, search, timeout)
+
+
+async def list_jobs_async(
+    limit: int = 20,
+    skip: int = 0,
+    search: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return await default_client.list_jobs_async(limit, skip, search, timeout)
+
+
+def get_job(
+    job_id: str,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.get_job(job_id, timeout)
+
+
+async def get_job_async(
+    job_id: str,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return await default_client.get_job_async(job_id, timeout)
+
+
+def terminate_job(
+    job_id: str,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.terminate_job(job_id, timeout)
+
+
+async def terminate_job_async(
+    job_id: str,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return await default_client.terminate_job_async(job_id, timeout)
