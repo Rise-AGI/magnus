@@ -387,8 +387,20 @@ export default function JobDetailsPage() {
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Quantity</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">GPU Count</label>
                 <span className="text-base text-white font-medium block">{job.gpu_count} GPUs</span>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">CPU Cores</label>
+                <span className="text-base text-white font-medium block">
+                  {job.cpu_count ? job.cpu_count : <span className="text-zinc-500 text-sm">(Station Default)</span>}
+                </span>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Memory</label>
+                <span className="text-base text-white font-medium block">
+                  {job.memory_demand ? job.memory_demand : <span className="text-zinc-500 text-sm">(Station Default)</span>}
+                </span>
               </div>
             </div>
           </div>
