@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
-  ArrowUpToLine, ArrowDownToLine, Copy, Check
+  ArrowUpToLine, ArrowDownToLine, Copy, Check, ChevronUp, ChevronDown
 } from "lucide-react";
 import { client } from "@/lib/api";
 import { CopyableText } from "@/components/ui/copyable-text";
@@ -55,6 +55,9 @@ export default function JobDetailsPage() {
   const [logs, setLogs] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"console" | "description" | "metrics">("console");
+
+  const [logPage, setLogPage] = useState(-1);
+  const [logTotalPages, setLogTotalPages] = useState(1);
 
   const [copiedCommand, setCopiedCommand] = useState(false);
   const copyToClipboard = async (text: string, setCopied: (v: boolean) => void) => {
@@ -117,23 +120,25 @@ export default function JobDetailsPage() {
     return () => clearInterval(interval);
   }, [jobId, isSlurmTask]);
 
+  const fetchLogs = useCallback(async (page: number = -1) => {
+    try {
+      const res = await client(`/api/jobs/${jobId}/logs?page=${page}`);
+      const logContent = typeof res === "string" ? res : (res.logs || res.content || "");
+      setLogs(logContent);
+      if (res.page !== undefined) setLogPage(res.page);
+      if (res.total_pages !== undefined) setLogTotalPages(res.total_pages);
+    } catch (e) {
+      // Ignore errors
+    }
+  }, [jobId]);
+
   useEffect(() => {
     if (isSlurmTask) return;
 
-    const fetchLogs = async () => {
-      try {
-        const res = await client(`/api/jobs/${jobId}/logs`);
-        const logContent = typeof res === "string" ? res : (res.logs || res.content || "");
-        setLogs(logContent);
-      } catch (e) {
-        // Ignore errors
-      }
-    };
-
-    fetchLogs();
-    const interval = setInterval(fetchLogs, POLL_INTERVAL);
+    fetchLogs(logPage);
+    const interval = setInterval(() => fetchLogs(logPage), POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [jobId, isSlurmTask]);
+  }, [jobId, isSlurmTask, logPage, fetchLogs]);
 
   // Slurm Task UI
   if (isSlurmTask) {
@@ -478,25 +483,46 @@ export default function JobDetailsPage() {
 
             {activeTab === 'console' && (
               <>
-                {/* 悬浮控制按钮组 */}
+                {/* 分页控制按钮组 */}
                 {logs && (
-                    <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-10">
-                        <div className="flex flex-col gap-2">
-                            <button
-                                onClick={() => handleScroll('top')}
-                                className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95"
-                                title="Scroll to Top"
-                            >
-                                <ArrowUpToLine className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => handleScroll('bottom')}
-                                className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95"
-                                title="Scroll to Bottom"
-                            >
-                                <ArrowDownToLine className="w-4 h-4" />
-                            </button>
-                        </div>
+                    <div className="absolute bottom-6 right-6 flex flex-col gap-1.5 z-10">
+                        <button
+                            onClick={() => { setLogPage(0); handleScroll('top'); }}
+                            disabled={logPage === 0}
+                            className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                            title="First Page"
+                        >
+                            <ArrowUpToLine className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={() => { setLogPage(p => Math.max(0, p - 1)); handleScroll('top'); }}
+                            disabled={logPage === 0}
+                            className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                            title="Previous Page"
+                        >
+                            <ChevronUp className="w-4 h-4" />
+                        </button>
+                        {logTotalPages > 1 && (
+                            <div className="text-[10px] text-zinc-500 text-center py-0.5 font-mono">
+                                {logPage + 1}/{logTotalPages}
+                            </div>
+                        )}
+                        <button
+                            onClick={() => { setLogPage(p => Math.min(logTotalPages - 1, p + 1)); handleScroll('top'); }}
+                            disabled={logPage >= logTotalPages - 1}
+                            className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                            title="Next Page"
+                        >
+                            <ChevronDown className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={() => { setLogPage(logTotalPages - 1); handleScroll('bottom'); }}
+                            disabled={logPage >= logTotalPages - 1}
+                            className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                            title="Last Page"
+                        >
+                            <ArrowDownToLine className="w-4 h-4" />
+                        </button>
                     </div>
                 )}
 

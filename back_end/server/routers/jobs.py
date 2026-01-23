@@ -5,7 +5,7 @@ import logging
 from socket import gethostname
 from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -127,13 +127,15 @@ def get_job_detail(
 )
 def get_job_logs(
     job_id: str,
+    page: int = Query(default=-1, description="Page number, -1 for last page"),
     db: Session = Depends(database.get_db),
 ):
     """
-    获取任务实时日志。
-    为了防止内存溢出，限制最大读取 1MB。
+    获取任务日志，分页返回。
+    每页约 200KB，相邻页有 30% 重叠以保持上下文连贯。
     """
-    MAX_LOG_SIZE = 1 * 1024 * 1024
+    PAGE_SIZE = 200 * 1024
+    OVERLAP_RATIO = 0.3
 
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
@@ -149,31 +151,52 @@ def get_job_logs(
                 "logs": (
                     "Job has failed for systematic reasons. "
                     f"Please check if you have access to user {effective_user} on {_hostname}."
-                )
+                ),
+                "page": 0,
+                "total_pages": 1,
             }
-        return {"logs": "Waiting for output stream... (Job might be PENDING or Initializing)"}
+        return {
+            "logs": "Waiting for output stream... (Job might be PENDING or Initializing)",
+            "page": 0,
+            "total_pages": 1,
+        }
 
     try:
         file_size = os.path.getsize(log_path)
 
-        # 情况 A: 文件过大，只读最后 1MB
-        if file_size > MAX_LOG_SIZE:
-            with open(log_path, "rb") as f:
-                f.seek(-MAX_LOG_SIZE, os.SEEK_END)
-                content_bytes = f.read()
-                content = content_bytes.decode("utf-8", errors="replace")
+        if file_size == 0:
+            return {"logs": "", "page": 0, "total_pages": 1}
 
-                header = f"[Magnus Warning] Log file is too large ({file_size/1024/1024:.2f}MB). Showing last 1MB only...\n\n"
-                return {"logs": header + content}
-
-        # 情况 B: 文件较小，直接全读
-        else:
+        # 小文件：单页返回
+        if file_size <= PAGE_SIZE:
             with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                return {"logs": f.read()}
+                return {"logs": f.read(), "page": 0, "total_pages": 1}
+
+        # 大文件：分页
+        step = int(PAGE_SIZE * (1 - OVERLAP_RATIO))
+        total_pages = max(1, (file_size - PAGE_SIZE) // step + 2)
+
+        if page < 0:
+            page = total_pages - 1
+        page = max(0, min(page, total_pages - 1))
+
+        offset = page * step
+        read_size = min(PAGE_SIZE, file_size - offset)
+
+        with open(log_path, "rb") as f:
+            f.seek(offset)
+            content_bytes = f.read(read_size)
+            content = content_bytes.decode("utf-8", errors="replace")
+
+        return {
+            "logs": content,
+            "page": page,
+            "total_pages": total_pages,
+        }
 
     except Exception as e:
         logger.error(f"Error reading log file for {job_id}: {e}")
-        return {"logs": f"Error reading logs: {str(e)}"}
+        return {"logs": f"Error reading logs: {str(e)}", "page": 0, "total_pages": 1}
 
 
 @router.get(
