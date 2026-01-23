@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
-  ArrowUpToLine, ArrowDownToLine, Copy, Check, ChevronUp, ChevronDown
+  ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX
 } from "lucide-react";
 import { client } from "@/lib/api";
 import { CopyableText } from "@/components/ui/copyable-text";
@@ -19,7 +19,6 @@ import { JobDrawer } from "@/components/jobs/job-drawer";
 import { useJobOperations } from "@/hooks/use-job-operations";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useAuth } from "@/context/auth-context";
-import { SquareX } from "lucide-react";
 
 export default function JobDetailsPage() {
   const { user } = useAuth();
@@ -32,7 +31,7 @@ export default function JobDetailsPage() {
   const fromSource = searchParams.get("from") || "jobs";
   const fromId = searchParams.get("id");
 
-
+  // Navigation Logic
   const getBackNav = (): { path: string; label: string } => {
     if (fromSource === "services") {
       return fromId
@@ -48,16 +47,19 @@ export default function JobDetailsPage() {
     return config[fromSource] || config["jobs"];
   };
 
-
   const { path: backDestination, label: backLabel } = getBackNav();
 
   const [job, setJob] = useState<Job | null>(null);
-  const [logs, setLogs] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"console" | "description" | "metrics">("console");
 
+  const [logs, setLogs] = useState("");
   const [logPage, setLogPage] = useState(-1);
   const [logTotalPages, setLogTotalPages] = useState(1);
+  const [followMode, setFollowMode] = useState(false);
+  const [pendingScroll, setPendingScroll] = useState<"top" | "bottom" | null>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const lastClickTimeRef = useRef(0);
 
   const [copiedCommand, setCopiedCommand] = useState(false);
   const copyToClipboard = async (text: string, setCopied: (v: boolean) => void) => {
@@ -70,11 +72,9 @@ export default function JobDetailsPage() {
     }
   };
 
-  const logContainerRef = useRef<HTMLDivElement>(null);
-
   const fetchJob = useCallback(async (isBackground = false) => {
     if (isSlurmTask) return;
-    
+
     if (!isBackground) setLoading(true);
     try {
       const data = await client(`/api/jobs/${jobId}`);
@@ -91,56 +91,120 @@ export default function JobDetailsPage() {
     onTerminateSuccess: () => fetchJob(false)
   });
 
-  const handleScroll = (direction: "top" | "bottom") => {
-    if (!logContainerRef.current) return;
-    const top = direction === "top" ? 0 : logContainerRef.current.scrollHeight;
-    logContainerRef.current.scrollTo({ top, behavior: "smooth" });
-  };
-
   useEffect(() => {
     if (isSlurmTask) {
       setLoading(false);
       return;
     }
-
-    const fetchJob = async (isBackground = false) => {
-      if (!isBackground) setLoading(true);
-      try {
-        const data = await client(`/api/jobs/${jobId}`);
-        setJob(data);
-      } catch (e) {
-        console.error("Failed to fetch job", e);
-      } finally {
-        if (!isBackground) setLoading(false);
-      }
-    };
-
     fetchJob();
     const interval = setInterval(() => fetchJob(true), POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [jobId, isSlurmTask]);
+  }, [jobId, isSlurmTask, fetchJob]);
 
-  const fetchLogs = useCallback(async (page: number = -1) => {
+  // Fetch logs for a specific page
+  const fetchLogs = useCallback(async (page: number) => {
     try {
       const res = await client(`/api/jobs/${jobId}/logs?page=${page}`);
-      const logContent = typeof res === "string" ? res : (res.logs || res.content || "");
-      setLogs(logContent);
-      if (res.page !== undefined) setLogPage(res.page);
-      if (res.total_pages !== undefined) setLogTotalPages(res.total_pages);
+      setLogs(res.logs || "");
+      setLogPage(res.page ?? 0);
+      setLogTotalPages(res.total_pages ?? 1);
     } catch (e) {
-      // Ignore errors
+      console.error("Failed to fetch logs", e);
     }
   }, [jobId]);
 
+  // Initial log load + auto-enable follow mode for running jobs
   useEffect(() => {
     if (isSlurmTask) return;
+    fetchLogs(-1);
+    if (job && ['Pending', 'Running'].includes(job.status)) {
+      setFollowMode(true);
+    }
+  }, [jobId, isSlurmTask, job?.status, fetchLogs]);
 
-    fetchLogs(logPage);
-    const interval = setInterval(() => fetchLogs(logPage), POLL_INTERVAL);
+  // Follow mode polling (5x slower than POLL_INTERVAL)
+  useEffect(() => {
+    if (!followMode) return;
+    if (job && !['Pending', 'Running'].includes(job.status)) {
+      setFollowMode(false);
+      return;
+    }
+    const interval = setInterval(() => fetchLogs(-1), POLL_INTERVAL * 5);
     return () => clearInterval(interval);
-  }, [jobId, isSlurmTask, logPage, fetchLogs]);
+  }, [followMode, job?.status, fetchLogs]);
 
-  // Slurm Task UI
+  // Execute pending scroll after logs update
+  useEffect(() => {
+    if (pendingScroll && logContainerRef.current) {
+      requestAnimationFrame(() => {
+        if (!logContainerRef.current) return;
+        const top = pendingScroll === "top" ? 0 : logContainerRef.current.scrollHeight;
+        logContainerRef.current.scrollTo({ top, behavior: "auto" });
+        setPendingScroll(null);
+      });
+    }
+  }, [logs, pendingScroll]);
+
+  // Follow mode: auto-scroll to bottom on new logs
+  useEffect(() => {
+    if (followMode && logContainerRef.current) {
+      logContainerRef.current.scrollTo({ top: logContainerRef.current.scrollHeight, behavior: "auto" });
+    }
+  }, [logs, followMode]);
+
+  // Exit follow mode on scroll up
+  const handleLogScroll = () => {
+    if (!followMode || !logContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+    if (!isAtBottom) {
+      setFollowMode(false);
+    }
+  };
+
+  const effectivePage = logPage < 0 ? Math.max(0, logTotalPages - 1) : logPage;
+
+  const goToFirstPage = () => {
+    setFollowMode(false);
+    setLogPage(0);
+    fetchLogs(0);
+    setPendingScroll("top");
+  };
+
+  const goToPrevPage = () => {
+    if (effectivePage <= 0) return;
+    setFollowMode(false);
+    const newPage = effectivePage - 1;
+    setLogPage(newPage);
+    fetchLogs(newPage);
+    setPendingScroll("bottom");
+  };
+
+  const goToNextPage = () => {
+    if (effectivePage >= logTotalPages - 1) return;
+    setFollowMode(false);
+    const newPage = effectivePage + 1;
+    setLogPage(newPage);
+    fetchLogs(newPage);
+    setPendingScroll("top");
+  };
+
+  const goToLastPage = () => {
+    const now = Date.now();
+    const isDoubleClick = now - lastClickTimeRef.current < 300;
+    lastClickTimeRef.current = now;
+
+    if (isDoubleClick) {
+      setFollowMode(true);
+    } else {
+      setFollowMode(false);
+    }
+
+    setLogPage(-1);
+    fetchLogs(-1);
+    setPendingScroll("bottom");
+  };
+
   if (isSlurmTask) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-zinc-400 gap-6">
@@ -483,66 +547,60 @@ export default function JobDetailsPage() {
 
             {activeTab === 'console' && (
               <>
-                {/* 分页控制按钮组 */}
                 {logs && (
-                    <div className="absolute bottom-6 right-6 flex flex-col gap-1.5 z-10">
-                        <button
-                            onClick={() => { setLogPage(0); handleScroll('top'); }}
-                            disabled={logPage === 0}
-                            className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
-                            title="First Page"
-                        >
-                            <ArrowUpToLine className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={() => { setLogPage(p => Math.max(0, p - 1)); handleScroll('top'); }}
-                            disabled={logPage === 0}
-                            className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
-                            title="Previous Page"
-                        >
-                            <ChevronUp className="w-4 h-4" />
-                        </button>
-                        {logTotalPages > 1 && (
-                            <div className="text-[10px] text-zinc-500 text-center py-0.5 font-mono">
-                                {logPage + 1}/{logTotalPages}
-                            </div>
-                        )}
-                        <button
-                            onClick={() => { setLogPage(p => Math.min(logTotalPages - 1, p + 1)); handleScroll('top'); }}
-                            disabled={logPage >= logTotalPages - 1}
-                            className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
-                            title="Next Page"
-                        >
-                            <ChevronDown className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={() => { setLogPage(logTotalPages - 1); handleScroll('bottom'); }}
-                            disabled={logPage >= logTotalPages - 1}
-                            className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
-                            title="Last Page"
-                        >
-                            <ArrowDownToLine className="w-4 h-4" />
-                        </button>
-                    </div>
+                  <div className="absolute bottom-6 right-6 flex flex-col gap-1.5 z-10">
+                    <button
+                      onClick={goToFirstPage}
+                      className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95"
+                      title="First Page"
+                    >
+                      <ArrowUpToLine className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={goToPrevPage}
+                      disabled={effectivePage <= 0}
+                      className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                      title="Previous Page"
+                    >
+                      <ChevronUp className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={goToNextPage}
+                      disabled={effectivePage >= logTotalPages - 1}
+                      className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                      title="Next Page"
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={goToLastPage}
+                      className={`p-2 backdrop-blur-sm border rounded-lg shadow-lg transition-all active:scale-95
+                        ${followMode
+                          ? "bg-green-900/20 border-green-800/50 text-green-400"
+                          : "bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600"}`}
+                      title={followMode ? "Following (Double-click to enable)" : "Last Page (Double-click to follow)"}
+                    >
+                      <ArrowDownToLine className="w-4 h-4" />
+                    </button>
+                  </div>
                 )}
 
-                <div 
-                    ref={logContainerRef}
-                    className="absolute inset-0 overflow-auto p-5 custom-scrollbar font-mono text-xs leading-5"
+                <div
+                  ref={logContainerRef}
+                  onScroll={handleLogScroll}
+                  className="absolute inset-0 overflow-auto p-5 custom-scrollbar font-mono text-xs leading-5"
                 >
                   {logs ? (
-                    <pre className="text-zinc-300 whitespace-pre-wrap break-all pb-10">
-                      {logs}
-                    </pre>
+                    <pre className="text-zinc-300 whitespace-pre-wrap break-all pb-10">{logs}</pre>
                   ) : (
-                      <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
-                         <Terminal className="w-10 h-10 opacity-20" />
-                         <p>
-                           {['Pending', 'Running'].includes(job.status) 
-                             ? "Waiting for output..." 
-                             : "No output generated during execution"}
-                         </p>
-                      </div>
+                    <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
+                      <Terminal className="w-10 h-10 opacity-20" />
+                      <p>
+                        {job && ['Pending', 'Running'].includes(job.status)
+                          ? "Waiting for output..."
+                          : "No output generated during execution"}
+                      </p>
+                    </div>
                   )}
                 </div>
               </>

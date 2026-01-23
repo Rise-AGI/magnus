@@ -2,7 +2,6 @@
 import os
 import json
 import logging
-from socket import gethostname
 from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,9 +15,6 @@ from ..schemas import JobResponse, JobSubmission, PagedJobResponse
 from .._magnus_config import magnus_config
 from .._scheduler import scheduler
 from .auth import get_current_user
-
-
-_hostname = gethostname()
 
 
 logger = logging.getLogger(__name__)
@@ -122,20 +118,29 @@ def get_job_detail(
     return job
 
 
-@router.get(
-    "/jobs/{job_id}/logs",
-)
-def get_job_logs(
+def _safe_utf8_truncate(data: bytes) -> bytes:
+    """截断字节流时避免切断 UTF-8 多字节字符"""
+    length = len(data)
+    if length == 0:
+        return data
+
+    for i in range(min(4, length)):
+        last_byte = data[length - 1 - i]
+        if (last_byte & 0x80) == 0:
+            return data
+        if (last_byte & 0xC0) == 0xC0:
+            return data[:length - 1 - i]
+    return data
+
+
+@router.get("/jobs/{job_id}/logs")
+def get_job_logs_paginated(
     job_id: str,
     page: int = Query(default=-1, description="Page number, -1 for last page"),
     db: Session = Depends(database.get_db),
-):
-    """
-    获取任务日志，分页返回。
-    每页约 200KB，相邻页有 30% 重叠以保持上下文连贯。
-    """
+) -> Dict[str, Any]:
     PAGE_SIZE = 200 * 1024
-    OVERLAP_RATIO = 0.3
+    OVERLAP = 0.3
 
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
@@ -143,37 +148,25 @@ def get_job_logs(
 
     root_path = magnus_config['server']['root']
     log_path = f"{root_path}/workspace/jobs/{job_id}/slurm/output.txt"
-
-    if not os.path.exists(log_path):
-        if job.status == JobStatus.FAILED:
-            effective_user = job.runner if job.runner is not None else "magnus"
-            return {
-                "logs": (
-                    "Job has failed for systematic reasons. "
-                    f"Please check if you have access to user {effective_user} on {_hostname}."
-                ),
-                "page": 0,
-                "total_pages": 1,
-            }
-        return {
-            "logs": "Waiting for output stream... (Job might be PENDING or Initializing)",
-            "page": 0,
-            "total_pages": 1,
-        }
-
     try:
+        if not os.path.exists(log_path):
+            msg = ""
+            if job.status == JobStatus.FAILED:
+                msg = "Job failed. Log file missing.\n"
+            elif job.status in [JobStatus.PENDING, JobStatus.RUNNING]:
+                msg = "Waiting for output stream...\n"
+            return {"logs": msg, "page": 0, "total_pages": 1}
+
         file_size = os.path.getsize(log_path)
 
         if file_size == 0:
             return {"logs": "", "page": 0, "total_pages": 1}
 
-        # 小文件：单页返回
         if file_size <= PAGE_SIZE:
             with open(log_path, "r", encoding="utf-8", errors="replace") as f:
                 return {"logs": f.read(), "page": 0, "total_pages": 1}
 
-        # 大文件：分页
-        step = int(PAGE_SIZE * (1 - OVERLAP_RATIO))
+        step = int(PAGE_SIZE * (1 - OVERLAP))
         total_pages = max(1, (file_size - PAGE_SIZE) // step + 2)
 
         if page < 0:
@@ -185,17 +178,15 @@ def get_job_logs(
 
         with open(log_path, "rb") as f:
             f.seek(offset)
-            content_bytes = f.read(read_size)
-            content = content_bytes.decode("utf-8", errors="replace")
+            chunk = f.read(read_size)
+            if offset + len(chunk) < file_size:
+                chunk = _safe_utf8_truncate(chunk)
 
-        return {
-            "logs": content,
-            "page": page,
-            "total_pages": total_pages,
-        }
+        content = chunk.decode("utf-8", errors="replace")
+        return {"logs": content, "page": page, "total_pages": total_pages}
 
     except Exception as e:
-        logger.error(f"Error reading log file for {job_id}: {e}")
+        logger.exception(f"[logs] Error for job={job_id}")
         return {"logs": f"Error reading logs: {str(e)}", "page": 0, "total_pages": 1}
 
 
