@@ -395,10 +395,9 @@ export default function ServiceDetailsPage() {
               <div>
                 <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Idle Timeout</label>
                 <span className="text-base text-white font-medium block">
-                  {service.idle_timeout === 0 ? (
-                    <span className="text-zinc-500">0s (Never Scale Down)</span>
-                  ) : (
-                    <>{service.idle_timeout}s</>
+                  {service.idle_timeout}s
+                  {service.idle_timeout === 0 && (
+                    <span className="text-zinc-500 text-sm ml-1">(Never Scale Down)</span>
                   )}
                 </span>
               </div>
