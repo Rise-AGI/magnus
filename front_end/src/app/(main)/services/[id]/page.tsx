@@ -387,35 +387,28 @@ export default function ServiceDetailsPage() {
               <Server className="w-4 h-4 text-zinc-400" />
               <h3 className="text-sm font-semibold text-zinc-200">Service Configuration</h3>
             </div>
-            <div className="p-5">
-              <div className="grid grid-cols-2 gap-5">
-                <div>
-                  <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Request Timeout</label>
-                  <span className="text-base text-white font-medium block">{service.request_timeout}s</span>
-                </div>
-                <div>
-                  <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Idle Timeout</label>
-                  <span className="text-base text-white font-medium block">
-                    {service.idle_timeout}s
-                    {service.idle_timeout === 0 && (
-                      <span className="text-zinc-500 text-sm ml-1">(Never Scale Down)</span>
-                    )}
-                  </span>
-                </div>
-                <div>
-                  <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Max Concurrency</label>
-                  <span className="text-base text-white font-medium block">{service.max_concurrency}</span>
-                </div>
-                <div>
-                  <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Job Type</label>
-                  <span className="text-base text-white font-medium block">{service.job_type}</span>
-                </div>
-                {service.runner && (
-                  <div>
-                    <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Runner</label>
-                    <span className="text-base text-white font-medium block">{service.runner}</span>
-                  </div>
-                )}
+            <div className="p-5 grid grid-cols-2 gap-5">
+              <div>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Request Timeout</label>
+                <span className="text-base text-white font-medium block">{service.request_timeout}s</span>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Idle Timeout</label>
+                <span className="text-base text-white font-medium block">
+                  {service.idle_timeout === 0 ? (
+                    <span className="text-zinc-500">0s (Never Scale Down)</span>
+                  ) : (
+                    <>{service.idle_timeout}s</>
+                  )}
+                </span>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Max Concurrency</label>
+                <span className="text-base text-white font-medium block">{service.max_concurrency}</span>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Job Type</label>
+                <span className="text-base text-white font-medium block">{service.job_type}</span>
               </div>
             </div>
           </div>

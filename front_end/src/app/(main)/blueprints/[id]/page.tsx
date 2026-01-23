@@ -395,9 +395,13 @@ export default function BlueprintDetailsPage() {
               </button>
             </div>
             <div className="flex-1 overflow-auto bg-[#1e1e1e] relative group">
+              <pre className="text-[13px] font-mono leading-relaxed px-5 pt-5 pb-2 text-zinc-500 select-none border-b border-zinc-800/50 mb-0">
+                <span className="text-purple-400">from</span> magnus <span className="text-purple-400">import</span> JobSubmission, JobType{"\n"}
+                <span className="text-purple-400">from</span> typing <span className="text-purple-400">import</span> Annotated, Literal, Optional, List
+              </pre>
               <Editor
                 value={blueprint.code}
-                onValueChange={() => {}} 
+                onValueChange={() => {}}
                 highlight={code => highlight(code, languages.python, 'python')}
                 padding={20}
                 className="prism-editor font-mono text-sm leading-relaxed"
