@@ -143,12 +143,14 @@ class BlueprintParamOption(BaseModel):
 
 class BlueprintParamSchema(BaseModel):
     key: str
-    label: str 
+    label: str
     type: str
     default: Any = None
     description: Optional[str] = None
     scope: Optional[str] = None
     allow_empty: bool = True
+    is_optional: bool = False
+    is_list: bool = False
     min: Optional[float] = None
     max: Optional[float] = None
     placeholder: Optional[str] = None

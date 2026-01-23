@@ -101,8 +101,13 @@ export default function BlueprintsPage() {
   
   const handleSave = async (data: any) => {
     setIsSaving(true);
-    try { await client("/api/blueprints", { method: "POST", json: data }); setIsEditorOpen(false); fetchBlueprints(); }
-    catch (e: any) { alert(e.message); } finally { setIsSaving(false); }
+    try {
+      await client("/api/blueprints", { method: "POST", json: data });
+      setIsEditorOpen(false);
+      fetchBlueprints();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (

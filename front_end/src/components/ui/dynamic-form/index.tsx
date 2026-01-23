@@ -1,6 +1,6 @@
 // front_end/src/components/ui/dynamic-form/index.tsx
 import React, { useState, useRef, useEffect } from "react";
-import { Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { cn } from "@/lib/utils";
@@ -15,16 +15,18 @@ interface DynamicFormProps {
   errorField?: string | null;
 }
 
-function DynamicStringInput({ 
-  field, 
-  value, 
+function DynamicStringInput({
+  field,
+  value,
   onChange,
-  hasError 
-}: { 
-  field: FieldSchema; 
-  value: string; 
+  hasError,
+  disabled,
+}: {
+  field: FieldSchema;
+  value: string;
   onChange: (val: string) => void;
   hasError?: boolean;
+  disabled?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -38,12 +40,13 @@ function DynamicStringInput({
 
   const baseClasses = cn(
     "w-full bg-zinc-950 border px-3 py-2.5 rounded-lg text-sm transition-all outline-none placeholder-zinc-700",
-    field.multi_line && "font-mono leading-relaxed resize-none overflow-hidden", 
-    (field.multi_line && !field.min_lines) && "min-h-[42px]", 
-    hasError 
-      ? "border-red-500 animate-shake" 
-      : (!field.border_color 
-          ? "border-zinc-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20" 
+    field.multi_line && "font-mono leading-relaxed resize-none overflow-hidden",
+    (field.multi_line && !field.min_lines) && "min-h-[42px]",
+    disabled && "opacity-40 cursor-not-allowed",
+    hasError
+      ? "border-red-500 animate-shake"
+      : (!field.border_color
+          ? "border-zinc-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
           : "border-zinc-800")
   );
 
@@ -64,6 +67,7 @@ function DynamicStringInput({
     className: baseClasses,
     style: dynamicStyle,
     spellCheck: false,
+    disabled,
   };
 
   if (field.multi_line) {
@@ -78,17 +82,18 @@ function DynamicFloatInput({
   field,
   value,
   onChange,
-  hasError
+  hasError,
+  disabled,
 }: {
   field: FieldSchema;
   value: string;
   onChange: (val: string) => void;
   hasError?: boolean;
+  disabled?: boolean;
 }) {
-  const [isFocused, setIsFocused] = useState(false);
-
   const baseClasses = cn(
     "w-full bg-zinc-950 border px-3 py-2.5 rounded-lg text-sm font-mono transition-all outline-none placeholder-zinc-700",
+    disabled && "opacity-40 cursor-not-allowed",
     hasError
       ? "border-red-500 animate-shake"
       : "border-zinc-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
@@ -99,70 +104,78 @@ function DynamicFloatInput({
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
       placeholder={field.placeholder || "e.g. 3.14, 1e-5"}
       className={baseClasses}
       spellCheck={false}
+      disabled={disabled}
     />
   );
 }
 
 
-function FormField({ 
-  field, 
-  value, 
+function SingleFieldInput({
+  field,
+  value,
   onChange,
-  isError 
-}: { 
-  field: FieldSchema; 
-  value: any; 
-  onChange: (key: string, val: any) => void;
-  isError?: boolean;
+  hasError,
+  disabled,
+}: {
+  field: FieldSchema;
+  value: any;
+  onChange: (val: any) => void;
+  hasError?: boolean;
+  disabled?: boolean;
 }) {
-  const showRequiredStar = field.type === "text" && field.allow_empty === false;
-
-  return (
-    <div className="space-y-1.5" id={`field-${field.key}`}>
-      <label className={cn(
-        "text-xs uppercase tracking-wider mb-1.5 block font-medium transition-colors",
-        isError ? "text-red-500" : "text-zinc-500"
-      )}>
-        {field.label || field.key}
-        {showRequiredStar && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
-
-      {field.type === "number" ? (
+  if (field.type === "number") {
+    return (
+      <div className={cn(disabled && "opacity-40 pointer-events-none")}>
         <NumberStepper
           label=""
           value={Number(value)}
-          onChange={(val) => onChange(field.key, val)}
+          onChange={onChange}
           min={field.min}
           max={field.max}
         />
-      ) : field.type === "float" ? (
-        <DynamicFloatInput
-          field={field}
-          value={String(value ?? "")}
-          onChange={(val) => onChange(field.key, val)}
-          hasError={isError}
-        />
-      ) : field.type === "select" ? (
+      </div>
+    );
+  }
+
+  if (field.type === "float") {
+    return (
+      <DynamicFloatInput
+        field={field}
+        value={String(value ?? "")}
+        onChange={onChange}
+        hasError={hasError}
+        disabled={disabled}
+      />
+    );
+  }
+
+  if (field.type === "select") {
+    return (
+      <div className={cn(disabled && "opacity-40 pointer-events-none")}>
         <SearchableSelect
           value={String(value)}
-          onChange={(val) => onChange(field.key, val)}
+          onChange={onChange}
           options={(field.options || []).map(opt => ({
             label: opt.label,
             value: String(opt.value),
-            meta: opt.description 
+            meta: opt.description
           }))}
           placeholder={field.placeholder || "Select option..."}
           className="mb-0"
         />
-      ) : field.type === "boolean" ? (
+      </div>
+    );
+  }
+
+  if (field.type === "boolean") {
+    return (
+      <div className={cn(disabled && "opacity-40 pointer-events-none")}>
         <SearchableSelect
           value={String(value)}
-          onChange={(val) => onChange(field.key, val === "true")}
+          onChange={(val) => onChange(val === "true")}
           options={[
             { label: "True", value: "true" },
             { label: "False", value: "false" }
@@ -170,17 +183,200 @@ function FormField({
           placeholder="Select boolean..."
           className="mb-0"
         />
-      ) : (
-        <DynamicStringInput 
-          field={field} 
-          value={value} 
-          onChange={(val) => onChange(field.key, val)} 
-          hasError={isError}
-        />
-      )}
+      </div>
+    );
+  }
 
+  return (
+    <DynamicStringInput
+      field={field}
+      value={value ?? ""}
+      onChange={onChange}
+      hasError={hasError}
+      disabled={disabled}
+    />
+  );
+}
+
+
+function ListField({
+  field,
+  values,
+  onChange,
+  isError,
+  disabled,
+}: {
+  field: FieldSchema;
+  values: any[];
+  onChange: (val: any[]) => void;
+  isError?: boolean;
+  disabled?: boolean;
+}) {
+  const items = Array.isArray(values) ? values : [];
+
+  const getDefaultValue = () => {
+    if (field.type === "number") return 0;
+    if (field.type === "boolean") return false;
+    if (field.type === "select" && field.options?.length) return field.options[0].value;
+    return "";
+  };
+
+  const handleAdd = () => {
+    onChange([...items, getDefaultValue()]);
+  };
+
+  const handleRemove = (index: number) => {
+    onChange(items.filter((_, i) => i !== index));
+  };
+
+  const handleItemChange = (index: number, value: any) => {
+    const newItems = [...items];
+    newItems[index] = value;
+    onChange(newItems);
+  };
+
+  return (
+    <div className={cn("space-y-2", disabled && "opacity-40")}>
+      {items.map((item, index) => (
+        <div key={index} className="flex items-start gap-2">
+          <div className="flex-1">
+            <SingleFieldInput
+              field={field}
+              value={item}
+              onChange={(val) => handleItemChange(index, val)}
+              hasError={isError}
+              disabled={disabled}
+            />
+          </div>
+          {!disabled && (
+            <button
+              type="button"
+              onClick={() => handleRemove(index)}
+              className="mt-2.5 p-1 text-zinc-600 hover:text-red-400 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      ))}
+
+      {!disabled && (
+        <button
+          type="button"
+          onClick={handleAdd}
+          className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors py-1.5"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>Add item</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+
+function FormField({
+  field,
+  value,
+  onChange,
+  isError
+}: {
+  field: FieldSchema;
+  value: any;
+  onChange: (key: string, val: any) => void;
+  isError?: boolean;
+}) {
+  const showRequiredStar = field.type === "text" && field.allow_empty === false;
+
+  // Optional 字段：value 为 null 表示禁用
+  const isOptionalEnabled = field.is_optional ? value !== null : true;
+
+  const handleToggleOptional = () => {
+    if (field.is_optional) {
+      if (isOptionalEnabled) {
+        onChange(field.key, null);
+      } else {
+        // 启用时给一个默认值
+        let defaultVal: any = field.default ?? "";
+        if (field.is_list) defaultVal = [];
+        else if (field.type === "number") defaultVal = field.default ?? 0;
+        else if (field.type === "boolean") defaultVal = field.default ?? false;
+        else if (field.type === "select" && field.options?.length) defaultVal = field.default ?? field.options[0].value;
+        onChange(field.key, defaultVal);
+      }
+    }
+  };
+
+  const handleValueChange = (val: any) => {
+    onChange(field.key, val);
+  };
+
+  // 标签部分
+  const labelContent = (
+    <div className="flex items-center justify-between mb-1.5">
+      <label className={cn(
+        "text-xs uppercase tracking-wider font-medium transition-colors",
+        isError ? "text-red-500" : (isOptionalEnabled ? "text-zinc-500" : "text-zinc-600")
+      )}>
+        {field.label || field.key}
+        {showRequiredStar && <span className="text-red-500 ml-0.5">*</span>}
+        {field.is_list && (
+          <span className="text-zinc-600 ml-1.5 normal-case tracking-normal font-normal">(list)</span>
+        )}
+      </label>
+
+      {field.is_optional && (
+        <button
+          type="button"
+          onClick={handleToggleOptional}
+          className={cn(
+            "relative w-8 h-4 rounded-full transition-colors",
+            isOptionalEnabled ? "bg-blue-600" : "bg-zinc-700"
+          )}
+        >
+          <span className={cn(
+            "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform",
+            isOptionalEnabled ? "left-[18px]" : "left-0.5"
+          )} />
+        </button>
+      )}
+    </div>
+  );
+
+  // 渲染字段内容
+  const renderContent = () => {
+    if (field.is_list) {
+      return (
+        <ListField
+          field={field}
+          values={isOptionalEnabled ? (value ?? []) : []}
+          onChange={handleValueChange}
+          isError={isError}
+          disabled={!isOptionalEnabled}
+        />
+      );
+    }
+
+    return (
+      <SingleFieldInput
+        field={field}
+        value={isOptionalEnabled ? value : ""}
+        onChange={handleValueChange}
+        hasError={isError}
+        disabled={!isOptionalEnabled}
+      />
+    );
+  };
+
+  return (
+    <div className="space-y-1.5" id={`field-${field.key}`}>
+      {labelContent}
+      {renderContent()}
       {field.description && (
-        <p className="text-[11px] text-zinc-500 mt-1 ml-0.5">
+        <p className={cn(
+          "text-[11px] mt-1 ml-0.5 transition-colors",
+          isOptionalEnabled ? "text-zinc-500" : "text-zinc-600"
+        )}>
           {field.description}
         </p>
       )}

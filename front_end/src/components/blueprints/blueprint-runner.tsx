@@ -6,7 +6,7 @@ import { Terminal, Loader2, Play } from "lucide-react";
 import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
 import { DynamicForm } from "@/components/ui/dynamic-form";
-import { FieldSchema } from "@/components/ui/dynamic-form/types";
+import { FieldSchema, getFieldInitialValue, validateFieldValue } from "@/components/ui/dynamic-form/types";
 import { BlueprintPreference } from "@/types/blueprint";
 import { computeStableHash } from "@/lib/utils";
 
@@ -69,16 +69,11 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
           setParamsSchema(schema);
           
           const initial: Record<string, any> = {};
-          
-          // 仅当 Hash 匹配时使用缓存
           const useCache = preference && preference.blueprint_hash === signatureHash;
+          const cached = useCache ? preference!.cached_params : {};
 
           schema.forEach((p: FieldSchema) => {
-            if (useCache && preference!.cached_params[p.key] !== undefined) {
-              initial[p.key] = preference!.cached_params[p.key];
-            } else {
-              initial[p.key] = p.default ?? "";
-            }
+            initial[p.key] = getFieldInitialValue(p, cached[p.key]);
           });
 
           setFormValues(initial);
@@ -116,43 +111,12 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
     setErrorMessage(null);
 
     for (const param of paramsSchema) {
-      if (param.type === 'text' && param.allow_empty === false) {
-        const val = formValues[param.key];
-        if (!val || (typeof val === 'string' && !val.trim())) {
-          setErrorField(param.key);
-          setErrorMessage(`⚠️ ${param.label || param.key} is required`);
-          scrollToError(param.key);
-          return;
-        }
-      }
-
-      if (param.type === 'float') {
-        const val = formValues[param.key];
-        const strVal = String(val ?? "").trim();
-
-        if (strVal === "") continue;
-
-        const num = Number(strVal);
-        if (isNaN(num)) {
-          setErrorField(param.key);
-          setErrorMessage(`⚠️ ${param.label || param.key} must be a valid number`);
-          scrollToError(param.key);
-          return;
-        }
-
-        if (param.min !== undefined && num < param.min) {
-          setErrorField(param.key);
-          setErrorMessage(`⚠️ ${param.label || param.key} must be ≥ ${param.min}`);
-          scrollToError(param.key);
-          return;
-        }
-
-        if (param.max !== undefined && num > param.max) {
-          setErrorField(param.key);
-          setErrorMessage(`⚠️ ${param.label || param.key} must be ≤ ${param.max}`);
-          scrollToError(param.key);
-          return;
-        }
+      const err = validateFieldValue(param, formValues[param.key]);
+      if (err) {
+        setErrorField(param.key);
+        setErrorMessage(`⚠️ ${err}`);
+        scrollToError(param.key);
+        return;
       }
     }
 

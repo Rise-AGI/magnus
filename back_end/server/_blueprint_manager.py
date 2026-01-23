@@ -1,7 +1,7 @@
 # back_end/server/_blueprint_manager.py
 import inspect
 import logging
-from typing import Any, Dict, List, Annotated, Literal, get_origin, get_args
+from typing import Any, Dict, List, Optional, Union, Annotated, Literal, get_origin, get_args
 
 from pydantic import ValidationError, create_model, ConfigDict
 
@@ -9,6 +9,37 @@ from .models import JobType
 from .schemas import JobSubmission, BlueprintParamSchema, BlueprintParamOption
 
 logger = logging.getLogger(__name__)
+
+
+def _is_optional_type(tp) -> bool:
+    """检查类型是否是 Optional[X]，即 Union[X, None]"""
+    if get_origin(tp) is Union:
+        args = get_args(tp)
+        return type(None) in args and len(args) == 2
+    return False
+
+
+def _unwrap_optional(tp):
+    """从 Optional[X] 中提取 X"""
+    if _is_optional_type(tp):
+        args = get_args(tp)
+        for arg in args:
+            if arg is not type(None):
+                return arg
+    return tp
+
+
+def _is_list_type(tp) -> bool:
+    """检查类型是否是 List[X]"""
+    return get_origin(tp) is list
+
+
+def _unwrap_list(tp):
+    """从 List[X] 中提取 X"""
+    if _is_list_type(tp):
+        args = get_args(tp)
+        return args[0] if args else Any
+    return tp
 
 
 class BlueprintManager:
@@ -25,6 +56,7 @@ class BlueprintManager:
             "JobType": JobType,
             "Annotated": Annotated,
             "Literal": Literal,
+            "Optional": Optional,
             "List": List,
             "Dict": Dict,
             "Any": Any,
@@ -48,6 +80,8 @@ class BlueprintManager:
     def analyze_signature(self, code: str) -> List[BlueprintParamSchema]:
         """
         静态分析 generate_job 函数签名，提取参数元数据（包括 Annotated 中的 UI 配置）。
+        支持类型：T, Optional[T], List[T], Optional[List[T]]
+        其中 T 为基础类型：int, float, bool, str, Literal[...]
         """
         local_scope = self._compile_code(code, extra_globals={})
         func = local_scope["generate_job"]
@@ -75,6 +109,18 @@ class BlueprintManager:
                     if isinstance(arg, dict):
                         meta_dict.update(arg)
 
+            # 解包 Optional 和 List 包装
+            # 支持：T, Optional[T], List[T], Optional[List[T]]
+            is_optional = _is_optional_type(base_type)
+            if is_optional:
+                base_type = _unwrap_optional(base_type)
+                schema.is_optional = True
+
+            is_list = _is_list_type(base_type)
+            if is_list:
+                base_type = _unwrap_list(base_type)
+                schema.is_list = True
+
             # 应用元数据到 Schema
             if "label" in meta_dict:
                 schema.label = meta_dict["label"]
@@ -82,11 +128,11 @@ class BlueprintManager:
                 schema.description = meta_dict["description"]
             if "scope" in meta_dict:
                 schema.scope = meta_dict["scope"]
-            
+
             # 默认允许为空，除非另有指定
             schema.allow_empty = True
 
-            # 类型映射逻辑
+            # 类型映射逻辑 - 针对解包后的基础类型
             origin_base = get_origin(base_type)
 
             if base_type is int:

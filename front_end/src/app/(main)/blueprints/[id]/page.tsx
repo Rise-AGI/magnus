@@ -19,7 +19,7 @@ import { BlueprintEditor } from "@/components/blueprints/blueprint-editor";
 import RenderMarkdown from "@/components/ui/render-markdown";
 
 import { Blueprint, BlueprintPreference } from "@/types/blueprint";
-import { FieldSchema } from "@/components/ui/dynamic-form/types";
+import { FieldSchema, getFieldInitialValue, validateFieldValue } from "@/components/ui/dynamic-form/types";
 
 // Syntax Highlighting for Read-only view
 import Editor from "react-simple-code-editor";
@@ -124,13 +124,10 @@ export default function BlueprintDetailsPage() {
 
         const initial: Record<string, any> = {};
         const useCache = preference && preference.blueprint_hash === signatureHash;
+        const cached = useCache ? preference!.cached_params : {};
 
         schema.forEach((p: FieldSchema) => {
-          if (useCache && preference!.cached_params[p.key] !== undefined) {
-            initial[p.key] = preference!.cached_params[p.key];
-          } else {
-            initial[p.key] = p.default ?? "";
-          }
+          initial[p.key] = getFieldInitialValue(p, cached[p.key]);
         });
 
         setFormValues(initial);
@@ -152,46 +149,13 @@ export default function BlueprintDetailsPage() {
     setRunFieldErr(null);
 
     for (const param of paramsSchema) {
-      if (param.type === 'text' && param.allow_empty === false) {
-        const val = formValues[param.key];
-        if (!val || (typeof val === 'string' && !val.trim())) {
-          setRunFieldErr(param.key);
-          setRunError(`⚠️ ${param.label || param.key} is required`);
-          const el = document.getElementById(`field-${param.key}`);
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          return;
-        }
-      }
-
-      if (param.type === 'float') {
-        const val = formValues[param.key];
-        const strVal = String(val ?? "").trim();
-        if (strVal === "") continue;
-
-        const num = Number(strVal);
-        if (isNaN(num)) {
-          setRunFieldErr(param.key);
-          setRunError(`⚠️ ${param.label || param.key} must be a valid number`);
-          const el = document.getElementById(`field-${param.key}`);
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          return;
-        }
-
-        if (param.min !== undefined && num < param.min) {
-          setRunFieldErr(param.key);
-          setRunError(`⚠️ ${param.label || param.key} must be ≥ ${param.min}`);
-          const el = document.getElementById(`field-${param.key}`);
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          return;
-        }
-
-        if (param.max !== undefined && num > param.max) {
-          setRunFieldErr(param.key);
-          setRunError(`⚠️ ${param.label || param.key} must be ≤ ${param.max}`);
-          const el = document.getElementById(`field-${param.key}`);
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          return;
-        }
+      const err = validateFieldValue(param, formValues[param.key]);
+      if (err) {
+        setRunFieldErr(param.key);
+        setRunError(`⚠️ ${err}`);
+        const el = document.getElementById(`field-${param.key}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
       }
     }
 
@@ -228,18 +192,14 @@ export default function BlueprintDetailsPage() {
     try {
       await client("/api/blueprints", { method: "POST", json: data });
       setEditorOpen(false);
-      
+
       if (data.id === blueprint?.id) {
-         // [Edit Mode] Update in place
          await fetchBlueprint();
       } else {
-         // [Clone Mode] New Blueprint Created
          sessionStorage.setItem('magnus_new_blueprint', 'true');
          router.refresh();
          router.push('/blueprints');
       }
-    } catch (e: any) {
-      alert(e.message);
     } finally {
       setIsSavingClone(false);
     }
@@ -362,7 +322,7 @@ export default function BlueprintDetailsPage() {
              </div>
 
              <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center gap-2">
-                <button 
+                <button
                     onClick={() => { setEditorOpen(true); }}
                     className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
                     title={isOwner ? "Edit / Clone Blueprint" : "Clone Blueprint"}
@@ -370,8 +330,17 @@ export default function BlueprintDetailsPage() {
                     <RefreshCw className="w-5 h-5" />
                 </button>
 
+                <button
+                    onClick={handleRun}
+                    disabled={isRunning || isLoadingSchema}
+                    className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Run Blueprint"
+                >
+                    {isRunning ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
+                </button>
+
                 {isOwner && (
-                    <button 
+                    <button
                         onClick={() => setShowDeleteConfirm(true)}
                         className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
                         title="Delete Blueprint"

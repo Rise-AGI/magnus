@@ -47,38 +47,107 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
   const handleKeyDown = (e: React.KeyboardEvent) => {
     const target = e.currentTarget as HTMLTextAreaElement;
     const { value, selectionStart, selectionEnd } = target;
+
+    // 找到选中区域涉及的所有行
+    const firstLineStart = value.lastIndexOf('\n', selectionStart - 1) + 1;
+    const lastLineEnd = value.indexOf('\n', selectionEnd);
+    const blockEnd = lastLineEnd === -1 ? value.length : lastLineEnd;
+    const selectedBlock = value.substring(firstLineStart, blockEnd);
+    const lines = selectedBlock.split('\n');
+    const hasMultipleLines = lines.length > 1 || selectionStart !== selectionEnd;
+
     if (e.key === 'Tab') {
       e.preventDefault();
-      const newValue = value.substring(0, selectionStart) + "    " + value.substring(selectionEnd);
-      setFormData(prev => ({ ...prev, code: newValue }));
-      setTimeout(() => { target.selectionStart = target.selectionEnd = selectionStart + 4; }, 0);
+
+      if (e.shiftKey) {
+        // Shift+Tab: 反缩进（支持多行）
+        let totalRemoved = 0;
+        let firstLineRemoved = 0;
+        const newLines = lines.map((line, i) => {
+          const match = line.match(/^( {1,4})/);
+          if (match) {
+            const removed = match[1].length;
+            totalRemoved += removed;
+            if (i === 0) firstLineRemoved = removed;
+            return line.substring(removed);
+          }
+          return line;
+        });
+
+        const newBlock = newLines.join('\n');
+        const newValue = value.substring(0, firstLineStart) + newBlock + value.substring(blockEnd);
+        setFormData(prev => ({ ...prev, code: newValue }));
+
+        setTimeout(() => {
+          const newStart = Math.max(firstLineStart, selectionStart - firstLineRemoved);
+          const newEnd = Math.max(newStart, selectionEnd - totalRemoved);
+          target.selectionStart = newStart;
+          target.selectionEnd = hasMultipleLines ? newEnd : newStart;
+        }, 0);
+      } else {
+        // Tab: 缩进（支持多行）
+        if (hasMultipleLines) {
+          const newLines = lines.map(line => '    ' + line);
+          const newBlock = newLines.join('\n');
+          const newValue = value.substring(0, firstLineStart) + newBlock + value.substring(blockEnd);
+          setFormData(prev => ({ ...prev, code: newValue }));
+
+          setTimeout(() => {
+            target.selectionStart = selectionStart + 4;
+            target.selectionEnd = selectionEnd + (lines.length * 4);
+          }, 0);
+        } else {
+          // 单行无选中：插入 4 空格
+          const newValue = value.substring(0, selectionStart) + "    " + value.substring(selectionEnd);
+          setFormData(prev => ({ ...prev, code: newValue }));
+          setTimeout(() => { target.selectionStart = target.selectionEnd = selectionStart + 4; }, 0);
+        }
+      }
     }
+
     if ((e.metaKey || e.ctrlKey) && e.key === '/') {
       e.preventDefault();
-      const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1;
-      let lineEnd = value.indexOf('\n', selectionStart);
-      if (lineEnd === -1) lineEnd = value.length;
-      const currentLine = value.substring(lineStart, lineEnd);
-      const isCommented = currentLine.trimStart().startsWith('#');
-      let newValue;
-      let newCursorPos = selectionStart;
-      if (isCommented) {
-        const match = currentLine.match(/^(\s*)# ?(.*)$/);
-        if (match) {
-          const cleanLine = match[1] + match[2];
-          newValue = value.substring(0, lineStart) + cleanLine + value.substring(lineEnd);
-          newCursorPos = Math.max(lineStart, selectionStart - (currentLine.length - cleanLine.length));
-        } else { newValue = value; }
-      } else {
-        const match = currentLine.match(/^(\s*)(.*)$/);
-        const indent = match ? match[1] : "";
-        const content = match ? match[2] : currentLine;
-        const commentedLine = indent + "# " + content;
-        newValue = value.substring(0, lineStart) + commentedLine + value.substring(lineEnd);
-        newCursorPos = selectionStart + 2;
-      }
+
+      // 检查是否所有行都已注释
+      const allCommented = lines.every(line => line.trim() === '' || line.trimStart().startsWith('#'));
+
+      let totalDelta = 0;
+      let firstLineDelta = 0;
+      const newLines = lines.map((line, i) => {
+        if (allCommented) {
+          // 反注释
+          const match = line.match(/^(\s*)# ?(.*)$/);
+          if (match) {
+            const newLine = match[1] + match[2];
+            const delta = line.length - newLine.length;
+            totalDelta -= delta;
+            if (i === 0) firstLineDelta = -delta;
+            return newLine;
+          }
+          return line;
+        } else {
+          // 注释
+          const match = line.match(/^(\s*)(.*)$/);
+          const indent = match ? match[1] : "";
+          const content = match ? match[2] : line;
+          if (content === '') return line;  // 空行不加注释
+          const newLine = indent + "# " + content;
+          totalDelta += 2;
+          if (i === 0) firstLineDelta = 2;
+          return newLine;
+        }
+      });
+
+      const newBlock = newLines.join('\n');
+      const newValue = value.substring(0, firstLineStart) + newBlock + value.substring(blockEnd);
       setFormData(prev => ({ ...prev, code: newValue }));
-      setTimeout(() => { target.selectionStart = target.selectionEnd = newCursorPos; }, 0);
+
+      setTimeout(() => {
+        const newStart = Math.max(firstLineStart, selectionStart + firstLineDelta);
+        const newEnd = hasMultipleLines ? selectionEnd + totalDelta : newStart;
+        target.selectionStart = newStart;
+        target.selectionEnd = newEnd;
+      }, 0);
     }
   };
 
@@ -94,7 +163,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const id = formData.id.trim();
     const title = formData.title.trim();
     const description = formData.description.trim();
@@ -102,29 +171,32 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
     setErrorField(null);
     setErrorMessage(null);
 
-    // Use setTimeout(0) to push validation to the next tick, ensuring the animate-shake class resets if re-applied
-    setTimeout(() => {
-      if (!title) {
-        setErrorField("title");
-        setErrorMessage("⚠️ Blueprint Name is required");
-        scrollToError("field-title");
-        return;
-      }
-      if (!id) {
-        setErrorField("id");
-        setErrorMessage("⚠️ Blueprint ID is required");
-        scrollToError("field-id");
-        return;
-      }
-      if (!description) {
-        setErrorField("description");
-        setErrorMessage("⚠️ Description is required");
-        scrollToError("field-description");
-        return;
-      }
+    if (!title) {
+      setErrorField("title");
+      setErrorMessage("⚠️ Blueprint Name is required");
+      scrollToError("field-title");
+      return;
+    }
+    if (!id) {
+      setErrorField("id");
+      setErrorMessage("⚠️ Blueprint ID is required");
+      scrollToError("field-id");
+      return;
+    }
+    if (!description) {
+      setErrorField("description");
+      setErrorMessage("⚠️ Description is required");
+      scrollToError("field-description");
+      return;
+    }
 
-      onSave({ ...formData, id, title, description });
-    }, 0);
+    try {
+      await onSave({ ...formData, id, title, description });
+    } catch (e: any) {
+      setErrorField("code");
+      setErrorMessage(`⚠️ ${e.message || "Failed to save blueprint"}`);
+      scrollToError("field-code");
+    }
   };
 
   const handleGetPayload = () => {
@@ -229,8 +301,10 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
               Implementation
               <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
             </h3>
-            <label className="text-xs uppercase font-bold text-zinc-500 mb-2 flex items-center gap-2"><Terminal className="w-3 h-3" /> Python Logic</label>
-            <div className="relative rounded-xl overflow-hidden border border-zinc-800 bg-[#1e1e1e] focus-within:ring-1 focus-within:ring-blue-500/50 transition-all shadow-inner min-h-[400px]">
+            <label className={`text-xs uppercase font-bold mb-2 flex items-center gap-2 ${errorField === 'code' ? 'text-red-500' : 'text-zinc-500'}`}>
+              <Terminal className="w-3 h-3" /> Python Logic
+            </label>
+            <div id="field-code" className={`relative rounded-xl overflow-hidden border bg-[#1e1e1e] focus-within:ring-1 transition-all shadow-inner min-h-[400px] ${errorField === 'code' ? 'border-red-500 animate-shake' : 'border-zinc-800 focus-within:ring-blue-500/50'}`}>
               <Editor
                 value={formData.code}
                 onValueChange={code => setFormData({ ...formData, code })}
