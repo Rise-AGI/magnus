@@ -321,6 +321,8 @@ class MagnusScheduler:
             ]
             subprocess.run(acl_cmd_cache, check=True)
             
+            juliaup_path = magnus_config["server"]["juliaup_path"]
+            
             gpu_status_path = f"{job_working_table}/gpu_status.json"
             try:
                 with open(gpu_status_path, "w", encoding="utf-8") as f:
@@ -478,6 +480,7 @@ def main():
             f"conda activate {{execution_conda_environment}}",
             "unset VIRTUAL_ENV",
             "export UV_CACHE_DIR={magnus_uv_cache}",
+            "export JULIAUP_DEPOT_PATH={juliaup_path}",
             f"export MAGNUS_TOKEN={{user_token}}",
             f"export MAGNUS_RESULT={{result_marker_path}}",
         ]
