@@ -120,6 +120,7 @@ export default function JobDetailsPage() {
     if (job && ['Pending', 'Running'].includes(job.status)) {
       setFollowMode(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, isSlurmTask, job?.status, fetchLogs]);
 
   // Follow mode polling (5x slower than POLL_INTERVAL)
@@ -131,6 +132,7 @@ export default function JobDetailsPage() {
     }
     const interval = setInterval(() => fetchLogs(-1), POLL_INTERVAL * 5);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followMode, job?.status, fetchLogs]);
 
   // Execute pending scroll after logs update
