@@ -7,7 +7,9 @@ import { Server, RefreshCw } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Service } from "@/types/service";
 import ServiceForm, { ServiceFormData } from "./service-form";
-import { ConfigClipboard } from "@/components/ui/config-clipboard"
+import { ConfigClipboard } from "@/components/ui/config-clipboard";
+import { HelpButton } from "@/components/ui/help-button";
+import { ServiceFormHelp } from "@/components/ui/help-content";
 
 
 interface ServiceDrawerProps {
@@ -38,11 +40,16 @@ export function ServiceDrawer({
       icon={isEdit ? <RefreshCw className="w-5 h-5 text-purple-500" /> : <Server className="w-5 h-5 text-blue-500" />}
       width="w-[650px]"
       actions={
-        <ConfigClipboard 
-          kind="magnus/service"
-          onGetPayload={() => formRef.current?.getPayload()}
-          onApplyPayload={(p) => formRef.current?.applyPayload(p)}
-        />
+        <>
+          <HelpButton title="弹性服务帮助">
+            <ServiceFormHelp />
+          </HelpButton>
+          <ConfigClipboard
+            kind="magnus/service"
+            onGetPayload={() => formRef.current?.getPayload()}
+            onApplyPayload={(p) => formRef.current?.applyPayload(p)}
+          />
+        </>
       }
     >
       {isOpen && (

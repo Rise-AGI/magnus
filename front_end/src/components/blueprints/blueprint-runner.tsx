@@ -9,6 +9,8 @@ import { DynamicForm } from "@/components/ui/dynamic-form";
 import { FieldSchema, getFieldInitialValue, validateFieldValue } from "@/components/ui/dynamic-form/types";
 import { BlueprintPreference } from "@/types/blueprint";
 import { computeStableHash } from "@/lib/utils";
+import { HelpButton } from "@/components/ui/help-button";
+import { BlueprintRunnerHelp } from "@/components/ui/help-content";
 
 interface BlueprintRunnerProps {
   blueprint: { id: string; title: string } | null;
@@ -162,6 +164,11 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
       title={blueprint?.title}
       icon={<Terminal className="w-5 h-5 text-blue-500" />}
       width="w-[600px]"
+      actions={
+        <HelpButton title="蓝图运行帮助">
+          <BlueprintRunnerHelp />
+        </HelpButton>
+      }
     >
       <div className="flex flex-col min-h-full">
         <div className="flex-1 pb-4">

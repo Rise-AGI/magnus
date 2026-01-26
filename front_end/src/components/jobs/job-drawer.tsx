@@ -3,7 +3,9 @@ import { useRef } from "react";
 import { Rocket, RefreshCw } from "lucide-react";
 import JobForm, { JobFormData } from "@/components/jobs/job-form";
 import { Drawer } from "@/components/ui/drawer";
-import { ConfigClipboard } from "@/components/ui/config-clipboard"
+import { ConfigClipboard } from "@/components/ui/config-clipboard";
+import { HelpButton } from "@/components/ui/help-button";
+import { JobFormHelp } from "@/components/ui/help-content";
 
 interface JobDrawerProps {
   isOpen: boolean;
@@ -38,11 +40,16 @@ export function JobDrawer({
       description={desc}
       width="w-[650px]"
       actions={
-        <ConfigClipboard 
-          kind="magnus/job"
-          onGetPayload={() => formRef.current?.getPayload()}
-          onApplyPayload={(p) => formRef.current?.applyPayload(p)}
-        />
+        <>
+          <HelpButton title="任务提交帮助">
+            <JobFormHelp />
+          </HelpButton>
+          <ConfigClipboard
+            kind="magnus/job"
+            onGetPayload={() => formRef.current?.getPayload()}
+            onApplyPayload={(p) => formRef.current?.applyPayload(p)}
+          />
+        </>
       }
     >
       <JobForm 

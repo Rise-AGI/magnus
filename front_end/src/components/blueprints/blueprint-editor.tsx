@@ -5,6 +5,8 @@ import { useState, useEffect, useRef } from "react";
 import { Loader2, Terminal, RefreshCw, DraftingCompass, Save } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { ConfigClipboard } from "@/components/ui/config-clipboard";
+import { HelpButton } from "@/components/ui/help-button";
+import { BlueprintEditorHelp } from "@/components/ui/help-content";
 
 import Editor from "react-simple-code-editor";
 import { highlight, languages } from "prismjs";
@@ -238,11 +240,16 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
       icon={mode === 'create' ? <DraftingCompass className="w-5 h-5 text-blue-500" /> : <RefreshCw className="w-5 h-5 text-purple-500" />}
       width="w-full max-w-4xl"
       actions={
-        <ConfigClipboard 
-          kind="magnus/blueprint"
-          onGetPayload={handleGetPayload}
-          onApplyPayload={handleApplyPayload}
-        />
+        <>
+          <HelpButton title="蓝图编辑帮助">
+            <BlueprintEditorHelp />
+          </HelpButton>
+          <ConfigClipboard
+            kind="magnus/blueprint"
+            onGetPayload={handleGetPayload}
+            onApplyPayload={handleApplyPayload}
+          />
+        </>
       }
     >
       <div className="flex flex-col min-h-full">
