@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Send, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check } from "lucide-react";
+import { ArrowUp, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check } from "lucide-react";
 import { client } from "@/lib/api";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import type { EnchantSessionWithMessages, EnchantMessage } from "@/types/enchant";
@@ -426,14 +426,27 @@ export default function SessionPage() {
 
     if (isStreaming) return;
 
-    let messageContent = textContent;
+    // Build message with images first, then text, then documents
+    const imageParts: string[] = [];
+    const docParts: string[] = [];
 
     for (const att of attachments) {
-      if (att.type === "text" && att.content) {
-        messageContent += `\n\n---\n📄 ${att.filename}\n---\n${att.content}`;
-      } else if (att.type === "image" && att.path) {
-        messageContent += `\n\n[图片: ${att.filename}](file://${att.path})`;
+      if (att.type === "image" && att.path) {
+        imageParts.push(`[图片: ${att.filename}](file://${att.path})`);
+      } else if (att.type === "text" && att.content) {
+        docParts.push(`---\n📄 ${att.filename}\n---\n${att.content}`);
       }
+    }
+
+    let messageContent = "";
+    if (imageParts.length > 0) {
+      messageContent += imageParts.join("\n\n");
+    }
+    if (textContent) {
+      messageContent += (messageContent ? "\n\n" : "") + textContent;
+    }
+    if (docParts.length > 0) {
+      messageContent += (messageContent ? "\n\n" : "") + docParts.join("\n\n");
     }
 
     if (editIndex !== undefined) {
@@ -464,6 +477,7 @@ export default function SessionPage() {
     setStreamingContent("");
 
     abortControllerRef.current = new AbortController();
+    let fullContent = "";
 
     try {
       const token = localStorage.getItem("magnus_token");
@@ -486,7 +500,6 @@ export default function SessionPage() {
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let fullContent = "";
 
       if (reader) {
         while (true) {
@@ -520,7 +533,25 @@ export default function SessionPage() {
       }, 3000);
     } catch (error) {
       if ((error as Error).name === "AbortError") {
-        console.log("Request aborted");
+        // Save partial content if any was received
+        if (fullContent) {
+          let savedContent = fullContent;
+          // If thinking tag was opened but not closed, close it
+          if (savedContent.includes("<think>") && !savedContent.includes("</think>")) {
+            savedContent = savedContent + "</think>";
+          }
+          const assistantMessage: EnchantMessage = {
+            id: `assistant-${Date.now()}`,
+            session_id: sessionId,
+            role: "assistant",
+            content: savedContent,
+            created_at: new Date().toISOString(),
+          };
+          setSession((prev) =>
+            prev ? { ...prev, messages: [...prev.messages, assistantMessage] } : null
+          );
+        }
+        setStreamingContent("");
       } else {
         console.error("Failed to send message:", error);
       }
@@ -539,7 +570,10 @@ export default function SessionPage() {
 
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Escape" && isStreaming) {
+      e.preventDefault();
+      stopStreaming();
+    } else if (e.key === "Enter" && !e.shiftKey && !isStreaming) {
       e.preventDefault();
       sendMessage();
     }
@@ -751,9 +785,9 @@ export default function SessionPage() {
             {isStreaming ? (
               <button
                 onClick={stopStreaming}
-                className="m-2 p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg transition-colors"
+                className="m-2 p-2 bg-red-900/30 hover:bg-red-800/40 text-red-400 rounded-lg transition-colors"
               >
-                <Square className="w-5 h-5 fill-current" />
+                <Square className="w-3.5 h-3.5 fill-current" />
               </button>
             ) : (
               <button
@@ -764,7 +798,7 @@ export default function SessionPage() {
                 {isUploading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
-                  <Send className="w-5 h-5" />
+                  <ArrowUp className="w-5 h-5" />
                 )}
               </button>
             )}
