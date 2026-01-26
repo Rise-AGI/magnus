@@ -142,12 +142,8 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
   };
 
   return (
-    <div className="fixed inset-0 top-16 left-64 flex bg-zinc-950 overflow-hidden">
+    <div className="flex h-full w-full bg-zinc-950 overflow-hidden">
       <style jsx global>{`
-        html, body {
-          overflow: hidden !important;
-          height: 100vh !important;
-        }
         .enchant-scroll::-webkit-scrollbar {
           width: 6px;
           height: 6px;
@@ -169,7 +165,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
       `}</style>
 
       {/* Sidebar */}
-      <div className="w-56 border-r border-zinc-800 flex flex-col">
+      <div className="w-56 flex-shrink-0 border-r border-zinc-800 flex flex-col">
         <div className="px-4 py-3 flex items-center justify-between">
           <h3 className="text-base font-medium text-zinc-400">Enchant Sessions</h3>
           <button
@@ -277,7 +273,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {children}
       </div>
     </div>
