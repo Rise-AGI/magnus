@@ -318,6 +318,8 @@ export default function SessionPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isUserNearBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -339,8 +341,20 @@ export default function SessionPage() {
 
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isUserNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [session?.messages, streamingContent]);
+
+
+  const handleMessagesScroll = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    isUserNearBottomRef.current = distanceFromBottom < 100;
+  }, []);
 
 
   const adjustTextareaHeight = useCallback(() => {
@@ -475,6 +489,7 @@ export default function SessionPage() {
     setAttachments([]);
     setIsStreaming(true);
     setStreamingContent("");
+    isUserNearBottomRef.current = true;
 
     abortControllerRef.current = new AbortController();
     let fullContent = "";
@@ -611,7 +626,11 @@ export default function SessionPage() {
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 enchant-scroll">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleMessagesScroll}
+        className="flex-1 overflow-y-auto px-4 py-6 enchant-scroll"
+      >
         <div className="max-w-3xl mx-auto space-y-6 pb-32">
           {session.messages.map((message, index) => (
             <div
