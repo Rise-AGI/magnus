@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import signal
+import subprocess
 import typer
 from typing import List, Optional, Any, Dict, Tuple
 from pathlib import Path
@@ -11,8 +12,9 @@ from rich.theme import Theme
 from rich.table import Table
 from rich.status import Status
 from datetime import datetime
+from importlib.metadata import version
 
-__version__ = "0.1.9"
+__version__ = version("magnus-sdk")
 
 from .. import (
     MagnusError,
@@ -228,7 +230,7 @@ def apply_cli_defaults(parsed_cli_args: Dict[str, Any], command_type: str = "sub
 
 def _version_callback(value: bool):
     if value:
-        console.print(f"[bold blue]Magnus SDK[/bold blue] v{__version__}")
+        console.print(f"[bold blue]Magnus SDK[/bold blue] v{__version__}", highlight=False)
         console.print("[dim]PKU Plasma · Rise-AGI[/dim]")
         raise typer.Exit()
 
@@ -612,6 +614,126 @@ def kill_job_cmd(
         raise typer.Exit(code=1)
     except Exception as e:
         print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+# === Session Management Commands ===
+
+TARGET_DEBUG_JOB_NAME = "Magnus Debug"
+
+
+def _get_debug_jobs(user: str) -> List[str]:
+    """获取当前用户的所有 Magnus Debug 任务 ID（按时间倒序）"""
+    try:
+        result = subprocess.run(
+            ["squeue", "-u", user, "-n", TARGET_DEBUG_JOB_NAME, "--sort=-i", "-h", "-o", "%i"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return []
+        return [jid.strip() for jid in result.stdout.strip().split("\n") if jid.strip()]
+    except Exception:
+        return []
+
+
+def _srun_connect(job_id: str, message: str) -> int:
+    """通过 srun 连接到指定任务"""
+    welcome = f'echo -e "\\033[0;34m[Magnus]\\033[0m {message}";'
+    cmd = ["srun", "--jobid", job_id, "--overlap", "--pty", "bash", "-c", f'{welcome} exec bash -l']
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=sys.stdin,
+            stdout=sys.stdout,
+            stderr=subprocess.PIPE,
+        )
+        _, stderr = proc.communicate()
+
+        if stderr:
+            filtered = "\n".join(
+                line for line in stderr.decode().split("\n")
+                if "Hangup" not in line and line.strip()
+            )
+            if filtered:
+                sys.stderr.write(filtered + "\n")
+
+        return proc.returncode
+    except Exception as e:
+        print_error(f"Failed to connect: {e}")
+        return 1
+
+
+@app.command(name="connect")
+def connect_cmd(
+    job_id: Optional[str] = typer.Argument(None, help="Job ID to connect (optional, auto-detect if omitted)"),
+):
+    """
+    Connect to a running Magnus Debug session via srun.
+
+    Examples:
+      magnus connect           # auto-detect and connect to latest debug job
+      magnus connect 12345     # connect to specific SLURM job
+    """
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    if slurm_job_id:
+        print_msg(f"Already in a Magnus session (Job ID: {slurm_job_id}).")
+        raise typer.Exit(code=0)
+
+    if job_id is not None:
+        if not job_id.isdigit():
+            print_error("Invalid Job ID format. Must be numeric.")
+            raise typer.Exit(code=1)
+
+        ret = _srun_connect(job_id, "Connected.")
+        raise typer.Exit(code=ret)
+
+    current_user = os.environ.get("USER", "")
+    if not current_user:
+        print_error("Cannot determine current user.")
+        raise typer.Exit(code=1)
+
+    jobs = _get_debug_jobs(current_user)
+
+    if not jobs:
+        print_msg(f"No active '{TARGET_DEBUG_JOB_NAME}' sessions found.")
+        console.print("         Please submit a debug job first.", highlight=False)
+        raise typer.Exit(code=1)
+
+    if len(jobs) == 1:
+        ret = _srun_connect(jobs[0], "Connected.")
+        raise typer.Exit(code=ret)
+
+    target_id = jobs[0]
+    other_ids = ", ".join(jobs[1:])
+    message = f"Connected to latest ({target_id}). Other active: {other_ids}"
+    ret = _srun_connect(target_id, message)
+    raise typer.Exit(code=ret)
+
+
+@app.command(name="disconnect")
+def disconnect_cmd():
+    """
+    Disconnect from the current Magnus Debug session.
+
+    This command sends SIGHUP to the parent process, terminating the srun session.
+    Only works when inside a Magnus session (SLURM_JOB_ID is set).
+    """
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+
+    if not slurm_job_id:
+        print_msg("Not in a Magnus session.")
+        raise typer.Exit(code=1)
+
+    print_msg("Disconnected.")
+
+    ppid = os.getppid()
+    try:
+        os.kill(ppid, signal.SIGHUP)
+    except OSError as e:
+        print_error(f"Failed to send SIGHUP: {e}")
         raise typer.Exit(code=1)
 
 

@@ -8,7 +8,7 @@ dependencies = [
     "fastapi>=0.124.0",
     "fastmcp>=2.14.2",
     "httpx[socks]>=0.28.1",
-    "magnus-sdk==0.1.9",
+    "magnus-sdk==0.2.2",
     "pyjwt>=2.10.1",
     "ruamel-yaml>=0.18.16",
     "sqlalchemy>=2.0.44",
