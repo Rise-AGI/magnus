@@ -130,7 +130,7 @@ export function JobFormHelp() {
       <HelpSection title="必填字段">
         <HelpFieldList>
           <HelpField name="Task Name">
-            任务名称，用于在任务列表中标识和搜索。建议使用有意义的命名，如 "train-resnet50-epoch100"。
+            任务名称，用于在任务列表中标识和搜索。建议使用有意义的命名，如 train-resnet50-epoch100。
           </HelpField>
           <HelpField name="Namespace / Repo Name">
             GitHub 仓库的组织名和仓库名。系统会通过 SSH 拉取代码，确保仓库已配置正确的访问权限。
@@ -208,7 +208,7 @@ export function ServiceFormHelp() {
           </HelpField>
           <HelpField name="Service ID">
             服务的唯一标识符，用于 API 调用和 CLI 访问。必须是 URL 安全的小写字符串，
-            如 "llm-inference"、"image-gen-v2"。创建后不可修改。
+            如 llm-inference、image-gen-v2。创建后不可修改。
           </HelpField>
         </HelpFieldList>
       </HelpSection>
@@ -265,7 +265,7 @@ export function BlueprintEditorHelp() {
   return (
     <>
       <p>
-        蓝图 (Blueprint) 实现了 "Python 函数即前端表单" 的开发模式。
+        蓝图 (Blueprint) 实现了「Python 函数即前端表单」的开发模式。
         编写一个带类型注解的 Python 函数，系统自动解析函数签名生成对应的前端表单界面，
         用户填写参数后调用函数生成任务配置并提交执行。
       </p>
@@ -343,7 +343,7 @@ def generate_job(
               <td className="py-2">—</td>
             </tr>
             <tr className="border-b border-zinc-800/50">
-              <td className="py-2"><code className="text-blue-400">Literal["a", "b"]</code></td>
+              <td className="py-2"><code className="text-blue-400">{`Literal["a", "b"]`}</code></td>
               <td className="py-2">下拉选择器</td>
               <td className="py-2">options (可为每个选项定义 label 和 description)</td>
             </tr>
