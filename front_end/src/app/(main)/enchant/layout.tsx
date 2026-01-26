@@ -142,7 +142,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-zinc-950 -m-8 overflow-hidden">
+    <div className="fixed inset-0 top-16 left-64 flex bg-zinc-950 overflow-hidden">
       <style jsx global>{`
         html, body {
           overflow: hidden !important;
