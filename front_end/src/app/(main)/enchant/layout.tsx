@@ -270,7 +270,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
 
           {sessions.length === 0 && initialLoaded && (
             <div className="text-center text-zinc-600 text-sm py-8">
-              No conversations yet
+              No sessions yet
             </div>
           )}
 

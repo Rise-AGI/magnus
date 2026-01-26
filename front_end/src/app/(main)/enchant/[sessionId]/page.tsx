@@ -66,6 +66,7 @@ function ImagePreviewModal({ src, alt, onClose }: { src: string; alt: string; on
       >
         <X className="w-6 h-6" />
       </button>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
         alt={alt}
@@ -169,6 +170,7 @@ function UserMessageContent({
 
           return (
             <div key={index} className="mt-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={imageUrl}
                 alt={part.filename || "图片"}
@@ -625,6 +627,7 @@ export default function SessionPage() {
                       />
                     </div>
                     {user?.avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={user.avatar_url}
                         alt={user.name}
@@ -640,6 +643,7 @@ export default function SessionPage() {
               ) : (
                 <div className="flex flex-col">
                   <div className="flex items-start gap-2 max-w-[85%]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src="/api/logo"
                       alt="Magnus"
@@ -668,6 +672,7 @@ export default function SessionPage() {
           {isStreaming && streamingContent && (
             <div className="flex justify-start">
               <div className="flex items-start gap-2 max-w-[85%]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="/api/logo"
                   alt="Magnus"
@@ -683,6 +688,7 @@ export default function SessionPage() {
           {isStreaming && !streamingContent && (
             <div className="flex justify-start">
               <div className="flex items-start gap-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="/api/logo"
                   alt="Magnus"
