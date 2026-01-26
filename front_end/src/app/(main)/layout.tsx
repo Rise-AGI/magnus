@@ -6,9 +6,12 @@ import { Header } from "@/components/layout/header";
 import { useAuth } from "@/context/auth-context";
 import { LoginRequired } from "@/components/auth/login-required";
 import { Loader2 } from "lucide-react";
+import { usePathname } from "next/navigation";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  const pathname = usePathname();
+  const isEnchantPage = pathname?.startsWith("/enchant");
 
   return (
     <div className="min-h-screen bg-[#050505]">
@@ -19,7 +22,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         {/* Header 永远显示，提供了基础导航 */}
         <Header />
 
-        <main className="p-8">
+        <main className={isEnchantPage ? "h-[calc(100vh-4rem)] overflow-hidden" : "p-8"}>
           {isLoading ? (
             // 状态 A: 加载中
             <div className="h-[60vh] flex items-center justify-center text-zinc-500 gap-2">
@@ -31,7 +34,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             <LoginRequired />
           ) : (
             // 状态 C: 已登录 -> 显示真实内容
-            <div className="animate-in fade-in duration-500">
+            <div className={isEnchantPage ? "h-full w-full" : "animate-in fade-in duration-500"}>
                {children}
             </div>
           )}
