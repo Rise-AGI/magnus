@@ -142,7 +142,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-zinc-950 -m-8">
+    <div className="flex h-[calc(100vh-4rem)] bg-zinc-950 -m-8 overflow-hidden">
       <style jsx global>{`
         .enchant-scroll::-webkit-scrollbar,
         html::-webkit-scrollbar,
