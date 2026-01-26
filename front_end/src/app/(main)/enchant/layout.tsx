@@ -144,31 +144,25 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
   return (
     <div className="flex h-[calc(100vh-4rem)] bg-zinc-950 -m-8 overflow-hidden">
       <style jsx global>{`
-        .enchant-scroll::-webkit-scrollbar,
-        html::-webkit-scrollbar,
-        body::-webkit-scrollbar {
+        html, body {
+          overflow: hidden !important;
+          height: 100vh !important;
+        }
+        .enchant-scroll::-webkit-scrollbar {
           width: 6px;
           height: 6px;
         }
-        .enchant-scroll::-webkit-scrollbar-track,
-        html::-webkit-scrollbar-track,
-        body::-webkit-scrollbar-track {
+        .enchant-scroll::-webkit-scrollbar-track {
           background: transparent;
         }
-        .enchant-scroll::-webkit-scrollbar-thumb,
-        html::-webkit-scrollbar-thumb,
-        body::-webkit-scrollbar-thumb {
+        .enchant-scroll::-webkit-scrollbar-thumb {
           background: #3f3f46;
           border-radius: 3px;
         }
-        .enchant-scroll::-webkit-scrollbar-thumb:hover,
-        html::-webkit-scrollbar-thumb:hover,
-        body::-webkit-scrollbar-thumb:hover {
+        .enchant-scroll::-webkit-scrollbar-thumb:hover {
           background: #52525b;
         }
-        .enchant-scroll,
-        html,
-        body {
+        .enchant-scroll {
           scrollbar-width: thin;
           scrollbar-color: #3f3f46 transparent;
         }
