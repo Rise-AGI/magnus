@@ -4,15 +4,16 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { 
-  LayoutDashboard, 
-  Rocket, 
-  Activity, 
-  Server, 
-  LogIn, 
-  LogOut, 
-  ScrollText, 
-  Layers, 
+import {
+  LayoutDashboard,
+  Rocket,
+  Activity,
+  Server,
+  LogIn,
+  LogOut,
+  ScrollText,
+  Layers,
+  ArrowRight,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context"; 
 import { CLUSTER_CONFIG } from "@/lib/config";
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   { name: "Jobs", href: "/jobs", icon: Rocket },
   { name: "Blueprints", href: "/blueprints", icon: ScrollText },
   { name: "Services", href: "/services", icon: Layers },
+  { name: "Enchant", href: "/enchant", icon: ArrowRight },
   // { name: "Tools", href: "/tools", icon: Wrench },
 ];
 
