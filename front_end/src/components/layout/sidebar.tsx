@@ -13,7 +13,7 @@ import {
   LogOut,
   ScrollText,
   Layers,
-  ArrowRight,
+  // ArrowRight,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context"; 
 import { CLUSTER_CONFIG } from "@/lib/config";
@@ -24,7 +24,7 @@ const NAV_ITEMS = [
   { name: "Jobs", href: "/jobs", icon: Rocket },
   { name: "Blueprints", href: "/blueprints", icon: ScrollText },
   { name: "Services", href: "/services", icon: Layers },
-  { name: "Enchant", href: "/enchant", icon: ArrowRight },
+  // { name: "Enchant", href: "/enchant", icon: ArrowRight },
   // { name: "Tools", href: "/tools", icon: Wrench },
 ];
 
