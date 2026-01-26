@@ -629,7 +629,7 @@ export default function SessionPage() {
       <div
         ref={scrollContainerRef}
         onScroll={handleMessagesScroll}
-        className="flex-1 overflow-y-auto px-4 py-6 enchant-scroll"
+        className="flex-1 min-h-0 overflow-y-auto px-4 py-6 enchant-scroll"
       >
         <div className="max-w-3xl mx-auto space-y-6 pb-32">
           {session.messages.map((message, index) => (
