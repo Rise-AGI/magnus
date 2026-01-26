@@ -8,6 +8,7 @@ from . import cluster
 from . import blueprints
 from . import services
 from . import sdk
+from . import enchant
 
 
 __all__ = [
@@ -24,3 +25,4 @@ router.include_router(cluster.router, tags=["Cluster"])
 router.include_router(blueprints.router, tags=["Blueprints"])
 router.include_router(services.router, tags=["Services"])
 router.include_router(sdk.router, tags=["sdk"])
+router.include_router(enchant.router, tags=["Enchant"])

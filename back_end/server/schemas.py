@@ -25,6 +25,12 @@ __all__ = [
     "PagedServiceResponse",
     "BlueprintPreferenceUpdate",
     "BlueprintPreferenceResponse",
+    "EnchantMessageCreate",
+    "EnchantMessageResponse",
+    "EnchantSessionCreate",
+    "EnchantSessionResponse",
+    "EnchantSessionWithMessages",
+    "PagedEnchantSessionResponse",
 ]
 
 
@@ -211,3 +217,38 @@ class ServiceResponse(ServiceCreate):
 class PagedServiceResponse(BaseModel):
     total: int
     items: List[ServiceResponse]
+
+
+class EnchantMessageCreate(BaseModel):
+    content: str
+
+
+class EnchantMessageResponse(BaseModel):
+    id: str
+    session_id: str
+    role: str
+    content: str
+    created_at: datetime
+    class Config: from_attributes = True
+
+
+class EnchantSessionCreate(BaseModel):
+    title: Optional[str] = "New Session"
+
+
+class EnchantSessionResponse(BaseModel):
+    id: str
+    user_id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    class Config: from_attributes = True
+
+
+class EnchantSessionWithMessages(EnchantSessionResponse):
+    messages: List[EnchantMessageResponse] = []
+
+
+class PagedEnchantSessionResponse(BaseModel):
+    total: int
+    items: List[EnchantSessionResponse]

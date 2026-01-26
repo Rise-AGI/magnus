@@ -17,6 +17,8 @@ __all__ = [
     "Blueprint",
     "Service",
     "BlueprintUserPreference",
+    "EnchantSession",
+    "EnchantMessage",
 ]
 
 
@@ -149,6 +151,31 @@ class BlueprintUserPreference(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     blueprint_id: Mapped[str] = mapped_column(String, ForeignKey("blueprints.id"), index=True)
-    blueprint_hash: Mapped[str] = mapped_column(String) 
+    blueprint_hash: Mapped[str] = mapped_column(String)
     cached_params: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class EnchantSession(Base):
+    __tablename__ = "enchant_sessions"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_hex_id)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    user: Mapped["User"] = relationship("User")
+    title: Mapped[str] = mapped_column(String, default="New Session")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    messages: Mapped[list["EnchantMessage"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="EnchantMessage.created_at",
+    )
+
+
+class EnchantMessage(Base):
+    __tablename__ = "enchant_messages"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_hex_id)
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("enchant_sessions.id"), index=True)
+    session: Mapped["EnchantSession"] = relationship(back_populates="messages")
+    role: Mapped[str] = mapped_column(String)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
