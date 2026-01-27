@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowUp, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check } from "lucide-react";
 import { client } from "@/lib/api";
 import RenderMarkdown from "@/components/ui/render-markdown";
-import type { EnchantSessionWithMessages, EnchantMessage, Attachment } from "@/types/enchant";
+import type { ExplorerSessionWithMessages, ExplorerMessage, Attachment } from "@/types/explore";
 import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
 
@@ -148,7 +148,7 @@ function UserMessageContent({
 
   const getImageUrl = (fileName: string | null) => {
     if (!fileName) return "";
-    const baseUrl = `${API_BASE}/api/enchant/files/${sessionId}/${fileName}`;
+    const baseUrl = `${API_BASE}/api/explore/files/${sessionId}/${fileName}`;
     return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl;
   };
 
@@ -301,7 +301,7 @@ function UserMessageWithActions({
   onEdit,
   onImageClick,
 }: {
-  message: EnchantMessage;
+  message: ExplorerMessage;
   index: number;
   isLastUserMessage: boolean;
   sessionId: string;
@@ -379,7 +379,7 @@ export default function SessionPage() {
   const { user } = useAuth();
   const sessionId = params.sessionId as string;
 
-  const [session, setSession] = useState<EnchantSessionWithMessages | null>(null);
+  const [session, setSession] = useState<ExplorerSessionWithMessages | null>(null);
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -394,11 +394,11 @@ export default function SessionPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageProcessedRef = useRef(false);
-  const currentUserMessageRef = useRef<EnchantMessage | null>(null);
+  const currentUserMessageRef = useRef<ExplorerMessage | null>(null);
 
 
   useEffect(() => {
-    const pendingKey = `enchant-pending-${sessionId}`;
+    const pendingKey = `explore-pending-${sessionId}`;
     const pending = sessionStorage.getItem(pendingKey);
     if (pending) {
       setPendingUserMessage(pending);
@@ -408,11 +408,11 @@ export default function SessionPage() {
 
   const fetchSession = useCallback(async () => {
     try {
-      const data: EnchantSessionWithMessages = await client(`/api/enchant/sessions/${sessionId}`);
+      const data: ExplorerSessionWithMessages = await client(`/api/explore/sessions/${sessionId}`);
       setSession(data);
     } catch (error) {
       console.error("Failed to fetch session:", error);
-      router.push("/enchant");
+      router.push("/explore");
     }
   }, [sessionId, router]);
 
@@ -425,7 +425,7 @@ export default function SessionPage() {
   const sendMessageContent = useCallback(async (messageContent: string) => {
     if (isStreaming) return;
 
-    const userMessage: EnchantMessage = {
+    const userMessage: ExplorerMessage = {
       id: `temp-${Date.now()}`,
       session_id: sessionId,
       role: "user",
@@ -447,17 +447,17 @@ export default function SessionPage() {
     let fullContent = "";
 
     const titleRefreshInterval = setInterval(() => {
-      window.dispatchEvent(new Event("enchant-sessions-update"));
+      window.dispatchEvent(new Event("explorer-sessions-update"));
     }, TITLE_REFRESH_INTERVAL_MS);
 
     setTimeout(() => {
-      window.dispatchEvent(new Event("enchant-sessions-update"));
+      window.dispatchEvent(new Event("explorer-sessions-update"));
     }, TITLE_REFRESH_INITIAL_MS);
 
     try {
       const token = localStorage.getItem("magnus_token");
       const response = await fetch(
-        `${API_BASE}/api/enchant/sessions/${sessionId}/chat`,
+        `${API_BASE}/api/explore/sessions/${sessionId}/chat`,
         {
           method: "POST",
           headers: {
@@ -487,7 +487,7 @@ export default function SessionPage() {
         }
       }
 
-      const assistantMessage: EnchantMessage = {
+      const assistantMessage: ExplorerMessage = {
         id: `assistant-${Date.now()}`,
         session_id: sessionId,
         role: "assistant",
@@ -506,9 +506,9 @@ export default function SessionPage() {
       currentUserMessageRef.current = null;
 
       clearInterval(titleRefreshInterval);
-      window.dispatchEvent(new Event("enchant-sessions-update"));
+      window.dispatchEvent(new Event("explorer-sessions-update"));
       setTimeout(() => {
-        window.dispatchEvent(new Event("enchant-sessions-update"));
+        window.dispatchEvent(new Event("explorer-sessions-update"));
       }, TITLE_REFRESH_DELAYED_MS);
     } catch (error) {
       clearInterval(titleRefreshInterval);
@@ -518,7 +518,7 @@ export default function SessionPage() {
           if (savedContent.includes("<think>") && !savedContent.includes("</think>")) {
             savedContent = savedContent + "</think>";
           }
-          const assistantMessage: EnchantMessage = {
+          const assistantMessage: ExplorerMessage = {
             id: `assistant-${Date.now()}`,
             session_id: sessionId,
             role: "assistant",
@@ -548,7 +548,7 @@ export default function SessionPage() {
   useEffect(() => {
     if (!session || pendingMessageProcessedRef.current || !pendingUserMessage) return;
 
-    const pendingKey = `enchant-pending-${sessionId}`;
+    const pendingKey = `explore-pending-${sessionId}`;
     sessionStorage.removeItem(pendingKey);
     pendingMessageProcessedRef.current = true;
     sendMessageContent(pendingUserMessage);
@@ -596,7 +596,7 @@ export default function SessionPage() {
 
     try {
       const token = localStorage.getItem("magnus_token");
-      const response = await fetch(`${API_BASE}/api/enchant/sessions/${sessionId}/upload`, {
+      const response = await fetch(`${API_BASE}/api/explore/sessions/${sessionId}/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -686,7 +686,7 @@ export default function SessionPage() {
       setEditingMessageContent("");
     }
 
-    const userMessage: EnchantMessage = {
+    const userMessage: ExplorerMessage = {
       id: `temp-${Date.now()}`,
       session_id: sessionId,
       role: "user",
@@ -708,17 +708,17 @@ export default function SessionPage() {
     let fullContent = "";
 
     const titleRefreshInterval = setInterval(() => {
-      window.dispatchEvent(new Event("enchant-sessions-update"));
+      window.dispatchEvent(new Event("explorer-sessions-update"));
     }, TITLE_REFRESH_INTERVAL_MS);
 
     setTimeout(() => {
-      window.dispatchEvent(new Event("enchant-sessions-update"));
+      window.dispatchEvent(new Event("explorer-sessions-update"));
     }, TITLE_REFRESH_INITIAL_MS);
 
     try {
       const token = localStorage.getItem("magnus_token");
       const response = await fetch(
-        `${API_BASE}/api/enchant/sessions/${sessionId}/chat`,
+        `${API_BASE}/api/explore/sessions/${sessionId}/chat`,
         {
           method: "POST",
           headers: {
@@ -748,7 +748,7 @@ export default function SessionPage() {
         }
       }
 
-      const assistantMessage: EnchantMessage = {
+      const assistantMessage: ExplorerMessage = {
         id: `assistant-${Date.now()}`,
         session_id: sessionId,
         role: "assistant",
@@ -762,9 +762,9 @@ export default function SessionPage() {
       setStreamingContent("");
 
       clearInterval(titleRefreshInterval);
-      window.dispatchEvent(new Event("enchant-sessions-update"));
+      window.dispatchEvent(new Event("explorer-sessions-update"));
       setTimeout(() => {
-        window.dispatchEvent(new Event("enchant-sessions-update"));
+        window.dispatchEvent(new Event("explorer-sessions-update"));
       }, TITLE_REFRESH_DELAYED_MS);
     } catch (error) {
       clearInterval(titleRefreshInterval);
@@ -775,7 +775,7 @@ export default function SessionPage() {
           if (savedContent.includes("<think>") && !savedContent.includes("</think>")) {
             savedContent = savedContent + "</think>";
           }
-          const assistantMessage: EnchantMessage = {
+          const assistantMessage: ExplorerMessage = {
             id: `assistant-${Date.now()}`,
             session_id: sessionId,
             role: "assistant",
@@ -855,7 +855,7 @@ export default function SessionPage() {
                 <span className="text-zinc-100">人机协作，</span>
                 <span className="text-blue-500">赋能科研</span>
               </h1>
-              <p className="text-zinc-500">Magnus Platform · Enchanting Table</p>
+              <p className="text-zinc-500">Magnus · Explorer</p>
             </div>
 
             {/* Input */}
@@ -934,7 +934,7 @@ export default function SessionPage() {
       <div
         ref={scrollContainerRef}
         onScroll={handleMessagesScroll}
-        className="flex-1 min-h-0 overflow-y-auto px-4 py-6 enchant-scroll"
+        className="flex-1 min-h-0 overflow-y-auto px-4 py-6 explorer-scroll"
       >
         <div className="max-w-3xl mx-auto space-y-6 pb-32 min-w-0">
           {/* Show pending user message only if it's not yet in session.messages */}
@@ -973,7 +973,7 @@ export default function SessionPage() {
                     <textarea
                       value={editingMessageContent}
                       onChange={(e) => setEditingMessageContent(e.target.value)}
-                      className="enchant-scroll w-full bg-zinc-800 text-zinc-100 text-sm px-4 py-3 rounded-2xl border border-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+                      className="explorer-scroll w-full bg-zinc-800 text-zinc-100 text-sm px-4 py-3 rounded-2xl border border-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
                       rows={3}
                       autoFocus
                     />

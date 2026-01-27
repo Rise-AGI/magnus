@@ -1,6 +1,4 @@
-// front_end/src/types/enchant.ts
-
-export interface EnchantMessage {
+export interface ExplorerMessage {
   id: string;
   session_id: string;
   role: "user" | "assistant";
@@ -8,7 +6,7 @@ export interface EnchantMessage {
   created_at: string;
 }
 
-export interface EnchantSession {
+export interface ExplorerSession {
   id: string;
   user_id: string;
   title: string;
@@ -16,13 +14,13 @@ export interface EnchantSession {
   updated_at: string;
 }
 
-export interface EnchantSessionWithMessages extends EnchantSession {
-  messages: EnchantMessage[];
+export interface ExplorerSessionWithMessages extends ExplorerSession {
+  messages: ExplorerMessage[];
 }
 
-export interface PagedEnchantSessionResponse {
+export interface PagedExplorerSessionResponse {
   total: number;
-  items: EnchantSession[];
+  items: ExplorerSession[];
 }
 
 export interface Attachment {

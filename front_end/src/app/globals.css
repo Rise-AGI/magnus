@@ -66,11 +66,11 @@ body {
   -moz-appearance: textfield;
 }
 
-/* Enchant 隐藏滚动条 */
-.enchant-scroll::-webkit-scrollbar {
+/* Explorer 隐藏滚动条 */
+.explorer-scroll::-webkit-scrollbar {
   display: none;
 }
-.enchant-scroll {
+.explorer-scroll {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }

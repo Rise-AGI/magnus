@@ -1,4 +1,4 @@
-# back_end/server/routers/enchant.py
+# back_end/server/routers/explore.py
 import logging
 import base64
 import io
@@ -19,12 +19,12 @@ from openai import OpenAI
 from .. import database
 from .. import models
 from ..schemas import (
-    EnchantSessionCreate,
-    EnchantSessionResponse,
-    EnchantSessionWithMessages,
-    EnchantMessageCreate,
-    EnchantMessageResponse,
-    PagedEnchantSessionResponse,
+    ExplorerSessionCreate,
+    ExplorerSessionResponse,
+    ExplorerSessionWithMessages,
+    ExplorerMessageCreate,
+    ExplorerMessageResponse,
+    PagedExplorerSessionResponse,
 )
 from .._magnus_config import magnus_config
 from .auth import get_current_user
@@ -195,16 +195,16 @@ def extract_text_from_txt(file_bytes: bytes) -> str:
     return file_bytes.decode("utf-8", errors="replace")
 
 
-@router.post("/enchant/sessions/{session_id}/upload")
+@router.post("/explore/sessions/{session_id}/upload")
 async def upload_file(
     session_id: str,
     file: UploadFile = File(...),
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    session = db.query(models.EnchantSession).filter(
-        models.EnchantSession.id == session_id,
-        models.EnchantSession.user_id == current_user.id,
+    session = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.id == session_id,
+        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
@@ -257,7 +257,7 @@ async def upload_file(
     raise HTTPException(status_code=400, detail=f"Unsupported file type: {filename}")
 
 
-@router.get("/enchant/files/{session_id}/{file_name}")
+@router.get("/explore/files/{session_id}/{file_name}")
 async def get_file(
     session_id: str,
     file_name: str,
@@ -266,9 +266,9 @@ async def get_file(
 ):
     from fastapi.responses import FileResponse
 
-    session = db.query(models.EnchantSession).filter(
-        models.EnchantSession.id == session_id,
-        models.EnchantSession.user_id == current_user.id,
+    session = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.id == session_id,
+        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
@@ -281,13 +281,13 @@ async def get_file(
     return FileResponse(file_path)
 
 
-@router.post("/enchant/sessions", response_model=EnchantSessionResponse)
+@router.post("/explore/sessions", response_model=ExplorerSessionResponse)
 def create_session(
-    data: EnchantSessionCreate,
+    data: ExplorerSessionCreate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-) -> models.EnchantSession:
-    session = models.EnchantSession(
+) -> models.ExplorerSession:
+    session = models.ExplorerSession(
         user_id=current_user.id,
         title=data.title or "New Session",
     )
@@ -297,30 +297,30 @@ def create_session(
     return session
 
 
-@router.get("/enchant/sessions", response_model=PagedEnchantSessionResponse)
+@router.get("/explore/sessions", response_model=PagedExplorerSessionResponse)
 def list_sessions(
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    query = db.query(models.EnchantSession).filter(
-        models.EnchantSession.user_id == current_user.id
+    query = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.user_id == current_user.id
     )
     total = query.count()
-    items = query.order_by(models.EnchantSession.updated_at.desc()).offset(skip).limit(limit).all()
+    items = query.order_by(models.ExplorerSession.updated_at.desc()).offset(skip).limit(limit).all()
     return {"total": total, "items": items}
 
 
-@router.get("/enchant/sessions/{session_id}", response_model=EnchantSessionWithMessages)
+@router.get("/explore/sessions/{session_id}", response_model=ExplorerSessionWithMessages)
 def get_session(
     session_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-) -> models.EnchantSession:
-    session = db.query(models.EnchantSession).filter(
-        models.EnchantSession.id == session_id,
-        models.EnchantSession.user_id == current_user.id,
+) -> models.ExplorerSession:
+    session = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.id == session_id,
+        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
@@ -329,15 +329,15 @@ def get_session(
     return session
 
 
-@router.delete("/enchant/sessions/{session_id}")
+@router.delete("/explore/sessions/{session_id}")
 def delete_session(
     session_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> Dict[str, str]:
-    session = db.query(models.EnchantSession).filter(
-        models.EnchantSession.id == session_id,
-        models.EnchantSession.user_id == current_user.id,
+    session = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.id == session_id,
+        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
@@ -354,16 +354,16 @@ def delete_session(
     return {"message": "Session deleted"}
 
 
-@router.patch("/enchant/sessions/{session_id}", response_model=EnchantSessionResponse)
+@router.patch("/explore/sessions/{session_id}", response_model=ExplorerSessionResponse)
 def update_session(
     session_id: str,
-    data: EnchantSessionCreate,
+    data: ExplorerSessionCreate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-) -> models.EnchantSession:
-    session = db.query(models.EnchantSession).filter(
-        models.EnchantSession.id == session_id,
-        models.EnchantSession.user_id == current_user.id,
+) -> models.ExplorerSession:
+    session = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.id == session_id,
+        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
@@ -378,23 +378,23 @@ def update_session(
     return session
 
 
-@router.post("/enchant/sessions/{session_id}/chat")
+@router.post("/explore/sessions/{session_id}/chat")
 async def chat(
     session_id: str,
-    data: EnchantMessageCreate,
+    data: ExplorerMessageCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> StreamingResponse:
-    session = db.query(models.EnchantSession).filter(
-        models.EnchantSession.id == session_id,
-        models.EnchantSession.user_id == current_user.id,
+    session = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.id == session_id,
+        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    user_message = models.EnchantMessage(
+    user_message = models.ExplorerMessage(
         session_id=session_id,
         role="user",
         content=data.content,
@@ -476,8 +476,8 @@ def _update_session_title_background(
 ) -> None:
     title = generate_session_title(user_message)
     with database.SessionLocal() as db:
-        session = db.query(models.EnchantSession).filter(
-            models.EnchantSession.id == session_id
+        session = db.query(models.ExplorerSession).filter(
+            models.ExplorerSession.id == session_id
         ).first()
         if session:
             session.title = title
@@ -538,7 +538,7 @@ def _run_generation_sync(
         if full_thinking:
             save_content = f"<think>{full_thinking}</think>\n\n{full_response}"
 
-        assistant_message = models.EnchantMessage(
+        assistant_message = models.ExplorerMessage(
             session_id=session_id,
             role="assistant",
             content=save_content,

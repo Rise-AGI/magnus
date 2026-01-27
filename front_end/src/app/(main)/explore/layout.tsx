@@ -4,15 +4,15 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Trash2, MessageSquare, Pencil, Check, X, Loader2, Plus } from "lucide-react";
 import { client } from "@/lib/api";
-import type { EnchantSession, PagedEnchantSessionResponse } from "@/types/enchant";
+import type { ExplorerSession, PagedExplorerSessionResponse } from "@/types/explore";
 
 const PAGE_SIZE = 20;
 
 
-export default function EnchantLayout({ children }: { children: React.ReactNode }) {
+export default function ExplorerLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [sessions, setSessions] = useState<EnchantSession[]>([]);
+  const [sessions, setSessions] = useState<ExplorerSession[]>([]);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -20,15 +20,15 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
   const [initialLoaded, setInitialLoaded] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  const activeSessionId = pathname.startsWith("/enchant/")
+  const activeSessionId = pathname.startsWith("/explore/")
     ? pathname.split("/")[2]
     : null;
 
 
   const fetchSessions = useCallback(async (skip: number = 0, append: boolean = false) => {
     try {
-      const data: PagedEnchantSessionResponse = await client(
-        `/api/enchant/sessions?skip=${skip}&limit=${PAGE_SIZE}`
+      const data: PagedExplorerSessionResponse = await client(
+        `/api/explore/sessions?skip=${skip}&limit=${PAGE_SIZE}`
       );
 
       if (append) {
@@ -64,8 +64,8 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
       setHasMore(true);
       fetchSessions(0, false);
     };
-    window.addEventListener("enchant-sessions-update", handleSessionsUpdate);
-    return () => window.removeEventListener("enchant-sessions-update", handleSessionsUpdate);
+    window.addEventListener("explorer-sessions-update", handleSessionsUpdate);
+    return () => window.removeEventListener("explorer-sessions-update", handleSessionsUpdate);
   }, [fetchSessions]);
 
 
@@ -82,10 +82,10 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
 
   const deleteSession = async (sessionId: string) => {
     try {
-      await client(`/api/enchant/sessions/${sessionId}`, { method: "DELETE" });
+      await client(`/api/explore/sessions/${sessionId}`, { method: "DELETE" });
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (activeSessionId === sessionId) {
-        router.push("/enchant");
+        router.push("/explore");
       }
     } catch (error) {
       console.error("Failed to delete session:", error);
@@ -95,7 +95,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
 
   const updateSessionTitle = async (sessionId: string, title: string) => {
     try {
-      await client(`/api/enchant/sessions/${sessionId}`, {
+      await client(`/api/explore/sessions/${sessionId}`, {
         method: "PATCH",
         json: { title },
       });
@@ -108,7 +108,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
   };
 
 
-  const startEditing = (session: EnchantSession) => {
+  const startEditing = (session: ExplorerSession) => {
     setEditingSessionId(session.id);
     setEditingTitle(session.title);
   };
@@ -132,9 +132,9 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
       {/* Sidebar */}
       <div className="w-56 flex-shrink-0 border-r border-zinc-800 flex flex-col">
         <div className="px-4 py-3 flex items-center justify-between">
-          <h3 className="text-base font-medium text-zinc-400">Enchant Sessions</h3>
+          <h3 className="text-base font-medium text-zinc-400">Explorer Sessions</h3>
           <button
-            onClick={() => router.push("/enchant")}
+            onClick={() => router.push("/explore")}
             className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -144,7 +144,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
         <div
           ref={scrollContainerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-2 pb-4 enchant-scroll"
+          className="flex-1 overflow-y-auto px-2 pb-4 explorer-scroll"
         >
           {sessions.map((session) => (
             <div
@@ -156,7 +156,7 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
               }`}
               onClick={() => {
                 if (editingSessionId !== session.id) {
-                  router.push(`/enchant/${session.id}`);
+                  router.push(`/explore/${session.id}`);
                 }
               }}
             >

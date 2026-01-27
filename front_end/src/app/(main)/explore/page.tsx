@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { ArrowUp, Loader2, X, FileText, Image as ImageIcon } from "lucide-react";
 import { client } from "@/lib/api";
 import { API_BASE } from "@/lib/config";
-import type { EnchantSession, Attachment } from "@/types/enchant";
+import type { ExplorerSession, Attachment } from "@/types/explore";
 
 
-export default function EnchantPage() {
+export default function ExplorePage() {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -60,7 +60,7 @@ export default function EnchantPage() {
     e.preventDefault();
     setIsUploading(true);
 
-    const tempSession: EnchantSession = await client("/api/enchant/sessions", {
+    const tempSession: ExplorerSession = await client("/api/explore/sessions", {
       json: { title: "New Session" },
     });
 
@@ -81,7 +81,7 @@ export default function EnchantPage() {
 
     try {
       const token = localStorage.getItem("magnus_token");
-      const response = await fetch(`${API_BASE}/api/enchant/sessions/${sessionId}/upload`, {
+      const response = await fetch(`${API_BASE}/api/explore/sessions/${sessionId}/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -112,7 +112,7 @@ export default function EnchantPage() {
     setIsSending(true);
 
     try {
-      const newSession: EnchantSession = await client("/api/enchant/sessions", {
+      const newSession: ExplorerSession = await client("/api/explore/sessions", {
         json: { title: "New Session" },
       });
 
@@ -138,10 +138,10 @@ export default function EnchantPage() {
         messageContent += (messageContent ? "\n\n" : "") + docParts.join("\n\n");
       }
 
-      sessionStorage.setItem(`enchant-pending-${newSession.id}`, messageContent);
+      sessionStorage.setItem(`explore-pending-${newSession.id}`, messageContent);
 
-      window.dispatchEvent(new Event("enchant-sessions-update"));
-      router.push(`/enchant/${newSession.id}`);
+      window.dispatchEvent(new Event("explorer-sessions-update"));
+      router.push(`/explore/${newSession.id}`);
     } catch (error) {
       console.error("Failed to send message:", error);
       setIsSending(false);
@@ -157,7 +157,7 @@ export default function EnchantPage() {
             <span className="text-zinc-100">人机协作，</span>
             <span className="text-blue-500">赋能科研</span>
           </h1>
-          <p className="text-zinc-500">Magnus Platform · Enchanting Table</p>
+          <p className="text-zinc-500">Magnus · Explorer</p>
         </div>
 
         {/* Input */}

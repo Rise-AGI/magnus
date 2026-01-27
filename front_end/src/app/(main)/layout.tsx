@@ -11,7 +11,7 @@ import { usePathname } from "next/navigation";
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const pathname = usePathname();
-  const isEnchantPage = pathname?.startsWith("/enchant");
+  const isExplorePage = pathname?.startsWith("/explore");
 
   return (
     // 修改点 1: min-h-screen -> h-screen
@@ -27,7 +27,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <Header />
 
         {/* 修改点 3: 确保 main 也是 flex 布局的一部分，且通过 relative 建立层叠上下文 */}
-        <main className={isEnchantPage ? "flex-1 min-h-0 min-w-0 overflow-hidden relative" : "flex-1 p-8 overflow-y-auto"}>
+        <main className={isExplorePage ? "flex-1 min-h-0 min-w-0 overflow-hidden relative" : "flex-1 p-8 overflow-y-auto"}>
           {isLoading ? (
             <div className="h-full flex items-center justify-center text-zinc-500 gap-2">
               <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
@@ -36,7 +36,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           ) : !user ? (
             <LoginRequired />
           ) : (
-            <div className={isEnchantPage ? "h-full w-full" : "animate-in fade-in duration-500"}>
+            <div className={isExplorePage ? "h-full w-full" : "animate-in fade-in duration-500"}>
                {children}
             </div>
           )}

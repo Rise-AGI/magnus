@@ -452,7 +452,7 @@ export default function JobDetailsPage() {
               </div>
               <div>
                 <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">GPU Count</label>
-                <span className="text-base text-white font-medium block">{job.gpu_count} GPUs</span>
+                <span className="text-base text-white font-medium block">{job.gpu_count} {job.gpu_count === 1 ? "GPU" : "GPUs"}</span>
               </div>
               <div>
                 <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">CPU Cores</label>

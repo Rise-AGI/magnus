@@ -17,8 +17,8 @@ __all__ = [
     "Blueprint",
     "Service",
     "BlueprintUserPreference",
-    "EnchantSession",
-    "EnchantMessage",
+    "ExplorerSession",
+    "ExplorerMessage",
 ]
 
 
@@ -156,26 +156,26 @@ class BlueprintUserPreference(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class EnchantSession(Base):
-    __tablename__ = "enchant_sessions"
+class ExplorerSession(Base):
+    __tablename__ = "explorer_sessions"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_hex_id)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     user: Mapped["User"] = relationship("User")
     title: Mapped[str] = mapped_column(String, default="New Session")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    messages: Mapped[list["EnchantMessage"]] = relationship(
+    messages: Mapped[list["ExplorerMessage"]] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
-        order_by="EnchantMessage.created_at",
+        order_by="ExplorerMessage.created_at",
     )
 
 
-class EnchantMessage(Base):
-    __tablename__ = "enchant_messages"
+class ExplorerMessage(Base):
+    __tablename__ = "explorer_messages"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_hex_id)
-    session_id: Mapped[str] = mapped_column(String, ForeignKey("enchant_sessions.id"), index=True)
-    session: Mapped["EnchantSession"] = relationship(back_populates="messages")
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("explorer_sessions.id"), index=True)
+    session: Mapped["ExplorerSession"] = relationship(back_populates="messages")
     role: Mapped[str] = mapped_column(String)
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

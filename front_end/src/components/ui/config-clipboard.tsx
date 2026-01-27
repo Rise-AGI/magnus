@@ -1,10 +1,10 @@
-// front_end/src/components/ui/config-clipboard.tsx
 "use client";
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Copy, ClipboardPaste, Check, XCircle, ShieldAlert, X } from "lucide-react";
 import { CopyableText } from "./copyable-text";
+import yaml from "js-yaml";
 
 interface ConfigClipboardProps {
   kind: "magnus/service" | "magnus/job" | "magnus/blueprint";
@@ -23,17 +23,14 @@ export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigCl
   const handleCopy = async () => {
     try {
       const payload = onGetPayload();
-      const envelope = JSON.stringify({ 
-        kind, 
-        version: "1.0", 
-        payload, 
-        exported_at: new Date().toISOString() 
-      }, null, 2);
+      const envelope = yaml.dump(
+        { kind, version: "1.0", payload, exported_at: new Date().toISOString() },
+        { lineWidth: -1, noRefs: true, quotingType: '"' }
+      );
 
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(envelope);
       } else {
-        // HTTP Context Fallback for Write
         const textArea = document.createElement("textarea");
         textArea.value = envelope;
         textArea.style.position = "fixed";
@@ -54,42 +51,37 @@ export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigCl
   };
 
   const handlePaste = async () => {
-    // 1. Check API Availability
     if (!navigator.clipboard || !navigator.clipboard.readText) {
       setStatus("config_needed");
       return;
     }
 
     try {
-      // 2. Attempt Read (Will throw in insecure context)
       const text = await navigator.clipboard.readText();
-      
-      // 3. Data Validation
+
       if (!text || !text.trim()) {
         setStatus("error");
         setTimeout(() => setStatus("idle"), 2000);
-        return; 
+        return;
       }
 
-      let data;
-      try { 
-        data = JSON.parse(text); 
-      } catch { 
-        // Invalid JSON -> Data Error, not Config Error
-        console.error("Invalid JSON in clipboard");
+      let data: any;
+      try {
+        data = yaml.load(text);
+      } catch {
+        console.error("Invalid YAML in clipboard");
         setStatus("error");
         setTimeout(() => setStatus("idle"), 2000);
-        return; 
+        return;
       }
 
-      const payloadToApply = data.payload || data;
+      const payloadToApply = data?.payload || data;
       onApplyPayload(payloadToApply);
-      
+
       setStatus("pasted");
       setTimeout(() => setStatus("idle"), 2000);
 
     } catch (e) {
-      // 4. Permission / Context Error
       console.warn("Clipboard read failed (likely secure context issue)", e);
       setStatus("config_needed");
     }

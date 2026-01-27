@@ -25,12 +25,12 @@ __all__ = [
     "PagedServiceResponse",
     "BlueprintPreferenceUpdate",
     "BlueprintPreferenceResponse",
-    "EnchantMessageCreate",
-    "EnchantMessageResponse",
-    "EnchantSessionCreate",
-    "EnchantSessionResponse",
-    "EnchantSessionWithMessages",
-    "PagedEnchantSessionResponse",
+    "ExplorerMessageCreate",
+    "ExplorerMessageResponse",
+    "ExplorerSessionCreate",
+    "ExplorerSessionResponse",
+    "ExplorerSessionWithMessages",
+    "PagedExplorerSessionResponse",
 ]
 
 
@@ -219,11 +219,11 @@ class PagedServiceResponse(BaseModel):
     items: List[ServiceResponse]
 
 
-class EnchantMessageCreate(BaseModel):
+class ExplorerMessageCreate(BaseModel):
     content: str
 
 
-class EnchantMessageResponse(BaseModel):
+class ExplorerMessageResponse(BaseModel):
     id: str
     session_id: str
     role: str
@@ -232,11 +232,11 @@ class EnchantMessageResponse(BaseModel):
     class Config: from_attributes = True
 
 
-class EnchantSessionCreate(BaseModel):
+class ExplorerSessionCreate(BaseModel):
     title: Optional[str] = "New Session"
 
 
-class EnchantSessionResponse(BaseModel):
+class ExplorerSessionResponse(BaseModel):
     id: str
     user_id: str
     title: str
@@ -245,10 +245,10 @@ class EnchantSessionResponse(BaseModel):
     class Config: from_attributes = True
 
 
-class EnchantSessionWithMessages(EnchantSessionResponse):
-    messages: List[EnchantMessageResponse] = []
+class ExplorerSessionWithMessages(ExplorerSessionResponse):
+    messages: List[ExplorerMessageResponse] = []
 
 
-class PagedEnchantSessionResponse(BaseModel):
+class PagedExplorerSessionResponse(BaseModel):
     total: int
-    items: List[EnchantSessionResponse]
+    items: List[ExplorerSessionResponse]
