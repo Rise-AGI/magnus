@@ -3,31 +3,23 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Bell, Check, Info, AlertCircle, X, CheckCheck } from "lucide-react";
+import { useLanguage } from "@/context/language-context";
 
 // --- Types ---
 // ! PROTECTED: Schema aligned with potential backend response.
 export interface Notification {
   id: string;
   type: "info" | "success" | "error" | "warning";
-  title: string;
-  message: string;
+  titleKey?: string;
+  messageKey?: string;
+  title?: string;
+  message?: string;
   created_at: string;
   read: boolean;
 }
 
-// --- Placeholder Data ---
-const INITIAL_NOTIFICATIONS: Notification[] = [
-  {
-    id: "init-1",
-    type: "info",
-    title: "Welcome to Magnus",
-    message: "System initialized. You can now submit training jobs.",
-    created_at: new Date().toISOString(),
-    read: false,
-  }
-];
-
 export function NotificationsPopover() {
+  const { t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -36,7 +28,16 @@ export function NotificationsPopover() {
   // --- Logic: Load Data ---
   useEffect(() => {
     // TODO: Replace with API call: client("/api/notifications")
-    setNotifications(INITIAL_NOTIFICATIONS);
+    setNotifications([
+      {
+        id: "init-1",
+        type: "info",
+        titleKey: "notifications.welcome",
+        messageKey: "notifications.systemInit",
+        created_at: new Date().toISOString(),
+        read: false,
+      }
+    ]);
   }, []);
 
   // --- Logic: Update Count ---
@@ -96,13 +97,13 @@ export function NotificationsPopover() {
         <div className="absolute right-0 mt-2 w-80 bg-[#0A0A0C] border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden ring-1 ring-white/5 animate-in fade-in zoom-in-95 duration-100">
           
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-sm">
-            <h3 className="text-sm font-semibold text-zinc-200">Notifications</h3>
+            <h3 className="text-sm font-semibold text-zinc-200">{t("notifications.title")}</h3>
             {unreadCount > 0 && (
-              <button 
+              <button
                 onClick={markAllAsRead}
                 className="text-[10px] flex items-center gap-1 text-zinc-500 hover:text-blue-400 transition-colors"
               >
-                <CheckCheck className="w-3 h-3" /> Mark read
+                <CheckCheck className="w-3 h-3" /> {t("notifications.markRead")}
               </button>
             )}
           </div>
@@ -111,7 +112,7 @@ export function NotificationsPopover() {
             {notifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-zinc-500 gap-2">
                 <Bell className="w-8 h-8 opacity-20" />
-                <p className="text-xs">No notifications yet</p>
+                <p className="text-xs">{t("notifications.empty")}</p>
               </div>
             ) : (
               <div className="divide-y divide-zinc-800/50">
@@ -128,14 +129,14 @@ export function NotificationsPopover() {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-0.5">
                         <p className={`text-sm font-medium leading-none ${n.read ? 'text-zinc-400' : 'text-zinc-200'}`}>
-                          {n.title}
+                          {n.titleKey ? t(n.titleKey as any) : n.title}
                         </p>
                         <span className="text-[10px] text-zinc-600 font-mono flex-shrink-0 ml-2">
                           {formatTime(n.created_at)}
                         </span>
                       </div>
                       <p className="text-xs text-zinc-500 leading-relaxed line-clamp-2">
-                        {n.message}
+                        {n.messageKey ? t(n.messageKey as any) : n.message}
                       </p>
                     </div>
 

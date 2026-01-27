@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Box, Loader2, RefreshCw, SquareX } from "lucide-react";
 import { Job } from "@/types/job";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
@@ -27,18 +28,19 @@ export function JobTable({
   loading,
   onClone,
   onTerminate,
-  emptyMessage = "No jobs found",
+  emptyMessage,
   className = "min-h-[400px]",
   fromSource = "jobs",
 }: JobTableProps) {
   const router = useRouter();
   const { user: currentUser } = useAuth();
+  const { t } = useLanguage();
 
   if (loading) {
     return (
       <div className={cn("border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 gap-3", className)}>
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <p className="text-sm font-medium">Fetching jobs...</p>
+        <p className="text-sm font-medium">{t("jobs.fetchingJobs")}</p>
       </div>
     );
   }
@@ -47,7 +49,7 @@ export function JobTable({
     return (
       <div className={cn("border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500", className)}>
         <Box className="w-10 h-10 opacity-20 mb-3" />
-        <p className="text-base font-medium text-zinc-400">{emptyMessage}</p>
+        <p className="text-base font-medium text-zinc-400">{emptyMessage || t("jobs.noJobsFound")}</p>
       </div>
     );
   }
@@ -58,12 +60,12 @@ export function JobTable({
         <table className="w-full text-left text-sm whitespace-nowrap table-fixed">
           <thead className="bg-zinc-900/90 text-zinc-500 border-b border-zinc-800 backdrop-blur-md">
             <tr>
-              <th className="px-6 py-4 font-medium w-[21%]">Task / Task ID</th>
-              <th className="px-6 py-4 font-medium w-[8%] text-center">Priority</th>
-              <th className="px-6 py-4 font-medium w-[13%] text-center">Status</th>
-              <th className="px-6 py-4 font-medium w-[20%] text-center">Github Repo / Branch · Commit</th>
-              <th className="px-6 py-4 font-medium w-[13%] text-center">Resources</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">Creator / Created at</th>
+              <th className="px-6 py-4 font-medium w-[21%]">{t("jobs.table.task")}</th>
+              <th className="px-6 py-4 font-medium w-[8%] text-center">{t("jobs.table.priority")}</th>
+              <th className="px-6 py-4 font-medium w-[13%] text-center">{t("jobs.table.status")}</th>
+              <th className="px-6 py-4 font-medium w-[20%] text-center">{t("jobs.table.repo")}</th>
+              <th className="px-6 py-4 font-medium w-[13%] text-center">{t("jobs.table.resources")}</th>
+              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("jobs.table.creator")}</th>
               <th className="px-6 py-4 font-medium text-right w-[10%]"></th>
             </tr>
           </thead>
@@ -127,7 +129,7 @@ export function JobTable({
                   <td className="px-6 py-4 align-top text-center">
                     <span className="text-zinc-300 text-sm font-medium">
                       {job.gpu_type === "cpu"
-                        ? "cpu only"
+                        ? t("jobs.cpuOnly")
                         : `${job.gpu_type.replace(/_/g, " ")} × ${job.gpu_count}`}
                     </span>
                   </td>
@@ -149,7 +151,7 @@ export function JobTable({
                           onClone(job);
                         }}
                         className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                        title="Clone & Rerun"
+                        title={t("jobs.cloneRerun")}
                       >
                         <RefreshCw className="w-4 h-4" />
                       </button>
@@ -161,7 +163,7 @@ export function JobTable({
                             onTerminate(job);
                           }}
                           className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
-                          title="Terminate Job"
+                          title={t("jobs.terminateJob")}
                         >
                           <SquareX className="w-4 h-4" />
                         </button>

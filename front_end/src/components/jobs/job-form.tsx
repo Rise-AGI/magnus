@@ -6,12 +6,13 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { client } from "@/lib/api";
-import { 
-  PHYSICAL_GPUS, 
-  getGpuLimit, 
-  MAX_CPU_COUNT, 
-  DEFAULT_MEMORY, 
-  DEFAULT_RUNNER 
+import { useLanguage } from "@/context/language-context";
+import {
+  PHYSICAL_GPUS,
+  getGpuLimit,
+  MAX_CPU_COUNT,
+  DEFAULT_MEMORY,
+  DEFAULT_RUNNER
 } from "@/lib/config";
 
 const GPU_TYPES = [
@@ -53,6 +54,7 @@ interface JobFormProps {
 }
 
 const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuccess }: JobFormProps, ref) {
+  const { t } = useLanguage();
   const [taskName, setTaskName] = useState(initialData?.taskName || "");
   const [description, setDescription] = useState(initialData?.description || "");
   const [namespace, setNamespace] = useState(initialData?.namespace || "Rise-AGI");
@@ -282,13 +284,13 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       {/* Task Info */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Task Information
+            {t("jobForm.taskInfo")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        
+
         <div className="mb-4" id="field-taskName">
           <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'taskName' ? 'text-red-500' : 'text-zinc-500'}`}>
-            Task Name <span className="text-red-500">*</span>
+            {t("jobForm.taskName")} <span className="text-red-500">*</span>
           </label>
           <input 
             className={`w-full bg-zinc-950 border px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700
@@ -301,7 +303,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
 
         <div className="mb-4">
           <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
-            Description <span className="text-zinc-600 normal-case ml-1">(Optional)</span>
+            {t("jobForm.description")} <span className="text-zinc-600 normal-case ml-1">({t("common.optional")})</span>
           </label>
           <textarea 
             ref={descriptionRef}
@@ -317,13 +319,13 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       {/* Code Source */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Code Source
+            {t("jobForm.codeSource")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        
+
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div id="field-namespace">
-            <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'namespace' ? 'text-red-500' : 'text-zinc-500'}`}>Namespace</label>
+            <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'namespace' ? 'text-red-500' : 'text-zinc-500'}`}>{t("jobForm.namespace")}</label>
             <input 
               className={`w-full bg-zinc-950 border px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700
                 ${errorField === 'namespace' ? 'animate-shake border-red-500' : 'border-zinc-800'}`} 
@@ -333,7 +335,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
             />
           </div>
           <div id="field-repo">
-            <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'repo' ? 'text-red-500' : 'text-zinc-500'}`}>Repo Name</label>
+            <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'repo' ? 'text-red-500' : 'text-zinc-500'}`}>{t("jobForm.repoName")}</label>
             <input 
               className={`w-full bg-zinc-950 border px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700
                 ${errorField === 'repo' ? 'animate-shake border-red-500' : 'border-zinc-800'}`} 
@@ -343,39 +345,39 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
             />
           </div>
         </div>
-        <button 
-            onClick={fetchBranches} 
-            disabled={loading} 
+        <button
+            onClick={fetchBranches}
+            disabled={loading}
             className="w-full bg-zinc-900 hover:bg-zinc-800 text-zinc-300 py-2.5 rounded-lg text-sm font-medium transition-all active:scale-[0.98] disabled:opacity-50 mb-6 border border-zinc-800 flex justify-center items-center gap-2"
         >
             {loading ? (
                 <>
                   <span className="w-4 h-4 border-2 border-zinc-500 border-t-white rounded-full animate-spin"></span>
-                  Scanning...
+                  {t("jobForm.scanning")}
                 </>
-            ) : "Scan Repository"}
+            ) : t("jobForm.scanRepo")}
         </button>
 
         <div className="grid grid-cols-1 gap-0">
-          <SearchableSelect 
-            id="field-branch" label="Branch" disabled={!hasScanned} placeholder="Select branch..." className="mb-4"
-            value={selectedBranch} onChange={(v) => { setSelectedBranch(v); clearError('branch'); }} 
-            options={branches.map(b => ({ label: b.name, value: b.name }))} 
+          <SearchableSelect
+            id="field-branch" label={t("jobForm.branch")} disabled={!hasScanned} placeholder="Select branch..." className="mb-4"
+            value={selectedBranch} onChange={(v) => { setSelectedBranch(v); clearError('branch'); }}
+            options={branches.map(b => ({ label: b.name, value: b.name }))}
             hasError={errorField === 'branch'}
           />
-          <SearchableSelect 
-            id="field-commit" label="Commit" disabled={!hasScanned} placeholder="Select commit..." className="mb-4"
-            value={selectedCommit} onChange={(v) => { setSelectedCommit(v); clearError('commit'); }} 
+          <SearchableSelect
+            id="field-commit" label={t("jobForm.commit")} disabled={!hasScanned} placeholder="Select commit..." className="mb-4"
+            value={selectedCommit} onChange={(v) => { setSelectedCommit(v); clearError('commit'); }}
             options={[
-              { 
-                label: "Latest Commit (HEAD)", 
-                value: "HEAD", 
-                meta: "Use latest code" 
+              {
+                label: t("jobForm.latestCommit"),
+                value: "HEAD",
+                meta: t("jobForm.useLatestCode")
               },
-              ...commits.map(c => ({ 
-                label: c.message, 
-                value: c.sha, 
-                meta: `${c.sha.substring(0, 7)} • ${c.author}` 
+              ...commits.map(c => ({
+                label: c.message,
+                value: c.sha,
+                meta: `${c.sha.substring(0, 7)} • ${c.author}`
               }))
             ]}
             hasError={errorField === 'commit'}
@@ -386,103 +388,103 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       {/* Job Scheduling */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Job Scheduling
+            {t("jobForm.scheduling")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        
-        <SearchableSelect 
-            label="Job Priority" 
-            value={jobType} 
-            onChange={setJobType} 
+
+        <SearchableSelect
+            label={t("jobForm.priority")}
+            value={jobType}
+            onChange={setJobType}
             options={JOB_TYPES}
             placeholder="Select Priority..."
-            className="mb-0" 
+            className="mb-0"
         />
       </div>
 
       {/* Compute Resources */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Compute Resources
+            {t("jobForm.computeResources")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        
+
         <div className="grid grid-cols-1 gap-4">
-            <SearchableSelect 
-                label="GPU Accelerator" 
-                value={gpuType} 
-                onChange={handleGpuTypeChange} 
+            <SearchableSelect
+                label={t("jobForm.gpuAccelerator")}
+                value={gpuType}
+                onChange={handleGpuTypeChange}
                 options={GPU_TYPES}
                 placeholder="Select GPU model..."
                 className="mb-4"
             />
-            <NumberStepper 
-                label="GPU Count"
-                value={gpuCount} 
-                onChange={setGpuCount} 
+            <NumberStepper
+                label={t("jobForm.gpuCount")}
+                value={gpuCount}
+                onChange={setGpuCount}
                 min={0}
                 max={getGpuLimit(gpuType)}
-                disabled={gpuType === 'cpu'} 
+                disabled={gpuType === 'cpu'}
             />
         </div>
 
 
         {/* Advanced Options (Collapsible) */}
         <div className="pt-2">
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
             className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors select-none group"
           >
             <div className="text-zinc-600 group-hover:text-zinc-300 transition-colors">
               {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             </div>
-            <span>Advanced</span>
+            <span>{t("common.advanced")}</span>
           </button>
-          
+
           {showAdvanced && (
             <div className="mt-3 pl-1 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in slide-in-from-top-1 duration-200">
-              
+
               {/* CPU Count Override */}
               <div>
-                <NumberStepper 
-                  label="CPU Cores"
-                  value={cpuCount} 
+                <NumberStepper
+                  label={t("jobForm.cpuCores")}
+                  value={cpuCount}
                   onChange={setCpuCount}
                   min={0}
                   max={MAX_CPU_COUNT}
                 />
                 <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">
-                  Set to <span className="text-zinc-400 font-mono">0</span> to use partition default.
+                  {t("jobForm.cpuCoresHint")}
                 </p>
               </div>
 
               {/* Memory Override */}
               <div>
                 <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
-                  Memory
+                  {t("jobForm.memory")}
                 </label>
-                <input 
+                <input
                   type="text"
                   className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
                   value={memoryDemand}
-                  placeholder={`Default: ${DEFAULT_MEMORY}`}
-                  onChange={e => setMemoryDemand(e.target.value)} 
+                  placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
+                  onChange={e => setMemoryDemand(e.target.value)}
                 />
               </div>
 
               {/* Runner Override */}
               <div className="sm:col-span-2">
                 <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
-                  Run As User
+                  {t("jobForm.runAsUser")}
                 </label>
                 <div className="relative">
-                    <input 
+                    <input
                     type="text"
                     className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 font-mono"
                     value={runner}
-                    placeholder={`Default: ${DEFAULT_RUNNER}`}
-                    onChange={e => setRunner(e.target.value)} 
+                    placeholder={t("jobForm.runAsUserDefault", { value: DEFAULT_RUNNER })}
+                    onChange={e => setRunner(e.target.value)}
                   />
                 </div>
               </div>
@@ -495,10 +497,10 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       {/* Execution */}
       <div id="field-command">
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Execution
+            {t("jobForm.execution")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'command' ? 'text-red-500' : 'text-zinc-500'}`}>Entry Command</label>
+        <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'command' ? 'text-red-500' : 'text-zinc-500'}`}>{t("jobForm.entryCommand")}</label>
         <div className="relative group">
             <span className="absolute left-3 top-3 text-zinc-600 select-none font-mono text-sm">$</span>
             <textarea 
@@ -517,21 +519,21 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         {errorMessage ? (
              <span className="text-red-500 text-xs font-bold animate-pulse text-center sm:text-left">{errorMessage}</span>
         ) : (
-            <span className="text-zinc-500 text-xs text-center sm:text-left hidden sm:block">Waiting for launch</span>
+            <span className="text-zinc-500 text-xs text-center sm:text-left hidden sm:block">{t("jobForm.waitingForLaunch")}</span>
         )}
-        
+
         <div className="flex gap-3 w-full sm:w-auto">
-            <button 
-                onClick={onCancel} 
+            <button
+                onClick={onCancel}
                 className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
             >
-                Cancel
+                {t("common.cancel")}
             </button>
-            <button 
+            <button
                 onClick={handleLaunch}
                 className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
             >
-                {mode === 'create' ? "🚀 Launch Job" : "🔁 Re-Launch"}
+                {mode === 'create' ? t("jobForm.launchJob") : t("jobForm.reLaunch")}
             </button>
         </div>
       </div>

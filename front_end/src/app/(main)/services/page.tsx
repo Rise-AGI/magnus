@@ -7,19 +7,22 @@ import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
 import { Service } from "@/types/service";
 import { User } from "@/types/job";
+import { useLanguage } from "@/context/language-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ServiceTable } from "@/components/services/service-table";
 import { ServiceDrawer } from "@/components/services/service-drawer";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 
-// 排序选项配置
-const SORT_OPTIONS = [
-  { label: "Sort: Last Active", value: "activity", meta: "Traffic" },
-  { label: "Sort: Updated", value: "updated", meta: "Config" },
-];
-
 export default function ServicesPage() {
+  const { t } = useLanguage();
+
+  // 排序选项配置
+  const SORT_OPTIONS = [
+    { label: t("services.sortLastActive"), value: "activity", meta: t("services.sortTraffic") },
+    { label: t("services.sortUpdated"), value: "updated", meta: t("services.sortConfig") },
+  ];
+
   const [services, setServices] = useState<Service[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -182,36 +185,36 @@ export default function ServicesPage() {
 
   const getDialogConfig = () => {
     if (!pendingAction) return { title: "", description: "", variant: "default" as const, confirmText: "" };
-    
+
     if (pendingAction.type === "delete") {
       return {
-        title: "Delete Service",
+        title: t("services.deleteTitle"),
         description: (
           <span>
-            Are you sure you want to delete service <strong className="text-white">{pendingAction.service.name}</strong>? 
-            This action cannot be undone and will terminate any running instances.
+            {t("services.deleteConfirm", { name: pendingAction.service.name })}
+            {" "}{t("services.deleteWarning")}
           </span>
         ),
         variant: "danger" as const,
-        confirmText: "Delete Service",
+        confirmText: t("services.deleteTitle"),
       };
     } else {
       const isStopping = pendingAction.service.is_active;
       return {
-        title: isStopping ? "Stop Service" : "Start Service",
+        title: isStopping ? t("services.stopTitle") : t("services.startTitle"),
         description: isStopping ? (
           <span>
-            Are you sure you want to stop <strong className="text-white">{pendingAction.service.name}</strong>? 
-            The proxy endpoint will stop accepting traffic.
+            {t("services.stopConfirm", { name: pendingAction.service.name })}
+            {" "}{t("services.stopWarning")}
           </span>
         ) : (
           <span>
-            Are you sure you want to activate <strong className="text-white">{pendingAction.service.name}</strong>? 
-            This will enable traffic routing and scale up resources on demand.
+            {t("services.startConfirm", { name: pendingAction.service.name })}
+            {" "}{t("services.startWarning")}
           </span>
         ),
         variant: isStopping ? "danger" as const : "default" as const,
-        confirmText: isStopping ? "Stop Service" : "Start Service",
+        confirmText: isStopping ? t("services.stopTitle") : t("services.startTitle"),
       };
     }
   };
@@ -234,23 +237,23 @@ export default function ServicesPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            Service Registry
+            Services
           </h1>
           <p className="text-zinc-500 text-sm mt-1">
-            Manage persistent endpoints and elastic drivers.
+            {t("services.subtitle")}
           </p>
         </div>
         <button
           onClick={handleCreate}
           className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50"
         >
-          <Plus className="w-4 h-4" /> New Service
+          <Plus className="w-4 h-4" /> {t("services.new")}
         </button>
       </div>
 
       {/* Filters & Search & Sort */}
       <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-1.5 mb-6 flex items-center gap-2 backdrop-blur-sm relative z-20">
-        
+
         {/* 1. Search (Expanded) */}
         <div className="relative flex-1 group">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
@@ -258,7 +261,7 @@ export default function ServicesPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by Service Name or ID..."
+            placeholder={t("services.searchPlaceholder")}
             className="w-full bg-transparent border-none py-2.5 pl-9 pr-4 text-sm text-zinc-200 focus:outline-none focus:ring-0 placeholder-zinc-600"
           />
         </div>
@@ -271,7 +274,7 @@ export default function ServicesPage() {
             value={selectedUserId}
             onChange={setSelectedUserId}
             options={userFilterOptions}
-            placeholder="Filter by Owner"
+            placeholder={t("services.filterByOwner")}
             className="mb-0 border-none bg-transparent"
           />
         </div>
@@ -295,14 +298,14 @@ export default function ServicesPage() {
         <button
           onClick={() => setActiveOnly(!activeOnly)}
           className={`px-3 py-2.5 text-sm font-medium flex items-center gap-2 transition-colors rounded-lg mr-1
-            ${activeOnly 
-              ? "text-teal-400 bg-teal-900/20 hover:bg-teal-900/30" 
+            ${activeOnly
+              ? "text-teal-400 bg-teal-900/20 hover:bg-teal-900/30"
               : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50"
             }`}
-          title="Show active services only"
+          title={t("services.activeOnlyTitle")}
         >
           <Activity className={`w-4 h-4 ${activeOnly ? "animate-pulse" : ""}`} />
-          <span className="whitespace-nowrap">Active Only</span>
+          <span className="whitespace-nowrap">{t("services.activeOnly")}</span>
         </button>
 
       </div>

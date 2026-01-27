@@ -4,18 +4,21 @@
 import { useState, useRef, useEffect } from "react";
 import { Eye, EyeOff, PenLine } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 import { client } from "@/lib/api";
 import { NotificationsPopover } from "./notifications-popover";
+import { LanguageToggle } from "./language-toggle";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { CLUSTER_CONFIG } from "@/lib/config";
 
 export function Header() {
   const { user, isLoading } = useAuth();
-  
+  const { t } = useLanguage();
+
   const [isOpen, setIsOpen] = useState(false);
   const [showToken, setShowToken] = useState(false);
-  
+
   const [showResetDialog, setShowResetDialog] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -25,7 +28,7 @@ export function Header() {
     function handleClickOutside(event: MouseEvent) {
       if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
         setIsOpen(false);
-        setShowToken(false); 
+        setShowToken(false);
       }
     }
     if (isOpen) {
@@ -40,8 +43,8 @@ export function Header() {
     setIsRefreshing(true);
     try {
       const token = localStorage.getItem("magnus_token");
-      if (!token) throw new Error("No login token found.");
-      
+      if (!token) throw new Error(t("header.noLoginToken"));
+
       const updatedUser = await client("/api/auth/token/refresh", {
         method: "POST",
         headers: {
@@ -57,7 +60,7 @@ export function Header() {
       setShowToken(false);
     } catch (error: any) {
       console.error("Refresh failed:", error);
-      alert(`Failed to refresh token: ${error.message || "Unknown error"}`);
+      alert(`${t("header.refreshFailed")} ${error.message || "Unknown error"}`);
     } finally {
       setIsRefreshing(false);
     }
@@ -71,6 +74,7 @@ export function Header() {
     <>
       <header className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur sticky top-0 z-40 flex items-center justify-end px-8 gap-4">
         <NotificationsPopover />
+        <LanguageToggle />
 
         {!isLoading && user && (
           <div className="relative" ref={popoverRef}>
@@ -116,7 +120,7 @@ export function Header() {
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowToken(!showToken); }}
                     className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-all"
-                    title={showToken ? "Hide Token" : "Show Token"}
+                    title={showToken ? t("header.hideToken") : t("header.showToken")}
                   >
                     {showToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
@@ -124,7 +128,7 @@ export function Header() {
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowResetDialog(true); }}
                     className="p-1.5 text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-md transition-all"
-                    title="Reset Token"
+                    title={t("header.resetToken")}
                   >
                     <PenLine className="w-3.5 h-3.5" />
                   </button>
@@ -137,19 +141,19 @@ export function Header() {
         )}
       </header>
 
-      <ConfirmationDialog 
+      <ConfirmationDialog
         isOpen={showResetDialog}
         onClose={() => setShowResetDialog(false)}
         onConfirm={handleRefreshToken}
-        title="Reset Trust Token?"
+        title={t("header.resetTokenTitle")}
         description={
           <span>
-            Are you sure you want to reset your Trust Token? <br/><br/>
-            <span className="text-red-400">The current token will become invalid immediately.</span> 
-            {" "}You will need to update your trust settings on the cluster.
+            {t("header.resetTokenDesc")} <br/><br/>
+            <span className="text-red-400">{t("header.resetTokenWarning")}</span>
+            {" "}{t("header.resetTokenNote")}
           </span>
         }
-        confirmText="Reset Token"
+        confirmText={t("header.resetToken")}
         variant="danger"
         isLoading={isRefreshing}
       />

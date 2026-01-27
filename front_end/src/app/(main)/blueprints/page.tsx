@@ -9,6 +9,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { POLL_INTERVAL } from "@/lib/config";
 import { DEFAULT_CODE_TEMPLATE } from "@/lib/blueprint-defaults";
+import { useLanguage } from "@/context/language-context";
 
 import { User } from "@/types/auth";
 import { Blueprint } from "@/types/blueprint";
@@ -18,6 +19,7 @@ import { BlueprintEditor } from "@/components/blueprints/blueprint-editor";
 import { BlueprintRunner } from "@/components/blueprints/blueprint-runner";
 
 export default function BlueprintsPage() {
+  const { t } = useLanguage();
   const [blueprints, setBlueprints] = useState<Blueprint[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -121,22 +123,22 @@ export default function BlueprintsPage() {
 
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">Blueprints Registry</h1>
-          <p className="text-zinc-500 text-sm mt-1">Standardized task templates via Python-defined logic.</p>
+          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">Blueprints</h1>
+          <p className="text-zinc-500 text-sm mt-1">{t("blueprints.subtitle")}</p>
         </div>
         <button onClick={() => { setEditorData({ id: "", title: "", description: "", code: DEFAULT_CODE_TEMPLATE }); setEditorMode('create'); setIsEditorOpen(true); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50">
-            <Plus className="w-4 h-4"/> New Blueprint
+            <Plus className="w-4 h-4"/> {t("blueprints.new")}
         </button>
       </div>
 
       <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-1.5 mb-6 flex items-center gap-2 backdrop-blur-sm relative z-20">
         <div className="relative flex-1 group">
            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
-           <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search Blueprints..." className="w-full bg-transparent border-none py-2.5 pl-9 pr-4 text-sm text-zinc-200 focus:outline-none focus:ring-0 placeholder-zinc-600" />
+           <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t("blueprints.searchPlaceholder")} className="w-full bg-transparent border-none py-2.5 pl-9 pr-4 text-sm text-zinc-200 focus:outline-none focus:ring-0 placeholder-zinc-600" />
         </div>
         <div className="h-6 w-px bg-zinc-800"></div>
-        <div className="w-56"> 
-          <SearchableSelect value={selectedUserId} onChange={setSelectedUserId} options={userFilterOptions} placeholder="Filter by User" className="mb-0 border-none bg-transparent" />
+        <div className="w-56">
+          <SearchableSelect value={selectedUserId} onChange={setSelectedUserId} options={userFilterOptions} placeholder={t("blueprints.filterByUser")} className="mb-0 border-none bg-transparent" />
         </div>
       </div>
 
@@ -151,7 +153,7 @@ export default function BlueprintsPage() {
 
       <BlueprintEditor isOpen={isEditorOpen} mode={editorMode} initialData={editorData} onClose={() => setIsEditorOpen(false)} onSave={handleSave} isSaving={isSaving} />
       <BlueprintRunner blueprint={selectedBlueprint} onClose={() => setSelectedBlueprint(null)} />
-      <ConfirmationDialog isOpen={!!blueprintToDelete} onClose={() => setBlueprintToDelete(null)} onConfirm={handleDelete} title="Delete Blueprint" description={<span>Are you sure you want to delete blueprint <strong>{blueprintToDelete?.title}</strong>?</span>} confirmText="Delete" variant="danger" isLoading={isDeleting} />
+      <ConfirmationDialog isOpen={!!blueprintToDelete} onClose={() => setBlueprintToDelete(null)} onConfirm={handleDelete} title={t("blueprints.deleteTitle")} description={<span>{t("blueprints.deleteConfirm", { title: blueprintToDelete?.title || "" })}</span>} confirmText={t("common.delete")} variant="danger" isLoading={isDeleting} />
     </div>
   );
 }

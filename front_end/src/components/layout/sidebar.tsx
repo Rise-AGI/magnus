@@ -15,7 +15,8 @@ import {
   Layers,
   ArrowRight,
 } from "lucide-react";
-import { useAuth } from "@/context/auth-context"; 
+import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 import { CLUSTER_CONFIG } from "@/lib/config";
 
 const NAV_ITEMS = [
@@ -30,7 +31,8 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { user, login, logout, isLoading } = useAuth(); 
+  const { user, login, logout, isLoading } = useAuth();
+  const { t } = useLanguage(); 
 
   return (
     <aside className="w-full h-full bg-zinc-950/50 backdrop-blur-xl flex flex-col">
@@ -85,7 +87,7 @@ export function Sidebar() {
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all text-sm font-medium bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700"
             >
               <LogIn className="w-4 h-4" />
-              <span>Sign in with Feishu</span>
+              <span>{t("auth.signInWithFeishu")}</span>
             </button>
           ) : (
             <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 shadow-sm">
@@ -105,10 +107,10 @@ export function Sidebar() {
                 </p>
               </div>
 
-              <button 
+              <button
                 onClick={logout}
                 className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-colors flex-shrink-0"
-                title="Log out"
+                title={t("auth.logout")}
               >
                 <LogOut className="w-4 h-4" />
               </button>

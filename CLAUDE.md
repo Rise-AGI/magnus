@@ -166,6 +166,60 @@ front_end/src/
 | `UserAvatar` | `components/ui/user-avatar.tsx` | 用户头像 |
 | `RenderMarkdown` | `components/ui/render-markdown.tsx` | Markdown 渲染 |
 
+## 国际化 (i18n)
+
+### 架构
+
+- **语言上下文**：`context/language-context.tsx` - 包含所有翻译定义和 `useLanguage` hook
+- **语言切换**：`components/layout/language-toggle.tsx` - Header 右侧的下拉选择器
+- **默认语言**：简体中文，用户选择后存储在 `localStorage`
+
+### 使用方式
+
+```tsx
+import { useLanguage } from "@/context/language-context";
+
+function MyComponent() {
+  const { t } = useLanguage();
+
+  return <h1>{t("jobs.title")}</h1>;
+}
+
+// 带参数插值
+t("jobForm.memoryDefault", { value: "64G" })  // "默认：64G"
+```
+
+### 翻译键命名规范
+
+```
+模块.子模块.具体项
+```
+
+示例：
+- `jobs.table.task` - Jobs 页面表格的 Task 列
+- `jobForm.taskName` - Job 表单的任务名称字段
+- `common.cancel` - 通用取消按钮
+
+### 不翻译的术语
+
+以下专有名词保持英文，不做翻译：
+- **导航项**：Dashboard, Cluster, Jobs, Blueprints, Services, Explorer
+- **品牌**：Magnus Platform
+- **技术术语**：GPU, CPU, HEAD, commit sha 等
+
+### 添加新翻译
+
+在 `language-context.tsx` 的 `translations` 对象中添加：
+
+```tsx
+const translations = {
+  // ...existing translations
+  "myModule.newKey": { zh: "中文文本", en: "English text" },
+} as const;
+```
+
+**注意**：使用 `as const` 确保 TypeScript 严格检查翻译键。
+
 ## 核心业务概念
 
 ### 四级优先级调度

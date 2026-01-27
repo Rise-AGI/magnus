@@ -2,11 +2,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Zap, Plus, Activity, Cpu, Clock, CalendarDays } from "lucide-react"; 
+import { Zap, Plus, Activity, Cpu, Clock, CalendarDays } from "lucide-react";
 import { client } from "@/lib/api";
 import { Job } from "@/types/job";
 import { POLL_INTERVAL } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useJobOperations } from "@/hooks/use-job-operations";
@@ -47,7 +48,8 @@ function StatCard({
 
 export default function DashboardPage() {
   const { user: currentUser } = useAuth();
-  
+  const { t } = useLanguage();
+
   const [activeJobs, setActiveJobs] = useState<Job[]>([]);
   const [totalJobs, setTotalJobs] = useState(0);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -114,37 +116,37 @@ export default function DashboardPage() {
       <div className="mb-8 flex items-center justify-between">
         <div>
             <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">Dashboard</h1>
-            <p className="text-zinc-500 text-sm mt-1">Welcome back, {currentUser?.name}. Here is your workload overview.</p>
+            <p className="text-zinc-500 text-sm mt-1">{t("dashboard.welcome", { name: currentUser?.name || "" })}</p>
         </div>
-        <button 
-          onClick={handleNewJob} 
+        <button
+          onClick={handleNewJob}
           className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50"
         >
-          <Plus className="w-4 h-4" /> New Job
+          <Plus className="w-4 h-4" /> {t("dashboard.newJob")}
         </button>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Total Occupancy (24h)" value={stats?.total_occupancy_24h ?? null} subLabel="All Slurm Tasks" icon={Activity} colorClass="bg-emerald-500 text-emerald-500" />
-        <StatCard label="Total Occupancy (7d)" value={stats?.total_occupancy_7d ?? null} subLabel="All Slurm Tasks" icon={CalendarDays} colorClass="bg-teal-500 text-teal-500" />
-        <StatCard label="Magnus Utilization (24h)" value={0.0} subLabel="Platform Managed（施工中）" icon={Cpu} colorClass="bg-blue-500 text-blue-500" />
-        <StatCard label="Magnus Utilization (7d)" value={0.0} subLabel="Platform Managed（施工中）" icon={Clock} colorClass="bg-indigo-500 text-indigo-500" />
+        <StatCard label={t("dashboard.totalOccupancy24h")} value={stats?.total_occupancy_24h ?? null} subLabel={t("dashboard.allSlurmTasks")} icon={Activity} colorClass="bg-emerald-500 text-emerald-500" />
+        <StatCard label={t("dashboard.totalOccupancy7d")} value={stats?.total_occupancy_7d ?? null} subLabel={t("dashboard.allSlurmTasks")} icon={CalendarDays} colorClass="bg-teal-500 text-teal-500" />
+        <StatCard label={t("dashboard.magnusUtil24h")} value={0.0} subLabel={t("dashboard.platformManaged")} icon={Cpu} colorClass="bg-blue-500 text-blue-500" />
+        <StatCard label={t("dashboard.magnusUtil7d")} value={0.0} subLabel={t("dashboard.platformManaged")} icon={Clock} colorClass="bg-indigo-500 text-indigo-500" />
       </div>
 
       <div className="flex flex-col gap-6">
         <div className="flex items-center gap-2 text-zinc-200 font-semibold text-lg">
             <Zap className="w-5 h-5 text-yellow-500 fill-yellow-500/20" />
-            My Active Jobs
+            {t("dashboard.myActiveJobs")}
         </div>
-        
+
         <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
-            <JobTable 
+            <JobTable
               jobs={activeJobs}
               loading={loading && activeJobs.length === 0}
               onClone={handleCloneJob}
               onTerminate={onClickTerminate}
-              emptyMessage="No active jobs."
+              emptyMessage={t("dashboard.noActiveJobs")}
               className="border-none min-h-[300px]"
               fromSource="dashboard"
             />
