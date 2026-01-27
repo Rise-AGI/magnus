@@ -11,6 +11,7 @@ import { BlueprintPreference } from "@/types/blueprint";
 import { computeStableHash } from "@/lib/utils";
 import { HelpButton } from "@/components/ui/help-button";
 import { BlueprintRunnerHelp } from "@/components/ui/help-content";
+import { useLanguage } from "@/context/language-context";
 
 interface BlueprintRunnerProps {
   blueprint: { id: string; title: string } | null;
@@ -18,6 +19,7 @@ interface BlueprintRunnerProps {
 }
 
 export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
+  const { t } = useLanguage();
   const router = useRouter();
 
   const [paramsSchema, setParamsSchema] = useState<FieldSchema[]>([]);
@@ -165,7 +167,7 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
       icon={<Terminal className="w-5 h-5 text-blue-500" />}
       width="w-[600px]"
       actions={
-        <HelpButton title="蓝图运行帮助">
+        <HelpButton title={t("blueprintRunner.help")}>
           <BlueprintRunnerHelp />
         </HelpButton>
       }
@@ -188,7 +190,7 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
             </span>
           ) : (
             <span className="text-zinc-500 text-xs text-center sm:text-left hidden sm:block transition-all">
-              Waiting for launch
+              {t("jobForm.waitingForLaunch")}
             </span>
           )}
 
@@ -198,7 +200,7 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
               disabled={isRunning}
               className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               onClick={handleRun}
@@ -208,12 +210,12 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
               {isRunning ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Launching...
+                  {t("blueprintRunner.launching")}
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-current" />
-                  Launch
+                  {t("blueprintRunner.launch")}
                 </>
               )}
             </button>

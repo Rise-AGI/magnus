@@ -19,9 +19,11 @@ import { JobDrawer } from "@/components/jobs/job-drawer";
 import { useJobOperations } from "@/hooks/use-job-operations";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 
 export default function JobDetailsPage() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -35,14 +37,14 @@ export default function JobDetailsPage() {
   const getBackNav = (): { path: string; label: string } => {
     if (fromSource === "services") {
       return fromId
-        ? { path: `/services/${fromId}`, label: "Back to Service" }
-        : { path: "/services", label: "Back to Services" };
+        ? { path: `/services/${fromId}`, label: t("jobDetail.backToService") }
+        : { path: "/services", label: t("jobDetail.backToServices") };
     }
 
     const config: Record<string, { path: string; label: string }> = {
-      cluster:   { path: "/cluster",   label: "Back to Cluster" },
-      dashboard: { path: "/dashboard", label: "Back to Dashboard" },
-      jobs:      { path: "/jobs",      label: "Back to Jobs" },
+      cluster:   { path: "/cluster",   label: t("jobDetail.backToCluster") },
+      dashboard: { path: "/dashboard", label: t("jobDetail.backToDashboard") },
+      jobs:      { path: "/jobs",      label: t("jobDetail.backToJobs") },
     };
     return config[fromSource] || config["jobs"];
   };
@@ -214,16 +216,15 @@ export default function JobDetailsPage() {
           <div className="w-12 h-12 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-4">
             <Terminal className="w-6 h-6 text-zinc-500" />
           </div>
-          <h2 className="text-xl font-bold text-zinc-200 mb-2">External Task</h2>
+          <h2 className="text-xl font-bold text-zinc-200 mb-2">{t("jobDetail.externalTask")}</h2>
           <p className="text-zinc-500 text-sm mb-6 leading-relaxed">
-            This task is managed directly by Slurm CLI outside of Magnus. <br />
-            Detailed logs and configuration are not available here.
+            {t("jobDetail.externalTaskDesc")}
           </p>
           <button
             onClick={() => router.back()}
             className="px-6 py-2 bg-blue-600 text-white hover:bg-blue-500 text-sm font-medium rounded-lg transition-colors"
           >
-            Go Back
+            {t("jobDetail.goBack")}
           </button>
         </div>
       </div>
@@ -231,14 +232,14 @@ export default function JobDetailsPage() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-[50vh] text-zinc-500">Loading Job Context...</div>;
+    return <div className="flex items-center justify-center h-[50vh] text-zinc-500">{t("jobDetail.loading")}</div>;
   }
 
   if (!job) {
     return (
       <div className="flex flex-col items-center justify-center h-[50vh] text-zinc-500 gap-4">
-        <p>Job not found</p>
-        <button onClick={() => router.back()} className="text-blue-500 hover:underline">Go Back</button>
+        <p>{t("jobDetail.notFound")}</p>
+        <button onClick={() => router.back()} className="text-blue-500 hover:underline">{t("jobDetail.goBack")}</button>
       </div>
     );
   }
@@ -295,7 +296,7 @@ export default function JobDetailsPage() {
           <div className="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
             <JobStatusBadge status={job.status} size="md" />
             <div className="flex flex-col">
-              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Status</span>
+              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.status")}</span>
               <span className={`text-base font-bold tracking-wide
                 ${job.status === "Running" ? "text-blue-400" :
                   job.status === "Success" ? "text-green-400" :
@@ -319,7 +320,7 @@ export default function JobDetailsPage() {
                   </div>
                 )}
                 <div className="flex flex-col">
-                  <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Creator</span>
+                  <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.creator")}</span>
                   <span className="text-sm font-medium text-zinc-200">{job.user.name}</span>
                 </div>
               </div>
@@ -330,7 +331,7 @@ export default function JobDetailsPage() {
               <button
                 onClick={() => handleCloneJob(job)}
                 className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                title="Clone this job"
+                title={t("jobDetail.cloneJob")}
               >
                 <RefreshCw className="w-5 h-5" />
               </button>
@@ -339,7 +340,7 @@ export default function JobDetailsPage() {
                 <button
                   onClick={() => onClickTerminate(job)}
                   className="ml-2 p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
-                  title="Terminate Task"
+                  title={t("jobDetail.terminateTask")}
                 >
                   <SquareX className="w-5 h-5" />
                 </button>
@@ -358,7 +359,7 @@ export default function JobDetailsPage() {
           <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <GitBranch className="w-4 h-4 text-zinc-400" />
-              <h3 className="text-sm font-semibold text-zinc-200">Repository</h3>
+              <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.repository")}</h3>
             </div>
             <div className="p-5 space-y-5">
 
@@ -370,9 +371,9 @@ export default function JobDetailsPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer transition-colors w-fit"
-                    title="Open Repository in GitHub"
+                    title={t("jobDetail.openRepoGithub")}
                   >
-                    Github Repository
+                    {t("jobDetail.githubRepo")}
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                   </a>
                 </div>
@@ -396,9 +397,9 @@ export default function JobDetailsPage() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer w-fit"
-                      title="View Branch Tree"
+                      title={t("jobDetail.viewBranchTree")}
                     >
-                      Branch
+                      {t("jobDetail.branch")}
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                     </a>
                   </div>
@@ -419,9 +420,9 @@ export default function JobDetailsPage() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer w-fit"
-                      title="View Commit Details"
+                      title={t("jobDetail.viewCommitDetails")}
                     >
-                      Commit SHA
+                      {t("jobDetail.commitSha")}
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                     </a>
                   </div>
@@ -441,29 +442,29 @@ export default function JobDetailsPage() {
           <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <Cpu className="w-4 h-4 text-zinc-400" />
-              <h3 className="text-sm font-semibold text-zinc-200">Resources</h3>
+              <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.resources")}</h3>
             </div>
             <div className="p-5 grid grid-cols-2 gap-4">
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Accelerator</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("jobDetail.accelerator")}</label>
                 <span className="text-base text-white font-medium block">
-                  {job.gpu_type === "CPU" ? "CPU Only" : job.gpu_type}
+                  {job.gpu_type === "CPU" ? t("jobDetail.cpuOnly") : job.gpu_type}
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">GPU Count</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("jobDetail.gpuCount")}</label>
                 <span className="text-base text-white font-medium block">{job.gpu_count} {job.gpu_count === 1 ? "GPU" : "GPUs"}</span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">CPU Cores</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("jobDetail.cpuCores")}</label>
                 <span className="text-base text-white font-medium block">
-                  {job.cpu_count ? job.cpu_count : <span className="text-zinc-500 text-sm">(Station Default)</span>}
+                  {job.cpu_count ? job.cpu_count : <span className="text-zinc-500 text-sm">{t("jobDetail.stationDefault")}</span>}
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Memory</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("jobDetail.memory")}</label>
                 <span className="text-base text-white font-medium block">
-                  {job.memory_demand ? job.memory_demand : <span className="text-zinc-500 text-sm">(Station Default)</span>}
+                  {job.memory_demand ? job.memory_demand : <span className="text-zinc-500 text-sm">{t("jobDetail.stationDefault")}</span>}
                 </span>
               </div>
             </div>
@@ -474,12 +475,12 @@ export default function JobDetailsPage() {
             <div className="shrink-0 px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-zinc-400" />
-                <h3 className="text-sm font-semibold text-zinc-200">Entry Command</h3>
+                <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.entryCommand")}</h3>
               </div>
-              <button 
+              <button
                 onClick={() => copyToClipboard(job.entry_command, setCopiedCommand)}
                 className="text-zinc-500 hover:text-zinc-200 transition-colors"
-                title="Copy Full Command"
+                title={t("jobDetail.copyFullCommand")}
               >
                 {copiedCommand ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -507,7 +508,7 @@ export default function JobDetailsPage() {
                   ${activeTab === "console" ? "text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
               >
                 <Terminal className={`w-4 h-4 ${activeTab === "console" ? "text-zinc-400" : "text-zinc-600"}`} />
-                <span>Console Output</span>
+                <span>{t("jobDetail.consoleOutput")}</span>
                 {job.status === "Running" && (
                   <span className="flex h-1.5 w-1.5 relative ml-0.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -522,7 +523,7 @@ export default function JobDetailsPage() {
                   ${activeTab === "description" ? "text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
               >
                 <AlignLeft className={`w-4 h-4 ${activeTab === "description" ? "text-zinc-400" : "text-zinc-600"}`} />
-                <span>Description</span>
+                <span>{t("jobDetail.description")}</span>
               </div>
 
               <div
@@ -531,7 +532,7 @@ export default function JobDetailsPage() {
                   ${activeTab === "metrics" ? "text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
               >
                 <Activity className={`w-4 h-4 ${activeTab === "metrics" ? "text-zinc-400" : "text-zinc-600"}`} />
-                <span>Metrics</span>
+                <span>{t("jobDetail.metrics")}</span>
               </div>
 
             </div>
@@ -539,7 +540,7 @@ export default function JobDetailsPage() {
             {job.status === "Running" && (
               <div className="text-xs text-zinc-500 font-medium flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500/50"></span>
-                Live
+                {t("jobDetail.live")}
               </div>
             )}
           </div>
@@ -554,7 +555,7 @@ export default function JobDetailsPage() {
                     <button
                       onClick={goToFirstPage}
                       className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95"
-                      title="First Page"
+                      title={t("jobDetail.firstPage")}
                     >
                       <ArrowUpToLine className="w-4 h-4" />
                     </button>
@@ -562,7 +563,7 @@ export default function JobDetailsPage() {
                       onClick={goToPrevPage}
                       disabled={effectivePage <= 0}
                       className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
-                      title="Previous Page"
+                      title={t("jobDetail.prevPage")}
                     >
                       <ChevronUp className="w-4 h-4" />
                     </button>
@@ -570,7 +571,7 @@ export default function JobDetailsPage() {
                       onClick={goToNextPage}
                       disabled={effectivePage >= logTotalPages - 1}
                       className="p-2 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 rounded-lg shadow-lg transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
-                      title="Next Page"
+                      title={t("jobDetail.nextPage")}
                     >
                       <ChevronDown className="w-4 h-4" />
                     </button>
@@ -580,7 +581,7 @@ export default function JobDetailsPage() {
                         ${followMode
                           ? "bg-green-900/20 border-green-800/50 text-green-400"
                           : "bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600"}`}
-                      title={followMode ? "Following (Double-click to enable)" : "Last Page (Double-click to follow)"}
+                      title={followMode ? t("jobDetail.followMode") : t("jobDetail.lastPageFollow")}
                     >
                       <ArrowDownToLine className="w-4 h-4" />
                     </button>
@@ -599,8 +600,8 @@ export default function JobDetailsPage() {
                       <Terminal className="w-10 h-10 opacity-20" />
                       <p>
                         {job && ['Pending', 'Running'].includes(job.status)
-                          ? "Waiting for output..."
-                          : "No output generated during execution"}
+                          ? t("jobDetail.waitingOutput")
+                          : t("jobDetail.noOutput")}
                       </p>
                     </div>
                   )}
@@ -616,7 +617,7 @@ export default function JobDetailsPage() {
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[200px] italic">
                       <AlignLeft className="w-8 h-8 opacity-20" />
-                      No description provided.
+                      {t("jobDetail.noDescriptionProvided")}
                     </div>
                   )}
                 </div>
@@ -633,8 +634,8 @@ export default function JobDetailsPage() {
                     </div>
                   </div>
                   <div className="text-center">
-                    <p className="text-zinc-200 font-bold text-lg mb-1">Coming Soon</p>
-                    <p className="text-zinc-500 text-sm">施工中...</p>
+                    <p className="text-zinc-200 font-bold text-lg mb-1">{t("jobDetail.comingSoon")}</p>
+                    <p className="text-zinc-500 text-sm">{t("jobDetail.underConstruction")}</p>
                   </div>
                 </div>
               </div>

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Job } from "@/types/job";
 import { JobFormData } from "@/components/jobs/job-form";
 import { client } from "@/lib/api";
+import { useLanguage } from "@/context/language-context";
 
 interface UseJobOperationsProps {
   onSuccess?: () => void;
@@ -10,6 +11,7 @@ interface UseJobOperationsProps {
 }
 
 export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperationsProps = {}) {
+  const { t } = useLanguage();
   // --- Drawer / Form State ---
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<"create" | "clone">("create");
@@ -98,15 +100,13 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
       onClose: () => setJobToTerminate(null),
       onConfirm: executeTermination,
       isLoading: isTerminating,
-      title: "Terminate Task?",
+      title: t("jobOps.terminateTitle"),
       description: jobToTerminate ? (
         <span>
-          Are you sure you want to terminate <strong>{jobToTerminate.task_name}</strong>?
-          <br />
-          This action will stop the process immediately and cannot be undone.
+          {t("jobOps.terminateDesc", { name: jobToTerminate.task_name })}
         </span>
       ) : null,
-      confirmText: "Terminate",
+      confirmText: t("jobOps.terminateBtn"),
       variant: "danger" as const,
     },
     // 暴露出的操作函数

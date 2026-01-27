@@ -249,6 +249,420 @@ const translations = {
   "validation.serviceNameRequired": { zh: "服务名称为必填项", en: "Service name is required" },
   "validation.serviceIdRequired": { zh: "服务 ID 为必填项", en: "Service ID is required" },
   "validation.serviceIdInvalid": { zh: "服务 ID 只能包含小写字母、数字和连字符", en: "Service ID can only contain lowercase letters, numbers, and hyphens" },
+
+  // ===== Blueprint Editor =====
+  "blueprintEditor.create": { zh: "创建 Blueprint", en: "Create Blueprint" },
+  "blueprintEditor.cloneUpdate": { zh: "克隆 / 更新 Blueprint", en: "Clone / Update Blueprint" },
+  "blueprintEditor.help": { zh: "蓝图编辑帮助", en: "Blueprint Editor Help" },
+  "blueprintEditor.basicInfo": { zh: "基本信息", en: "Basic Information" },
+  "blueprintEditor.name": { zh: "Blueprint 名称", en: "Blueprint Name" },
+  "blueprintEditor.id": { zh: "Blueprint ID", en: "Blueprint ID" },
+  "blueprintEditor.idHint": { zh: "唯一标识符（URL 安全）。", en: "Unique identifier (URL safe)." },
+  "blueprintEditor.implementation": { zh: "实现逻辑", en: "Implementation" },
+  "blueprintEditor.pythonLogic": { zh: "Python 逻辑", en: "Python Logic" },
+  "blueprintEditor.updating": { zh: "正在更新现有 Blueprint。", en: "Updating existing blueprint." },
+  "blueprintEditor.creating": { zh: "正在创建新 Blueprint 定义。", en: "Creating new blueprint definition." },
+  "blueprintEditor.updateBtn": { zh: "更新 Blueprint", en: "Update Blueprint" },
+  "blueprintEditor.createBtn": { zh: "创建 Blueprint", en: "Create Blueprint" },
+  "blueprintEditor.cloneBtn": { zh: "克隆 Blueprint", en: "Clone Blueprint" },
+
+  // ===== Blueprint Runner =====
+  "blueprintRunner.help": { zh: "蓝图运行帮助", en: "Blueprint Runner Help" },
+  "blueprintRunner.launching": { zh: "启动中...", en: "Launching..." },
+  "blueprintRunner.launch": { zh: "启动", en: "Launch" },
+
+  // ===== Blueprint Detail Page =====
+  "blueprintDetail.backTo": { zh: "返回 Blueprints", en: "Back to Blueprints" },
+  "blueprintDetail.notFound": { zh: "Blueprint 未找到", en: "Blueprint Not Found" },
+  "blueprintDetail.notFoundDesc": { zh: "在注册表中未找到 Blueprint 定义 {id}。它可能已被删除或 ID 不正确。", en: "The blueprint definition {id} could not be located in the registry. It may have been deleted or the ID is incorrect." },
+  "blueprintDetail.returnToRegistry": { zh: "返回注册表", en: "Return to Registry" },
+  "blueprintDetail.author": { zh: "作者", en: "Author" },
+  "blueprintDetail.editClone": { zh: "编辑 / 克隆 Blueprint", en: "Edit / Clone Blueprint" },
+  "blueprintDetail.runBlueprint": { zh: "运行 Blueprint", en: "Run Blueprint" },
+  "blueprintDetail.deleteBlueprint": { zh: "删除 Blueprint", en: "Delete Blueprint" },
+  "blueprintDetail.description": { zh: "描述", en: "Description" },
+  "blueprintDetail.copyDescription": { zh: "复制描述", en: "Copy Description" },
+  "blueprintDetail.implementationLogic": { zh: "实现逻辑", en: "Implementation Logic" },
+  "blueprintDetail.copyCode": { zh: "复制代码", en: "Copy Code" },
+  "blueprintDetail.configuration": { zh: "配置", en: "Configuration" },
+  "blueprintDetail.configureParams": { zh: "配置参数以实例化此任务。", en: "Configure parameters to instantiate this task." },
+  "blueprintDetail.deleteConfirmDesc": { zh: "确定要删除 Blueprint {title} 吗？此操作不可撤销。", en: "Are you sure you want to delete blueprint {title}? This action cannot be undone." },
+
+  // ===== Job Detail Page =====
+  "jobDetail.backTo": { zh: "返回 Jobs", en: "Back to Jobs" },
+  "jobDetail.cloneJob": { zh: "克隆此任务", en: "Clone this job" },
+  "jobDetail.terminateTask": { zh: "终止任务", en: "Terminate Task" },
+  "jobDetail.openRepoGithub": { zh: "在 GitHub 中打开仓库", en: "Open Repository in GitHub" },
+  "jobDetail.viewBranchTree": { zh: "查看分支树", en: "View Branch Tree" },
+  "jobDetail.viewCommitDetails": { zh: "查看提交详情", en: "View Commit Details" },
+  "jobDetail.copyFullCommand": { zh: "复制完整命令", en: "Copy Full Command" },
+  "jobDetail.firstPage": { zh: "第一页", en: "First Page" },
+  "jobDetail.prevPage": { zh: "上一页", en: "Previous Page" },
+  "jobDetail.nextPage": { zh: "下一页", en: "Next Page" },
+  "jobDetail.lastPage": { zh: "最后一页", en: "Last Page" },
+  "jobDetail.followMode": { zh: "跟随模式（双击启用）", en: "Following (Double-click to enable)" },
+  "jobDetail.lastPageFollow": { zh: "最后一页（双击跟随）", en: "Last Page (Double-click to follow)" },
+
+  // ===== Service Detail Page =====
+  "serviceDetail.backTo": { zh: "返回 Services", en: "Back to Services" },
+  "serviceDetail.editClone": { zh: "编辑 / 克隆 Service", en: "Edit / Clone Service" },
+  "serviceDetail.stopService": { zh: "停止 Service", en: "Stop Service" },
+  "serviceDetail.startService": { zh: "启动 Service", en: "Start Service" },
+  "serviceDetail.deleteService": { zh: "删除 Service", en: "Delete Service" },
+  "serviceDetail.copyDescription": { zh: "复制描述", en: "Copy Description" },
+  "serviceDetail.openRepoGithub": { zh: "在 GitHub 中打开仓库", en: "Open Repository in GitHub" },
+  "serviceDetail.viewBranchTree": { zh: "查看分支树", en: "View Branch Tree" },
+  "serviceDetail.viewCommitDetails": { zh: "查看提交详情", en: "View Commit Details" },
+  "serviceDetail.copyFullCommand": { zh: "复制完整命令", en: "Copy Full Command" },
+
+  // ===== Job Operations =====
+  "jobOps.terminateTitle": { zh: "终止任务？", en: "Terminate Task?" },
+  "jobOps.terminateDesc": { zh: "确定要终止 {name} 吗？此操作将立即停止进程且不可撤销。", en: "Are you sure you want to terminate {name}? This action will stop the process immediately and cannot be undone." },
+  "jobOps.terminateBtn": { zh: "终止", en: "Terminate" },
+
+  // ===== Common Actions =====
+  "action.copy": { zh: "复制", en: "Copy" },
+  "action.copied": { zh: "已复制！", en: "Copied!" },
+  "action.copyConfig": { zh: "复制配置", en: "Copy Config" },
+  "action.pasteConfig": { zh: "粘贴配置", en: "Paste Config" },
+
+  // ===== Explorer Session =====
+  "explorer.goodResponse": { zh: "好的回复", en: "Good response" },
+  "explorer.badResponse": { zh: "不好的回复", en: "Bad response" },
+  "explorer.regenerate": { zh: "重新生成", en: "Regenerate" },
+  "explorer.edit": { zh: "编辑", en: "Edit" },
+  "explorer.thinking": { zh: "思考中", en: "Thinking" },
+  "explorer.thinkingWait": { zh: "思考中...", en: "Thinking..." },
+  "explorer.send": { zh: "发送", en: "Send" },
+
+  // ===== Job Detail - Navigation =====
+  "jobDetail.backToService": { zh: "返回 Service", en: "Back to Service" },
+  "jobDetail.backToServices": { zh: "返回 Services", en: "Back to Services" },
+  "jobDetail.backToCluster": { zh: "返回 Cluster", en: "Back to Cluster" },
+  "jobDetail.backToDashboard": { zh: "返回 Dashboard", en: "Back to Dashboard" },
+  "jobDetail.backToJobs": { zh: "返回 Jobs", en: "Back to Jobs" },
+
+  // ===== Job Detail - States =====
+  "jobDetail.loading": { zh: "正在加载任务上下文...", en: "Loading Job Context..." },
+  "jobDetail.notFound": { zh: "任务未找到", en: "Job not found" },
+  "jobDetail.goBack": { zh: "返回", en: "Go Back" },
+
+  // ===== Job Detail - External Task =====
+  "jobDetail.externalTask": { zh: "外部任务", en: "External Task" },
+  "jobDetail.externalTaskDesc": { zh: "此任务由 Slurm CLI 直接管理，不在 Magnus 范围内。详细日志和配置在此不可用。", en: "This task is managed directly by Slurm CLI outside of Magnus. Detailed logs and configuration are not available here." },
+
+  // ===== Job Detail - Status Card =====
+  "jobDetail.status": { zh: "状态", en: "Status" },
+  "jobDetail.creator": { zh: "创建者", en: "Creator" },
+  "jobDetail.live": { zh: "实时", en: "Live" },
+
+  // ===== Job Detail - Repository Section =====
+  "jobDetail.repository": { zh: "仓库", en: "Repository" },
+  "jobDetail.githubRepo": { zh: "Github 仓库", en: "Github Repository" },
+  "jobDetail.branch": { zh: "分支", en: "Branch" },
+  "jobDetail.commitSha": { zh: "提交 SHA", en: "Commit SHA" },
+
+  // ===== Job Detail - Resources Section =====
+  "jobDetail.resources": { zh: "资源", en: "Resources" },
+  "jobDetail.accelerator": { zh: "加速器", en: "Accelerator" },
+  "jobDetail.cpuOnly": { zh: "仅 CPU", en: "CPU Only" },
+  "jobDetail.gpuCount": { zh: "GPU 数量", en: "GPU Count" },
+  "jobDetail.cpuCores": { zh: "CPU 核心", en: "CPU Cores" },
+  "jobDetail.memory": { zh: "内存", en: "Memory" },
+  "jobDetail.stationDefault": { zh: "（分区默认）", en: "(Station Default)" },
+
+  // ===== Job Detail - Entry Command =====
+  "jobDetail.entryCommand": { zh: "入口命令", en: "Entry Command" },
+
+  // ===== Job Detail - Tabs =====
+  "jobDetail.consoleOutput": { zh: "控制台输出", en: "Console Output" },
+  "jobDetail.description": { zh: "描述", en: "Description" },
+  "jobDetail.metrics": { zh: "指标", en: "Metrics" },
+
+  // ===== Job Detail - Console =====
+  "jobDetail.waitingOutput": { zh: "等待输出...", en: "Waiting for output..." },
+  "jobDetail.noOutput": { zh: "执行期间未产生输出", en: "No output generated during execution" },
+  "jobDetail.noDescriptionProvided": { zh: "未提供描述。", en: "No description provided." },
+
+  // ===== Job Detail - Metrics =====
+  "jobDetail.comingSoon": { zh: "即将推出", en: "Coming Soon" },
+  "jobDetail.underConstruction": { zh: "施工中...", en: "Under construction..." },
+
+  // ===== Service Detail - Not Found =====
+  "serviceDetail.notFound": { zh: "Service 未找到", en: "Service Not Found" },
+  "serviceDetail.notFoundDesc": { zh: "在注册表中未找到服务 {id}。它可能已被删除或 ID 不正确。", en: "The service {id} could not be located in the registry. It may have been deleted or the ID is incorrect." },
+  "serviceDetail.returnToServices": { zh: "返回 Services", en: "Return to Services" },
+
+  // ===== Service Detail - Status =====
+  "serviceDetail.status": { zh: "状态", en: "Status" },
+  "serviceDetail.inactive": { zh: "未激活", en: "Inactive" },
+  "serviceDetail.idle": { zh: "空闲", en: "Idle" },
+  "serviceDetail.manager": { zh: "管理者", en: "Manager" },
+
+  // ===== Service Detail - Sections =====
+  "serviceDetail.description": { zh: "描述", en: "Description" },
+  "serviceDetail.noDescription": { zh: "未提供描述。", en: "No description provided." },
+  "serviceDetail.serviceConfig": { zh: "服务配置", en: "Service Configuration" },
+  "serviceDetail.requestTimeout": { zh: "请求超时", en: "Request Timeout" },
+  "serviceDetail.idleTimeout": { zh: "空闲超时", en: "Idle Timeout" },
+  "serviceDetail.neverScaleDown": { zh: "（永不缩容）", en: "(Never Scale Down)" },
+  "serviceDetail.maxConcurrency": { zh: "最大并发", en: "Max Concurrency" },
+  "serviceDetail.jobType": { zh: "任务类型", en: "Job Type" },
+
+  // ===== Service Detail - Repository =====
+  "serviceDetail.repository": { zh: "仓库", en: "Repository" },
+  "serviceDetail.githubRepo": { zh: "Github 仓库", en: "Github Repository" },
+  "serviceDetail.branch": { zh: "分支", en: "Branch" },
+  "serviceDetail.commitSha": { zh: "提交 SHA", en: "Commit SHA" },
+
+  // ===== Service Detail - Resources =====
+  "serviceDetail.resources": { zh: "资源", en: "Resources" },
+  "serviceDetail.accelerator": { zh: "加速器", en: "Accelerator" },
+  "serviceDetail.cpuOnly": { zh: "仅 CPU", en: "CPU Only" },
+  "serviceDetail.gpuCount": { zh: "GPU 数量", en: "GPU Count" },
+  "serviceDetail.cpuCores": { zh: "CPU 核心", en: "CPU Cores" },
+  "serviceDetail.memory": { zh: "内存", en: "Memory" },
+  "serviceDetail.stationDefault": { zh: "（分区默认）", en: "(Station Default)" },
+
+  // ===== Service Detail - Entry Command =====
+  "serviceDetail.entryCommand": { zh: "入口命令", en: "Entry Command" },
+
+  // ===== Service Detail - Dialogs =====
+  "serviceDetail.deleteTitle": { zh: "删除 Service", en: "Delete Service" },
+  "serviceDetail.deleteDesc": { zh: "确定要删除服务 {name} 吗？此操作不可撤销，将终止所有运行中的实例。", en: "Are you sure you want to delete service {name}? This action cannot be undone and will terminate any running instances." },
+  "serviceDetail.deleteConfirm": { zh: "删除 Service", en: "Delete Service" },
+  "serviceDetail.stopTitle": { zh: "停止 Service", en: "Stop Service" },
+  "serviceDetail.stopDesc": { zh: "确定要停止 {name} 吗？代理端点将停止接受流量。", en: "Are you sure you want to stop {name}? The proxy endpoint will stop accepting traffic." },
+  "serviceDetail.stopConfirm": { zh: "停止 Service", en: "Stop Service" },
+  "serviceDetail.startTitle": { zh: "启动 Service", en: "Start Service" },
+  "serviceDetail.startDesc": { zh: "确定要激活 {name} 吗？这将启用流量路由并按需扩展资源。", en: "Are you sure you want to activate {name}? This will enable traffic routing and scale up resources on demand." },
+  "serviceDetail.startConfirm": { zh: "启动 Service", en: "Start Service" },
+
+  // ===== Job Form Help =====
+  "help.jobForm.intro": {
+    zh: "通过此表单向 Magnus 调度系统提交计算任务。任务将根据优先级和集群资源可用性自动调度执行。",
+    en: "Submit compute tasks to the Magnus scheduling system via this form. Tasks will be automatically scheduled based on priority and cluster resource availability."
+  },
+  "help.jobForm.requiredFields": { zh: "必填字段", en: "Required Fields" },
+  "help.jobForm.taskName": {
+    zh: "任务名称，用于在任务列表中标识和搜索。建议使用有意义的命名，如 train-resnet50-epoch100。",
+    en: "Task name, used to identify and search in the task list. Use meaningful names like train-resnet50-epoch100."
+  },
+  "help.jobForm.namespace": {
+    zh: "GitHub 仓库的组织名和仓库名。系统会通过 SSH 拉取代码，确保仓库已配置正确的访问权限。",
+    en: "GitHub organization and repository name. The system pulls code via SSH, ensure the repository has correct access permissions."
+  },
+  "help.jobForm.branch": {
+    zh: "点击 Scan Repository 后可选择分支和具体提交。HEAD 表示使用该分支的最新提交。",
+    en: "Click Scan Repository to select a branch and specific commit. HEAD means using the latest commit of that branch."
+  },
+  "help.jobForm.entryCommand": {
+    zh: "任务启动命令，支持多行。每行作为独立命令顺序执行，工作目录为仓库根目录。",
+    en: "Task start command, supports multiple lines. Each line executes as an independent command sequentially, working directory is the repository root."
+  },
+  "help.jobForm.priority": { zh: "任务优先级", en: "Task Priority" },
+  "help.jobForm.priorityIntro": {
+    zh: "Magnus 采用四级优先级调度，高优先级任务可抢占低优先级任务的资源：",
+    en: "Magnus uses four-level priority scheduling, higher priority tasks can preempt resources from lower priority tasks:"
+  },
+  "help.jobForm.a1": {
+    zh: "最高优先级，适用于紧急任务。不可被抢占，立即获得资源。",
+    en: "Highest priority, for urgent tasks. Non-preemptible, gets resources immediately."
+  },
+  "help.jobForm.a2": {
+    zh: "高优先级，日常生产任务的默认选择。不可被抢占。",
+    en: "High priority, the default choice for daily production tasks. Non-preemptible."
+  },
+  "help.jobForm.b1": {
+    zh: "标准优先级，适用于非紧急的开发和测试。可被 A 类任务抢占，抢占后状态变为 Paused。",
+    en: "Standard priority, for non-urgent development and testing. Can be preempted by A-class tasks, status changes to Paused."
+  },
+  "help.jobForm.b2": {
+    zh: "低优先级，适用于后台批量任务。可被 A 类任务抢占。",
+    en: "Low priority, for background batch tasks. Can be preempted by A-class tasks."
+  },
+  "help.jobForm.resources": { zh: "计算资源配置", en: "Compute Resource Configuration" },
+  "help.jobForm.gpuAccelerator": {
+    zh: "选择 GPU 类型。选择 CPU Only 时 GPU Count 自动设为 0。",
+    en: "Select GPU type. When CPU Only is selected, GPU Count is automatically set to 0."
+  },
+  "help.jobForm.gpuCount": {
+    zh: "请求的 GPU 数量。多卡任务会分配到同一节点的连续 GPU。",
+    en: "Number of GPUs requested. Multi-GPU tasks are allocated to consecutive GPUs on the same node."
+  },
+  "help.jobForm.advancedOptions": {
+    zh: "展开可配置 CPU 核心数、内存大小、指定运行用户等高级选项。",
+    en: "Expand to configure advanced options like CPU cores, memory size, and specified runner user."
+  },
+  "help.jobForm.configReuse": { zh: "配置复用", en: "Configuration Reuse" },
+  "help.jobForm.configReuseDesc": {
+    zh: "右上角提供配置的导出和导入功能。点击复制按钮可将当前配置导出为 JSON，点击粘贴按钮可从剪贴板导入之前保存的配置。支持跨浏览器、跨设备复用配置。",
+    en: "Export and import configuration options are available in the top right. Click the copy button to export current configuration as JSON, click paste to import previously saved configuration. Supports cross-browser and cross-device configuration reuse."
+  },
+
+  // ===== Service Form Help =====
+  "help.serviceForm.intro": {
+    zh: "弹性服务 (Elastic Service) 是独立于任务调度器的长期运行服务单元。服务会根据流量自动启停，空闲时释放资源，有请求时自动唤醒，实现按需伸缩。",
+    en: "Elastic Service is a long-running service unit independent of the task scheduler. Services automatically start/stop based on traffic, release resources when idle, and auto-wake on request, enabling on-demand scaling."
+  },
+  "help.serviceForm.identity": { zh: "服务标识", en: "Service Identity" },
+  "help.serviceForm.serviceName": {
+    zh: "服务的显示名称，用于在服务列表中识别。",
+    en: "Display name of the service, used for identification in the service list."
+  },
+  "help.serviceForm.serviceId": {
+    zh: "服务的唯一标识符，用于 API 调用和 CLI 访问。必须是 URL 安全的小写字符串，如 llm-inference、image-gen-v2。创建后不可修改。",
+    en: "Unique identifier for the service, used for API calls and CLI access. Must be a URL-safe lowercase string, e.g., llm-inference, image-gen-v2. Cannot be modified after creation."
+  },
+  "help.serviceForm.lifecycle": { zh: "生命周期配置", en: "Lifecycle Configuration" },
+  "help.serviceForm.idleTimeout": {
+    zh: "服务空闲多长时间后自动停止。设置较短的超时可节省资源，但会增加冷启动频率。建议根据服务的启动时间和使用频率权衡设置。",
+    en: "How long the service idles before auto-stopping. Shorter timeouts save resources but increase cold start frequency. Set based on service startup time and usage frequency."
+  },
+  "help.serviceForm.requestTimeout": {
+    zh: "单次请求的最大等待时间。超时后请求会返回错误。对于耗时较长的推理任务，应适当增大此值。",
+    en: "Maximum wait time for a single request. Returns error on timeout. For longer inference tasks, increase this value appropriately."
+  },
+  "help.serviceForm.maxConcurrency": {
+    zh: "服务同时处理的最大请求数。超出并发限制的请求会排队等待。",
+    en: "Maximum number of concurrent requests the service handles. Requests exceeding the limit will queue."
+  },
+  "help.serviceForm.lifecycleFlow": { zh: "服务生命周期", en: "Service Lifecycle" },
+  "help.serviceForm.flow1": {
+    zh: "创建服务后，系统自动分配一个固定的端口号 (MAGNUS_PORT)",
+    en: "After creating the service, the system automatically assigns a fixed port number (MAGNUS_PORT)"
+  },
+  "help.serviceForm.flow2": {
+    zh: "首次收到请求时，系统启动底层 SLURM 任务运行服务代码",
+    en: "On first request, the system starts the underlying SLURM task to run service code"
+  },
+  "help.serviceForm.flow3": {
+    zh: "服务启动后，后续请求直接转发到运行中的实例",
+    en: "After startup, subsequent requests are forwarded directly to the running instance"
+  },
+  "help.serviceForm.flow4": {
+    zh: "持续无请求达到 Idle Timeout 后，系统自动终止底层任务释放资源",
+    en: "After no requests for the Idle Timeout period, the system auto-terminates the underlying task to release resources"
+  },
+  "help.serviceForm.flow5": {
+    zh: "再次收到请求时，系统重新启动服务（冷启动）",
+    en: "On receiving requests again, the system restarts the service (cold start)"
+  },
+  "help.serviceForm.accessMethods": { zh: "访问方式", en: "Access Methods" },
+
+  // ===== Blueprint Editor Help =====
+  "help.blueprintEditor.intro": {
+    zh: "蓝图 (Blueprint) 实现了「Python 函数即前端表单」的开发模式。编写一个带类型注解的 Python 函数，系统自动解析函数签名生成对应的前端表单界面，用户填写参数后调用函数生成任务配置并提交执行。",
+    en: "Blueprint implements the 'Python function as frontend form' development pattern. Write a type-annotated Python function, the system auto-parses the function signature to generate the corresponding frontend form interface, users fill in parameters to call the function, generate task config and submit for execution."
+  },
+  "help.blueprintEditor.runtime": { zh: "运行环境", en: "Runtime Environment" },
+  "help.blueprintEditor.runtimeDesc": {
+    zh: "蓝图代码在执行时，以下符号已自动导入，无需手动 import：",
+    en: "When executing blueprint code, the following symbols are auto-imported, no manual import needed:"
+  },
+  "help.blueprintEditor.autoImported": { zh: "已自动导入", en: "auto-imported" },
+  "help.blueprintEditor.functionSpec": { zh: "函数规范", en: "Function Specification" },
+  "help.blueprintEditor.functionSpecDesc": {
+    zh: "蓝图代码必须定义一个名为 generate_job 的函数，返回类型为 JobSubmission：",
+    en: "Blueprint code must define a function named generate_job with return type JobSubmission:"
+  },
+  "help.blueprintEditor.paramTypes": { zh: "支持的参数类型", en: "Supported Parameter Types" },
+  "help.blueprintEditor.pythonType": { zh: "Python 类型", en: "Python Type" },
+  "help.blueprintEditor.formControl": { zh: "表单控件", en: "Form Control" },
+  "help.blueprintEditor.metadata": { zh: "可用元数据", en: "Available Metadata" },
+  "help.blueprintEditor.textInput": { zh: "文本输入框", en: "Text Input" },
+  "help.blueprintEditor.intStepper": { zh: "整数步进器", en: "Integer Stepper" },
+  "help.blueprintEditor.floatInput": { zh: "浮点数输入框", en: "Float Input" },
+  "help.blueprintEditor.switch": { zh: "开关", en: "Switch" },
+  "help.blueprintEditor.dropdown": { zh: "下拉选择器", en: "Dropdown Selector" },
+  "help.blueprintEditor.optionsDesc": {
+    zh: "options (可为每个选项定义 label 和 description)",
+    en: "options (can define label and description for each option)"
+  },
+  "help.blueprintEditor.optionalField": { zh: "带启用开关的字段", en: "Field with Enable Switch" },
+  "help.blueprintEditor.optionalDesc": { zh: "禁用时不传参给函数", en: "Disabled means no param passed to function" },
+  "help.blueprintEditor.dynamicList": { zh: "可动态增删的列表", en: "Dynamic Add/Remove List" },
+  "help.blueprintEditor.nestedTypes": { zh: "支持嵌套基础类型", en: "Supports nested basic types" },
+  "help.blueprintEditor.commonMetadata": { zh: "通用元数据属性", en: "Common Metadata Properties" },
+  "help.blueprintEditor.labelDesc": { zh: "字段在表单中显示的名称", en: "Field display name in the form" },
+  "help.blueprintEditor.descriptionDesc": { zh: "字段的详细说明，显示在输入框下方", en: "Detailed field description, shown below the input" },
+  "help.blueprintEditor.scopeDesc": { zh: "参数分组，相同 scope 的参数会被归类到同一区域显示", en: "Parameter grouping, params with the same scope are grouped together" },
+  "help.blueprintEditor.shortcuts": { zh: "代码编辑器快捷键", en: "Code Editor Shortcuts" },
+  "help.blueprintEditor.tabDesc": {
+    zh: "插入 4 个空格的缩进。选中多行时，为所有选中行添加缩进。",
+    en: "Insert 4 spaces for indentation. When multiple lines are selected, add indentation to all selected lines."
+  },
+  "help.blueprintEditor.shiftTabDesc": {
+    zh: "减少缩进。删除行首最多 4 个空格。选中多行时，为所有选中行减少缩进。",
+    en: "Reduce indentation. Remove up to 4 spaces from line start. When multiple lines are selected, reduce indentation for all."
+  },
+  "help.blueprintEditor.commentDesc": {
+    zh: "注释或取消注释。自动判断当前行或选中行的状态，智能切换。保留原有缩进。",
+    en: "Comment or uncomment. Auto-detects current/selected line state, smart toggle. Preserves original indentation."
+  },
+  "help.blueprintEditor.paramCache": { zh: "参数缓存", en: "Parameter Cache" },
+  "help.blueprintEditor.paramCacheDesc": {
+    zh: "通过 Web 界面成功运行蓝图后，系统会自动保存用户填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。",
+    en: "After successfully running a blueprint via the web interface, the system auto-saves user-filled parameter values. Next time opening the same blueprint, if the signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the parameter signature."
+  },
+  "help.blueprintEditor.autoSave": { zh: "自动保存", en: "auto-save" },
+  "help.blueprintEditor.autoRestore": { zh: "自动恢复", en: "auto-restore" },
+  "help.blueprintEditor.sdkCall": { zh: "SDK 调用", en: "SDK Call" },
+  "help.blueprintEditor.sdkCallDesc": {
+    zh: "蓝图也可以通过 Python SDK 或 CLI 直接调用：",
+    en: "Blueprints can also be called directly via Python SDK or CLI:"
+  },
+
+  // ===== Blueprint Runner Help =====
+  "help.blueprintRunner.intro": {
+    zh: "此表单根据蓝图定义的参数签名自动生成。填写参数后点击 Launch，系统会调用蓝图函数生成任务配置并提交到调度系统执行。",
+    en: "This form is auto-generated based on the blueprint's parameter signature. After filling parameters, click Launch, the system calls the blueprint function to generate task config and submit to the scheduling system."
+  },
+  "help.blueprintRunner.fieldNotes": { zh: "字段说明", en: "Field Notes" },
+  "help.blueprintRunner.required": {
+    zh: "标记的字段为必填项，提交前必须填写有效值。",
+    en: "marked fields are required, must fill valid values before submission."
+  },
+  "help.blueprintRunner.optional": {
+    zh: "带开关的字段为可选参数 (Optional)。开关关闭时，该参数不会传递给蓝图函数，函数将使用默认值。开关开启后必须填写有效值。",
+    en: "Fields with switches are optional parameters (Optional). When switch is off, the parameter won't be passed to the blueprint function, function uses default value. When on, must fill valid value."
+  },
+  "help.blueprintRunner.numberRange": {
+    zh: "数字类型字段可能设置了最小值和最大值限制，输入超出范围的值会提示错误。",
+    en: "Number fields may have min/max limits, entering out-of-range values shows an error."
+  },
+  "help.blueprintRunner.dropdown": {
+    zh: "下拉选择字段的选项由蓝图定义，部分选项可能带有说明文字。",
+    en: "Dropdown options are defined by the blueprint, some options may have description text."
+  },
+  "help.blueprintRunner.paramCache": { zh: "参数缓存", en: "Parameter Cache" },
+  "help.blueprintRunner.paramCacheDesc": {
+    zh: "成功提交任务后，系统会自动保存当前填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。",
+    en: "After successful submission, the system auto-saves current parameter values. Next time opening the same blueprint, if signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the signature."
+  },
+  "help.blueprintRunner.sdkCall": { zh: "SDK 调用", en: "SDK Call" },
+  "help.blueprintRunner.sdkCallDesc": {
+    zh: "除了通过 Web 界面运行蓝图，也可以通过 Python SDK 或 CLI 调用：",
+    en: "Besides running blueprints via web interface, you can also call via Python SDK or CLI:"
+  },
+  "help.blueprintRunner.submitFlow": { zh: "提交流程", en: "Submission Flow" },
+  "help.blueprintRunner.flow1": {
+    zh: "填写所有必填参数，确保可选参数的开关状态正确",
+    en: "Fill all required parameters, ensure optional parameter switches are set correctly"
+  },
+  "help.blueprintRunner.flow2": { zh: "点击 Launch 按钮提交", en: "Click Launch button to submit" },
+  "help.blueprintRunner.flow3": {
+    zh: "系统验证参数合法性，调用蓝图函数生成 JobSubmission",
+    en: "System validates parameters, calls blueprint function to generate JobSubmission"
+  },
+  "help.blueprintRunner.flow4": {
+    zh: "任务提交成功后自动跳转到 Jobs 页面",
+    en: "Auto-redirects to Jobs page after successful submission"
+  },
+  "help.blueprintRunner.flow5": {
+    zh: "在 Jobs 页面可查看任务状态、日志和结果",
+    en: "View task status, logs, and results on the Jobs page"
+  },
 } as const;
 
 

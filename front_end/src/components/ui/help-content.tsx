@@ -2,6 +2,7 @@
 "use client";
 
 import React from "react";
+import { useLanguage } from "@/context/language-context";
 
 // ============================================================================
 // Shared Components - 确保跨模块风格统一
@@ -121,67 +122,68 @@ function HelpHighlight({ children }: { children: React.ReactNode }) {
 // ============================================================================
 
 export function JobFormHelp() {
+  const { t } = useLanguage();
+
   return (
     <>
       <p>
-        通过此表单向 Magnus 调度系统提交计算任务。任务将根据优先级和集群资源可用性自动调度执行。
+        {t("help.jobForm.intro")}
       </p>
 
-      <HelpSection title="必填字段">
+      <HelpSection title={t("help.jobForm.requiredFields")}>
         <HelpFieldList>
           <HelpField name="Task Name">
-            任务名称，用于在任务列表中标识和搜索。建议使用有意义的命名，如 train-resnet50-epoch100。
+            {t("help.jobForm.taskName")}
           </HelpField>
           <HelpField name="Namespace / Repo Name">
-            GitHub 仓库的组织名和仓库名。系统会通过 SSH 拉取代码，确保仓库已配置正确的访问权限。
+            {t("help.jobForm.namespace")}
           </HelpField>
           <HelpField name="Branch / Commit">
-            点击 Scan Repository 后可选择分支和具体提交。HEAD 表示使用该分支的最新提交。
+            {t("help.jobForm.branch")}
           </HelpField>
           <HelpField name="Entry Command">
-            任务启动命令，支持多行。每行作为独立命令顺序执行，工作目录为仓库根目录。
+            {t("help.jobForm.entryCommand")}
           </HelpField>
         </HelpFieldList>
       </HelpSection>
 
-      <HelpSection title="任务优先级">
+      <HelpSection title={t("help.jobForm.priority")}>
         <HelpParagraph>
-          Magnus 采用四级优先级调度，高优先级任务可抢占低优先级任务的资源：
+          {t("help.jobForm.priorityIntro")}
         </HelpParagraph>
         <HelpFieldList>
           <HelpField name="A1 (Critical)" color="text-red-400">
-            最高优先级，适用于紧急任务。不可被抢占，立即获得资源。
+            {t("help.jobForm.a1")}
           </HelpField>
           <HelpField name="A2 (High)" color="text-orange-400">
-            高优先级，日常生产任务的默认选择。不可被抢占。
+            {t("help.jobForm.a2")}
           </HelpField>
           <HelpField name="B1 (Normal)" color="text-blue-400">
-            标准优先级，适用于非紧急的开发和测试。可被 A 类任务抢占，抢占后状态变为 Paused。
+            {t("help.jobForm.b1")}
           </HelpField>
           <HelpField name="B2 (Low)" color="text-zinc-500">
-            低优先级，适用于后台批量任务。可被 A 类任务抢占。
+            {t("help.jobForm.b2")}
           </HelpField>
         </HelpFieldList>
       </HelpSection>
 
-      <HelpSection title="计算资源配置">
+      <HelpSection title={t("help.jobForm.resources")}>
         <HelpFieldList>
           <HelpField name="GPU Accelerator">
-            选择 GPU 类型。选择 CPU Only 时 GPU Count 自动设为 0。
+            {t("help.jobForm.gpuAccelerator")}
           </HelpField>
           <HelpField name="GPU Count">
-            请求的 GPU 数量。多卡任务会分配到同一节点的连续 GPU。
+            {t("help.jobForm.gpuCount")}
           </HelpField>
           <HelpField name="Advanced Options">
-            展开可配置 CPU 核心数、内存大小、指定运行用户等高级选项。
+            {t("help.jobForm.advancedOptions")}
           </HelpField>
         </HelpFieldList>
       </HelpSection>
 
-      <HelpSection title="配置复用">
+      <HelpSection title={t("help.jobForm.configReuse")}>
         <HelpParagraph>
-          右上角提供配置的导出和导入功能。点击复制按钮可将当前配置导出为 JSON，
-          点击粘贴按钮可从剪贴板导入之前保存的配置。支持跨浏览器、跨设备复用配置。
+          {t("help.jobForm.configReuseDesc")}
         </HelpParagraph>
       </HelpSection>
     </>
@@ -194,52 +196,50 @@ export function JobFormHelp() {
 // ============================================================================
 
 export function ServiceFormHelp() {
+  const { t } = useLanguage();
+
   return (
     <>
       <p>
-        弹性服务 (Elastic Service) 是独立于任务调度器的长期运行服务单元。服务会根据流量自动启停，
-        空闲时释放资源，有请求时自动唤醒，实现按需伸缩。
+        {t("help.serviceForm.intro")}
       </p>
 
-      <HelpSection title="服务标识">
+      <HelpSection title={t("help.serviceForm.identity")}>
         <HelpFieldList>
           <HelpField name="Service Name">
-            服务的显示名称，用于在服务列表中识别。
+            {t("help.serviceForm.serviceName")}
           </HelpField>
           <HelpField name="Service ID">
-            服务的唯一标识符，用于 API 调用和 CLI 访问。必须是 URL 安全的小写字符串，
-            如 llm-inference、image-gen-v2。创建后不可修改。
+            {t("help.serviceForm.serviceId")}
           </HelpField>
         </HelpFieldList>
       </HelpSection>
 
-      <HelpSection title="生命周期配置">
+      <HelpSection title={t("help.serviceForm.lifecycle")}>
         <HelpFieldList>
-          <HelpField name="Idle Timeout (分钟)">
-            服务空闲多长时间后自动停止。设置较短的超时可节省资源，但会增加冷启动频率。
-            建议根据服务的启动时间和使用频率权衡设置。
+          <HelpField name="Idle Timeout">
+            {t("help.serviceForm.idleTimeout")}
           </HelpField>
-          <HelpField name="Request Timeout (秒)">
-            单次请求的最大等待时间。超时后请求会返回错误。对于耗时较长的推理任务，
-            应适当增大此值。
+          <HelpField name="Request Timeout">
+            {t("help.serviceForm.requestTimeout")}
           </HelpField>
           <HelpField name="Max Concurrency">
-            服务同时处理的最大请求数。超出并发限制的请求会排队等待。
+            {t("help.serviceForm.maxConcurrency")}
           </HelpField>
         </HelpFieldList>
       </HelpSection>
 
-      <HelpSection title="服务生命周期">
+      <HelpSection title={t("help.serviceForm.lifecycleFlow")}>
         <HelpOrderedList>
-          <li>创建服务后，系统自动分配一个固定的端口号 (MAGNUS_PORT)</li>
-          <li>首次收到请求时，系统启动底层 SLURM 任务运行服务代码</li>
-          <li>服务启动后，后续请求直接转发到运行中的实例</li>
-          <li>持续无请求达到 Idle Timeout 后，系统自动终止底层任务释放资源</li>
-          <li>再次收到请求时，系统重新启动服务（冷启动）</li>
+          <li>{t("help.serviceForm.flow1")}</li>
+          <li>{t("help.serviceForm.flow2")}</li>
+          <li>{t("help.serviceForm.flow3")}</li>
+          <li>{t("help.serviceForm.flow4")}</li>
+          <li>{t("help.serviceForm.flow5")}</li>
         </HelpOrderedList>
       </HelpSection>
 
-      <HelpSection title="访问方式">
+      <HelpSection title={t("help.serviceForm.accessMethods")}>
         <HelpFieldList>
           <HelpField name="CLI">
             <HelpInlineCode>magnus call &lt;service-id&gt; --param value</HelpInlineCode>
@@ -262,27 +262,32 @@ export function ServiceFormHelp() {
 // ============================================================================
 
 export function BlueprintEditorHelp() {
+  const { t } = useLanguage();
+
   return (
     <>
       <p>
-        蓝图 (Blueprint) 实现了「Python 函数即前端表单」的开发模式。
-        编写一个带类型注解的 Python 函数，系统自动解析函数签名生成对应的前端表单界面，
-        用户填写参数后调用函数生成任务配置并提交执行。
+        {t("help.blueprintEditor.intro")}
       </p>
 
-      <HelpSection title="运行环境">
+      <HelpSection title={t("help.blueprintEditor.runtime")}>
         <HelpParagraph>
-          蓝图代码在执行时，以下符号<HelpHighlight>已自动导入</HelpHighlight>，无需手动 import：
+          {t("help.blueprintEditor.runtimeDesc").split(t("help.blueprintEditor.autoImported"))[0]}
+          <HelpHighlight>{t("help.blueprintEditor.autoImported")}</HelpHighlight>
+          {t("help.blueprintEditor.runtimeDesc").split(t("help.blueprintEditor.autoImported"))[1] || ""}
         </HelpParagraph>
         <div className="bg-black/50 p-4 rounded-lg text-[11px] text-zinc-300 font-mono">
           <span className="text-purple-400">JobSubmission</span>, <span className="text-purple-400">JobType</span>, <span className="text-blue-400">Annotated</span>, <span className="text-blue-400">Literal</span>, <span className="text-blue-400">Optional</span>, <span className="text-blue-400">List</span>, <span className="text-blue-400">Dict</span>, <span className="text-blue-400">Any</span>
         </div>
       </HelpSection>
 
-      <HelpSection title="函数规范">
+      <HelpSection title={t("help.blueprintEditor.functionSpec")}>
         <HelpParagraph>
-          蓝图代码必须定义一个名为 <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-green-400 text-[11px]">generate_job</code> 的函数，
-          返回类型为 <HelpInlineCode>JobSubmission</HelpInlineCode>：
+          {t("help.blueprintEditor.functionSpecDesc").split("generate_job")[0]}
+          <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-green-400 text-[11px]">generate_job</code>
+          {t("help.blueprintEditor.functionSpecDesc").split("generate_job")[1]?.split("JobSubmission")[0]}
+          <HelpInlineCode>JobSubmission</HelpInlineCode>
+          {t("help.blueprintEditor.functionSpecDesc").split("JobSubmission")[1] || ""}
         </HelpParagraph>
         <HelpCodeBlock>{`# 定义参数类型（带元数据）
 MyParam = Annotated[str, {
@@ -312,94 +317,92 @@ def generate_job(
     )`}</HelpCodeBlock>
       </HelpSection>
 
-      <HelpSection title="支持的参数类型">
+      <HelpSection title={t("help.blueprintEditor.paramTypes")}>
         <table className="w-full text-xs">
           <thead>
             <tr className="text-zinc-400 border-b border-zinc-800">
-              <th className="text-left py-2 font-medium">Python 类型</th>
-              <th className="text-left py-2 font-medium">表单控件</th>
-              <th className="text-left py-2 font-medium">可用元数据</th>
+              <th className="text-left py-2 font-medium">{t("help.blueprintEditor.pythonType")}</th>
+              <th className="text-left py-2 font-medium">{t("help.blueprintEditor.formControl")}</th>
+              <th className="text-left py-2 font-medium">{t("help.blueprintEditor.metadata")}</th>
             </tr>
           </thead>
           <tbody className="text-zinc-400">
             <tr className="border-b border-zinc-800/50">
               <td className="py-2"><code className="text-blue-400">str</code></td>
-              <td className="py-2">文本输入框</td>
+              <td className="py-2">{t("help.blueprintEditor.textInput")}</td>
               <td className="py-2">placeholder, allow_empty, multi_line, min_lines, color, border_color</td>
             </tr>
             <tr className="border-b border-zinc-800/50">
               <td className="py-2"><code className="text-blue-400">int</code></td>
-              <td className="py-2">整数步进器</td>
+              <td className="py-2">{t("help.blueprintEditor.intStepper")}</td>
               <td className="py-2">min, max</td>
             </tr>
             <tr className="border-b border-zinc-800/50">
               <td className="py-2"><code className="text-blue-400">float</code></td>
-              <td className="py-2">浮点数输入框</td>
+              <td className="py-2">{t("help.blueprintEditor.floatInput")}</td>
               <td className="py-2">min, max, placeholder</td>
             </tr>
             <tr className="border-b border-zinc-800/50">
               <td className="py-2"><code className="text-blue-400">bool</code></td>
-              <td className="py-2">开关</td>
+              <td className="py-2">{t("help.blueprintEditor.switch")}</td>
               <td className="py-2">—</td>
             </tr>
             <tr className="border-b border-zinc-800/50">
               <td className="py-2"><code className="text-blue-400">{`Literal["a", "b"]`}</code></td>
-              <td className="py-2">下拉选择器</td>
-              <td className="py-2">options (可为每个选项定义 label 和 description)</td>
+              <td className="py-2">{t("help.blueprintEditor.dropdown")}</td>
+              <td className="py-2">{t("help.blueprintEditor.optionsDesc")}</td>
             </tr>
             <tr className="border-b border-zinc-800/50">
               <td className="py-2"><code className="text-blue-400">Optional[T]</code></td>
-              <td className="py-2">带启用开关的字段</td>
-              <td className="py-2">禁用时不传参给函数</td>
+              <td className="py-2">{t("help.blueprintEditor.optionalField")}</td>
+              <td className="py-2">{t("help.blueprintEditor.optionalDesc")}</td>
             </tr>
             <tr>
               <td className="py-2"><code className="text-blue-400">List[T]</code></td>
-              <td className="py-2">可动态增删的列表</td>
-              <td className="py-2">支持嵌套基础类型</td>
+              <td className="py-2">{t("help.blueprintEditor.dynamicList")}</td>
+              <td className="py-2">{t("help.blueprintEditor.nestedTypes")}</td>
             </tr>
           </tbody>
         </table>
       </HelpSection>
 
-      <HelpSection title="通用元数据属性">
+      <HelpSection title={t("help.blueprintEditor.commonMetadata")}>
         <HelpFieldList>
           <HelpField name="label" color="text-green-400">
-            字段在表单中显示的名称
+            {t("help.blueprintEditor.labelDesc")}
           </HelpField>
           <HelpField name="description" color="text-green-400">
-            字段的详细说明，显示在输入框下方
+            {t("help.blueprintEditor.descriptionDesc")}
           </HelpField>
           <HelpField name="scope" color="text-green-400">
-            参数分组，相同 scope 的参数会被归类到同一区域显示
+            {t("help.blueprintEditor.scopeDesc")}
           </HelpField>
         </HelpFieldList>
       </HelpSection>
 
-      <HelpSection title="代码编辑器快捷键">
+      <HelpSection title={t("help.blueprintEditor.shortcuts")}>
         <HelpFieldList>
           <HelpField name={<HelpKeyboard>Tab</HelpKeyboard>}>
-            插入 4 个空格的缩进。选中多行时，为所有选中行添加缩进。
+            {t("help.blueprintEditor.tabDesc")}
           </HelpField>
           <HelpField name={<HelpKeyboard>Shift + Tab</HelpKeyboard>}>
-            减少缩进。删除行首最多 4 个空格。选中多行时，为所有选中行减少缩进。
+            {t("help.blueprintEditor.shiftTabDesc")}
           </HelpField>
           <HelpField name={<HelpKeyboard>Ctrl + /</HelpKeyboard>}>
-            注释或取消注释。自动判断当前行或选中行的状态，智能切换。保留原有缩进。
+            {t("help.blueprintEditor.commentDesc")}
           </HelpField>
         </HelpFieldList>
       </HelpSection>
 
-      <HelpSection title="参数缓存">
+      <HelpSection title={t("help.blueprintEditor.paramCache")}>
         <HelpParagraph>
-          通过 Web 界面成功运行蓝图后，系统会<HelpHighlight>自动保存</HelpHighlight>用户填写的参数值。
-          下次打开同一蓝图时，如果蓝图签名未发生变化，会<HelpHighlight>自动恢复</HelpHighlight>上次的参数值，
-          无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。
+          {t("help.blueprintEditor.paramCacheDesc")}
         </HelpParagraph>
       </HelpSection>
 
-      <HelpSection title="SDK 调用">
+      <HelpSection title={t("help.blueprintEditor.sdkCall")}>
         <HelpParagraph>
-          蓝图也可以通过 Python SDK 或 CLI 直接调用：
+          {t("help.blueprintEditor.sdkCallDesc")}
         </HelpParagraph>
         <HelpCodeBlock>{`from magnus import submit_blueprint, run_blueprint
 
@@ -419,42 +422,40 @@ result = run_blueprint("blueprint-id", args={"param": "value"})`}</HelpCodeBlock
 // ============================================================================
 
 export function BlueprintRunnerHelp() {
+  const { t } = useLanguage();
+
   return (
     <>
       <p>
-        此表单根据蓝图定义的参数签名自动生成。填写参数后点击 Launch，
-        系统会调用蓝图函数生成任务配置并提交到调度系统执行。
+        {t("help.blueprintRunner.intro")}
       </p>
 
-      <HelpSection title="字段说明">
+      <HelpSection title={t("help.blueprintRunner.fieldNotes")}>
         <HelpFieldList>
           <li>
-            <span className="text-red-400 font-medium">*</span> 标记的字段为必填项，提交前必须填写有效值。
+            <span className="text-red-400 font-medium">*</span> {t("help.blueprintRunner.required")}
           </li>
           <li>
-            带开关的字段为可选参数 (Optional)。开关关闭时，该参数不会传递给蓝图函数，
-            函数将使用默认值。开关开启后必须填写有效值。
+            {t("help.blueprintRunner.optional")}
           </li>
           <li>
-            数字类型字段可能设置了最小值和最大值限制，输入超出范围的值会提示错误。
+            {t("help.blueprintRunner.numberRange")}
           </li>
           <li>
-            下拉选择字段的选项由蓝图定义，部分选项可能带有说明文字。
+            {t("help.blueprintRunner.dropdown")}
           </li>
         </HelpFieldList>
       </HelpSection>
 
-      <HelpSection title="参数缓存">
+      <HelpSection title={t("help.blueprintRunner.paramCache")}>
         <HelpParagraph>
-          成功提交任务后，系统会<HelpHighlight>自动保存</HelpHighlight>当前填写的参数值。
-          下次打开同一蓝图时，如果蓝图签名未发生变化，会<HelpHighlight>自动恢复</HelpHighlight>上次的参数值，
-          无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。
+          {t("help.blueprintRunner.paramCacheDesc")}
         </HelpParagraph>
       </HelpSection>
 
-      <HelpSection title="SDK 调用">
+      <HelpSection title={t("help.blueprintRunner.sdkCall")}>
         <HelpParagraph>
-          除了通过 Web 界面运行蓝图，也可以通过 Python SDK 或 CLI 调用：
+          {t("help.blueprintRunner.sdkCallDesc")}
         </HelpParagraph>
         <HelpCodeBlock>{`# Python SDK
 from magnus import submit_blueprint, run_blueprint
@@ -470,13 +471,13 @@ magnus submit <blueprint-id> --param value
 magnus run <blueprint-id> --param value`}</HelpCodeBlock>
       </HelpSection>
 
-      <HelpSection title="提交流程">
+      <HelpSection title={t("help.blueprintRunner.submitFlow")}>
         <HelpOrderedList>
-          <li>填写所有必填参数，确保可选参数的开关状态正确</li>
-          <li>点击 Launch 按钮提交</li>
-          <li>系统验证参数合法性，调用蓝图函数生成 JobSubmission</li>
-          <li>任务提交成功后自动跳转到 Jobs 页面</li>
-          <li>在 Jobs 页面可查看任务状态、日志和结果</li>
+          <li>{t("help.blueprintRunner.flow1")}</li>
+          <li>{t("help.blueprintRunner.flow2")}</li>
+          <li>{t("help.blueprintRunner.flow3")}</li>
+          <li>{t("help.blueprintRunner.flow4")}</li>
+          <li>{t("help.blueprintRunner.flow5")}</li>
         </HelpOrderedList>
       </HelpSection>
     </>

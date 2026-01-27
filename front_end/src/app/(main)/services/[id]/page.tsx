@@ -11,6 +11,7 @@ import {
 import { client } from "@/lib/api";
 import { formatBeijingTime } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 import { POLL_INTERVAL } from "@/lib/config";
 
 import { CopyableText } from "@/components/ui/copyable-text";
@@ -25,6 +26,7 @@ export default function ServiceDetailsPage() {
   const params = useParams();
   const router = useRouter();
   const { user: currentUser } = useAuth();
+  const { t } = useLanguage();
   const serviceId = params.id as string;
 
   // Data States
@@ -124,33 +126,30 @@ export default function ServiceDetailsPage() {
 
     if (pendingAction === "delete") {
       return {
-        title: "Delete Service",
+        title: t("serviceDetail.deleteTitle"),
         description: (
           <span>
-            Are you sure you want to delete service <strong className="text-white">{service.name}</strong>?
-            This action cannot be undone and will terminate any running instances.
+            {t("serviceDetail.deleteDesc", { name: service.name })}
           </span>
         ),
         variant: "danger" as const,
-        confirmText: "Delete Service",
+        confirmText: t("serviceDetail.deleteConfirm"),
       };
     } else {
       const isStopping = service.is_active;
       return {
-        title: isStopping ? "Stop Service" : "Start Service",
+        title: isStopping ? t("serviceDetail.stopTitle") : t("serviceDetail.startTitle"),
         description: isStopping ? (
           <span>
-            Are you sure you want to stop <strong className="text-white">{service.name}</strong>?
-            The proxy endpoint will stop accepting traffic.
+            {t("serviceDetail.stopDesc", { name: service.name })}
           </span>
         ) : (
           <span>
-            Are you sure you want to activate <strong className="text-white">{service.name}</strong>?
-            This will enable traffic routing and scale up resources on demand.
+            {t("serviceDetail.startDesc", { name: service.name })}
           </span>
         ),
         variant: isStopping ? "danger" as const : "default" as const,
-        confirmText: isStopping ? "Stop Service" : "Start Service",
+        confirmText: isStopping ? t("serviceDetail.stopConfirm") : t("serviceDetail.startConfirm"),
       };
     }
   };
@@ -174,16 +173,15 @@ export default function ServiceDetailsPage() {
           <div className="w-16 h-16 bg-zinc-800/80 rounded-full flex items-center justify-center mx-auto mb-6 border border-zinc-700/50 shadow-inner">
             <FileQuestion className="w-8 h-8 text-zinc-500" />
           </div>
-          <h2 className="text-xl font-bold text-zinc-200 mb-2 tracking-tight">Service Not Found</h2>
+          <h2 className="text-xl font-bold text-zinc-200 mb-2 tracking-tight">{t("serviceDetail.notFound")}</h2>
           <p className="text-zinc-500 text-sm mb-8 leading-relaxed">
-            The service <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-400 font-mono text-xs">{decodeURIComponent(serviceId)}</code> could not be located in the registry.
-            <br />It may have been deleted or the ID is incorrect.
+            {t("serviceDetail.notFoundDesc", { id: decodeURIComponent(serviceId) })}
           </p>
           <button
             onClick={() => router.push("/services")}
             className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-all shadow-lg shadow-blue-900/20 active:scale-95 flex items-center justify-center gap-2 mx-auto"
           >
-            <ArrowLeft className="w-4 h-4" /> Return to Services
+            <ArrowLeft className="w-4 h-4" /> {t("serviceDetail.returnToServices")}
           </button>
         </div>
       </div>
@@ -207,7 +205,7 @@ export default function ServiceDetailsPage() {
   if (!service.is_active) {
     statusNode = (
       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-500 border border-zinc-700">
-        Inactive
+        {t("serviceDetail.inactive")}
       </span>
     );
   } else if (hasLiveJob) {
@@ -226,7 +224,7 @@ export default function ServiceDetailsPage() {
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
           <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
         </span>
-        Idle
+        {t("serviceDetail.idle")}
       </span>
     );
   }
@@ -245,7 +243,7 @@ export default function ServiceDetailsPage() {
           className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group"
         >
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-          Back to Services
+          {t("serviceDetail.backTo")}
         </button>
 
         {/* Header Section */}
@@ -279,14 +277,14 @@ export default function ServiceDetailsPage() {
           <div className="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
             {statusNode}
             <div className="flex flex-col">
-              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Status</span>
+              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("serviceDetail.status")}</span>
               <span className={`text-base font-bold tracking-wide ${
                 !service.is_active ? "text-zinc-400" :
                 hasLiveJob && currentJobStatus === "Running" ? "text-blue-400" :
                 hasLiveJob && currentJobStatus === "Pending" ? "text-amber-400" :
                 "text-teal-400"
               }`}>
-                {!service.is_active ? "INACTIVE" : hasLiveJob ? currentJobStatus?.toUpperCase() : "IDLE"}
+                {!service.is_active ? t("serviceDetail.inactive").toUpperCase() : hasLiveJob ? currentJobStatus?.toUpperCase() : t("serviceDetail.idle").toUpperCase()}
               </span>
             </div>
 
@@ -305,7 +303,7 @@ export default function ServiceDetailsPage() {
                 </div>
               )}
               <div className="flex flex-col">
-                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Manager</span>
+                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("serviceDetail.manager")}</span>
                 <span className="text-sm font-medium text-zinc-200">{displayUser.name}</span>
               </div>
             </div>
@@ -315,7 +313,7 @@ export default function ServiceDetailsPage() {
               <button
                 onClick={() => setIsDrawerOpen(true)}
                 className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                title={isOwner ? "Edit / Clone Service" : "Clone Service"}
+                title={isOwner ? t("serviceDetail.editClone") : t("services.cloneService")}
               >
                 <RefreshCw className="w-5 h-5" />
               </button>
@@ -328,7 +326,7 @@ export default function ServiceDetailsPage() {
                     ? "bg-teal-900/20 hover:bg-teal-900/40 text-teal-400 border-teal-500/20"
                     : "bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 border-zinc-700/50"
                     }`}
-                  title={service.is_active ? "Stop Service" : "Start Service"}
+                  title={service.is_active ? t("serviceDetail.stopService") : t("serviceDetail.startService")}
                 >
                   <Power className="w-5 h-5" />
                 </button>
@@ -339,7 +337,7 @@ export default function ServiceDetailsPage() {
                 <button
                   onClick={handleDeleteClick}
                   className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
-                  title="Delete Service"
+                  title={t("serviceDetail.deleteService")}
                 >
                   <Trash2 className="w-5 h-5" />
                 </button>
@@ -360,13 +358,13 @@ export default function ServiceDetailsPage() {
             <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <AlignLeft className="w-4 h-4 text-zinc-400" />
-                <h3 className="text-sm font-semibold text-zinc-200">Description</h3>
+                <h3 className="text-sm font-semibold text-zinc-200">{t("serviceDetail.description")}</h3>
               </div>
               {service.description && (
                 <button
                   onClick={() => copyToClipboard(service.description || "", setCopiedDescription)}
                   className="text-zinc-500 hover:text-zinc-200 transition-colors"
-                  title="Copy Description"
+                  title={t("serviceDetail.copyDescription")}
                 >
                   {copiedDescription ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
@@ -376,7 +374,7 @@ export default function ServiceDetailsPage() {
               {service.description ? (
                 <p className="text-zinc-300 text-sm leading-relaxed break-all">{service.description}</p>
               ) : (
-                <p className="text-zinc-600 italic text-sm">No description provided.</p>
+                <p className="text-zinc-600 italic text-sm">{t("serviceDetail.noDescription")}</p>
               )}
             </div>
           </div>
@@ -385,28 +383,28 @@ export default function ServiceDetailsPage() {
           <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <Server className="w-4 h-4 text-zinc-400" />
-              <h3 className="text-sm font-semibold text-zinc-200">Service Configuration</h3>
+              <h3 className="text-sm font-semibold text-zinc-200">{t("serviceDetail.serviceConfig")}</h3>
             </div>
             <div className="p-5 grid grid-cols-2 gap-5">
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Request Timeout</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("serviceDetail.requestTimeout")}</label>
                 <span className="text-base text-white font-medium block">{service.request_timeout}s</span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Idle Timeout</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("serviceDetail.idleTimeout")}</label>
                 <span className="text-base text-white font-medium block">
                   {service.idle_timeout}s
                   {service.idle_timeout === 0 && (
-                    <span className="text-zinc-500 text-sm ml-1">(Never Scale Down)</span>
+                    <span className="text-zinc-500 text-sm ml-1">{t("serviceDetail.neverScaleDown")}</span>
                   )}
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Max Concurrency</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("serviceDetail.maxConcurrency")}</label>
                 <span className="text-base text-white font-medium block">{service.max_concurrency}</span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Job Type</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("serviceDetail.jobType")}</label>
                 <span className="text-base text-white font-medium block">{service.job_type}</span>
               </div>
             </div>
@@ -421,7 +419,7 @@ export default function ServiceDetailsPage() {
           <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <GitBranch className="w-4 h-4 text-zinc-400" />
-              <h3 className="text-sm font-semibold text-zinc-200">Repository</h3>
+              <h3 className="text-sm font-semibold text-zinc-200">{t("serviceDetail.repository")}</h3>
             </div>
             <div className="p-5 space-y-5">
               {/* Repo Name */}
@@ -432,9 +430,9 @@ export default function ServiceDetailsPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer transition-colors w-fit"
-                    title="Open Repository in GitHub"
+                    title={t("serviceDetail.openRepoGithub")}
                   >
-                    Github Repository
+                    {t("serviceDetail.githubRepo")}
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
@@ -457,9 +455,9 @@ export default function ServiceDetailsPage() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer w-fit"
-                      title="View Branch Tree"
+                      title={t("serviceDetail.viewBranchTree")}
                     >
-                      Branch
+                      {t("serviceDetail.branch")}
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -476,9 +474,9 @@ export default function ServiceDetailsPage() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer w-fit"
-                      title="View Commit Details"
+                      title={t("serviceDetail.viewCommitDetails")}
                     >
-                      Commit SHA
+                      {t("serviceDetail.commitSha")}
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -494,29 +492,29 @@ export default function ServiceDetailsPage() {
           <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <Cpu className="w-4 h-4 text-zinc-400" />
-              <h3 className="text-sm font-semibold text-zinc-200">Resources</h3>
+              <h3 className="text-sm font-semibold text-zinc-200">{t("serviceDetail.resources")}</h3>
             </div>
             <div className="p-5 grid grid-cols-2 gap-4">
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Accelerator</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("serviceDetail.accelerator")}</label>
                 <span className="text-base text-white font-medium block">
-                  {service.gpu_type === "CPU" ? "CPU Only" : service.gpu_type}
+                  {service.gpu_type === "CPU" ? t("serviceDetail.cpuOnly") : service.gpu_type}
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">GPU Count</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("serviceDetail.gpuCount")}</label>
                 <span className="text-base text-white font-medium block">{service.gpu_count} {service.gpu_count === 1 ? "GPU" : "GPUs"}</span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">CPU Cores</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("serviceDetail.cpuCores")}</label>
                 <span className="text-base text-white font-medium block">
-                  {service.cpu_count ? service.cpu_count : <span className="text-zinc-500 text-sm">(Station Default)</span>}
+                  {service.cpu_count ? service.cpu_count : <span className="text-zinc-500 text-sm">{t("serviceDetail.stationDefault")}</span>}
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">Memory</label>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("serviceDetail.memory")}</label>
                 <span className="text-base text-white font-medium block">
-                  {service.memory_demand ? service.memory_demand : <span className="text-zinc-500 text-sm">(Station Default)</span>}
+                  {service.memory_demand ? service.memory_demand : <span className="text-zinc-500 text-sm">{t("serviceDetail.stationDefault")}</span>}
                 </span>
               </div>
             </div>
@@ -527,12 +525,12 @@ export default function ServiceDetailsPage() {
             <div className="shrink-0 px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-zinc-400" />
-                <h3 className="text-sm font-semibold text-zinc-200">Entry Command</h3>
+                <h3 className="text-sm font-semibold text-zinc-200">{t("serviceDetail.entryCommand")}</h3>
               </div>
               <button
                 onClick={() => copyToClipboard(service.entry_command, setCopiedCommand)}
                 className="text-zinc-500 hover:text-zinc-200 transition-colors"
-                title="Copy Full Command"
+                title={t("serviceDetail.copyFullCommand")}
               >
                 {copiedCommand ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
               </button>

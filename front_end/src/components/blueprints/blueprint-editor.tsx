@@ -7,6 +7,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
 import { BlueprintEditorHelp } from "@/components/ui/help-content";
+import { useLanguage } from "@/context/language-context";
 
 import Editor from "react-simple-code-editor";
 import { highlight, languages } from "prismjs";
@@ -31,6 +32,7 @@ interface BlueprintEditorProps {
 }
 
 export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, isSaving }: BlueprintEditorProps) {
+  const { t } = useLanguage();
   const [formData, setFormData] = useState(initialData);
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -236,12 +238,12 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
     <Drawer
       isOpen={isOpen}
       onClose={onClose}
-      title={mode === 'create' ? "Create Blueprint" : "Clone / Update Blueprint"}
+      title={mode === 'create' ? t("blueprintEditor.create") : t("blueprintEditor.cloneUpdate")}
       icon={mode === 'create' ? <DraftingCompass className="w-5 h-5 text-blue-500" /> : <RefreshCw className="w-5 h-5 text-purple-500" />}
       width="w-full max-w-4xl"
       actions={
         <>
-          <HelpButton title="蓝图编辑帮助">
+          <HelpButton title={t("blueprintEditor.help")}>
             <BlueprintEditorHelp />
           </HelpButton>
           <ConfigClipboard
@@ -256,40 +258,40 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
         <div className="flex-1 space-y-8 pb-4">
           <div className="max-w-3xl mx-auto space-y-6">
             <h3 className="text-zinc-200 text-sm font-semibold flex items-center gap-2">
-              Basic Information
+              {t("blueprintEditor.basicInfo")}
               <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
             </h3>
 
             <div id="field-title">
               <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'title' ? 'text-red-500' : 'text-zinc-500'}`}>
-                Blueprint Name <span className="text-red-500">*</span>
+                {t("blueprintEditor.name")} <span className="text-red-500">*</span>
               </label>
               <input
                 value={formData.title}
                 onChange={e => { setFormData({ ...formData, title: e.target.value }); clearError('title'); }}
                 placeholder="My Debug Tool"
-                className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 
+                className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700
                     ${errorField === 'title' ? 'animate-shake border-red-500' : 'border-zinc-800'}`}
               />
             </div>
 
             <div id="field-id">
               <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'id' ? 'text-red-500' : 'text-zinc-500'}`}>
-                Blueprint ID <span className="text-red-500">*</span>
+                {t("blueprintEditor.id")} <span className="text-red-500">*</span>
               </label>
               <input
                 value={formData.id}
                 onChange={e => { setFormData({ ...formData, id: e.target.value }); clearError('id'); }}
                 placeholder="e.g. my-debug-tool"
-                className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 
+                className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700
                     ${errorField === 'id' ? 'animate-shake border-red-500' : 'border-zinc-800'}`}
               />
-              <p className="text-[10px] text-zinc-600 mt-1">Unique identifier (URL safe).</p>
+              <p className="text-[10px] text-zinc-600 mt-1">{t("blueprintEditor.idHint")}</p>
             </div>
 
             <div id="field-description">
               <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'description' ? 'text-red-500' : 'text-zinc-500'}`}>
-                Description <span className="text-red-500">*</span>
+                {t("jobForm.description")} <span className="text-red-500">*</span>
               </label>
               <input
                 value={formData.description}
@@ -305,11 +307,11 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
 
           <div className="flex flex-col flex-1 max-w-3xl mx-auto w-full">
             <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-              Implementation
+              {t("blueprintEditor.implementation")}
               <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
             </h3>
             <label className={`text-xs uppercase font-bold mb-2 flex items-center gap-2 ${errorField === 'code' ? 'text-red-500' : 'text-zinc-500'}`}>
-              <Terminal className="w-3 h-3" /> Python Logic
+              <Terminal className="w-3 h-3" /> {t("blueprintEditor.pythonLogic")}
             </label>
             <div id="field-code" className={`relative rounded-xl overflow-hidden border bg-[#1e1e1e] focus-within:ring-1 transition-all shadow-inner min-h-[400px] ${errorField === 'code' ? 'border-red-500 animate-shake' : 'border-zinc-800 focus-within:ring-blue-500/50'}`}>
               <Editor
@@ -331,14 +333,14 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
             <span className="text-red-500 text-xs font-bold animate-pulse">{errorMessage}</span>
           ) : (
             <span className="text-zinc-500 text-xs hidden sm:block">
-               {isOriginalId ? "Updating existing blueprint." : "Creating new blueprint definition."}
+               {isOriginalId ? t("blueprintEditor.updating") : t("blueprintEditor.creating")}
             </span>
           )}
           <div className="flex gap-3 w-full sm:w-auto">
-            <button onClick={onClose} className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors">Cancel</button>
-            <button 
-                onClick={handleSubmit} 
-                disabled={isSaving} 
+            <button onClick={onClose} className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors">{t("common.cancel")}</button>
+            <button
+                onClick={handleSubmit}
+                disabled={isSaving}
                 className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
             >
               {isSaving ? (
@@ -346,7 +348,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
               ) : (
                  isOriginalId ? <Save className="w-4 h-4" /> : (mode === 'create' ? <DraftingCompass className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />)
               )}
-              {isOriginalId ? "Update Blueprint" : (mode === 'create' ? "Create Blueprint" : "Clone Blueprint")}
+              {isOriginalId ? t("blueprintEditor.updateBtn") : (mode === 'create' ? t("blueprintEditor.createBtn") : t("blueprintEditor.cloneBtn"))}
             </button>
           </div>
         </div>

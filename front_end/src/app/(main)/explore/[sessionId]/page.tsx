@@ -8,6 +8,7 @@ import RenderMarkdown from "@/components/ui/render-markdown";
 import type { ExplorerSessionWithMessages, ExplorerMessage, Attachment } from "@/types/explore";
 import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 
 
 function parseThinkingContent(content: string): { thinking: string | null; response: string } {
@@ -21,6 +22,7 @@ function parseThinkingContent(content: string): { thinking: string | null; respo
 
 function ThinkingBlock({ content, defaultExpanded = true }: { content: string; defaultExpanded?: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const { t } = useLanguage();
 
   return (
     <div className="mb-4">
@@ -33,7 +35,7 @@ function ThinkingBlock({ content, defaultExpanded = true }: { content: string; d
         ) : (
           <ChevronRight className="w-4 h-4" />
         )}
-        <span className="text-sm">Thinking</span>
+        <span className="text-sm">{t("explorer.thinking")}</span>
       </button>
       {expanded && (
         <div className="pl-4 border-l-2 border-zinc-700 text-sm text-zinc-500 whitespace-pre-wrap">
@@ -237,6 +239,7 @@ function MessageContent({ content }: { content: string }) {
 function MessageActions({ content, onRegenerate, alwaysShow = false }: { content: string; onRegenerate?: () => void; alwaysShow?: boolean }) {
   const [liked, setLiked] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
+  const { t } = useLanguage();
 
   const handleCopy = async () => {
     const { response } = parseThinkingContent(content);
@@ -254,7 +257,7 @@ function MessageActions({ content, onRegenerate, alwaysShow = false }: { content
             ? "text-green-400 bg-green-400/10"
             : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
         }`}
-        title="Good response"
+        title={t("explorer.goodResponse")}
       >
         <ThumbsUp className="w-4 h-4" />
       </button>
@@ -265,14 +268,14 @@ function MessageActions({ content, onRegenerate, alwaysShow = false }: { content
             ? "text-red-400 bg-red-400/10"
             : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
         }`}
-        title="Bad response"
+        title={t("explorer.badResponse")}
       >
         <ThumbsDown className="w-4 h-4" />
       </button>
       <button
         onClick={onRegenerate}
         className="p-2 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-        title="Regenerate"
+        title={t("explorer.regenerate")}
       >
         <RotateCcw className="w-4 h-4" />
       </button>
@@ -283,7 +286,7 @@ function MessageActions({ content, onRegenerate, alwaysShow = false }: { content
             ? "text-green-400 bg-green-400/10"
             : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
         }`}
-        title={copied ? "Copied!" : "Copy"}
+        title={copied ? t("action.copied") : t("action.copy")}
       >
         {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
       </button>
@@ -310,6 +313,7 @@ function UserMessageWithActions({
   onImageClick: (src: string, alt: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useLanguage();
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(message.content);
@@ -324,7 +328,7 @@ function UserMessageWithActions({
           <button
             onClick={onEdit}
             className="p-1.5 hover:bg-zinc-800 rounded transition-colors"
-            title="Edit"
+            title={t("explorer.edit")}
           >
             <Pencil className="w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300" />
           </button>
@@ -334,7 +338,7 @@ function UserMessageWithActions({
           className={`p-1.5 rounded transition-colors ${
             copied ? "text-green-400" : "hover:bg-zinc-800"
           }`}
-          title={copied ? "Copied!" : "Copy"}
+          title={copied ? t("action.copied") : t("action.copy")}
         >
           {copied ? (
             <Check className="w-3.5 h-3.5" />
@@ -377,6 +381,7 @@ export default function SessionPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
+  const { t } = useLanguage();
   const sessionId = params.sessionId as string;
 
   const [session, setSession] = useState<ExplorerSessionWithMessages | null>(null);
@@ -855,8 +860,8 @@ export default function SessionPage() {
             {/* Title */}
             <div className="text-center mb-8">
               <h1 className="text-3xl font-bold mb-2">
-                <span className="text-zinc-100">人机协作，</span>
-                <span className="text-blue-500">赋能科研</span>
+                <span className="text-zinc-100">{t("explorer.tagline1")}</span>
+                <span className="text-blue-500">{t("explorer.tagline2")}</span>
               </h1>
               <p className="text-zinc-500">Magnus · Explorer</p>
             </div>
@@ -894,7 +899,7 @@ export default function SessionPage() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   onPaste={handlePaste}
-                  placeholder={isUploading ? "上传中..." : "输入消息，可上传图片和文件"}
+                  placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
                   rows={1}
                   className="custom-scrollbar flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
                   style={{ minHeight: "48px", maxHeight: "192px" }}
@@ -913,7 +918,7 @@ export default function SessionPage() {
                 </button>
               </div>
               <p className="text-xs text-zinc-600 mt-2 text-center">
-                您在 Magnus 平台上的活动记录会被收集并整理为科学语料，请注意隐私保护
+                {t("explorer.privacyNotice")}
               </p>
             </div>
           </div>
@@ -985,13 +990,13 @@ export default function SessionPage() {
                         onClick={cancelEditingMessage}
                         className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
                       >
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                       <button
                         onClick={() => sendMessage(index)}
                         className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
                       >
-                        Send
+                        {t("explorer.send")}
                       </button>
                     </div>
                   </div>
@@ -1063,7 +1068,7 @@ export default function SessionPage() {
                 />
                 <div className="flex items-center gap-2 text-zinc-500 mt-1">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span className="text-sm">Thinking...</span>
+                <span className="text-sm">{t("explorer.thinkingWait")}</span>
                 </div>
               </div>
             </div>

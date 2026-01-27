@@ -3,14 +3,15 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { 
-  ArrowLeft, Terminal, Clock, DraftingCompass, RefreshCw, 
+import {
+  ArrowLeft, Terminal, Clock, DraftingCompass, RefreshCw,
   Trash2, Play, Loader2, FileCode, FileQuestion, Check, Copy
 } from "lucide-react";
 
 import { client } from "@/lib/api";
 import { formatBeijingTime, computeStableHash } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -32,6 +33,7 @@ export default function BlueprintDetailsPage() {
   const params = useParams();
   const router = useRouter();
   const { user: currentUser } = useAuth();
+  const { t } = useLanguage();
   const blueprintId = params.id as string;
 
   // Data States
@@ -236,15 +238,15 @@ export default function BlueprintDetailsPage() {
           <div className="w-16 h-16 bg-zinc-800/80 rounded-full flex items-center justify-center mx-auto mb-6 border border-zinc-700/50 shadow-inner">
             <FileQuestion className="w-8 h-8 text-zinc-500" />
           </div>
-          <h2 className="text-xl font-bold text-zinc-200 mb-2 tracking-tight">Blueprint Not Found</h2>
+          <h2 className="text-xl font-bold text-zinc-200 mb-2 tracking-tight">{t("blueprintDetail.notFound")}</h2>
           <p className="text-zinc-500 text-sm mb-8 leading-relaxed">
-            The blueprint definition <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-400 font-mono text-xs">{decodeURIComponent(blueprintId)}</code> could not be located in the registry. <br/>It may have been deleted or the ID is incorrect.
+            {t("blueprintDetail.notFoundDesc", { id: decodeURIComponent(blueprintId) })}
           </p>
           <button
             onClick={() => router.push('/blueprints')}
             className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-all shadow-lg shadow-blue-900/20 active:scale-95 flex items-center justify-center gap-2 mx-auto"
           >
-            <ArrowLeft className="w-4 h-4" /> Return to Registry
+            <ArrowLeft className="w-4 h-4" /> {t("blueprintDetail.returnToRegistry")}
           </button>
         </div>
       </div>
@@ -273,7 +275,7 @@ export default function BlueprintDetailsPage() {
       <div className="mb-8">
         <button onClick={() => router.push('/blueprints')} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group">
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-          Back to Blueprints
+          {t("blueprintDetail.backTo")}
         </button>
 
         {/* Header Section */}
@@ -315,7 +317,7 @@ export default function BlueprintDetailsPage() {
              </div>
              
              <div className="flex flex-col">
-                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">Author</span>
+                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("blueprintDetail.author")}</span>
                 <span className="text-base font-bold tracking-wide text-zinc-200">
                    {displayUser.name}
                 </span>
@@ -325,7 +327,7 @@ export default function BlueprintDetailsPage() {
                 <button
                     onClick={() => { setEditorOpen(true); }}
                     className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                    title={isOwner ? "Edit / Clone Blueprint" : "Clone Blueprint"}
+                    title={isOwner ? t("blueprintDetail.editClone") : t("blueprints.clone")}
                 >
                     <RefreshCw className="w-5 h-5" />
                 </button>
@@ -334,7 +336,7 @@ export default function BlueprintDetailsPage() {
                     onClick={handleRun}
                     disabled={isRunning || isLoadingSchema}
                     className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Run Blueprint"
+                    title={t("blueprintDetail.runBlueprint")}
                 >
                     {isRunning ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
                 </button>
@@ -343,7 +345,7 @@ export default function BlueprintDetailsPage() {
                     <button
                         onClick={() => setShowDeleteConfirm(true)}
                         className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
-                        title="Delete Blueprint"
+                        title={t("blueprintDetail.deleteBlueprint")}
                     >
                         <Trash2 className="w-5 h-5" />
                     </button>
@@ -364,12 +366,12 @@ export default function BlueprintDetailsPage() {
              <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
                <div className="flex items-center gap-2">
                  <DraftingCompass className="w-4 h-4 text-zinc-400" />
-                 <h3 className="text-sm font-semibold text-zinc-200">Description</h3>
+                 <h3 className="text-sm font-semibold text-zinc-200">{t("blueprintDetail.description")}</h3>
                </div>
-               <button 
+               <button
                  onClick={() => copyToClipboard(blueprint.description, setCopiedDesc)}
                  className="text-zinc-500 hover:text-zinc-200 transition-colors"
-                 title="Copy Description"
+                 title={t("blueprintDetail.copyDescription")}
                >
                  {copiedDesc ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                </button>
@@ -384,12 +386,12 @@ export default function BlueprintDetailsPage() {
             <div className="shrink-0 px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                  <FileCode className="w-4 h-4 text-zinc-400" />
-                 <h3 className="text-sm font-semibold text-zinc-200">Implementation Logic</h3>
+                 <h3 className="text-sm font-semibold text-zinc-200">{t("blueprintDetail.implementationLogic")}</h3>
               </div>
-              <button 
+              <button
                 onClick={() => copyToClipboard(blueprint.code, setCopiedCode)}
                 className="text-zinc-500 hover:text-zinc-200 transition-colors"
-                title="Copy Code"
+                title={t("blueprintDetail.copyCode")}
               >
                 {copiedCode ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -418,16 +420,16 @@ export default function BlueprintDetailsPage() {
            <div className="shrink-0 px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
              <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-blue-400" />
-                <h3 className="text-sm font-semibold text-zinc-200">Configuration</h3>
+                <h3 className="text-sm font-semibold text-zinc-200">{t("blueprintDetail.configuration")}</h3>
              </div>
              {isLoadingSchema && <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-500" />}
            </div>
 
            <div className="flex-1 overflow-auto p-1 custom-scrollbar relative">
              <div className="p-4">
-                <DynamicForm 
-                  schema={paramsSchema} 
-                  values={formValues} 
+                <DynamicForm
+                  schema={paramsSchema}
+                  values={formValues}
                   onChange={(k, v) => { setFormValues(prev => ({...prev, [k]: v})); setRunFieldErr(null); setRunError(null); }}
                   isLoading={isLoadingSchema}
                   errorField={runFieldErr}
@@ -440,21 +442,21 @@ export default function BlueprintDetailsPage() {
                  {runError ? (
                     <span className="text-red-400 text-xs font-bold animate-pulse">{runError}</span>
                  ) : (
-                    <span className="text-zinc-500 text-xs">Configure parameters to instantiate this task.</span>
+                    <span className="text-zinc-500 text-xs">{t("blueprintDetail.configureParams")}</span>
                  )}
               </div>
-              <button 
+              <button
                 onClick={handleRun}
                 disabled={isRunning || isLoadingSchema}
                 className="px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-w-[120px] justify-center"
               >
                 {isRunning ? (
                    <>
-                     <Loader2 className="w-4 h-4 animate-spin" /> Launching...
+                     <Loader2 className="w-4 h-4 animate-spin" /> {t("blueprintRunner.launching")}
                    </>
                 ) : (
                    <>
-                     <Play className="w-4 h-4 fill-current" /> Launch
+                     <Play className="w-4 h-4 fill-current" /> {t("blueprintRunner.launch")}
                    </>
                 )}
               </button>
@@ -473,15 +475,15 @@ export default function BlueprintDetailsPage() {
         isSaving={isSavingClone} 
       />
 
-      <ConfirmationDialog 
-        isOpen={showDeleteConfirm} 
-        onClose={() => setShowDeleteConfirm(false)} 
-        onConfirm={handleDelete} 
-        title="Delete Blueprint" 
-        description={<span>Are you sure you want to delete blueprint <strong>{blueprint.title}</strong>? This action cannot be undone.</span>} 
-        confirmText="Delete Blueprint" 
-        variant="danger" 
-        isLoading={isDeleting} 
+      <ConfirmationDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title={t("blueprintDetail.deleteBlueprint")}
+        description={<span>{t("blueprintDetail.deleteConfirmDesc", { title: blueprint.title })}</span>}
+        confirmText={t("blueprintDetail.deleteBlueprint")}
+        variant="danger"
+        isLoading={isDeleting}
       />
     </div>
   );
