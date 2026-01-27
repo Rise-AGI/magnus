@@ -1,4 +1,3 @@
-// front_end/src/app/(main)/enchant/[sessionId]/page.tsx
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -6,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowUp, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check } from "lucide-react";
 import { client } from "@/lib/api";
 import RenderMarkdown from "@/components/ui/render-markdown";
-import type { EnchantSessionWithMessages, EnchantMessage } from "@/types/enchant";
+import type { EnchantSessionWithMessages, EnchantMessage, Attachment } from "@/types/enchant";
 import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
 
@@ -235,7 +234,7 @@ function MessageContent({ content }: { content: string }) {
 }
 
 
-function MessageActions({ content, onRegenerate }: { content: string; onRegenerate?: () => void }) {
+function MessageActions({ content, onRegenerate, alwaysShow = false }: { content: string; onRegenerate?: () => void; alwaysShow?: boolean }) {
   const [liked, setLiked] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -247,7 +246,7 @@ function MessageActions({ content, onRegenerate }: { content: string; onRegenera
   };
 
   return (
-    <div className="flex items-center gap-1 mt-2 ml-9">
+    <div className={`flex items-center gap-1 mt-2 ml-9 ${alwaysShow ? "" : "opacity-0 group-hover:opacity-100"} transition-opacity`}>
       <button
         onClick={() => setLiked(liked === true ? null : true)}
         className={`p-2 rounded-md transition-colors ${
@@ -293,13 +292,85 @@ function MessageActions({ content, onRegenerate }: { content: string; onRegenera
 }
 
 
-interface Attachment {
-  type: "image" | "text";
-  filename: string;
-  file_id?: string;
-  path?: string;
-  content?: string;
+function UserMessageWithActions({
+  message,
+  index,
+  isLastUserMessage,
+  sessionId,
+  user,
+  onEdit,
+  onImageClick,
+}: {
+  message: EnchantMessage;
+  index: number;
+  isLastUserMessage: boolean;
+  sessionId: string;
+  user: { name: string; avatar_url?: string | null } | null;
+  onEdit: () => void;
+  onImageClick: (src: string, alt: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="group flex items-start gap-2">
+      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity mt-2">
+        {isLastUserMessage && (
+          <button
+            onClick={onEdit}
+            className="p-1.5 hover:bg-zinc-800 rounded transition-colors"
+            title="Edit"
+          >
+            <Pencil className="w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300" />
+          </button>
+        )}
+        <button
+          onClick={handleCopy}
+          className={`p-1.5 rounded transition-colors ${
+            copied ? "text-green-400" : "hover:bg-zinc-800"
+          }`}
+          title={copied ? "Copied!" : "Copy"}
+        >
+          {copied ? (
+            <Check className="w-3.5 h-3.5" />
+          ) : (
+            <Copy className="w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300" />
+          )}
+        </button>
+      </div>
+      <div className="bg-blue-600/20 border border-blue-500/30 text-zinc-100 px-4 py-3 rounded-2xl rounded-br-md">
+        <UserMessageContent
+          content={message.content}
+          sessionId={sessionId}
+          onImageClick={onImageClick}
+        />
+      </div>
+      {user?.avatar_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={user.avatar_url}
+          alt={user.name}
+          className="w-7 h-7 rounded-full border border-zinc-700 object-cover flex-shrink-0 mt-1"
+        />
+      ) : (
+        <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs font-medium border border-blue-500/30 flex-shrink-0 mt-1">
+          {user?.name?.substring(0, 1) || "U"}
+        </div>
+      )}
+    </div>
+  );
 }
+
+
+// 标题刷新时间间隔常量
+const TITLE_REFRESH_INTERVAL_MS = 2000;
+const TITLE_REFRESH_INITIAL_MS = 500;
+const TITLE_REFRESH_DELAYED_MS = 3000;
 
 
 export default function SessionPage() {
@@ -309,6 +380,7 @@ export default function SessionPage() {
   const sessionId = params.sessionId as string;
 
   const [session, setSession] = useState<EnchantSessionWithMessages | null>(null);
+  const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
@@ -322,6 +394,17 @@ export default function SessionPage() {
   const isUserNearBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pendingMessageProcessedRef = useRef(false);
+  const currentUserMessageRef = useRef<EnchantMessage | null>(null);
+
+
+  useEffect(() => {
+    const pendingKey = `enchant-pending-${sessionId}`;
+    const pending = sessionStorage.getItem(pendingKey);
+    if (pending) {
+      setPendingUserMessage(pending);
+    }
+  }, [sessionId]);
 
 
   const fetchSession = useCallback(async () => {
@@ -340,9 +423,147 @@ export default function SessionPage() {
   }, [fetchSession]);
 
 
+  const sendMessageContent = useCallback(async (messageContent: string) => {
+    if (isStreaming) return;
+
+    const userMessage: EnchantMessage = {
+      id: `temp-${Date.now()}`,
+      session_id: sessionId,
+      role: "user",
+      content: messageContent,
+      created_at: new Date().toISOString(),
+    };
+
+    currentUserMessageRef.current = userMessage;
+
+    setSession((prev) =>
+      prev ? { ...prev, messages: [...prev.messages, userMessage] } : null
+    );
+
+    setIsStreaming(true);
+    setStreamingContent("");
+    isUserNearBottomRef.current = true;
+
+    abortControllerRef.current = new AbortController();
+    let fullContent = "";
+
+    const titleRefreshInterval = setInterval(() => {
+      window.dispatchEvent(new Event("enchant-sessions-update"));
+    }, TITLE_REFRESH_INTERVAL_MS);
+
+    setTimeout(() => {
+      window.dispatchEvent(new Event("enchant-sessions-update"));
+    }, TITLE_REFRESH_INITIAL_MS);
+
+    try {
+      const token = localStorage.getItem("magnus_token");
+      const response = await fetch(
+        `${API_BASE}/api/enchant/sessions/${sessionId}/chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ content: messageContent }),
+          signal: abortControllerRef.current.signal,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          fullContent += chunk;
+          setStreamingContent(fullContent);
+        }
+      }
+
+      const assistantMessage: EnchantMessage = {
+        id: `assistant-${Date.now()}`,
+        session_id: sessionId,
+        role: "assistant",
+        content: fullContent,
+        created_at: new Date().toISOString(),
+      };
+
+      const savedUserMessage = currentUserMessageRef.current;
+      setSession((prev) => {
+        if (!prev) return null;
+        const hasUserMessage = prev.messages.some(m => m.id === savedUserMessage?.id);
+        const baseMessages = hasUserMessage ? prev.messages : [...prev.messages, savedUserMessage!];
+        return { ...prev, messages: [...baseMessages, assistantMessage] };
+      });
+      setStreamingContent("");
+      currentUserMessageRef.current = null;
+
+      clearInterval(titleRefreshInterval);
+      window.dispatchEvent(new Event("enchant-sessions-update"));
+      setTimeout(() => {
+        window.dispatchEvent(new Event("enchant-sessions-update"));
+      }, TITLE_REFRESH_DELAYED_MS);
+    } catch (error) {
+      clearInterval(titleRefreshInterval);
+      if ((error as Error).name === "AbortError") {
+        if (fullContent) {
+          let savedContent = fullContent;
+          if (savedContent.includes("<think>") && !savedContent.includes("</think>")) {
+            savedContent = savedContent + "</think>";
+          }
+          const assistantMessage: EnchantMessage = {
+            id: `assistant-${Date.now()}`,
+            session_id: sessionId,
+            role: "assistant",
+            content: savedContent,
+            created_at: new Date().toISOString(),
+          };
+          const savedUserMessage = currentUserMessageRef.current;
+          setSession((prev) => {
+            if (!prev) return null;
+            const hasUserMessage = prev.messages.some(m => m.id === savedUserMessage?.id);
+            const baseMessages = hasUserMessage ? prev.messages : [...prev.messages, savedUserMessage!];
+            return { ...prev, messages: [...baseMessages, assistantMessage] };
+          });
+        }
+        setStreamingContent("");
+        currentUserMessageRef.current = null;
+      } else {
+        console.error("Failed to send message:", error);
+      }
+    } finally {
+      setIsStreaming(false);
+      abortControllerRef.current = null;
+    }
+  }, [sessionId, isStreaming]);
+
+
+  useEffect(() => {
+    if (!session || pendingMessageProcessedRef.current || !pendingUserMessage) return;
+
+    const pendingKey = `enchant-pending-${sessionId}`;
+    sessionStorage.removeItem(pendingKey);
+    pendingMessageProcessedRef.current = true;
+    sendMessageContent(pendingUserMessage);
+  }, [session, sessionId, pendingUserMessage, sendMessageContent]);
+
+
   useEffect(() => {
     if (isUserNearBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      // block: "nearest" 防止触发父容器滚动导致布局错位
+      messagesEndRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest"
+      });
     }
   }, [session?.messages, streamingContent]);
 
@@ -437,10 +658,8 @@ export default function SessionPage() {
 
     const textContent = editIndex !== undefined ? editingMessageContent.trim() : input.trim();
     if (!textContent && attachments.length === 0) return;
-
     if (isStreaming) return;
 
-    // Build message with images first, then text, then documents
     const imageParts: string[] = [];
     const docParts: string[] = [];
 
@@ -494,6 +713,14 @@ export default function SessionPage() {
     abortControllerRef.current = new AbortController();
     let fullContent = "";
 
+    const titleRefreshInterval = setInterval(() => {
+      window.dispatchEvent(new Event("enchant-sessions-update"));
+    }, TITLE_REFRESH_INTERVAL_MS);
+
+    setTimeout(() => {
+      window.dispatchEvent(new Event("enchant-sessions-update"));
+    }, TITLE_REFRESH_INITIAL_MS);
+
     try {
       const token = localStorage.getItem("magnus_token");
       const response = await fetch(
@@ -540,18 +767,17 @@ export default function SessionPage() {
       );
       setStreamingContent("");
 
+      clearInterval(titleRefreshInterval);
       window.dispatchEvent(new Event("enchant-sessions-update"));
-
-      // Refresh again after delay for async title generation
       setTimeout(() => {
         window.dispatchEvent(new Event("enchant-sessions-update"));
-      }, 3000);
+      }, TITLE_REFRESH_DELAYED_MS);
     } catch (error) {
+      clearInterval(titleRefreshInterval);
       if ((error as Error).name === "AbortError") {
-        // Save partial content if any was received
         if (fullContent) {
           let savedContent = fullContent;
-          // If thinking tag was opened but not closed, close it
+          // 流式响应中断时，补全未闭合的 thinking 标签
           if (savedContent.includes("<think>") && !savedContent.includes("</think>")) {
             savedContent = savedContent + "</think>";
           }
@@ -614,6 +840,91 @@ export default function SessionPage() {
     );
   }
 
+  const hasMessages = session.messages.length > 0 || isStreaming || pendingUserMessage;
+
+  if (!hasMessages) {
+    return (
+      <>
+        {previewImage && (
+          <ImagePreviewModal
+            src={previewImage.src}
+            alt={previewImage.alt}
+            onClose={() => setPreviewImage(null)}
+          />
+        )}
+
+        <div className="flex-1 flex flex-col items-center justify-center px-4">
+          <div className="w-full max-w-3xl">
+            {/* Title */}
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-bold mb-2">
+                <span className="text-zinc-100">人机协作，</span>
+                <span className="text-blue-500">赋能科研</span>
+              </h1>
+              <p className="text-zinc-500">Magnus Platform · Enchanting Table</p>
+            </div>
+
+            {/* Input */}
+            <div className="mb-16">
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {attachments.map((att, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
+                    >
+                      {att.type === "image" ? (
+                        <ImageIcon className="w-4 h-4 text-zinc-400" />
+                      ) : (
+                        <FileText className="w-4 h-4 text-zinc-400" />
+                      )}
+                      <span className="text-zinc-300 max-w-32 truncate">{att.filename}</span>
+                      <button
+                        onClick={() => removeAttachment(idx)}
+                        className="text-zinc-500 hover:text-zinc-300"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="relative flex items-end bg-zinc-900 border border-zinc-700 rounded-xl focus-within:border-zinc-600 transition-colors">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
+                  placeholder={isUploading ? "上传中..." : "输入消息，可上传图片和文件"}
+                  rows={1}
+                  className="custom-scrollbar flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
+                  style={{ minHeight: "48px", maxHeight: "192px" }}
+                  disabled={isUploading}
+                />
+                <button
+                  onClick={() => sendMessage()}
+                  disabled={(!input.trim() && attachments.length === 0) || isUploading}
+                  className="m-2 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                >
+                  {isUploading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <ArrowUp className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-600 mt-2 text-center">
+                您在 Magnus 平台上的活动记录会被收集并整理为科学语料，请注意隐私保护
+              </p>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       {/* Image Preview Modal */}
@@ -631,7 +942,30 @@ export default function SessionPage() {
         onScroll={handleMessagesScroll}
         className="flex-1 min-h-0 overflow-y-auto px-4 py-6 enchant-scroll"
       >
-        <div className="max-w-3xl mx-auto space-y-6 pb-32">
+        <div className="max-w-3xl mx-auto space-y-6 pb-32 min-w-0">
+          {/* Show pending user message only if it's not yet in session.messages */}
+          {pendingUserMessage && !session.messages.some(m => m.role === "user" && m.content === pendingUserMessage) && (
+            <div className="flex justify-end">
+              <div className="group flex items-start gap-2">
+                <div className="bg-blue-600/20 border border-blue-500/30 text-zinc-100 px-4 py-3 rounded-2xl rounded-br-md">
+                  <p className="text-sm whitespace-pre-wrap">{pendingUserMessage}</p>
+                </div>
+                {user?.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={user.avatar_url}
+                    alt={user.name}
+                    className="w-7 h-7 rounded-full border border-zinc-700 object-cover flex-shrink-0 mt-1"
+                  />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs font-medium border border-blue-500/30 flex-shrink-0 mt-1">
+                    {user?.name?.substring(0, 1) || "U"}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {session.messages.map((message, index) => (
             <div
               key={message.id}
@@ -665,36 +999,18 @@ export default function SessionPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="group flex items-start gap-2">
-                    <button
-                      onClick={() => startEditingMessage(index, message.content)}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-zinc-800 rounded transition-all mt-2"
-                    >
-                      <Pencil className="w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300" />
-                    </button>
-                    <div className="bg-blue-600/20 border border-blue-500/30 text-zinc-100 px-4 py-3 rounded-2xl rounded-br-md">
-                      <UserMessageContent
-                        content={message.content}
-                        sessionId={sessionId}
-                        onImageClick={(src, alt) => setPreviewImage({ src, alt })}
-                      />
-                    </div>
-                    {user?.avatar_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={user.avatar_url}
-                        alt={user.name}
-                        className="w-7 h-7 rounded-full border border-zinc-700 object-cover flex-shrink-0 mt-1"
-                      />
-                    ) : (
-                      <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs font-medium border border-blue-500/30 flex-shrink-0 mt-1">
-                        {user?.name?.substring(0, 1) || "U"}
-                      </div>
-                    )}
-                  </div>
+                  <UserMessageWithActions
+                    message={message}
+                    index={index}
+                    isLastUserMessage={index === session.messages.map(m => m.role).lastIndexOf("user")}
+                    sessionId={sessionId}
+                    user={user}
+                    onEdit={() => startEditingMessage(index, message.content)}
+                    onImageClick={(src, alt) => setPreviewImage({ src, alt })}
+                  />
                 )
               ) : (
-                <div className="flex flex-col">
+                <div className="group flex flex-col min-w-0">
                   <div className="flex items-start gap-2 max-w-[85%]">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -702,13 +1018,14 @@ export default function SessionPage() {
                       alt="Magnus"
                       className="w-7 h-7 rounded-full border border-violet-500/30 flex-shrink-0 mt-1"
                     />
-                    <div className="text-zinc-300">
+                    <div className="text-zinc-300 min-w-0 overflow-hidden">
                       <MessageContent content={message.content} />
                     </div>
                   </div>
-                  {!isStreaming && index === session.messages.length - 1 && (
+                  {!isStreaming && (
                     <MessageActions
                       content={message.content}
+                      alwaysShow={index === session.messages.length - 1}
                       onRegenerate={() => {
                         const lastUserIndex = session.messages.map(m => m.role).lastIndexOf("user");
                         if (lastUserIndex >= 0) {
@@ -731,7 +1048,7 @@ export default function SessionPage() {
                   alt="Magnus"
                   className="w-7 h-7 rounded-full border border-violet-500/30 flex-shrink-0 mt-1"
                 />
-                <div className="text-zinc-300">
+                <div className="text-zinc-300 min-w-0 overflow-hidden">
                   <StreamingContent content={streamingContent} />
                 </div>
               </div>
@@ -797,7 +1114,7 @@ export default function SessionPage() {
               onPaste={handlePaste}
               placeholder={isUploading ? "上传中..." : "输入消息，可上传图片和文件"}
               rows={1}
-              className="enchant-scroll flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
+              className="custom-scrollbar flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
               style={{ minHeight: "48px", maxHeight: "192px" }}
               disabled={isUploading}
             />

@@ -3,6 +3,7 @@
 
 {/* 感谢 @wjsoj 卫同学！love you ❤ */}
 
+import React from "react";
 import Markdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -18,13 +19,23 @@ import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { cn } from "@/lib/utils";
 import { CopyableText } from "@/components/ui/copyable-text";
 
-export default function RenderMarkdown({ content }: { content: string }) {
+
+interface RenderMarkdownProps {
+  content: string;
+  className?: string;
+}
+
+
+const RenderMarkdown = React.memo(function RenderMarkdown({
+  content,
+  className,
+}: RenderMarkdownProps) {
 
   const markdownComponents = {
     h1: ({ className, ...props }: any) => (
       <h1
         className={cn(
-          "scroll-m-20 text-3xl font-extrabold tracking-tight lg:text-5xl text-zinc-100 mb-6",
+          "text-2xl font-bold tracking-tight text-zinc-100 mb-4",
           className,
         )}
         {...props}
@@ -33,7 +44,7 @@ export default function RenderMarkdown({ content }: { content: string }) {
     h2: ({ className, ...props }: any) => (
       <h2
         className={cn(
-          "mt-10 scroll-m-20 border-b border-zinc-800 pb-2 text-2xl font-semibold tracking-tight transition-colors first:mt-0 text-zinc-100",
+          "mt-6 border-b border-zinc-800 pb-2 text-xl font-semibold tracking-tight first:mt-0 text-zinc-100",
           className,
         )}
         {...props}
@@ -42,7 +53,7 @@ export default function RenderMarkdown({ content }: { content: string }) {
     h3: ({ className, ...props }: any) => (
       <h3
         className={cn(
-          "mt-8 scroll-m-20 text-xl font-semibold tracking-tight text-zinc-100",
+          "mt-4 text-lg font-semibold tracking-tight text-zinc-100",
           className,
         )}
         {...props}
@@ -51,7 +62,7 @@ export default function RenderMarkdown({ content }: { content: string }) {
     h4: ({ className, ...props }: any) => (
       <h4
         className={cn(
-          "mt-4 scroll-m-20 text-lg font-semibold tracking-tight text-zinc-100",
+          "mt-3 text-base font-semibold tracking-tight text-zinc-100",
           className,
         )}
         {...props}
@@ -60,7 +71,7 @@ export default function RenderMarkdown({ content }: { content: string }) {
     p: ({ className, ...props }: any) => (
       <p
         className={cn(
-          "leading-7 text-sm [&:not(:first-child)]:mt-4 text-zinc-300",
+          "leading-7 text-sm [&:not(:first-child)]:mt-3 text-zinc-300 break-words min-w-0",
           className,
         )}
         {...props}
@@ -68,34 +79,38 @@ export default function RenderMarkdown({ content }: { content: string }) {
     ),
     ul: ({ className, ...props }: any) => (
       <ul
-        className={cn("my-6 ml-6 list-disc [&>li]:mt-2 text-sm text-zinc-300", className)}
+        className={cn("my-3 ml-6 list-disc [&>li]:mt-1 text-sm text-zinc-300", className)}
         {...props}
       />
     ),
     ol: ({ className, ...props }: any) => (
       <ol
-        className={cn("my-6 ml-6 list-decimal [&>li]:mt-2 text-sm text-zinc-300", className)}
+        className={cn("my-3 ml-6 list-decimal [&>li]:mt-1 text-sm text-zinc-300", className)}
         {...props}
       />
     ),
     li: ({ className, ...props }: any) => (
-      <li className={cn("mt-2 text-sm text-zinc-300", className)} {...props} />
+      <li className={cn("text-sm text-zinc-300", className)} {...props} />
     ),
     blockquote: ({ className, ...props }: any) => (
       <blockquote
-        className={cn("mt-6 border-l-2 border-zinc-700 pl-6 italic text-sm text-zinc-400", className)}
+        className={cn("mt-4 border-l-2 border-zinc-700 pl-4 italic text-sm text-zinc-400", className)}
         {...props}
       />
     ),
     img: ({ className, ...props }: any) => (
       // eslint-disable-next-line @next/next/no-img-element
-      <img className={cn("rounded-md border border-zinc-800 bg-zinc-950", className)} {...props} alt="" />
+      <img
+        className={cn("rounded-md border border-zinc-800 bg-zinc-950 max-w-full h-auto", className)}
+        {...props}
+        alt=""
+      />
     ),
     hr: ({ ...props }) => (
       <hr className="my-4 border-zinc-800" {...props} />
     ),
     table: ({ className, ...props }: any) => (
-      <div className="my-6 w-full overflow-y-auto">
+      <div className="my-4 w-full overflow-x-auto">
         <table className={cn("w-full border-collapse border border-zinc-800 text-sm", className)} {...props} />
       </div>
     ),
@@ -123,7 +138,11 @@ export default function RenderMarkdown({ content }: { content: string }) {
         {...props}
       />
     ),
-    pre: ({ children }: any) => <div className="not-prose">{children}</div>,
+    pre: ({ children }: any) => (
+      <div className="not-prose max-w-full overflow-x-auto">
+        {children}
+      </div>
+    ),
     a: ({ className, ...props }: any) => (
       <a
         className={cn(
@@ -139,12 +158,12 @@ export default function RenderMarkdown({ content }: { content: string }) {
       const codeString = String(children).replace(/\n$/, "");
 
       return match ? (
-        <div className="relative group mt-6 rounded-lg overflow-hidden border border-zinc-800">
+        <div className="relative group mt-4 rounded-lg overflow-hidden border border-zinc-800 max-w-full">
           <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800">
             <span className="text-xs font-mono text-zinc-400">
               {match[1]}
             </span>
-            <CopyableText 
+            <CopyableText
               text="Copy"
               copyValue={codeString}
               variant="id"
@@ -156,13 +175,19 @@ export default function RenderMarkdown({ content }: { content: string }) {
             PreTag="div"
             language={match[1]}
             style={vscDarkPlus}
-            customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', background: '#09090b' }} 
+            customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', background: '#09090b', overflowX: 'auto' }}
           >
             {codeString}
           </SyntaxHighlighter>
         </div>
       ) : (
-        <code {...rest} className={cn("bg-zinc-800/50 px-1.5 py-0.5 rounded text-zinc-200 font-mono text-xs border border-zinc-700/50", className)}>
+        <code
+          {...rest}
+          className={cn(
+            "bg-zinc-800/50 px-1.5 py-0.5 rounded text-zinc-200 font-mono text-xs border border-zinc-700/50 break-all",
+            className,
+          )}
+        >
           {children}
         </code>
       );
@@ -170,7 +195,7 @@ export default function RenderMarkdown({ content }: { content: string }) {
   };
 
   return (
-    <div className="markdown-body">
+    <div className={cn("markdown-body max-w-full overflow-hidden [&>*:first-child]:!mt-0", className)}>
       <Markdown
         remarkPlugins={[remarkMath, remarkGfm, remarkParse]}
         rehypePlugins={[rehypeKatex, rehypeRaw, rehypeStringify]}
@@ -180,4 +205,8 @@ export default function RenderMarkdown({ content }: { content: string }) {
       </Markdown>
     </div>
   );
-}
+}, (prevProps, nextProps) => {
+  return prevProps.content === nextProps.content && prevProps.className === nextProps.className;
+});
+
+export default RenderMarkdown;

@@ -24,3 +24,11 @@ export interface PagedEnchantSessionResponse {
   total: number;
   items: EnchantSession[];
 }
+
+export interface Attachment {
+  type: "image" | "text";
+  filename: string;
+  file_id?: string;
+  path?: string;
+  content?: string;
+}

@@ -13,7 +13,7 @@ import {
   LogOut,
   ScrollText,
   Layers,
-  // ArrowRight,
+  ArrowRight,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context"; 
 import { CLUSTER_CONFIG } from "@/lib/config";
@@ -24,7 +24,7 @@ const NAV_ITEMS = [
   { name: "Jobs", href: "/jobs", icon: Rocket },
   { name: "Blueprints", href: "/blueprints", icon: ScrollText },
   { name: "Services", href: "/services", icon: Layers },
-  // { name: "Enchant", href: "/enchant", icon: ArrowRight },
+  { name: "Enchant", href: "/enchant", icon: ArrowRight },
   // { name: "Tools", href: "/tools", icon: Wrench },
 ];
 
@@ -33,7 +33,7 @@ export function Sidebar() {
   const { user, login, logout, isLoading } = useAuth(); 
 
   return (
-    <aside className="w-64 h-screen fixed left-0 top-0 border-r border-zinc-800 bg-zinc-950/50 backdrop-blur-xl flex flex-col z-50">
+    <aside className="w-full h-full bg-zinc-950/50 backdrop-blur-xl flex flex-col">
       
       {/* Logo Header */}
       <div className="h-16 flex items-center justify-between px-8 border-b border-zinc-800 bg-zinc-900/20">

@@ -13,6 +13,18 @@ body {
   background: linear-gradient(to bottom, transparent, rgb(var(--background-end-rgb)))
     rgb(var(--background-start-rgb));
   min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* KaTeX 防溢出 */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 0.5em 0;
+}
+.katex {
+  font-size: 1.1em;
 }
 
 /* 自定义滚动条，让表格好看点 */
@@ -49,4 +61,13 @@ body {
 }
 .hide-arrows {
   -moz-appearance: textfield;
+}
+
+/* Enchant 隐藏滚动条 */
+.enchant-scroll::-webkit-scrollbar {
+  display: none;
+}
+.enchant-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
