@@ -1,0 +1,57 @@
+client:
+  jobs:
+    poll_interval: 2
+
+server:
+  address: http://your-server-ip
+  front_end_port: 3011
+  back_end_port: 8017
+  root: /path/to/magnus-data
+
+  jwt_signer:
+    secret_key: your-secret-key
+    algorithm: HS256
+    expire_minutes: 10080
+
+  github_client:
+    token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  feishu_client:
+    app_id: cli_xxxxxxxxxxxxxxxx
+    app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  scheduler:
+    spy_gpu_interval: 5
+    heartbeat_interval: 2
+    snapshot_interval: 300
+    slurm_latency: 1
+    conda_shell_script_path: /opt/miniconda3/etc/profile.d/conda.sh
+    execution_conda_environment: magnus_shared
+
+  service_proxy:
+    max_concurrency: 1024
+    pool_size: 1024
+
+  juliaup_path: /opt/juliaup
+
+  enchanter:
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model_name: qwen3-235b-a22b
+    visual_model_name: qwen-vl-max
+    small_fast_model_name: qwen-turbo
+    api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+cluster:
+  name: Your Cluster Name
+  resources:
+    gpus:
+      - value: rtx4090
+        label: NVIDIA GeForce RTX 4090
+        meta: 24GB • Ada Lovelace
+        limit: 8
+    cpus:
+      max_count: 128
+    memory:
+      default_limit: 1600M
+    runner:
+      default_user: username

@@ -199,15 +199,8 @@ cd front_end && npx tsc --noEmit
 
 ## 配置文件
 
-主配置文件：`configs/magnus_config.yaml`
+主配置文件：`configs/magnus_config.yaml`，前后端共享。具体字段参考 README.md。
 
-```yaml
-server:
-  public_ip: 162.105.151.196
-  front_end_port: 3011
-  back_end_port: 8017
-  root: /data/zycai/magnus_data
-```
 
 ## 协作提醒
 
