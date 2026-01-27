@@ -2,11 +2,116 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Trash2, MessageSquare, Pencil, Check, X, Loader2, Plus } from "lucide-react";
+import { Trash2, MessageSquare, Pencil, Check, X, Loader2, Plus, Share2, Copy } from "lucide-react";
 import { client } from "@/lib/api";
 import type { ExplorerSession, PagedExplorerSessionResponse } from "@/types/explore";
 
 const PAGE_SIZE = 20;
+const SERVER_ADDRESS = process.env.NEXT_PUBLIC_SERVER_ADDRESS;
+const FRONT_END_PORT = process.env.NEXT_PUBLIC_FRONT_END_PORT;
+
+
+interface ShareDialogProps {
+  session: ExplorerSession;
+  onClose: () => void;
+  onShare: () => Promise<void>;
+  onUnshare: () => Promise<void>;
+}
+
+
+function ShareDialog({ session, onClose, onShare, onUnshare }: ShareDialogProps) {
+  const [copied, setCopied] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const shareUrl = `${SERVER_ADDRESS}:${FRONT_END_PORT}/explore/${session.id}`;
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isLoading) onClose();
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [onClose, isLoading]);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleAction = async () => {
+    setIsLoading(true);
+    try {
+      if (session.is_shared) {
+        await onUnshare();
+      } else {
+        await onShare();
+      }
+      onClose();
+    } catch {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={() => !isLoading && onClose()}
+      />
+
+      <div className="relative bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="p-6">
+          <h3 className="text-base font-semibold text-zinc-100 mb-3">
+            {session.is_shared ? "关闭分享" : "分享对话"}
+          </h3>
+
+          <div className="space-y-3">
+            <p className="text-sm text-zinc-400">
+              {session.is_shared
+                ? "组织内的成员可通过链接查看该对话。"
+                : "开启后，组织内的成员可通过以下链接查看该对话。"}
+            </p>
+            <div className="flex items-center gap-2 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2">
+              <span className="flex-1 text-sm text-zinc-300 truncate">{shareUrl}</span>
+              <button
+                onClick={handleCopy}
+                className={`p-1.5 rounded transition-colors flex-shrink-0 ${
+                  copied
+                    ? "text-green-400 bg-green-400/10"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700"
+                }`}
+              >
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-zinc-900/50 px-6 py-4 flex items-center justify-end gap-3 border-t border-zinc-800/50">
+          <button
+            onClick={onClose}
+            disabled={isLoading}
+            className="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-50"
+          >
+            {session.is_shared ? "关闭" : "取消"}
+          </button>
+          <button
+            onClick={handleAction}
+            disabled={isLoading}
+            className={`px-4 py-2 rounded-lg text-sm font-medium text-white shadow-lg transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed ${
+              session.is_shared
+                ? "bg-red-600 hover:bg-red-500 border border-red-500/50"
+                : "bg-blue-600 hover:bg-blue-500 border border-blue-500/50"
+            }`}
+          >
+            {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {session.is_shared ? "停止分享" : "开启分享"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 
 export default function ExplorerLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +123,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [initialLoaded, setInitialLoaded] = useState(false);
+  const [sharingSession, setSharingSession] = useState<ExplorerSession | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const activeSessionId = pathname.startsWith("/explore/")
@@ -127,6 +233,22 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
     setEditingTitle("");
   };
 
+
+  const shareSession = async (sessionId: string) => {
+    await client(`/api/explore/sessions/${sessionId}/share`, { method: "POST" });
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, is_shared: true } : s))
+    );
+  };
+
+
+  const unshareSession = async (sessionId: string) => {
+    await client(`/api/explore/sessions/${sessionId}/unshare`, { method: "POST" });
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, is_shared: false } : s))
+    );
+  };
+
   return (
     <div className="flex h-full w-full bg-zinc-950 overflow-hidden">
       {/* Sidebar */}
@@ -198,6 +320,9 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
               ) : (
                 <>
                   <span className="flex-1 truncate text-sm">{session.title}</span>
+                  {session.is_shared && (
+                    <Share2 className="w-3 h-3 text-blue-400 flex-shrink-0 group-hover:hidden" />
+                  )}
                   <div className="hidden group-hover:flex items-center gap-1">
                     <button
                       onClick={(e) => {
@@ -216,6 +341,15 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
                       className="p-1 hover:bg-zinc-700 rounded"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-zinc-500 hover:text-red-400" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSharingSession(session);
+                      }}
+                      className="p-1 hover:bg-zinc-700 rounded"
+                    >
+                      <Share2 className={`w-3.5 h-3.5 ${session.is_shared ? "text-blue-400" : "text-zinc-500 hover:text-zinc-300"}`} />
                     </button>
                   </div>
                 </>
@@ -241,6 +375,16 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {children}
       </div>
+
+      {/* Share Dialog */}
+      {sharingSession && (
+        <ShareDialog
+          session={sharingSession}
+          onClose={() => setSharingSession(null)}
+          onShare={() => shareSession(sharingSession.id)}
+          onUnshare={() => unshareSession(sharingSession.id)}
+        />
+      )}
     </div>
   );
 }

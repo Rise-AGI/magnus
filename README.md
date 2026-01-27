@@ -426,6 +426,12 @@ server:
 
 ### 1. 配置设置
 
+复制示例配置并编辑：
+
+```bash
+cp configs/magnus_config.yaml.example configs/magnus_config.yaml
+```
+
 编辑 `configs/magnus_config.yaml`:
 
 ```yaml
@@ -434,7 +440,7 @@ client:
     poll_interval: 2                    # SDK 轮询间隔(秒)
 
 server:
-  public_ip: 162.105.151.196            # 公网 IP 地址
+  address: http://162.105.151.196        # 服务器地址（含协议）
   front_end_port: 3011                  # 前端端口
   back_end_port: 8017                   # 后端端口
   root: /home/magnus/magnus-data        # 数据存储根目录

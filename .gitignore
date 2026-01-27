@@ -1,7 +1,8 @@
 # .gitignore
 
 # Global Configs
-configs/
+configs/*
+!configs/*.example
 
 
 # Front End: Next.js

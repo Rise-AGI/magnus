@@ -2,7 +2,7 @@
 import secrets
 import enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Integer, String, DateTime, Text, ForeignKey, Enum as SQLEnum, Boolean
+from sqlalchemy import Integer, String, DateTime, Text, ForeignKey, Enum as SQLEnum, Boolean, text
 from datetime import datetime
 from .database import Base
 
@@ -162,6 +162,7 @@ class ExplorerSession(Base):
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     user: Mapped["User"] = relationship("User")
     title: Mapped[str] = mapped_column(String, default="New Session")
+    is_shared: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     messages: Mapped[list["ExplorerMessage"]] = relationship(

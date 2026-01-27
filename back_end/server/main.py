@@ -42,6 +42,21 @@ models.Base.metadata.create_all(
 )
 
 
+def run_migrations() -> None:
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    columns = [col["name"] for col in inspector.get_columns("explorer_sessions")]
+    if "is_shared" not in columns:
+        logger.info("🔧 Adding is_shared column to explorer_sessions table...")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE explorer_sessions ADD COLUMN is_shared BOOLEAN DEFAULT 0"))
+            conn.commit()
+        logger.info("✅ Migration completed.")
+
+
+run_migrations()
+
+
 async def run_scheduler_loop(
 )-> None:
     

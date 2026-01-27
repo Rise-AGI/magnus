@@ -268,11 +268,14 @@ async def get_file(
 
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
-        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    is_owner = session.user_id == current_user.id
+    if not is_owner and not session.is_shared:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     file_path = Path(sessions_workspace) / session_id / "files" / file_name
     if not file_path.exists():
@@ -320,12 +323,55 @@ def get_session(
 ) -> models.ExplorerSession:
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    is_owner = session.user_id == current_user.id
+    if not is_owner and not session.is_shared:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return session
+
+
+@router.post("/explore/sessions/{session_id}/share", response_model=ExplorerSessionResponse)
+def share_session(
+    session_id: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> models.ExplorerSession:
+    session = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.id == session_id,
         models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    session.is_shared = True
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.post("/explore/sessions/{session_id}/unshare", response_model=ExplorerSessionResponse)
+def unshare_session(
+    session_id: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> models.ExplorerSession:
+    session = db.query(models.ExplorerSession).filter(
+        models.ExplorerSession.id == session_id,
+        models.ExplorerSession.user_id == current_user.id,
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session.is_shared = False
+    db.commit()
+    db.refresh(session)
     return session
 
 

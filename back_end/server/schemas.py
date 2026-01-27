@@ -241,6 +241,7 @@ class ExplorerSessionResponse(BaseModel):
     id: str
     user_id: str
     title: str
+    is_shared: bool = False
     created_at: datetime
     updated_at: datetime
     class Config: from_attributes = True
