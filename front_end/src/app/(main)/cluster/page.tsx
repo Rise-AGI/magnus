@@ -6,6 +6,7 @@ import { Activity, Server, Clock, Cpu } from "lucide-react";
 import { client } from "@/lib/api";
 import { Job } from "@/types/job";
 import { POLL_INTERVAL } from "@/lib/config";
+import { useLanguage } from "@/context/language-context";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useJobOperations } from "@/hooks/use-job-operations";
@@ -27,6 +28,7 @@ interface ClusterStats {
 }
 
 export default function ClusterPage() {
+  const { t } = useLanguage();
   const [stats, setStats] = useState<ClusterStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -74,7 +76,7 @@ export default function ClusterPage() {
   // 当 loading 且没有任何数据时显示 Loading 状态
   // (如果已经有 stats 数据但在做后台刷新，则保留显示旧数据)
   if (loading && !stats) {
-    return <div className="p-8 text-zinc-500">Loading cluster status...</div>;
+    return <div className="p-8 text-zinc-500">{t("cluster.loadingStatus")}</div>;
   }
 
   // 安全检查，防止 stats 为空时渲染
@@ -88,8 +90,8 @@ export default function ClusterPage() {
       `}</style>
       
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">Cluster Status</h1>
-        <p className="text-zinc-500 text-sm mt-1">Real-time resource monitoring and queue status.</p>
+        <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">Cluster</h1>
+        <p className="text-zinc-500 text-sm mt-1">{t("cluster.subtitle")}</p>
       </div>
 
       {/* Resource Cards */}
@@ -97,38 +99,38 @@ export default function ClusterPage() {
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Cpu className="w-24 h-24 text-emerald-500" /></div>
           <div className="relative z-10">
-            <div className="flex items-center gap-2 text-emerald-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">Available GPUs</span></div>
+            <div className="flex items-center gap-2 text-emerald-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableGpus")}</span></div>
             <div className="flex items-baseline gap-2"><span className="text-4xl font-bold text-white">{stats.resources.free}</span><span className="text-zinc-500 text-sm">/ {stats.resources.total}</span></div>
             <div className="mt-3 flex items-center gap-2 text-xs text-zinc-400 font-mono bg-zinc-800/50 w-fit px-2 py-1 rounded"><Server className="w-3 h-3" />{stats.resources.node} · {stats.resources.gpu_model}</div>
           </div>
         </div>
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-blue-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">Active Jobs</span></div>
+          <div className="flex items-center gap-2 text-blue-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.activeJobs")}</span></div>
           {/* 这里显示 Total Running 而不是当前页的长度 */}
           <div className="text-4xl font-bold text-white">{stats.total_running}</div>
-          <p className="text-zinc-500 text-xs mt-2">Currently executing on cluster</p>
+          <p className="text-zinc-500 text-xs mt-2">{t("cluster.activeJobsDesc")}</p>
         </div>
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-amber-400 mb-2"><Clock className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">Queue Depth</span></div>
+          <div className="flex items-center gap-2 text-amber-400 mb-2"><Clock className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.queueDepth")}</span></div>
           {/* 这里显示 Total Pending */}
           <div className="text-4xl font-bold text-white">{stats.total_pending}</div>
-          <p className="text-zinc-500 text-xs mt-2">Jobs waiting for resources</p>
+          <p className="text-zinc-500 text-xs mt-2">{t("cluster.queueDepthDesc")}</p>
         </div>
       </div>
 
       <div className="flex flex-col gap-10">
-        
+
         {/* === Running Jobs Section === */}
         <div className="flex flex-col gap-4">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>Running Jobs</h2>
-          
+          <h2 className="text-lg font-bold text-white flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>{t("cluster.runningJobs")}</h2>
+
           <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
-            <JobTable 
+            <JobTable
               jobs={stats.running_jobs}
               loading={false}
               onClone={handleCloneJob}
               onTerminate={onClickTerminate}
-              emptyMessage="No running jobs."
+              emptyMessage={t("cluster.noRunningJobs")}
               className="border-none min-h-[175px]"
               fromSource="cluster"
             />
@@ -154,15 +156,15 @@ export default function ClusterPage() {
 
         {/* === Pending Jobs Section === */}
         <div className="flex flex-col gap-4">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-amber-500"></span>Queued Jobs</h2>
-          
+          <h2 className="text-lg font-bold text-white flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-amber-500"></span>{t("cluster.queuedJobs")}</h2>
+
           <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
-            <JobTable 
+            <JobTable
               jobs={stats.pending_jobs}
               loading={false}
               onClone={handleCloneJob}
               onTerminate={onClickTerminate}
-              emptyMessage="Queue is empty."
+              emptyMessage={t("cluster.queueEmpty")}
               className="border-none min-h-[175px]"
               fromSource="cluster"
             />

@@ -6,6 +6,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
 import { JobFormHelp } from "@/components/ui/help-content";
+import { useLanguage } from "@/context/language-context";
 
 interface JobDrawerProps {
   isOpen: boolean;
@@ -13,21 +14,22 @@ interface JobDrawerProps {
   onSuccess: () => void;
   mode: "create" | "clone";
   initialData: JobFormData | null;
-  formKey?: string; 
+  formKey?: string;
 }
 
-export function JobDrawer({ 
-  isOpen, 
-  onClose, 
-  onSuccess, 
-  mode, 
-  initialData, 
-  formKey 
+export function JobDrawer({
+  isOpen,
+  onClose,
+  onSuccess,
+  mode,
+  initialData,
+  formKey
 }: JobDrawerProps) {
 
+  const { t } = useLanguage();
   const formRef = useRef<any>(null);
-  
-  const title = mode === 'create' ? "Submit New Job" : "Clone Job";
+
+  const title = mode === 'create' ? t("jobs.submitNewJob") : t("jobs.cloneJob");
   const icon = mode === 'create' ? <Rocket className="w-5 h-5 text-blue-500"/> : <RefreshCw className="w-5 h-5 text-purple-500"/>;
   const desc = undefined;
 
@@ -41,7 +43,7 @@ export function JobDrawer({
       width="w-[650px]"
       actions={
         <>
-          <HelpButton title="任务提交帮助">
+          <HelpButton title={t("jobs.submitHelp")}>
             <JobFormHelp />
           </HelpButton>
           <ConfigClipboard
@@ -52,9 +54,9 @@ export function JobDrawer({
         </>
       }
     >
-      <JobForm 
+      <JobForm
         ref={formRef}
-        key={formKey || mode} 
+        key={formKey || mode}
         mode={mode}
         initialData={initialData}
         onCancel={onClose}

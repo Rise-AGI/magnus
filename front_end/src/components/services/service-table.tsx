@@ -9,6 +9,7 @@ import { UserAvatar } from "@/components/ui/user-avatar";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { formatBeijingTime } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 
 interface ServiceTableProps {
   services: Service[];
@@ -26,17 +27,18 @@ export function ServiceTable({
   onClone,
   onToggle,
   onDelete,
-  emptyMessage = "No services found.",
+  emptyMessage,
   className = "",
 }: ServiceTableProps) {
   const { user: currentUser } = useAuth();
+  const { t } = useLanguage();
   const router = useRouter();
 
   if (loading) {
     return (
       <div className={`border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 gap-3 min-h-[400px] ${className}`}>
         <Loader2 className="w-8 h-8 animate-spin text-teal-500" />
-        <p className="text-sm font-medium">Fetching services...</p>
+        <p className="text-sm font-medium">{t("services.fetching")}</p>
       </div>
     );
   }
@@ -45,7 +47,7 @@ export function ServiceTable({
     return (
       <div className={`border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 min-h-[400px] ${className}`}>
         <Box className="w-10 h-10 opacity-20 mb-3" />
-        <p className="text-base font-medium text-zinc-400">{emptyMessage}</p>
+        <p className="text-base font-medium text-zinc-400">{emptyMessage || t("services.noFound")}</p>
       </div>
     );
   }
@@ -56,10 +58,10 @@ export function ServiceTable({
         <table className="w-full text-left text-sm whitespace-nowrap table-fixed">
           <thead className="bg-zinc-900/90 text-zinc-500 border-b border-zinc-800 backdrop-blur-md">
             <tr>
-              <th className="px-6 py-4 font-medium w-[25%]">Service / Service ID</th>
-              <th className="px-6 py-4 font-medium w-[45%]">Description</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">Job Status</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">Manager / Updated at</th>
+              <th className="px-6 py-4 font-medium w-[25%]">{t("services.table.service")}</th>
+              <th className="px-6 py-4 font-medium w-[45%]">{t("services.table.description")}</th>
+              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("services.table.jobStatus")}</th>
+              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("services.table.manager")}</th>
               <th className="px-6 py-4 font-medium text-right w-[15%]"></th>
             </tr>
           </thead>
@@ -81,7 +83,7 @@ export function ServiceTable({
                 // Manual Inactive State
                 statusNode = (
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-500 border border-zinc-700">
-                    Inactive
+                    {t("services.inactive")}
                   </span>
                 );
               } else {
@@ -104,7 +106,7 @@ export function ServiceTable({
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
                       </span>
-                      Idle
+                      {t("services.idle")}
                     </span>
                   );
                 }
@@ -150,7 +152,7 @@ export function ServiceTable({
                   {/* Column 2: Description */}
                   <td className="px-6 py-4 align-top whitespace-normal">
                     <p className="text-zinc-400 text-sm leading-relaxed break-all">
-                      {svc.description || <span className="text-zinc-600 italic">No description provided.</span>}
+                      {svc.description || <span className="text-zinc-600 italic">{t("services.noDescription")}</span>}
                     </p>
                   </td>
 
@@ -185,7 +187,7 @@ export function ServiceTable({
                           onClone(svc);
                         }}
                         className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                        title={isOwner ? "Edit Service" : "Clone Service"}
+                        title={isOwner ? t("services.editService") : t("services.cloneService")}
                       >
                         <RefreshCw className="w-4 h-4" />
                       </button>
@@ -213,7 +215,7 @@ export function ServiceTable({
                             onDelete(svc);
                           }}
                           className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
-                          title="Delete"
+                          title={t("common.delete")}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>

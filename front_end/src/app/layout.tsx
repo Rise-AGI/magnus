@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/auth-context";
+import { LanguageProvider } from "@/context/language-context";
 import { CLUSTER_CONFIG } from "@/lib/config";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -21,7 +22,9 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={inter.className}>
         <AuthProvider>
-          {children}
+          <LanguageProvider>
+            {children}
+          </LanguageProvider>
         </AuthProvider>
       </body>
     </html>

@@ -4,12 +4,14 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { useAuth } from "@/context/auth-context";
+import { useLanguage } from "@/context/language-context";
 import { LoginRequired } from "@/components/auth/login-required";
 import { Loader2 } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  const { t } = useLanguage();
   const pathname = usePathname();
   const isExplorePage = pathname?.startsWith("/explore");
 
@@ -31,7 +33,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           {isLoading ? (
             <div className="h-full flex items-center justify-center text-zinc-500 gap-2">
               <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
-              <span className="text-sm font-medium">Verifying access...</span>
+              <span className="text-sm font-medium">{t("auth.verifyingAccess")}</span>
             </div>
           ) : !user ? (
             <LoginRequired />

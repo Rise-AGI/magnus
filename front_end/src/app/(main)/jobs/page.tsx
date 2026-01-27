@@ -6,6 +6,7 @@ import { Plus, Search } from "lucide-react";
 import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
 import { Job, User } from "@/types/job";
+import { useLanguage } from "@/context/language-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { JobDrawer } from "@/components/jobs/job-drawer";
@@ -14,6 +15,7 @@ import { useJobOperations } from "@/hooks/use-job-operations";
 import { JobTable } from "@/components/jobs/job-table";
 
 export default function JobsPage() {
+  const { t } = useLanguage();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -116,15 +118,15 @@ export default function JobsPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            Job Management
+            Jobs
           </h1>
-          <p className="text-zinc-500 text-sm mt-1">Monitor and schedule your training workloads.</p>
+          <p className="text-zinc-500 text-sm mt-1">{t("jobs.subtitle")}</p>
         </div>
-        <button 
-          onClick={handleNewJob} 
+        <button
+          onClick={handleNewJob}
           className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50"
         >
-          <Plus className="w-4 h-4" /> New Job
+          <Plus className="w-4 h-4" /> {t("jobs.newJob")}
         </button>
       </div>
 
@@ -132,22 +134,22 @@ export default function JobsPage() {
       <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-1.5 mb-6 flex items-center gap-2 backdrop-blur-sm relative z-20">
         <div className="relative flex-1 group">
            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
-           <input 
-             type="text" 
+           <input
+             type="text"
              value={searchQuery}
              onChange={(e) => setSearchQuery(e.target.value)}
-             placeholder="Search by Task Name or ID..." 
+             placeholder={t("jobs.searchPlaceholder")}
              className="w-full bg-transparent border-none py-2.5 pl-9 pr-4 text-sm text-zinc-200 focus:outline-none focus:ring-0 placeholder-zinc-600"
            />
         </div>
         <div className="h-6 w-px bg-zinc-800"></div>
-        <div className="w-56"> 
+        <div className="w-56">
           <SearchableSelect
              value={selectedUserId}
              onChange={setSelectedUserId}
              options={userFilterOptions}
-             placeholder="Filter by User"
-             className="mb-0 border-none bg-transparent" 
+             placeholder={t("jobs.filterByUser")}
+             className="mb-0 border-none bg-transparent"
           />
         </div>
       </div>

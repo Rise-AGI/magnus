@@ -10,6 +10,7 @@ import ServiceForm, { ServiceFormData } from "./service-form";
 import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
 import { ServiceFormHelp } from "@/components/ui/help-content";
+import { useLanguage } from "@/context/language-context";
 
 
 interface ServiceDrawerProps {
@@ -27,10 +28,11 @@ export function ServiceDrawer({
   onSuccess,
 }: ServiceDrawerProps): JSX.Element {
 
+  const { t } = useLanguage();
   const formRef = useRef<any>(null);
 
   const isEdit = !!initialData;
-  const title = isEdit ? "Clone / Update Service" : "Create Service";
+  const title = isEdit ? t("serviceForm.cloneUpdate") : t("serviceForm.create");
 
   return (
     <Drawer
@@ -41,7 +43,7 @@ export function ServiceDrawer({
       width="w-[650px]"
       actions={
         <>
-          <HelpButton title="弹性服务帮助">
+          <HelpButton title={t("serviceForm.help")}>
             <ServiceFormHelp />
           </HelpButton>
           <ConfigClipboard

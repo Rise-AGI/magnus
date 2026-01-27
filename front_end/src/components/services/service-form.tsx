@@ -7,12 +7,13 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { client } from "@/lib/api";
 import { Service } from "@/types/service";
-import { 
-  PHYSICAL_GPUS, 
-  getGpuLimit, 
-  MAX_CPU_COUNT, 
-  DEFAULT_MEMORY, 
-  DEFAULT_RUNNER 
+import { useLanguage } from "@/context/language-context";
+import {
+  PHYSICAL_GPUS,
+  getGpuLimit,
+  MAX_CPU_COUNT,
+  DEFAULT_MEMORY,
+  DEFAULT_RUNNER
 } from "@/lib/config";
 
 const GPU_TYPES = [
@@ -64,6 +65,7 @@ interface ServiceFormProps {
 }
 
 const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onSuccess }: ServiceFormProps, ref) {
+  const { t } = useLanguage();
   const data = initialData as ServiceFormData; 
 
   // === Service Identity ===
@@ -324,43 +326,43 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       {/* 1. Service Identity */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Service Identity
+            {t("serviceForm.identity")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        
+
         <div className="mb-4" id="field-name">
             <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'name' ? 'text-red-500' : 'text-zinc-500'}`}>
-                SERVICE NAME <span className="text-red-500">*</span>
+                {t("serviceForm.name")} <span className="text-red-500">*</span>
             </label>
-            <input 
+            <input
                 className={inputClass(errorField === 'name')}
-                value={name} 
-                placeholder="e.g. My Interactive Environment"
-                onChange={e => handleServiceNameChange(e.target.value)} 
+                value={name}
+                placeholder={t("serviceForm.namePlaceholder")}
+                onChange={e => handleServiceNameChange(e.target.value)}
             />
         </div>
 
         <div className="mb-4" id="field-serviceId">
             <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'serviceId' ? 'text-red-500' : 'text-zinc-500'}`}>
-                SERVICE ID <span className="text-red-500">*</span>
+                {t("serviceForm.id")} <span className="text-red-500">*</span>
             </label>
-            <input 
+            <input
                 className={`${inputClass(errorField === 'serviceId')} font-mono`}
-                value={serviceId} 
-                placeholder="e.g. jupyter-lab-01"
-                onChange={e => { setServiceId(e.target.value); clearError('serviceId'); }} 
+                value={serviceId}
+                placeholder={t("serviceForm.idPlaceholder")}
+                onChange={e => { setServiceId(e.target.value); clearError('serviceId'); }}
             />
-            <p className="text-[10px] text-zinc-600 mt-1">Unique identifier (URL safe).</p>
+            <p className="text-[10px] text-zinc-600 mt-1">{t("serviceForm.idHint")}</p>
         </div>
 
         <div className="mb-4" id="field-description">
           <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'description' ? 'text-red-500' : 'text-zinc-500'}`}>
-            DESCRIPTION <span className="text-red-500">*</span>
+            {t("serviceForm.description")} <span className="text-red-500">*</span>
           </label>
           <input
             className={inputClass(errorField === 'description')}
             value={description || ""}
-            placeholder="Service description (Single line)"
+            placeholder={t("serviceForm.descPlaceholder")}
             maxLength={200}
             onChange={e => { setDescription(e.target.value); clearError('description'); }}
           />
@@ -371,40 +373,40 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       {/* 2. Lifecycle & Traffic */}
       <div>
          <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Lifecycle & Traffic
+            {t("serviceForm.lifecycle")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
          </h3>
-         
+
          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-                 <NumberStepper 
-                   label="Idle Timeout (Mins)"
+                 <NumberStepper
+                   label={t("serviceForm.idleTimeout")}
                    value={idleTimeout}
                    onChange={setIdleTimeout}
                    min={0}
-                   max={10080} // A Week
+                   max={10080}
                  />
-                 <p className="text-[11px] text-zinc-500 mt-2">Auto-stop. 0 to disable.</p>
+                 <p className="text-[11px] text-zinc-500 mt-2">{t("serviceForm.idleTimeoutHint")}</p>
             </div>
             <div>
-                <NumberStepper 
-                  label="Req Timeout (Secs)"
+                <NumberStepper
+                  label={t("serviceForm.reqTimeout")}
                   value={requestTimeout}
                   onChange={setRequestTimeout}
                   min={10}
-                  max={3600} // An Hour
+                  max={3600}
                 />
-                 <p className="text-[11px] text-zinc-500 mt-2">Total Handling Timeout.</p>
+                 <p className="text-[11px] text-zinc-500 mt-2">{t("serviceForm.reqTimeoutHint")}</p>
             </div>
             <div>
-                <NumberStepper 
-                  label="Max Concurrency"
+                <NumberStepper
+                  label={t("serviceForm.maxConcurrency")}
                   value={maxConcurrency}
                   onChange={setMaxConcurrency}
                   min={1}
                   max={1000}
                 />
-                <p className="text-[11px] text-zinc-500 mt-2">Max In-flight Requests.</p>
+                <p className="text-[11px] text-zinc-500 mt-2">{t("serviceForm.maxConcurrencyHint")}</p>
             </div>
          </div>
       </div>
@@ -413,33 +415,33 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
             <Layers className="w-4 h-4 text-zinc-500" />
-            Underlying Job Config
+            {t("serviceForm.underlyingJob")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        
+
         <div className="mb-4" id="field-jobTaskName">
             <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'jobTaskName' ? 'text-red-500' : 'text-zinc-500'}`}>
-                Job Task Name
+                {t("serviceForm.jobTaskName")}
             </label>
-            <input 
+            <input
                 className={inputClass(errorField === 'jobTaskName')}
                 value={jobTaskName}
                 placeholder={`Default: [Service] ${serviceId || '...'}`}
-                onChange={e => { setJobTaskName(e.target.value); clearError('jobTaskName'); }} 
+                onChange={e => { setJobTaskName(e.target.value); clearError('jobTaskName'); }}
             />
         </div>
 
         <div className="mb-4">
             <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
-                Job Description <span className="text-zinc-600 normal-case ml-1">(Optional)</span>
+                {t("serviceForm.jobDescription")} <span className="text-zinc-600 normal-case ml-1">({t("common.optional")})</span>
             </label>
-            <textarea 
+            <textarea
                 ref={jobDescriptionRef}
                 className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500/50 focus:shadow-[0_0_15px_rgba(59,130,246,0.1)] outline-none transition-all placeholder-zinc-700 resize-none overflow-hidden min-h-[42px]"
-                value={jobDescription} 
-                placeholder="Worker process description..."
+                value={jobDescription}
+                placeholder={t("serviceForm.jobDescPlaceholder")}
                 rows={1}
-                onChange={e => setJobDescription(e.target.value)} 
+                onChange={e => setJobDescription(e.target.value)}
             />
         </div>
       </div>
@@ -447,51 +449,51 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       {/* 4. Code Source */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Code Source
+            {t("jobForm.codeSource")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        
+
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div id="field-namespace">
-             <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'namespace' ? 'text-red-500' : 'text-zinc-500'}`}>Namespace</label>
+             <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'namespace' ? 'text-red-500' : 'text-zinc-500'}`}>{t("jobForm.namespace")}</label>
              <input className={inputClass(errorField === 'namespace')} value={namespace} onChange={e => { setNamespace(e.target.value); clearError('namespace'); }} />
           </div>
           <div id="field-repo">
-             <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'repo' ? 'text-red-500' : 'text-zinc-500'}`}>Repo Name</label>
+             <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'repo' ? 'text-red-500' : 'text-zinc-500'}`}>{t("jobForm.repoName")}</label>
              <input className={inputClass(errorField === 'repo')} value={repoName} onChange={e => { setRepoName(e.target.value); clearError('repo'); }} />
           </div>
         </div>
 
         <button onClick={fetchBranches} disabled={loading} className="w-full bg-zinc-900 hover:bg-zinc-800 text-zinc-300 py-2.5 rounded-lg text-sm font-medium transition-all active:scale-[0.98] disabled:opacity-50 mb-6 border border-zinc-800 flex justify-center items-center gap-2">
-            {loading ? <><span className="w-4 h-4 border-2 border-zinc-500 border-t-white rounded-full animate-spin"></span>Scanning...</> : "Scan Repository"}
+            {loading ? <><span className="w-4 h-4 border-2 border-zinc-500 border-t-white rounded-full animate-spin"></span>{t("jobForm.scanning")}</> : t("jobForm.scanRepo")}
         </button>
 
         <div className="grid grid-cols-1 gap-0">
-          <SearchableSelect 
-            label="Branch" 
-            disabled={!hasScanned} 
-            value={selectedBranch} 
-            onChange={(v) => { setSelectedBranch(v); clearError('branch'); }} 
-            options={branches.map(b => ({ label: b.name, value: b.name }))} 
+          <SearchableSelect
+            label={t("jobForm.branch")}
+            disabled={!hasScanned}
+            value={selectedBranch}
+            onChange={(v) => { setSelectedBranch(v); clearError('branch'); }}
+            options={branches.map(b => ({ label: b.name, value: b.name }))}
             hasError={errorField === 'branch'}
             placeholder="Select branch..."
             className="mb-4"
           />
-          <SearchableSelect 
-            label="Commit" 
-            disabled={!hasScanned} 
-            value={selectedCommit} 
-            onChange={(v) => { setSelectedCommit(v); clearError('commit'); }} 
+          <SearchableSelect
+            label={t("jobForm.commit")}
+            disabled={!hasScanned}
+            value={selectedCommit}
+            onChange={(v) => { setSelectedCommit(v); clearError('commit'); }}
             options={[
-              { 
-                label: "Latest Commit (HEAD)", 
-                value: "HEAD", 
-                meta: "Use latest code" 
+              {
+                label: t("jobForm.latestCommit"),
+                value: "HEAD",
+                meta: t("jobForm.useLatestCode")
               },
-              ...commits.map(c => ({ 
-                label: c.message, 
-                value: c.sha, 
-                meta: `${c.sha.substring(0, 7)} • ${c.author}` 
+              ...commits.map(c => ({
+                label: c.message,
+                value: c.sha,
+                meta: `${c.sha.substring(0, 7)} • ${c.author}`
               }))
             ]}
             hasError={errorField === 'commit'}
@@ -504,72 +506,72 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       {/* 5. Resources */}
       <div>
          <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Compute Resources
+            {t("jobForm.computeResources")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
          </h3>
 
          <div className="flex flex-col gap-4">
-            <SearchableSelect 
-                label="Job Priority" 
-                value={jobType} 
-                onChange={setJobType} 
-                options={JOB_TYPES} 
+            <SearchableSelect
+                label={t("jobForm.priority")}
+                value={jobType}
+                onChange={setJobType}
+                options={JOB_TYPES}
                 placeholder="Select Priority..."
             />
-            <SearchableSelect 
-                label="GPU Accelerator" 
-                value={gpuType} 
-                onChange={handleGpuTypeChange} 
-                options={GPU_TYPES} 
+            <SearchableSelect
+                label={t("jobForm.gpuAccelerator")}
+                value={gpuType}
+                onChange={handleGpuTypeChange}
+                options={GPU_TYPES}
                 placeholder="Select GPU model..."
             />
-            <NumberStepper 
-                label="GPU Count" 
-                value={gpuCount} 
-                onChange={setGpuCount} 
+            <NumberStepper
+                label={t("jobForm.gpuCount")}
+                value={gpuCount}
+                onChange={setGpuCount}
                 min={0}
                 max={getGpuLimit(gpuType)}
-                disabled={gpuType === 'cpu'} 
+                disabled={gpuType === 'cpu'}
             />
          </div>
-         
+
          {/* Advanced (Collapsed) */}
          <div className="pt-2">
           <button type="button" onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors select-none group">
             <div className="text-zinc-600 group-hover:text-zinc-300 transition-colors">
                 {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             </div>
-            <span>Advanced</span>
+            <span>{t("common.advanced")}</span>
           </button>
-          
+
           {showAdvanced && (
             <div className="mt-3 pl-1 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in slide-in-from-top-1 duration-200">
                 <div>
-                    <NumberStepper 
-                      label="CPU Cores" 
-                      value={cpuCount} 
-                      onChange={setCpuCount} 
+                    <NumberStepper
+                      label={t("jobForm.cpuCores")}
+                      value={cpuCount}
+                      onChange={setCpuCount}
                       min={0}
-                      max={MAX_CPU_COUNT} 
+                      max={MAX_CPU_COUNT}
                     />
-                    <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">Set to <span className="text-zinc-400 font-mono">0</span> to use default.</p>
+                    <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">{t("jobForm.cpuCoresHint")}</p>
                 </div>
                 <div>
-                      <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">Memory</label>
-                      <input 
-                        className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700" 
-                        value={memoryDemand} 
+                      <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("jobForm.memory")}</label>
+                      <input
+                        className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+                        value={memoryDemand}
                         onChange={e => setMemoryDemand(e.target.value)}
-                        placeholder={`Default: ${DEFAULT_MEMORY}`}
+                        placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
                       />
                 </div>
                 <div className="sm:col-span-2">
-                      <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">Run As User</label>
-                      <input 
-                        className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm font-mono focus:border-blue-500 outline-none transition-all placeholder-zinc-700" 
-                        value={runner} 
+                      <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("jobForm.runAsUser")}</label>
+                      <input
+                        className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm font-mono focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+                        value={runner}
                         onChange={e => setRunner(e.target.value)}
-                        placeholder={`Default: ${DEFAULT_RUNNER}`}
+                        placeholder={t("jobForm.runAsUserDefault", { value: DEFAULT_RUNNER })}
                       />
                 </div>
             </div>
@@ -580,10 +582,10 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       {/* 6. Execution */}
       <div id="field-command">
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
-            Execution
+            {t("jobForm.execution")}
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
-        <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'command' ? 'text-red-500' : 'text-zinc-500'}`}>Entry Command</label>
+        <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'command' ? 'text-red-500' : 'text-zinc-500'}`}>{t("jobForm.entryCommand")}</label>
         <div className="relative group">
             <span className="absolute left-3 top-3 text-zinc-600 select-none font-mono text-sm">$</span>
             <textarea 
@@ -603,21 +605,21 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
         {errorMessage ? (
              <span className="text-red-500 text-xs font-bold animate-pulse text-center sm:text-left">{errorMessage}</span>
         ) : (
-            <span className="text-zinc-500 text-xs text-center sm:text-left hidden sm:block">Persistent service driver.</span>
+            <span className="text-zinc-500 text-xs text-center sm:text-left hidden sm:block">{t("serviceForm.persistentDriver")}</span>
         )}
         <div className="flex gap-3 w-full sm:w-auto">
-            <button 
-                onClick={onCancel} 
+            <button
+                onClick={onCancel}
                 className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
             >
-                Cancel
+                {t("common.cancel")}
             </button>
-            <button 
+            <button
                 id={isOriginalId ? "btn-update" : "btn-create"}
-                onClick={handleSave} 
+                onClick={handleSave}
                 className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
             >
-                {isOriginalId ? "📡 Update Service" : (initialData ? "📡 Clone Service" : "📡 Create Service")}
+                {isOriginalId ? t("serviceForm.updateService") : (initialData ? t("serviceForm.cloneServiceBtn") : t("serviceForm.createService"))}
             </button>
         </div>
       </div>

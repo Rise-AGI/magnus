@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { ArrowUp, Loader2, X, FileText, Image as ImageIcon } from "lucide-react";
 import { client } from "@/lib/api";
 import { API_BASE } from "@/lib/config";
+import { useLanguage } from "@/context/language-context";
 import type { ExplorerSession, Attachment } from "@/types/explore";
 
 
 export default function ExplorePage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -154,8 +156,8 @@ export default function ExplorePage() {
         {/* Title */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold mb-2">
-            <span className="text-zinc-100">人机协作，</span>
-            <span className="text-blue-500">赋能科研</span>
+            <span className="text-zinc-100">{t("explorer.tagline1")}</span>
+            <span className="text-blue-500">{t("explorer.tagline2")}</span>
           </h1>
           <p className="text-zinc-500">Magnus · Explorer</p>
         </div>
@@ -193,7 +195,7 @@ export default function ExplorePage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={isUploading ? "上传中..." : "输入消息，可上传图片和文件"}
+              placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
               rows={1}
               className="custom-scrollbar flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
               style={{ minHeight: "48px", maxHeight: "192px" }}
@@ -212,7 +214,7 @@ export default function ExplorePage() {
             </button>
           </div>
           <p className="text-xs text-zinc-600 mt-2 text-center">
-            您在 Magnus 平台上的活动记录会被收集并整理为科学语料，请注意隐私保护
+            {t("explorer.privacyNotice")}
           </p>
         </div>
       </div>

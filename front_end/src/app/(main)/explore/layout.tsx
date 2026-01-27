@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Trash2, MessageSquare, Pencil, Check, X, Loader2, Plus, Share2, Copy } from "lucide-react";
 import { client } from "@/lib/api";
+import { useLanguage } from "@/context/language-context";
 import type { ExplorerSession, PagedExplorerSessionResponse } from "@/types/explore";
 
 const PAGE_SIZE = 20;
@@ -20,6 +21,7 @@ interface ShareDialogProps {
 
 
 function ShareDialog({ session, onClose, onShare, onUnshare }: ShareDialogProps) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const shareUrl = `${SERVER_ADDRESS}:${FRONT_END_PORT}/explore/${session.id}`;
@@ -62,14 +64,14 @@ function ShareDialog({ session, onClose, onShare, onUnshare }: ShareDialogProps)
       <div className="relative bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
         <div className="p-6">
           <h3 className="text-base font-semibold text-zinc-100 mb-3">
-            {session.is_shared ? "关闭分享" : "分享对话"}
+            {session.is_shared ? t("explorer.closeShare") : t("explorer.shareSession")}
           </h3>
 
           <div className="space-y-3">
             <p className="text-sm text-zinc-400">
               {session.is_shared
-                ? "组织内的成员可通过链接查看该对话。"
-                : "开启后，组织内的成员可通过以下链接查看该对话。"}
+                ? t("explorer.sharedDesc")
+                : t("explorer.shareDesc")}
             </p>
             <div className="flex items-center gap-2 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2">
               <span className="flex-1 text-sm text-zinc-300 truncate">{shareUrl}</span>
@@ -93,7 +95,7 @@ function ShareDialog({ session, onClose, onShare, onUnshare }: ShareDialogProps)
             disabled={isLoading}
             className="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-50"
           >
-            {session.is_shared ? "关闭" : "取消"}
+            {session.is_shared ? t("common.close") : t("common.cancel")}
           </button>
           <button
             onClick={handleAction}
@@ -105,7 +107,7 @@ function ShareDialog({ session, onClose, onShare, onUnshare }: ShareDialogProps)
             }`}
           >
             {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-            {session.is_shared ? "停止分享" : "开启分享"}
+            {session.is_shared ? t("explorer.disableShare") : t("explorer.enableShare")}
           </button>
         </div>
       </div>
@@ -117,6 +119,7 @@ function ShareDialog({ session, onClose, onShare, onUnshare }: ShareDialogProps)
 export default function ExplorerLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { t } = useLanguage();
   const [sessions, setSessions] = useState<ExplorerSession[]>([]);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -254,7 +257,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
       {/* Sidebar */}
       <div className="w-56 flex-shrink-0 border-r border-zinc-800 flex flex-col">
         <div className="px-4 py-3 flex items-center justify-between">
-          <h3 className="text-base font-medium text-zinc-400">Explorer Sessions</h3>
+          <h3 className="text-base font-medium text-zinc-400">{t("explorer.sessions")}</h3>
           <button
             onClick={() => router.push("/explore")}
             className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors"
@@ -359,7 +362,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
 
           {sessions.length === 0 && initialLoaded && (
             <div className="text-center text-zinc-600 text-sm py-8">
-              No sessions yet
+              {t("explorer.noSessions")}
             </div>
           )}
 
