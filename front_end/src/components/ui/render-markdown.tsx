@@ -170,15 +170,17 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
               className="text-zinc-500 hover:text-zinc-300"
             />
           </div>
-          <SyntaxHighlighter
-            {...rest}
-            PreTag="div"
-            language={match[1]}
-            style={vscDarkPlus}
-            customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', background: '#09090b', overflowX: 'auto' }}
-          >
-            {codeString}
-          </SyntaxHighlighter>
+          <div className="custom-scrollbar overflow-x-auto">
+            <SyntaxHighlighter
+              {...rest}
+              PreTag="div"
+              language={match[1]}
+              style={vscDarkPlus}
+              customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', background: '#09090b' }}
+            >
+              {codeString}
+            </SyntaxHighlighter>
+          </div>
         </div>
       ) : (
         <code
