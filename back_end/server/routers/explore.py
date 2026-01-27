@@ -394,6 +394,13 @@ async def chat(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    if data.truncate_before is not None:
+        messages_to_delete = session.messages[data.truncate_before:]
+        for msg in messages_to_delete:
+            db.delete(msg)
+        db.flush()
+        db.expire(session, ["messages"])
+
     user_message = models.ExplorerMessage(
         session_id=session_id,
         role="user",

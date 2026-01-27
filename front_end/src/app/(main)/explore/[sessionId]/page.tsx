@@ -725,7 +725,10 @@ export default function SessionPage() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ content: messageContent }),
+          body: JSON.stringify({
+            content: messageContent,
+            truncate_before: editIndex,
+          }),
           signal: abortControllerRef.current.signal,
         }
       );

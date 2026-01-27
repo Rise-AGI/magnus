@@ -221,6 +221,7 @@ class PagedServiceResponse(BaseModel):
 
 class ExplorerMessageCreate(BaseModel):
     content: str
+    truncate_before: Optional[int] = None
 
 
 class ExplorerMessageResponse(BaseModel):
