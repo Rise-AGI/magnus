@@ -14,26 +14,28 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const isEnchantPage = pathname?.startsWith("/enchant");
 
   return (
-    <div className="min-h-screen bg-[#050505]">
-      {/* 永远显示，包含了登录按钮 */}
-      <Sidebar />
+    // 修改点 1: min-h-screen -> h-screen
+    // 修改点 2: 添加 w-screen overflow-hidden
+    // 这就像给整个页面加了一个不可逾越的"铁框"
+    <div className="h-screen w-screen bg-[#050505] overflow-hidden flex">
+      {/* Sidebar 容器不需要 fixed，在 flex 布局中自然左侧固定 */}
+      <div className="flex-shrink-0 w-64 h-full border-r border-zinc-800 bg-[#050505]">
+         <Sidebar />
+      </div>
 
-      <div className="pl-64">
-        {/* Header 永远显示，提供了基础导航 */}
+      <div className="flex-1 flex flex-col min-w-0 h-full">
         <Header />
 
-        <main className={isEnchantPage ? "h-[calc(100vh-4rem)] overflow-hidden" : "p-8"}>
+        {/* 修改点 3: 确保 main 也是 flex 布局的一部分，且通过 relative 建立层叠上下文 */}
+        <main className={isEnchantPage ? "flex-1 min-h-0 min-w-0 overflow-hidden relative" : "flex-1 p-8 overflow-y-auto"}>
           {isLoading ? (
-            // 状态 A: 加载中
-            <div className="h-[60vh] flex items-center justify-center text-zinc-500 gap-2">
+            <div className="h-full flex items-center justify-center text-zinc-500 gap-2">
               <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
               <span className="text-sm font-medium">Verifying access...</span>
             </div>
           ) : !user ? (
-            // 状态 B: 未登录 -> 显示遮罩组件
             <LoginRequired />
           ) : (
-            // 状态 C: 已登录 -> 显示真实内容
             <div className={isEnchantPage ? "h-full w-full" : "animate-in fade-in duration-500"}>
                {children}
             </div>

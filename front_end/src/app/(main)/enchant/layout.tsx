@@ -1,4 +1,3 @@
-// front_end/src/app/(main)/enchant/layout.tsx
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -128,48 +127,14 @@ export default function EnchantLayout({ children }: { children: React.ReactNode 
     setEditingTitle("");
   };
 
-
-  const createSession = async () => {
-    try {
-      const newSession: EnchantSession = await client("/api/enchant/sessions", {
-        json: { title: "New Session" },
-      });
-      window.dispatchEvent(new Event("enchant-sessions-update"));
-      router.push(`/enchant/${newSession.id}`);
-    } catch (error) {
-      console.error("Failed to create session:", error);
-    }
-  };
-
   return (
     <div className="flex h-full w-full bg-zinc-950 overflow-hidden">
-      <style jsx global>{`
-        .enchant-scroll::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
-        .enchant-scroll::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .enchant-scroll::-webkit-scrollbar-thumb {
-          background: #3f3f46;
-          border-radius: 3px;
-        }
-        .enchant-scroll::-webkit-scrollbar-thumb:hover {
-          background: #52525b;
-        }
-        .enchant-scroll {
-          scrollbar-width: thin;
-          scrollbar-color: #3f3f46 transparent;
-        }
-      `}</style>
-
       {/* Sidebar */}
       <div className="w-56 flex-shrink-0 border-r border-zinc-800 flex flex-col">
         <div className="px-4 py-3 flex items-center justify-between">
           <h3 className="text-base font-medium text-zinc-400">Enchant Sessions</h3>
           <button
-            onClick={createSession}
+            onClick={() => router.push("/enchant")}
             className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors"
           >
             <Plus className="w-4 h-4" />

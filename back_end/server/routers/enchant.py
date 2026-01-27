@@ -6,6 +6,7 @@ import re
 import secrets
 import asyncio
 import threading
+import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Any, AsyncGenerator, cast
 from datetime import datetime
@@ -345,7 +346,6 @@ def delete_session(
     db.delete(session)
     db.commit()
 
-    import shutil
     session_dir = Path(sessions_workspace) / session_id
     if session_dir.exists():
         shutil.rmtree(session_dir)
