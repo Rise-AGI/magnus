@@ -389,7 +389,6 @@ export default function SessionPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isUserNearBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -557,14 +556,9 @@ export default function SessionPage() {
 
 
   useEffect(() => {
-    if (isUserNearBottomRef.current) {
-      // block: "nearest" 防止触发父容器滚动导致布局错位
-      messagesEndRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-        inline: "nearest"
-      });
-    }
+    const container = scrollContainerRef.current;
+    if (!container || !isUserNearBottomRef.current) return;
+    container.scrollTop = container.scrollHeight;
   }, [session?.messages, streamingContent]);
 
 
@@ -1071,8 +1065,6 @@ export default function SessionPage() {
               </div>
             </div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
       </div>
 
