@@ -18,6 +18,7 @@ import RenderMarkdown from "@/components/ui/render-markdown";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { useJobOperations } from "@/hooks/use-job-operations";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { NotFound } from "@/components/ui/not-found";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 
@@ -237,10 +238,12 @@ export default function JobDetailsPage() {
 
   if (!job) {
     return (
-      <div className="flex flex-col items-center justify-center h-[50vh] text-zinc-500 gap-4">
-        <p>{t("jobDetail.notFound")}</p>
-        <button onClick={() => router.back()} className="text-blue-500 hover:underline">{t("jobDetail.goBack")}</button>
-      </div>
+      <NotFound
+        title={t("jobDetail.notFound")}
+        description={t("jobDetail.notFoundDesc", { id: decodeURIComponent(jobId) })}
+        buttonText={t("jobDetail.returnToJobs")}
+        onBack={() => router.push("/jobs")}
+      />
     );
   }
 

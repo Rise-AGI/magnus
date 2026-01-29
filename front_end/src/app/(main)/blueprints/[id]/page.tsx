@@ -5,13 +5,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Terminal, Clock, DraftingCompass, RefreshCw,
-  Trash2, Play, Loader2, FileCode, FileQuestion, Check, Copy
+  Trash2, Play, Loader2, FileCode, Check, Copy
 } from "lucide-react";
 
 import { client } from "@/lib/api";
 import { formatBeijingTime, computeStableHash } from "@/lib/utils";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
+import { NotFound } from "@/components/ui/not-found";
 
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -52,6 +53,7 @@ export default function BlueprintDetailsPage() {
   // Action States
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorData, setEditorData] = useState({ id: "", title: "", description: "", code: "" });
   const [isSavingClone, setIsSavingClone] = useState(false);
@@ -207,7 +209,7 @@ export default function BlueprintDetailsPage() {
       await client(`/api/blueprints/${blueprint.id}`, { method: "DELETE" });
       router.push('/blueprints');
     } catch (e: any) {
-      alert(e.message);
+      setErrorMessage(e.message || t("common.operationFailed"));
       setIsDeleting(false);
     }
   };
@@ -226,23 +228,12 @@ export default function BlueprintDetailsPage() {
 
   if (notFound || !blueprint) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-zinc-400 gap-6">
-        <div className="bg-zinc-900/50 p-8 rounded-2xl border border-zinc-800 text-center max-w-md shadow-2xl backdrop-blur-sm">
-          <div className="w-16 h-16 bg-zinc-800/80 rounded-full flex items-center justify-center mx-auto mb-6 border border-zinc-700/50 shadow-inner">
-            <FileQuestion className="w-8 h-8 text-zinc-500" />
-          </div>
-          <h2 className="text-xl font-bold text-zinc-200 mb-2 tracking-tight">{t("blueprintDetail.notFound")}</h2>
-          <p className="text-zinc-500 text-sm mb-8 leading-relaxed">
-            {t("blueprintDetail.notFoundDesc", { id: decodeURIComponent(blueprintId) })}
-          </p>
-          <button
-            onClick={() => router.push('/blueprints')}
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-all shadow-lg shadow-blue-900/20 active:scale-95 flex items-center justify-center gap-2 mx-auto"
-          >
-            <ArrowLeft className="w-4 h-4" /> {t("blueprintDetail.returnToRegistry")}
-          </button>
-        </div>
-      </div>
+      <NotFound
+        title={t("blueprintDetail.notFound")}
+        description={t("blueprintDetail.notFoundDesc", { id: decodeURIComponent(blueprintId) })}
+        buttonText={t("blueprintDetail.returnToRegistry")}
+        onBack={() => router.push('/blueprints')}
+      />
     );
   }
 
@@ -477,6 +468,16 @@ export default function BlueprintDetailsPage() {
         confirmText={t("blueprintDetail.deleteBlueprint")}
         variant="danger"
         isLoading={isDeleting}
+      />
+
+      <ConfirmationDialog
+        isOpen={!!errorMessage}
+        onClose={() => setErrorMessage(null)}
+        title={t("common.error")}
+        description={errorMessage}
+        confirmText={t("common.ok")}
+        mode="alert"
+        variant="danger"
       />
     </div>
   );

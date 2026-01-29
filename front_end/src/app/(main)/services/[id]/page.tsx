@@ -16,6 +16,7 @@ import { POLL_INTERVAL } from "@/lib/config";
 
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { NotFound } from "@/components/ui/not-found";
 import { ServiceDrawer } from "@/components/services/service-drawer";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import RenderMarkdown from "@/components/ui/render-markdown";
@@ -39,6 +40,7 @@ export default function ServiceDetailsPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState<"delete" | "toggle" | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Copy States
   const [copiedCommand, setCopiedCommand] = useState(false);
@@ -98,7 +100,7 @@ export default function ServiceDetailsPage() {
         fetchService(true);
       }
     } catch (e: any) {
-      alert(`Operation failed: ${e.message}`);
+      setErrorMessage(t("common.operationFailed"));
     } finally {
       setActionLoading(false);
     }
@@ -168,23 +170,12 @@ export default function ServiceDetailsPage() {
   // Not Found State
   if (notFound || !service) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-zinc-400 gap-6">
-        <div className="bg-zinc-900/50 p-8 rounded-2xl border border-zinc-800 text-center max-w-md shadow-2xl backdrop-blur-sm">
-          <div className="w-16 h-16 bg-zinc-800/80 rounded-full flex items-center justify-center mx-auto mb-6 border border-zinc-700/50 shadow-inner">
-            <FileQuestion className="w-8 h-8 text-zinc-500" />
-          </div>
-          <h2 className="text-xl font-bold text-zinc-200 mb-2 tracking-tight">{t("serviceDetail.notFound")}</h2>
-          <p className="text-zinc-500 text-sm mb-8 leading-relaxed">
-            {t("serviceDetail.notFoundDesc", { id: decodeURIComponent(serviceId) })}
-          </p>
-          <button
-            onClick={() => router.push("/services")}
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-all shadow-lg shadow-blue-900/20 active:scale-95 flex items-center justify-center gap-2 mx-auto"
-          >
-            <ArrowLeft className="w-4 h-4" /> {t("serviceDetail.returnToServices")}
-          </button>
-        </div>
-      </div>
+      <NotFound
+        title={t("serviceDetail.notFound")}
+        description={t("serviceDetail.notFoundDesc", { id: decodeURIComponent(serviceId) })}
+        buttonText={t("serviceDetail.returnToServices")}
+        onBack={() => router.push("/services")}
+      />
     );
   }
 
@@ -565,6 +556,16 @@ export default function ServiceDetailsPage() {
         confirmText={dialogConfig.confirmText}
         variant={dialogConfig.variant}
         isLoading={actionLoading}
+      />
+
+      <ConfirmationDialog
+        isOpen={!!errorMessage}
+        onClose={() => setErrorMessage(null)}
+        title={t("common.error")}
+        description={errorMessage}
+        confirmText={t("common.ok")}
+        mode="alert"
+        variant="danger"
       />
     </div>
   );

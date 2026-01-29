@@ -24,6 +24,9 @@ const translations = {
   "common.gotIt": { zh: "知道了", en: "Got it" },
   "common.help": { zh: "帮助", en: "Help" },
   "common.waiting": { zh: "等待中...", en: "Waiting..." },
+  "common.error": { zh: "错误", en: "Error" },
+  "common.ok": { zh: "知道了", en: "OK" },
+  "common.operationFailed": { zh: "操作失败", en: "Operation Failed" },
 
   // ===== Auth =====
   "auth.signInWithFeishu": { zh: "飞书登录", en: "Sign in with Feishu" },
@@ -234,6 +237,12 @@ const translations = {
   "explorer.sharedDesc": { zh: "组织内的成员可通过链接查看该对话。", en: "Organization members can view this session via the link." },
   "explorer.enableShare": { zh: "开启分享", en: "Enable Sharing" },
   "explorer.disableShare": { zh: "停止分享", en: "Disable Sharing" },
+  "explorer.deleteSession": { zh: "删除对话", en: "Delete Session" },
+  "explorer.deleteDesc": { zh: "确定要删除这个对话吗？此操作不可撤销。", en: "Are you sure you want to delete this session? This action cannot be undone." },
+  "explorer.confirmDelete": { zh: "确认删除", en: "Confirm Delete" },
+  "explorer.notFound": { zh: "会话不存在", en: "Session Not Found" },
+  "explorer.notFoundDesc": { zh: "该会话不存在或已被删除。", en: "This session does not exist or has been deleted." },
+  "explorer.returnToExplorer": { zh: "返回 Explorer", en: "Return to Explorer" },
 
   // ===== Pagination =====
   "pagination.showing": { zh: "显示", en: "Showing" },
@@ -270,6 +279,7 @@ const translations = {
   "blueprintRunner.help": { zh: "蓝图运行帮助", en: "Blueprint Runner Help" },
   "blueprintRunner.launching": { zh: "启动中...", en: "Launching..." },
   "blueprintRunner.launch": { zh: "启动", en: "Launch" },
+  "blueprintRunner.loadFailed": { zh: "加载 Blueprint 失败", en: "Failed to load blueprint" },
 
   // ===== Blueprint Detail Page =====
   "blueprintDetail.backTo": { zh: "返回 Blueprints", en: "Back to Blueprints" },
@@ -319,6 +329,7 @@ const translations = {
   "jobOps.terminateTitle": { zh: "终止任务？", en: "Terminate Task?" },
   "jobOps.terminateDesc": { zh: "确定要终止 {name} 吗？此操作将立即停止进程且不可撤销。", en: "Are you sure you want to terminate {name}? This action will stop the process immediately and cannot be undone." },
   "jobOps.terminateBtn": { zh: "终止", en: "Terminate" },
+  "jobOps.terminateFailed": { zh: "终止任务失败", en: "Failed to terminate job" },
 
   // ===== Common Actions =====
   "action.copy": { zh: "复制", en: "Copy" },
@@ -344,7 +355,9 @@ const translations = {
 
   // ===== Job Detail - States =====
   "jobDetail.loading": { zh: "正在加载任务上下文...", en: "Loading Job Context..." },
-  "jobDetail.notFound": { zh: "任务未找到", en: "Job not found" },
+  "jobDetail.notFound": { zh: "任务不存在", en: "Job Not Found" },
+  "jobDetail.notFoundDesc": { zh: "该任务不存在或已被删除。", en: "This job does not exist or has been deleted." },
+  "jobDetail.returnToJobs": { zh: "返回任务列表", en: "Return to Jobs" },
   "jobDetail.goBack": { zh: "返回", en: "Go Back" },
 
   // ===== Job Detail - External Task =====

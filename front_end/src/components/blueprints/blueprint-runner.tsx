@@ -85,8 +85,7 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
         } catch (e: any) {
           if (isMounted) {
             console.error("Blueprint initialization failed:", e);
-            alert(`Failed to load blueprint: ${e.message}`);
-            onClose();
+            setErrorMessage(t("blueprintRunner.loadFailed") + `: ${e.message}`);
           }
         } finally {
           if (isMounted) setIsLoadingSchema(false);

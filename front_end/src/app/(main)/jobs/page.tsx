@@ -50,12 +50,13 @@ export default function JobsPage() {
     }
   }, [skip, pageSize, debouncedQuery, selectedUserId]);
 
-  const { 
-    drawerProps, 
-    terminateDialogProps, 
-    handleNewJob, 
-    handleCloneJob, 
-    onClickTerminate 
+  const {
+    drawerProps,
+    terminateDialogProps,
+    errorDialogProps,
+    handleNewJob,
+    handleCloneJob,
+    onClickTerminate
   } = useJobOperations({ onSuccess: fetchJobs });
 
   useEffect(() => {
@@ -186,6 +187,7 @@ export default function JobsPage() {
       {/* Dialogs */}
       <JobDrawer {...drawerProps} />
       <ConfirmationDialog {...terminateDialogProps} />
+      <ConfirmationDialog {...errorDialogProps} />
     </div>
   );
 }

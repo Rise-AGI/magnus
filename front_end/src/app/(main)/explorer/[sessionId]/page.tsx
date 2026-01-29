@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowUp, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check } from "lucide-react";
 import { client } from "@/lib/api";
 import RenderMarkdown from "@/components/ui/render-markdown";
+import { NotFound } from "@/components/ui/not-found";
 import type { ExplorerSessionWithMessages, ExplorerMessage, Attachment } from "@/types/explore";
 import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
@@ -385,6 +386,7 @@ export default function SessionPage() {
   const sessionId = params.sessionId as string;
 
   const [session, setSession] = useState<ExplorerSessionWithMessages | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -417,9 +419,9 @@ export default function SessionPage() {
       setSession(data);
     } catch (error) {
       console.error("Failed to fetch session:", error);
-      router.push("/explorer");
+      setNotFound(true);
     }
-  }, [sessionId, router]);
+  }, [sessionId]);
 
 
   useEffect(() => {
@@ -833,6 +835,17 @@ export default function SessionPage() {
     setEditingMessageIndex(null);
     setEditingMessageContent("");
   };
+
+  if (notFound) {
+    return (
+      <NotFound
+        title={t("explorer.notFound")}
+        description={t("explorer.notFoundDesc")}
+        buttonText={t("explorer.returnToExplorer")}
+        onBack={() => router.push("/explorer")}
+      />
+    );
+  }
 
   if (!session) {
     return (

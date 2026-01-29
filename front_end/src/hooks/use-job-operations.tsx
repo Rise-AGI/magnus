@@ -24,6 +24,9 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
   const [jobToTerminate, setJobToTerminate] = useState<Job | null>(null);
   const [isTerminating, setIsTerminating] = useState(false);
 
+  // --- Error Dialog State ---
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   // 打开新建窗口
   const handleNewJob = () => {
     setDrawerMode("create");
@@ -74,7 +77,7 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
       }
       setJobToTerminate(null);
     } catch (e) {
-      alert("Failed to terminate job");
+      setErrorMessage(t("jobOps.terminateFailed"));
       console.error(e);
     } finally {
       setIsTerminating(false);
@@ -107,6 +110,16 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
         </span>
       ) : null,
       confirmText: t("jobOps.terminateBtn"),
+      variant: "danger" as const,
+    },
+    // Error Dialog 属性
+    errorDialogProps: {
+      isOpen: !!errorMessage,
+      onClose: () => setErrorMessage(null),
+      title: t("common.error"),
+      description: errorMessage,
+      confirmText: t("common.ok"),
+      mode: "alert" as const,
       variant: "danger" as const,
     },
     // 暴露出的操作函数

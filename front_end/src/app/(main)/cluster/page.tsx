@@ -60,11 +60,12 @@ export default function ClusterPage() {
     }
   }, [runningPage, runningSize, pendingPage, pendingSize]);
 
-  const { 
-    drawerProps, 
-    terminateDialogProps, 
-    handleCloneJob, 
-    onClickTerminate 
+  const {
+    drawerProps,
+    terminateDialogProps,
+    errorDialogProps,
+    handleCloneJob,
+    onClickTerminate
   } = useJobOperations({ onSuccess: fetchStats });
 
   useEffect(() => {
@@ -192,6 +193,7 @@ export default function ClusterPage() {
       {/* Dialogs */}
       <JobDrawer {...drawerProps} />
       <ConfirmationDialog {...terminateDialogProps} />
+      <ConfirmationDialog {...errorDialogProps} />
     </div>
   );
 }

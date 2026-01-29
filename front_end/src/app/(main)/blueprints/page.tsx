@@ -34,6 +34,7 @@ export default function BlueprintsPage() {
   const [selectedBlueprint, setSelectedBlueprint] = useState<Blueprint | null>(null);
   const [blueprintToDelete, setBlueprintToDelete] = useState<Blueprint | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<'create' | 'clone'>('create');
@@ -97,8 +98,15 @@ export default function BlueprintsPage() {
   const handleDelete = async () => {
     if (!blueprintToDelete) return;
     setIsDeleting(true);
-    try { await client(`/api/blueprints/${blueprintToDelete.id}`, { method: "DELETE" }); fetchBlueprints(); setBlueprintToDelete(null); }
-    catch (e: any) { alert(e.message); } finally { setIsDeleting(false); }
+    try {
+      await client(`/api/blueprints/${blueprintToDelete.id}`, { method: "DELETE" });
+      fetchBlueprints();
+      setBlueprintToDelete(null);
+    } catch (e: any) {
+      setErrorMessage(e.message || t("common.operationFailed"));
+    } finally {
+      setIsDeleting(false);
+    }
   };
   
   const handleSave = async (data: any) => {
@@ -154,6 +162,7 @@ export default function BlueprintsPage() {
       <BlueprintEditor isOpen={isEditorOpen} mode={editorMode} initialData={editorData} onClose={() => setIsEditorOpen(false)} onSave={handleSave} isSaving={isSaving} />
       <BlueprintRunner blueprint={selectedBlueprint} onClose={() => setSelectedBlueprint(null)} />
       <ConfirmationDialog isOpen={!!blueprintToDelete} onClose={() => setBlueprintToDelete(null)} onConfirm={handleDelete} title={t("blueprints.deleteTitle")} description={<span>{t("blueprints.deleteConfirm", { title: blueprintToDelete?.title || "" })}</span>} confirmText={t("common.delete")} variant="danger" isLoading={isDeleting} />
+      <ConfirmationDialog isOpen={!!errorMessage} onClose={() => setErrorMessage(null)} title={t("common.error")} description={errorMessage} confirmText={t("common.ok")} mode="alert" variant="danger" />
     </div>
   );
 }
