@@ -48,7 +48,7 @@ def main():
     print(f"   To connect to this session, run the following command", flush=True)
     print(f"   on {node_name}:", flush=True)
     print(f"", flush=True)
-    print(f"       magnus-connect", flush=True)
+    print(f"       magnus connect", flush=True)
     print(f"", flush=True)
     print("="*60, flush=True)
 
