@@ -195,7 +195,7 @@ def extract_text_from_txt(file_bytes: bytes) -> str:
     return file_bytes.decode("utf-8", errors="replace")
 
 
-@router.post("/explore/sessions/{session_id}/upload")
+@router.post("/explorer/sessions/{session_id}/upload")
 async def upload_file(
     session_id: str,
     file: UploadFile = File(...),
@@ -257,7 +257,7 @@ async def upload_file(
     raise HTTPException(status_code=400, detail=f"Unsupported file type: {filename}")
 
 
-@router.get("/explore/files/{session_id}/{file_name}")
+@router.get("/explorer/files/{session_id}/{file_name}")
 async def get_file(
     session_id: str,
     file_name: str,
@@ -284,7 +284,7 @@ async def get_file(
     return FileResponse(file_path)
 
 
-@router.post("/explore/sessions", response_model=ExplorerSessionResponse)
+@router.post("/explorer/sessions", response_model=ExplorerSessionResponse)
 def create_session(
     data: ExplorerSessionCreate,
     db: Session = Depends(database.get_db),
@@ -300,7 +300,7 @@ def create_session(
     return session
 
 
-@router.get("/explore/sessions", response_model=PagedExplorerSessionResponse)
+@router.get("/explorer/sessions", response_model=PagedExplorerSessionResponse)
 def list_sessions(
     skip: int = 0,
     limit: int = 50,
@@ -315,7 +315,7 @@ def list_sessions(
     return {"total": total, "items": items}
 
 
-@router.get("/explore/sessions/{session_id}", response_model=ExplorerSessionWithMessages)
+@router.get("/explorer/sessions/{session_id}", response_model=ExplorerSessionWithMessages)
 def get_session(
     session_id: str,
     db: Session = Depends(database.get_db),
@@ -335,7 +335,7 @@ def get_session(
     return session
 
 
-@router.post("/explore/sessions/{session_id}/share", response_model=ExplorerSessionResponse)
+@router.post("/explorer/sessions/{session_id}/share", response_model=ExplorerSessionResponse)
 def share_session(
     session_id: str,
     db: Session = Depends(database.get_db),
@@ -355,7 +355,7 @@ def share_session(
     return session
 
 
-@router.post("/explore/sessions/{session_id}/unshare", response_model=ExplorerSessionResponse)
+@router.post("/explorer/sessions/{session_id}/unshare", response_model=ExplorerSessionResponse)
 def unshare_session(
     session_id: str,
     db: Session = Depends(database.get_db),
@@ -375,7 +375,7 @@ def unshare_session(
     return session
 
 
-@router.delete("/explore/sessions/{session_id}")
+@router.delete("/explorer/sessions/{session_id}")
 def delete_session(
     session_id: str,
     db: Session = Depends(database.get_db),
@@ -400,7 +400,7 @@ def delete_session(
     return {"message": "Session deleted"}
 
 
-@router.patch("/explore/sessions/{session_id}", response_model=ExplorerSessionResponse)
+@router.patch("/explorer/sessions/{session_id}", response_model=ExplorerSessionResponse)
 def update_session(
     session_id: str,
     data: ExplorerSessionCreate,
@@ -424,7 +424,7 @@ def update_session(
     return session
 
 
-@router.post("/explore/sessions/{session_id}/chat")
+@router.post("/explorer/sessions/{session_id}/chat")
 async def chat(
     session_id: str,
     data: ExplorerMessageCreate,

@@ -13,7 +13,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const { user, isLoading } = useAuth();
   const { t } = useLanguage();
   const pathname = usePathname();
-  const isExplorePage = pathname?.startsWith("/explore");
+  const isExplorePage = pathname?.startsWith("/explorer");
 
   return (
     // 修改点 1: min-h-screen -> h-screen

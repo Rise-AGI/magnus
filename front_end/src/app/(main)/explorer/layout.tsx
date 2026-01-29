@@ -24,7 +24,7 @@ function ShareDialog({ session, onClose, onShare, onUnshare }: ShareDialogProps)
   const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const shareUrl = `${SERVER_ADDRESS}:${FRONT_END_PORT}/explore/${session.id}`;
+  const shareUrl = `${SERVER_ADDRESS}:${FRONT_END_PORT}/explorer/${session.id}`;
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -129,7 +129,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
   const [sharingSession, setSharingSession] = useState<ExplorerSession | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  const activeSessionId = pathname.startsWith("/explore/")
+  const activeSessionId = pathname.startsWith("/explorer/")
     ? pathname.split("/")[2]
     : null;
 
@@ -137,7 +137,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
   const fetchSessions = useCallback(async (skip: number = 0, append: boolean = false) => {
     try {
       const data: PagedExplorerSessionResponse = await client(
-        `/api/explore/sessions?skip=${skip}&limit=${PAGE_SIZE}`
+        `/api/explorer/sessions?skip=${skip}&limit=${PAGE_SIZE}`
       );
 
       if (append) {
@@ -191,10 +191,10 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
 
   const deleteSession = async (sessionId: string) => {
     try {
-      await client(`/api/explore/sessions/${sessionId}`, { method: "DELETE" });
+      await client(`/api/explorer/sessions/${sessionId}`, { method: "DELETE" });
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (activeSessionId === sessionId) {
-        router.push("/explore");
+        router.push("/explorer");
       }
     } catch (error) {
       console.error("Failed to delete session:", error);
@@ -204,7 +204,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
 
   const updateSessionTitle = async (sessionId: string, title: string) => {
     try {
-      await client(`/api/explore/sessions/${sessionId}`, {
+      await client(`/api/explorer/sessions/${sessionId}`, {
         method: "PATCH",
         json: { title },
       });
@@ -238,7 +238,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
 
 
   const shareSession = async (sessionId: string) => {
-    await client(`/api/explore/sessions/${sessionId}/share`, { method: "POST" });
+    await client(`/api/explorer/sessions/${sessionId}/share`, { method: "POST" });
     setSessions((prev) =>
       prev.map((s) => (s.id === sessionId ? { ...s, is_shared: true } : s))
     );
@@ -246,7 +246,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
 
 
   const unshareSession = async (sessionId: string) => {
-    await client(`/api/explore/sessions/${sessionId}/unshare`, { method: "POST" });
+    await client(`/api/explorer/sessions/${sessionId}/unshare`, { method: "POST" });
     setSessions((prev) =>
       prev.map((s) => (s.id === sessionId ? { ...s, is_shared: false } : s))
     );
@@ -259,7 +259,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
         <div className="px-4 py-3 flex items-center justify-between">
           <h3 className="text-base font-medium text-zinc-400">{t("explorer.sessions")}</h3>
           <button
-            onClick={() => router.push("/explore")}
+            onClick={() => router.push("/explorer")}
             className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -281,7 +281,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
               }`}
               onClick={() => {
                 if (editingSessionId !== session.id) {
-                  router.push(`/explore/${session.id}`);
+                  router.push(`/explorer/${session.id}`);
                 }
               }}
             >

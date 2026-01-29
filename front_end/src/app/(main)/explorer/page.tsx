@@ -62,7 +62,7 @@ export default function ExplorePage() {
     e.preventDefault();
     setIsUploading(true);
 
-    const tempSession: ExplorerSession = await client("/api/explore/sessions", {
+    const tempSession: ExplorerSession = await client("/api/explorer/sessions", {
       json: { title: "New Session" },
     });
 
@@ -83,7 +83,7 @@ export default function ExplorePage() {
 
     try {
       const token = localStorage.getItem("magnus_token");
-      const response = await fetch(`${API_BASE}/api/explore/sessions/${sessionId}/upload`, {
+      const response = await fetch(`${API_BASE}/api/explorer/sessions/${sessionId}/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -114,7 +114,7 @@ export default function ExplorePage() {
     setIsSending(true);
 
     try {
-      const newSession: ExplorerSession = await client("/api/explore/sessions", {
+      const newSession: ExplorerSession = await client("/api/explorer/sessions", {
         json: { title: "New Session" },
       });
 
@@ -140,10 +140,10 @@ export default function ExplorePage() {
         messageContent += (messageContent ? "\n\n" : "") + docParts.join("\n\n");
       }
 
-      sessionStorage.setItem(`explore-pending-${newSession.id}`, messageContent);
+      sessionStorage.setItem(`explorer-pending-${newSession.id}`, messageContent);
 
       window.dispatchEvent(new Event("explorer-sessions-update"));
-      router.push(`/explore/${newSession.id}`);
+      router.push(`/explorer/${newSession.id}`);
     } catch (error) {
       console.error("Failed to send message:", error);
       setIsSending(false);

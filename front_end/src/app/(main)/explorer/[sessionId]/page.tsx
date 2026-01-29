@@ -150,7 +150,7 @@ function UserMessageContent({
 
   const getImageUrl = (fileName: string | null) => {
     if (!fileName) return "";
-    const baseUrl = `${API_BASE}/api/explore/files/${sessionId}/${fileName}`;
+    const baseUrl = `${API_BASE}/api/explorer/files/${sessionId}/${fileName}`;
     return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl;
   };
 
@@ -403,7 +403,7 @@ export default function SessionPage() {
 
 
   useEffect(() => {
-    const pendingKey = `explore-pending-${sessionId}`;
+    const pendingKey = `explorer-pending-${sessionId}`;
     const pending = sessionStorage.getItem(pendingKey);
     if (pending) {
       setPendingUserMessage(pending);
@@ -413,11 +413,11 @@ export default function SessionPage() {
 
   const fetchSession = useCallback(async () => {
     try {
-      const data: ExplorerSessionWithMessages = await client(`/api/explore/sessions/${sessionId}`);
+      const data: ExplorerSessionWithMessages = await client(`/api/explorer/sessions/${sessionId}`);
       setSession(data);
     } catch (error) {
       console.error("Failed to fetch session:", error);
-      router.push("/explore");
+      router.push("/explorer");
     }
   }, [sessionId, router]);
 
@@ -462,7 +462,7 @@ export default function SessionPage() {
     try {
       const token = localStorage.getItem("magnus_token");
       const response = await fetch(
-        `${API_BASE}/api/explore/sessions/${sessionId}/chat`,
+        `${API_BASE}/api/explorer/sessions/${sessionId}/chat`,
         {
           method: "POST",
           headers: {
@@ -553,7 +553,7 @@ export default function SessionPage() {
   useEffect(() => {
     if (!session || pendingMessageProcessedRef.current || !pendingUserMessage) return;
 
-    const pendingKey = `explore-pending-${sessionId}`;
+    const pendingKey = `explorer-pending-${sessionId}`;
     sessionStorage.removeItem(pendingKey);
     pendingMessageProcessedRef.current = true;
     sendMessageContent(pendingUserMessage);
@@ -601,7 +601,7 @@ export default function SessionPage() {
 
     try {
       const token = localStorage.getItem("magnus_token");
-      const response = await fetch(`${API_BASE}/api/explore/sessions/${sessionId}/upload`, {
+      const response = await fetch(`${API_BASE}/api/explorer/sessions/${sessionId}/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -723,7 +723,7 @@ export default function SessionPage() {
     try {
       const token = localStorage.getItem("magnus_token");
       const response = await fetch(
-        `${API_BASE}/api/explore/sessions/${sessionId}/chat`,
+        `${API_BASE}/api/explorer/sessions/${sessionId}/chat`,
         {
           method: "POST",
           headers: {

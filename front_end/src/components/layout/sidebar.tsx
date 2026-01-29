@@ -25,7 +25,7 @@ const NAV_ITEMS = [
   { name: "Jobs", href: "/jobs", icon: Rocket },
   { name: "Blueprints", href: "/blueprints", icon: ScrollText },
   { name: "Services", href: "/services", icon: Layers },
-  { name: "Explorer", href: "/explore", icon: ArrowRight },
+  { name: "Explorer", href: "/explorer", icon: ArrowRight },
   // { name: "Tools", href: "/tools", icon: Wrench },
 ];
 
