@@ -186,7 +186,8 @@ def list_blueprints(
 
     # 3. 分页查询
     # 按更新时间倒序排列（最近更新的在前面）
-    items = query.order_by(models.Blueprint.updated_at.desc())\
+    items = query.options(joinedload(models.Blueprint.user))\
+                 .order_by(models.Blueprint.updated_at.desc())\
                  .offset(skip)\
                  .limit(limit)\
                  .all()

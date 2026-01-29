@@ -73,13 +73,16 @@ class ServiceManager:
 
             db.commit()
 
-    def allocate_port(self, db: Session) -> int:
+    def allocate_port(
+        self,
+        db: Session,
+    ) -> int:
         used_ports = set(
-            db.query(Service.assigned_port)
+            row[0] for row in db.query(Service.assigned_port)
             .filter(Service.assigned_port.is_not(None))
+            .with_for_update()
             .all()
         )
-        used_ports = {p[0] for p in used_ports}
 
         for _ in range(100):
             candidate = random.randint(10000, 30000)

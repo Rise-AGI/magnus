@@ -3,10 +3,10 @@ import secrets
 import logging
 import jwt
 import asyncio
-import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
+from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -26,40 +26,22 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/feishu/login", auto_error=False)
 
 
-@dataclass
-class CachedUser:
-    id: str
-    name: str
-    token: str
-    expires_at: float
-
-
-_auth_cache: Dict[str, CachedUser] = {}
-AUTH_CACHE_TTL = 60.0
+AUTH_CACHE_TTL = 60
+AUTH_CACHE_MAX_SIZE = 1000
+_auth_cache: TTLCache[str, str] = TTLCache(maxsize=AUTH_CACHE_MAX_SIZE, ttl=AUTH_CACHE_TTL)
 
 
 def _get_from_cache(
     token: str
 ) -> Optional[str]:
-    if token in _auth_cache:
-        cached = _auth_cache[token]
-        if time.time() < cached.expires_at:
-            return cached.id
-        else:
-            del _auth_cache[token]
-    return None
+    return _auth_cache.get(token)
 
 
 def _add_to_cache(
-    token: str, 
-    user: models.User
+    token: str,
+    user: models.User,
 ) -> None:
-    _auth_cache[token] = CachedUser(
-        id = user.id,
-        name = user.name,
-        token = token,
-        expires_at = time.time() + AUTH_CACHE_TTL
-    )
+    _auth_cache[token] = user.id
 
 
 def generate_trust_token() -> str:

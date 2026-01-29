@@ -43,3 +43,4 @@ back_end/python_scripts/run*.py
 documents/
 .DS_Store
 .vscode/
+**claude_report**

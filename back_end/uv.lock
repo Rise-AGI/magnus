@@ -736,6 +736,7 @@ name = "magnus"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cachetools" },
     { name = "fastapi" },
     { name = "fastmcp" },
     { name = "httpx", extra = ["socks"] },
@@ -753,6 +754,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cachetools", specifier = ">=5.0.0" },
     { name = "fastapi", specifier = ">=0.124.0" },
     { name = "fastmcp", specifier = ">=2.14.2" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
