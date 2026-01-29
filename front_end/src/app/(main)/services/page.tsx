@@ -253,7 +253,7 @@ export default function ServicesPage() {
       </div>
 
       {/* Filters & Search & Sort */}
-      <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-1.5 mb-6 flex items-center gap-2 backdrop-blur-sm relative z-20">
+      <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-1.5 mb-6 flex flex-wrap items-center gap-2 backdrop-blur-sm relative z-20">
 
         {/* 1. Search (Expanded) */}
         <div className="relative flex-1 group">

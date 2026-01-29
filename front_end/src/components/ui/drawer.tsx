@@ -48,9 +48,9 @@ export function Drawer({
       />
 
       {/* Drawer Panel */}
-      <div 
+      <div
         className={cn(
-          "fixed top-0 right-0 h-full bg-[#09090b] border-l border-zinc-800 shadow-2xl z-[100] transform transition-transform duration-300 ease-in-out flex flex-col",
+          "fixed top-0 right-0 h-full max-w-full bg-[#09090b] border-l border-zinc-800 shadow-2xl z-[100] transform transition-transform duration-300 ease-in-out flex flex-col",
           width,
           isOpen ? "translate-x-0" : "translate-x-full"
         )}
