@@ -274,7 +274,6 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     } catch (e: any) {
       console.error(e);
       setErrorMessage(e.message || "Submit Failed");
-      alert(`❌ Error: ${e.message}`);
     }
   };
 

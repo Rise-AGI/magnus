@@ -21,6 +21,7 @@ export function Header() {
 
   const [showResetDialog, setShowResetDialog] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -60,7 +61,7 @@ export function Header() {
       setShowToken(false);
     } catch (error: any) {
       console.error("Refresh failed:", error);
-      alert(`${t("header.refreshFailed")} ${error.message || "Unknown error"}`);
+      setErrorMessage(`${t("header.refreshFailed")} ${error.message || "Unknown error"}`);
     } finally {
       setIsRefreshing(false);
     }
@@ -156,6 +157,16 @@ export function Header() {
         confirmText={t("header.resetToken")}
         variant="danger"
         isLoading={isRefreshing}
+      />
+
+      <ConfirmationDialog
+        isOpen={!!errorMessage}
+        onClose={() => setErrorMessage(null)}
+        title={t("common.error")}
+        description={errorMessage}
+        confirmText={t("common.ok")}
+        mode="alert"
+        variant="danger"
       />
     </>
   );

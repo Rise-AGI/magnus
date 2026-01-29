@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, X } from "lucide-react";
 
 interface CopyableTextProps {
   text: string;
@@ -12,14 +12,15 @@ interface CopyableTextProps {
   variant?: "id" | "text"; 
 }
 
-export function CopyableText({ 
-  text, 
-  copyValue, 
-  label, 
-  className = "", 
-  variant = "id" 
+export function CopyableText({
+  text,
+  copyValue,
+  label,
+  className = "",
+  variant = "id"
 }: CopyableTextProps) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const valueToCopy = copyValue || text;
 
   // 1. 传统兼容方案 (Fallback): 用于 HTTP 环境
@@ -71,7 +72,8 @@ export function CopyableText({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } else {
-      alert("Copy failed. Please manually select and copy.");
+      setCopyFailed(true);
+      setTimeout(() => setCopyFailed(false), 2000);
     }
   };
 
@@ -92,6 +94,8 @@ export function CopyableText({
       <div className="flex-shrink-0 mt-[0.15em]">
         {copied ? (
           <Check className="w-3.5 h-3.5 text-green-500" />
+        ) : copyFailed ? (
+          <X className="w-3.5 h-3.5 text-red-500" />
         ) : (
           <Copy className="w-3.5 h-3.5 opacity-0 group-hover/copy:opacity-100 transition-opacity" />
         )}

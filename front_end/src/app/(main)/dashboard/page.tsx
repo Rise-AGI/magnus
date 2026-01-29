@@ -92,12 +92,13 @@ export default function DashboardPage() {
   }, [currentPage, pageSize]);
 
   // Hook 注入
-  const { 
-    drawerProps, 
-    terminateDialogProps, 
-    handleNewJob, 
-    handleCloneJob, 
-    onClickTerminate 
+  const {
+    drawerProps,
+    terminateDialogProps,
+    errorDialogProps,
+    handleNewJob,
+    handleCloneJob,
+    onClickTerminate
   } = useJobOperations({ onSuccess: fetchDashboardData });
 
   useEffect(() => {
@@ -174,6 +175,7 @@ export default function DashboardPage() {
       {/* Dialogs */}
       <JobDrawer {...drawerProps} />
       <ConfirmationDialog {...terminateDialogProps} />
+      <ConfirmationDialog {...errorDialogProps} />
     </div>
   );
 }

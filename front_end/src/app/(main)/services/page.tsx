@@ -46,6 +46,7 @@ export default function ServicesPage() {
   // Confirmation Dialog State
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<{
     type: "delete" | "toggle";
     service: Service;
@@ -177,7 +178,7 @@ export default function ServicesPage() {
       setPendingAction(null);
     } catch (e) {
       console.error(`Failed to ${pendingAction.type} service`, e);
-      alert(`Operation failed: ${e}`);
+      setErrorMessage(t("common.operationFailed"));
     } finally {
       setActionLoading(false);
     }
@@ -352,6 +353,16 @@ export default function ServicesPage() {
         confirmText={dialogConfig.confirmText}
         variant={dialogConfig.variant}
         isLoading={actionLoading}
+      />
+
+      <ConfirmationDialog
+        isOpen={!!errorMessage}
+        onClose={() => setErrorMessage(null)}
+        title={t("common.error")}
+        description={errorMessage}
+        confirmText={t("common.ok")}
+        mode="alert"
+        variant="danger"
       />
     </div>
   );

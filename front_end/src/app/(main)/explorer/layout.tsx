@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { Trash2, MessageSquare, Pencil, Check, X, Loader2, Plus, Share2, Copy } from "lucide-react";
 import { client } from "@/lib/api";
 import { useLanguage } from "@/context/language-context";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import type { ExplorerSession, PagedExplorerSessionResponse } from "@/types/explore";
 
 const PAGE_SIZE = 20;
@@ -127,6 +128,8 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
   const [hasMore, setHasMore] = useState(true);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [sharingSession, setSharingSession] = useState<ExplorerSession | null>(null);
+  const [deletingSession, setDeletingSession] = useState<ExplorerSession | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const activeSessionId = pathname.startsWith("/explorer/")
@@ -339,7 +342,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteSession(session.id);
+                        setDeletingSession(session);
                       }}
                       className="p-1 hover:bg-zinc-700 rounded"
                     >
@@ -388,6 +391,29 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
           onUnshare={() => unshareSession(sharingSession.id)}
         />
       )}
+
+      {/* Delete Confirm Dialog */}
+      <ConfirmationDialog
+        isOpen={!!deletingSession}
+        onClose={() => setDeletingSession(null)}
+        onConfirm={async () => {
+          if (!deletingSession) return;
+          setIsDeleting(true);
+          await deleteSession(deletingSession.id);
+          setIsDeleting(false);
+          setDeletingSession(null);
+        }}
+        title={t("explorer.deleteSession")}
+        description={
+          <>
+            <p>{t("explorer.deleteDesc")}</p>
+            <p className="mt-2 text-zinc-500 truncate">{deletingSession?.title}</p>
+          </>
+        }
+        confirmText={t("explorer.confirmDelete")}
+        isLoading={isDeleting}
+        variant="danger"
+      />
     </div>
   );
 }
