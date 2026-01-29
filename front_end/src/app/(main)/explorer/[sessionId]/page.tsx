@@ -1019,7 +1019,7 @@ export default function SessionPage() {
                     index={index}
                     isLastUserMessage={index === session.messages.map(m => m.role).lastIndexOf("user")}
                     sessionId={sessionId}
-                    user={user}
+                    user={session.user ?? user}
                     onEdit={() => startEditingMessage(index, message.content)}
                     onImageClick={(src, alt) => setPreviewImage({ src, alt })}
                   />

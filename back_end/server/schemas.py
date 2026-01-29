@@ -237,6 +237,13 @@ class ExplorerSessionCreate(BaseModel):
     title: Optional[str] = "New Session"
 
 
+class ExplorerSessionOwner(BaseModel):
+    id: str
+    name: str
+    avatar_url: Optional[str] = None
+    class Config: from_attributes = True
+
+
 class ExplorerSessionResponse(BaseModel):
     id: str
     user_id: str
@@ -244,6 +251,7 @@ class ExplorerSessionResponse(BaseModel):
     is_shared: bool = False
     created_at: datetime
     updated_at: datetime
+    user: Optional[ExplorerSessionOwner] = None
     class Config: from_attributes = True
 
 

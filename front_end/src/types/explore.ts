@@ -6,6 +6,12 @@ export interface ExplorerMessage {
   created_at: string;
 }
 
+export interface ExplorerSessionOwner {
+  id: string;
+  name: string;
+  avatar_url?: string | null;
+}
+
 export interface ExplorerSession {
   id: string;
   user_id: string;
@@ -13,6 +19,7 @@ export interface ExplorerSession {
   is_shared: boolean;
   created_at: string;
   updated_at: string;
+  user?: ExplorerSessionOwner | null;
 }
 
 export interface ExplorerSessionWithMessages extends ExplorerSession {
