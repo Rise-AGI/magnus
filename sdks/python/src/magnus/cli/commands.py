@@ -1,11 +1,12 @@
 # sdks/python/src/magnus/cli/commands.py
+import io
 import os
 import sys
 import json
 import signal
 import subprocess
 import typer
-from typing import List, Optional, Any, Dict, Tuple
+from typing import List, Optional, Any, Dict, Tuple, Literal
 from pathlib import Path
 from rich.console import Console
 from rich.theme import Theme
@@ -13,6 +14,7 @@ from rich.table import Table
 from rich.status import Status
 from datetime import datetime
 from importlib.metadata import version
+from ruamel.yaml import YAML
 
 __version__ = version("magnus-sdk")
 
@@ -23,7 +25,11 @@ from .. import (
     call_service,
     list_jobs as api_list_jobs,
     get_job as api_get_job,
+    get_job_logs as api_get_job_logs,
     terminate_job as api_terminate_job,
+    get_cluster_stats as api_get_cluster_stats,
+    list_blueprints as api_list_blueprints,
+    list_services as api_list_services,
 )
 
 # === UI Setup ===
@@ -40,6 +46,32 @@ def print_msg(msg: str, end: str = "\n"):
 
 def print_error(msg: str):
     console.print(f"[magnus.prefix][Magnus][/magnus.prefix] [magnus.error]Error:[/magnus.error] {msg}", highlight=False)
+
+
+# === Output Format Helpers ===
+
+OutputFormat = Literal["table", "yaml", "json"]
+
+_yaml_dumper = YAML()
+_yaml_dumper.default_flow_style = False
+
+
+def _auto_format() -> OutputFormat:
+    """自动检测输出格式：TTY 用表格，管道用 YAML"""
+    return "table" if sys.stdout.isatty() else "yaml"
+
+
+def _output_data(
+    data: Any,
+    fmt: OutputFormat,
+):
+    """统一输出数据"""
+    if fmt == "yaml":
+        stream = io.StringIO()
+        _yaml_dumper.dump(data, stream)
+        console.print(stream.getvalue(), end="")
+    elif fmt == "json":
+        console.print_json(data=data)
 
 
 # === Signal-Safe Spinner ===
@@ -230,8 +262,13 @@ def apply_cli_defaults(parsed_cli_args: Dict[str, Any], command_type: str = "sub
 
 def _version_callback(value: bool):
     if value:
-        console.print(f"[bold blue]Magnus SDK[/bold blue] v{__version__}", highlight=False)
-        console.print("[dim]PKU Plasma · Rise-AGI[/dim]")
+        console.print()
+        console.print(f"  [bold blue]Magnus SDK[/bold blue] v{__version__}", highlight=False)
+        console.print("  [italic dim]An agentic infrastructure automating scientific discoveries.[/italic dim]")
+        console.print()
+        console.print("  [dim]PKU Plasma · PKU HET · Rise-AGI[/dim]")
+        console.print("  [dim]© PKU Plasma Lab. All rights reserved.[/dim]")
+        console.print()
         raise typer.Exit()
 
 
@@ -248,6 +285,29 @@ def main_callback(
     _version: bool = typer.Option(False, "--version", "-V", callback=_version_callback, is_eager=True, help="Show version"),
 ):
     pass
+
+
+@app.command(name="config")
+def show_config():
+    """
+    Show current SDK configuration (address and token).
+    """
+    address = os.getenv("MAGNUS_ADDRESS", "http://127.0.0.1:8017")
+    token = os.getenv("MAGNUS_TOKEN", "")
+
+    console.print()
+    console.print(f"  [bold]MAGNUS_ADDRESS[/bold]  {address}")
+
+    if token:
+        if len(token) > 12:
+            masked = f"{token[:4]}{'*' * 16}{token[-4:]}"
+        else:
+            masked = "*" * len(token)
+        console.print(f"  [bold]MAGNUS_TOKEN[/bold]    {masked}")
+    else:
+        console.print("  [bold]MAGNUS_TOKEN[/bold]    [dim](not set)[/dim]")
+
+    console.print()
 
 @app.command(
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
@@ -490,6 +550,7 @@ def _format_time(iso_str: Optional[str]) -> str:
 def list_jobs_cmd(
     limit: int = typer.Option(10, "--limit", "-l", help="Number of jobs to fetch"),
     name: Optional[str] = typer.Option(None, "--name", "-n", "--search", "-s", help="Search by task name or job ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
 ):
     """
     List recent jobs. Index -1 = newest, -2 = second newest, ...
@@ -498,6 +559,12 @@ def list_jobs_cmd(
         result = api_list_jobs(limit=limit, search=name)
         items = result.get("items", [])
         total = result.get("total", 0)
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data({"total": total, "items": items}, fmt)
+            return
 
         if not items:
             print_msg("No jobs found.")
@@ -734,6 +801,183 @@ def disconnect_cmd():
         os.kill(ppid, signal.SIGHUP)
     except OSError as e:
         print_error(f"Failed to send SIGHUP: {e}")
+        raise typer.Exit(code=1)
+
+
+# === New Commands ===
+
+@app.command(name="logs")
+def job_logs_cmd(
+    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+    page: int = typer.Option(-1, "--page", "-p", help="Log page number (-1 for last)"),
+):
+    """
+    Show logs for a job.
+
+    Examples:
+      magnus logs -1              # logs of newest job
+      magnus logs -1 --page 0     # first page
+      magnus logs abc123          # by job ID
+    """
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+        result = api_get_job_logs(resolved_id, page=page)
+
+        logs = result.get("logs", "")
+        current_page = result.get("page", 0)
+        total_pages = result.get("total_pages", 1)
+
+        console.rule(f"[bold]Job Logs: {resolved_id}[/bold] (Page {current_page + 1}/{total_pages})")
+        console.print(logs, end="")
+        console.rule()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command(name="cluster")
+def cluster_status_cmd(
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """
+    Show cluster resource status.
+    """
+    try:
+        result = api_get_cluster_stats()
+        resources = result.get("resources", {})
+        running_jobs = result.get("running_jobs", [])
+        pending_jobs = result.get("pending_jobs", [])
+        total_running = result.get("total_running", len(running_jobs))
+        total_pending = result.get("total_pending", len(pending_jobs))
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data(result, fmt)
+            return
+
+        console.print()
+        console.rule(f"[bold]{resources.get('node', 'Cluster')}[/bold]")
+        console.print(f"  [bold]GPU Model:[/bold] {resources.get('gpu_model', '-')}")
+        console.print(f"  [bold]Total:[/bold]     {resources.get('total', 0)}")
+        console.print(f"  [bold]Free:[/bold]      [green]{resources.get('free', 0)}[/green]")
+        console.print(f"  [bold]Used:[/bold]      [yellow]{resources.get('used', 0)}[/yellow]")
+        console.print()
+        console.print(f"  [bold]Running Jobs:[/bold] {total_running}")
+        console.print(f"  [bold]Pending Jobs:[/bold] {total_pending}")
+        console.rule()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command(name="blueprints")
+def list_blueprints_cmd(
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of blueprints to fetch"),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by title or ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """
+    List available blueprints.
+    """
+    try:
+        result = api_list_blueprints(limit=limit, search=search)
+        items = result.get("items", [])
+        total = result.get("total", 0)
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data({"total": total, "items": items}, fmt)
+            return
+
+        if not items:
+            print_msg("No blueprints found.")
+            return
+
+        table = Table(title=f"Blueprints ({len(items)}/{total})", show_header=True, header_style="bold")
+        table.add_column("ID", max_width=25)
+        table.add_column("Title", max_width=30)
+        table.add_column("Creator", width=15)
+        table.add_column("Updated", width=12)
+
+        for bp in items:
+            user = bp.get("user") or {}
+            table.add_row(
+                bp.get("id", "")[:25],
+                (bp.get("title") or "-")[:30],
+                (user.get("name") or "-")[:15],
+                _format_time(bp.get("updated_at")),
+            )
+
+        console.print(table)
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command(name="services")
+def list_services_cmd(
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of services to fetch"),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by name or ID"),
+    active: bool = typer.Option(False, "--active", "-a", help="Show only active services"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """
+    List managed services.
+    """
+    try:
+        result = api_list_services(limit=limit, search=search, active_only=active)
+        items = result.get("items", [])
+        total = result.get("total", 0)
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data({"total": total, "items": items}, fmt)
+            return
+
+        if not items:
+            print_msg("No services found.")
+            return
+
+        table = Table(title=f"Services ({len(items)}/{total})", show_header=True, header_style="bold")
+        table.add_column("ID", max_width=20)
+        table.add_column("Name", max_width=25)
+        table.add_column("Active", width=6)
+        table.add_column("GPU", width=4)
+        table.add_column("Updated", width=12)
+
+        for svc in items:
+            is_active = svc.get("is_active", False)
+            active_str = "[green]✓[/green]" if is_active else "[dim]-[/dim]"
+            table.add_row(
+                svc.get("id", "")[:20],
+                (svc.get("name") or "-")[:25],
+                active_str,
+                str(svc.get("gpu_count", 0)),
+                _format_time(svc.get("updated_at")),
+            )
+
+        console.print(table)
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
 
 

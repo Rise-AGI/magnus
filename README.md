@@ -684,7 +684,11 @@ asyncio.run(main())
 | `call_service(id, payload)` | 调用托管服务 |
 | `list_jobs(limit, search)` | 列出任务 |
 | `get_job(job_id)` | 获取任务详情 |
+| `get_job_logs(job_id, page)` | 获取任务日志 |
 | `terminate_job(job_id)` | 终止任务 |
+| `get_cluster_stats()` | 获取集群状态 |
+| `list_blueprints(limit, search)` | 列出蓝图 |
+| `list_services(limit, search)` | 列出服务 |
 
 所有函数均有对应的 `_async` 版本。
 
@@ -725,14 +729,48 @@ echo '{"x": 1}' | magnus call my-service -
 magnus jobs
 magnus jobs -l 20          # 显示 20 条
 magnus jobs -n "quadre"    # 按名称搜索
+magnus jobs -f yaml        # YAML 格式输出
 
 # 查看任务详情 (支持负数索引: -1 = 最新, -2 = 第二新)
 magnus status -1           # 最新任务
 magnus status abc123       # 按 Job ID
 
+# 查看任务日志
+magnus logs -1             # 最新任务的日志
+magnus logs -1 --page 0    # 第一页日志
+
 # 终止任务
 magnus kill -1             # 终止最新任务
 magnus kill -1 -f          # 跳过确认
+```
+
+### 集群与资源
+
+```bash
+# 查看集群状态
+magnus cluster
+magnus cluster -f yaml     # YAML 格式
+
+# 列出蓝图
+magnus blueprints
+magnus blueprints -s "sim" # 搜索蓝图
+
+# 列出服务
+magnus services
+magnus services -a         # 仅活跃服务
+```
+
+### 配置查看
+
+```bash
+# 查看当前 SDK 配置
+magnus config
+```
+
+**输出示例**：
+```
+  MAGNUS_ADDRESS  http://162.105.151.196:8017
+  MAGNUS_TOKEN    eyJh****************bGci
 ```
 
 ## 📈 项目状态

@@ -758,7 +758,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.124.0" },
     { name = "fastmcp", specifier = ">=2.14.2" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
-    { name = "magnus-sdk", specifier = "==0.2.2" },
+    { name = "magnus-sdk", specifier = "==0.2.3" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pypdf", specifier = ">=5.0.0" },
     { name = "python-docx", specifier = ">=1.1.0" },
@@ -772,7 +772,7 @@ requires-dist = [
 
 [[package]]
 name = "magnus-sdk"
-version = "0.2.2"
+version = "0.2.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["socks"] },
@@ -780,11 +780,12 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pywheels" },
     { name = "rich" },
+    { name = "ruamel-yaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4a/73/a788863bce29d82dff4c5c683aba3af06e582dd591e74d3d698d9824e973/magnus_sdk-0.2.2.tar.gz", hash = "sha256:6c77a759cf5927d39503d51c13467dc0b1b2ddd4b6a002dbab9c306434243a43", size = 72442, upload-time = "2026-01-26T15:38:57.443Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/4e/12674fb6537419d7f151e8bb7217124ac0371e5593ea6f8f88e3d065cb45/magnus_sdk-0.2.3.tar.gz", hash = "sha256:8c6ef1d12a8d9b4964ecfef96083ea8bb25216ba4ddbacbaa54ed80182c763e1", size = 74370, upload-time = "2026-01-29T05:11:07.657Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b6/3d/e42de61d8b277e14cf7b4e1020faa6a1275e9f4f3c731bb62a90de9ab727/magnus_sdk-0.2.2-py3-none-any.whl", hash = "sha256:c4663c0dc98ac753342d0d956cdcf5bf6cdc0c8d30094c818b91737cff08ac5d", size = 11838, upload-time = "2026-01-26T15:38:55.326Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/0e/a15c2598453e11a583586d342e9cb9ed36f036d6eadfa5a058b2b43dc7cd/magnus_sdk-0.2.3-py3-none-any.whl", hash = "sha256:2560b27d54e99239f47f31a7111dcbce50a6096e14defd1975f0236fb19d0a11", size = 13802, upload-time = "2026-01-29T05:10:45.525Z" },
 ]
 
 [[package]]

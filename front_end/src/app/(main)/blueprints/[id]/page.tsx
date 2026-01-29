@@ -165,19 +165,12 @@ export default function BlueprintDetailsPage() {
     try {
       await client(`/api/blueprints/${blueprint.id}/run`, {
         method: "POST",
-        json: formValues
+        json: {
+          parameters: formValues,
+          use_preference: false,
+          save_preference: true,
+        }
       });
-
-      if (currentHashRef.current) {
-        client(`/api/blueprints/${blueprint.id}/preference`, {
-          method: "PUT",
-          json: {
-            blueprint_id: blueprint.id,
-            blueprint_hash: currentHashRef.current,
-            cached_params: formValues,
-          }
-        }).catch(err => console.warn("Failed to save preference:", err));
-      }
 
       // Flash Message for Job List
       sessionStorage.setItem('magnus_new_job', 'true');

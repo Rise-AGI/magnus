@@ -9,10 +9,12 @@ from sqlalchemy import or_
 
 from .. import database
 from .. import models
+from pydantic import BaseModel
+
 from ..schemas import (
-    BlueprintResponse, 
-    BlueprintCreate, 
-    PagedBlueprintResponse, 
+    BlueprintResponse,
+    BlueprintCreate,
+    PagedBlueprintResponse,
     BlueprintParamSchema,
     BlueprintPreferenceUpdate,
     BlueprintPreferenceResponse,
@@ -20,6 +22,13 @@ from ..schemas import (
 from .._blueprint_manager import blueprint_manager
 from .auth import get_current_user
 from library import *
+
+
+class BlueprintRunRequest(BaseModel):
+    """统一的 Blueprint 运行请求模型"""
+    parameters: Dict[str, Any] = {}
+    use_preference: bool = False   # 是否合并已缓存的偏好
+    save_preference: bool = False  # 成功后是否保存参数为新偏好
 
 
 def _normalize_obj(
@@ -235,20 +244,47 @@ def get_blueprint_schema(
 @router.post("/blueprints/{blueprint_id}/run")
 def run_blueprint(
     blueprint_id: str,
-    params: Dict[str, Any],
+    request: BlueprintRunRequest,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    """
+    统一的 Blueprint 运行端点。
+    - use_preference=True: 合并用户缓存的偏好参数（显式传入 > 缓存）
+    - save_preference=True: 成功运行后保存参数为新偏好
+    """
     bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    try:
-        job_submission = blueprint_manager.execute(
-            bp.code,
-            params,
-        )
 
+    # 1. 构建最终参数
+    final_params = request.parameters.copy()
+
+    if request.use_preference:
+        pref = db.query(models.BlueprintUserPreference).filter(
+            models.BlueprintUserPreference.user_id == current_user.id,
+            models.BlueprintUserPreference.blueprint_id == blueprint_id,
+        ).first()
+
+        if pref:
+            current_hash = _compute_signature_hash(bp.code)
+            # 仅当 Blueprint 签名未变化时才使用缓存
+            if pref.blueprint_hash == current_hash:
+                try:
+                    cached = deserialize_json(pref.cached_params)
+                    if isinstance(cached, dict):
+                        # 优先级：显式传入 > 缓存
+                        base_params = cached.copy()
+                        base_params.update(final_params)
+                        final_params = base_params
+                except Exception as e:
+                    logger.warning(f"Failed to merge preferences: {e}")
+
+
+    # 2. 执行 Blueprint
+    try:
+        job_submission = blueprint_manager.execute(bp.code, final_params)
         job_dict = job_submission.model_dump()
 
         db_job = models.Job(
@@ -256,13 +292,38 @@ def run_blueprint(
             user_id=current_user.id,
             status=models.JobStatus.PENDING,
         )
-
         db.add(db_job)
+
+
+        # 3. 保存偏好（仅在成功执行后）
+        if request.save_preference:
+            pref = db.query(models.BlueprintUserPreference).filter(
+                models.BlueprintUserPreference.user_id == current_user.id,
+                models.BlueprintUserPreference.blueprint_id == blueprint_id,
+            ).first()
+
+            current_hash = _compute_signature_hash(bp.code)
+            serialized_params = serialize_json(final_params)
+
+            if pref:
+                pref.blueprint_hash = current_hash
+                pref.cached_params = serialized_params
+                pref.updated_at = datetime.utcnow()
+            else:
+                new_pref = models.BlueprintUserPreference(
+                    user_id=current_user.id,
+                    blueprint_id=blueprint_id,
+                    blueprint_hash=current_hash,
+                    cached_params=serialized_params,
+                )
+                db.add(new_pref)
+
+
         db.commit()
         db.refresh(db_job)
 
         logger.info(f"Blueprint {blueprint_id} launched job {db_job.id}")
-        return {"message": "Blueprint launched", "job_id": db_job.id}
+        return {"job_id": db_job.id}
 
     except Exception as e:
         logger.error(f"Blueprint run failed: {e}")

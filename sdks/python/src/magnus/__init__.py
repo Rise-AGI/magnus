@@ -22,8 +22,12 @@ __all__ = [
     "list_jobs_async",
     "get_job",
     "get_job_async",
+    "get_job_logs",
     "terminate_job",
     "terminate_job_async",
+    "get_cluster_stats",
+    "list_blueprints",
+    "list_services",
 
     # Exceptions
     "MagnusError",
@@ -129,21 +133,25 @@ class MagnusClient:
         blueprint_id: str,
         args: Optional[Dict[str, Any]] = None,
         use_preference: bool = True,
+        save_preference: bool = True,
         timeout: float = 10.0,
     ) -> str:
         """
         提交蓝图任务，立即返回 Job ID (Fire & Forget)。
         :param args: 传递给蓝图的参数字典。
+        :param use_preference: 是否合并已缓存的偏好参数。
+        :param save_preference: 成功后是否保存参数为新偏好。
         :param timeout: HTTP 请求超时时间（非任务执行时间）。
         """
         payload = {
+            "parameters": args or {},
             "use_preference": use_preference,
-            "parameters": args or {}
+            "save_preference": save_preference,
         }
-        
+
         try:
             resp = self.http.post(
-                f"/sdk/blueprints/{blueprint_id}/submit",
+                f"/blueprints/{blueprint_id}/run",
                 json=payload,
                 timeout=timeout
             )
@@ -157,16 +165,18 @@ class MagnusClient:
         blueprint_id: str,
         args: Optional[Dict[str, Any]] = None,
         use_preference: bool = True,
+        save_preference: bool = True,
         timeout: float = 10.0,
     ) -> str:
         payload = {
+            "parameters": args or {},
             "use_preference": use_preference,
-            "parameters": args or {}
+            "save_preference": save_preference,
         }
-        
+
         try:
             resp = await self.ahttp.post(
-                f"/sdk/blueprints/{blueprint_id}/submit",
+                f"/blueprints/{blueprint_id}/run",
                 json=payload,
                 timeout=timeout
             )
@@ -180,6 +190,7 @@ class MagnusClient:
         blueprint_id: str,
         args: Optional[Dict[str, Any]] = None,
         use_preference: bool = True,
+        save_preference: bool = True,
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
     ) -> Optional[str]:
@@ -188,9 +199,10 @@ class MagnusClient:
         :param timeout: 最大任务执行等待时间（秒）。默认为 None（无限等待）。
         """
         job_id = self.submit_blueprint(
-            blueprint_id=blueprint_id, 
-            args=args, 
-            use_preference=use_preference, 
+            blueprint_id=blueprint_id,
+            args=args,
+            use_preference=use_preference,
+            save_preference=save_preference,
             timeout=10.0  # Network timeout
         )
         logger.info(f"Job {job_id} submitted. Waiting for completion...")
@@ -217,13 +229,15 @@ class MagnusClient:
         blueprint_id: str,
         args: Optional[Dict[str, Any]] = None,
         use_preference: bool = True,
+        save_preference: bool = True,
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
     ) -> Optional[str]:
         job_id = await self.submit_blueprint_async(
-            blueprint_id=blueprint_id, 
-            args=args, 
-            use_preference=use_preference, 
+            blueprint_id=blueprint_id,
+            args=args,
+            use_preference=use_preference,
+            save_preference=save_preference,
             timeout=10.0
         )
         logger.info(f"Job {job_id} submitted. Waiting for completion...")
@@ -347,6 +361,90 @@ class MagnusClient:
             raise MagnusError("Request timed out while terminating job.")
 
 
+    def get_job_logs(
+        self,
+        job_id: str,
+        page: int = -1,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """
+        获取任务日志。
+        :param page: 页码，-1 为最新页
+        :return: {"logs": str, "page": int, "total_pages": int}
+        """
+        try:
+            resp = self.http.get(f"/jobs/{job_id}/logs", params={"page": page}, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting job logs.")
+
+
+    def get_cluster_stats(
+        self,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """
+        获取集群状态。
+        :return: {"resources": {...}, "running_jobs": [...], "pending_jobs": [...]}
+        """
+        try:
+            resp = self.http.get("/cluster/stats", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting cluster stats.")
+
+
+    def list_blueprints(
+        self,
+        limit: int = 20,
+        skip: int = 0,
+        search: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """
+        列出蓝图。
+        :return: {"total": int, "items": List[BlueprintInfo]}
+        """
+        params: Dict[str, Any] = {"limit": limit, "skip": skip}
+        if search:
+            params["search"] = search
+
+        try:
+            resp = self.http.get("/blueprints", params=params, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while listing blueprints.")
+
+
+    def list_services(
+        self,
+        limit: int = 20,
+        skip: int = 0,
+        search: Optional[str] = None,
+        active_only: bool = False,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """
+        列出服务。
+        :return: {"total": int, "items": List[ServiceInfo]}
+        """
+        params: Dict[str, Any] = {"limit": limit, "skip": skip}
+        if search:
+            params["search"] = search
+        if active_only:
+            params["active_only"] = True
+
+        try:
+            resp = self.http.get("/services", params=params, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while listing services.")
+
+
     # === Service Methods ===
 
     def call_service(
@@ -411,38 +509,42 @@ def configure(token: Optional[str] = None, address: Optional[str] = None):
     default_client = MagnusClient(token=token, address=address)
 
 def submit_blueprint(
-    blueprint_id: str, 
-    args: Optional[Dict[str, Any]] = None, 
-    use_preference: bool = True, 
+    blueprint_id: str,
+    args: Optional[Dict[str, Any]] = None,
+    use_preference: bool = True,
+    save_preference: bool = True,
     timeout: float = 10.0
 ) -> str:
-    return default_client.submit_blueprint(blueprint_id, args, use_preference, timeout)
+    return default_client.submit_blueprint(blueprint_id, args, use_preference, save_preference, timeout)
 
 async def submit_blueprint_async(
-    blueprint_id: str, 
-    args: Optional[Dict[str, Any]] = None, 
-    use_preference: bool = True, 
+    blueprint_id: str,
+    args: Optional[Dict[str, Any]] = None,
+    use_preference: bool = True,
+    save_preference: bool = True,
     timeout: float = 10.0
 ) -> str:
-    return await default_client.submit_blueprint_async(blueprint_id, args, use_preference, timeout)
+    return await default_client.submit_blueprint_async(blueprint_id, args, use_preference, save_preference, timeout)
 
 def run_blueprint(
-    blueprint_id: str, 
-    args: Optional[Dict[str, Any]] = None, 
-    use_preference: bool = True, 
-    timeout: Optional[float] = None, 
+    blueprint_id: str,
+    args: Optional[Dict[str, Any]] = None,
+    use_preference: bool = True,
+    save_preference: bool = True,
+    timeout: Optional[float] = None,
     poll_interval: float = 2.0
 ) -> Optional[str]:
-    return default_client.run_blueprint(blueprint_id, args, use_preference, timeout, poll_interval)
+    return default_client.run_blueprint(blueprint_id, args, use_preference, save_preference, timeout, poll_interval)
 
 async def run_blueprint_async(
-    blueprint_id: str, 
-    args: Optional[Dict[str, Any]] = None, 
-    use_preference: bool = True, 
-    timeout: Optional[float] = None, 
+    blueprint_id: str,
+    args: Optional[Dict[str, Any]] = None,
+    use_preference: bool = True,
+    save_preference: bool = True,
+    timeout: Optional[float] = None,
     poll_interval: float = 2.0
 ) -> Optional[str]:
-    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, timeout, poll_interval)
+    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, timeout, poll_interval)
 
 def call_service(
     service_id: str, 
@@ -503,3 +605,36 @@ async def terminate_job_async(
     timeout: float = 10.0,
 ) -> Dict[str, Any]:
     return await default_client.terminate_job_async(job_id, timeout)
+
+
+def get_job_logs(
+    job_id: str,
+    page: int = -1,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.get_job_logs(job_id, page, timeout)
+
+
+def get_cluster_stats(
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.get_cluster_stats(timeout)
+
+
+def list_blueprints(
+    limit: int = 20,
+    skip: int = 0,
+    search: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.list_blueprints(limit, skip, search, timeout)
+
+
+def list_services(
+    limit: int = 20,
+    skip: int = 0,
+    search: Optional[str] = None,
+    active_only: bool = False,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.list_services(limit, skip, search, active_only, timeout)

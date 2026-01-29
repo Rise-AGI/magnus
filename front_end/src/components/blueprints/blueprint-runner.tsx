@@ -128,19 +128,12 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
     try {
       await client(`/api/blueprints/${blueprint.id}/run`, {
         method: "POST",
-        json: formValues
+        json: {
+          parameters: formValues,
+          use_preference: false,  // 前端已合并缓存，不需要后端再合并
+          save_preference: true,  // 统一由后端保存偏好
+        }
       });
-      
-      if (currentHashRef.current) {
-        client(`/api/blueprints/${blueprint.id}/preference`, {
-          method: "PUT",
-          json: {
-            blueprint_id: blueprint.id,
-            blueprint_hash: currentHashRef.current,
-            cached_params: formValues,
-          }
-        }).catch(err => console.warn("Failed to save preference:", err));
-      }
 
       sessionStorage.setItem('magnus_new_job', 'true');
       router.refresh();
