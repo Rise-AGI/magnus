@@ -14,6 +14,7 @@ dependencies = [
     "pypdf>=5.0.0",
     "python-docx>=1.1.0",
     "python-multipart>=0.0.20",
+    "pywheels==0.8.3.2",
     "ruamel-yaml>=0.18.16",
     "sqlalchemy>=2.0.44",
     "torch>=2.9.1",
