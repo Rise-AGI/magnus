@@ -115,6 +115,11 @@ async def lifespan(app: FastAPI):
 - 前端通过 `NEXT_PUBLIC_*` 环境变量注入
 - 开发模式自动端口 +2，路径后缀 `-develop`
 
+**配置读取原则**：
+- **必须**用 `magnus_config[key]` 直接访问，禁止 `.get()` 带默认值
+- Quick fail 好于模模糊糊地运行不休
+- 必要的配置项在 `_magnus_config.py` 加载时验证存在性和类型
+
 ---
 
 ## Explorer 智能体架构

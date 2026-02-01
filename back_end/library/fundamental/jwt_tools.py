@@ -1,5 +1,5 @@
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 
@@ -40,9 +40,9 @@ class JwtSigner:
         to_encode = payload.copy()
         
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(timezone.utc) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=self.expire_minutes)
+            expire = datetime.now(timezone.utc) + timedelta(minutes=self.expire_minutes)
         
         # 添加标准过期字段
         to_encode.update({"exp": expire})

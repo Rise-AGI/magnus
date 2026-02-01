@@ -1,6 +1,6 @@
 [project]
 name = "magnus-sdk"
-version = "0.2.3"
+version = "0.2.4"
 description = "Official Python SDK and CLI for Magnus"
 requires-python = ">=3.10"
 authors = [
@@ -12,7 +12,6 @@ dependencies = [
     "pydantic>=2.0.0",
     "rich>=13.0.0",
     "python-dotenv>=1.0.0",
-    "pywheels>=0.8.3.2",
     "ruamel.yaml>=0.18.0",
 ]
 

@@ -2,7 +2,7 @@
 import logging
 import asyncio
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -36,7 +36,7 @@ class ServiceManager:
     def _sync_logic(self):
         with SessionLocal() as db:
             active_services = db.query(Service).filter(Service.is_active == True).all()
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             for service in active_services:
                 if not service.current_job_id:
