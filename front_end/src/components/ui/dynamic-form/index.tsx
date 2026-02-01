@@ -21,12 +21,14 @@ function DynamicStringInput({
   onChange,
   hasError,
   disabled,
+  isVisible,
 }: {
   field: FieldSchema;
   value: string;
   onChange: (val: string) => void;
   hasError?: boolean;
   disabled?: boolean;
+  isVisible?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -34,9 +36,9 @@ function DynamicStringInput({
   useEffect(() => {
     if (field.multi_line && textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      textareaRef.current.style.height = `${Math.max(textareaRef.current.scrollHeight, field.min_lines ? field.min_lines * 24 : 42)}px`;
     }
-  }, [value, field.multi_line]);
+  }, [value, field.multi_line, field.min_lines, isVisible]);
 
   const baseClasses = cn(
     "w-full bg-zinc-950 border px-3 py-2.5 rounded-lg text-sm transition-all outline-none placeholder-zinc-700",
@@ -119,12 +121,14 @@ function SingleFieldInput({
   onChange,
   hasError,
   disabled,
+  isVisible,
 }: {
   field: FieldSchema;
   value: any;
   onChange: (val: any) => void;
   hasError?: boolean;
   disabled?: boolean;
+  isVisible?: boolean;
 }) {
   if (field.type === "number") {
     return (
@@ -194,6 +198,7 @@ function SingleFieldInput({
       onChange={onChange}
       hasError={hasError}
       disabled={disabled}
+      isVisible={isVisible}
     />
   );
 }
@@ -205,12 +210,14 @@ function ListField({
   onChange,
   isError,
   disabled,
+  isVisible,
 }: {
   field: FieldSchema;
   values: any[];
   onChange: (val: any[]) => void;
   isError?: boolean;
   disabled?: boolean;
+  isVisible?: boolean;
 }) {
   const items = Array.isArray(values) ? values : [];
 
@@ -246,6 +253,7 @@ function ListField({
               onChange={(val) => handleItemChange(index, val)}
               hasError={isError}
               disabled={disabled}
+              isVisible={isVisible}
             />
           </div>
           {!disabled && (
@@ -279,12 +287,14 @@ function FormField({
   field,
   value,
   onChange,
-  isError
+  isError,
+  isVisible,
 }: {
   field: FieldSchema;
   value: any;
   onChange: (key: string, val: any) => void;
   isError?: boolean;
+  isVisible?: boolean;
 }) {
   const showRequiredStar = field.type === "text" && field.allow_empty === false;
 
@@ -353,6 +363,7 @@ function FormField({
           onChange={handleValueChange}
           isError={isError}
           disabled={!isOptionalEnabled}
+          isVisible={isVisible}
         />
       );
     }
@@ -364,6 +375,7 @@ function FormField({
         onChange={handleValueChange}
         hasError={isError}
         disabled={!isOptionalEnabled}
+        isVisible={isVisible}
       />
     );
   };
@@ -445,12 +457,13 @@ export function DynamicForm({
       {mainFields.length > 0 && (
         <div className="space-y-5">
           {mainFields.map(field => (
-            <FormField 
-              key={field.key} 
-              field={field} 
-              value={values[field.key]} 
+            <FormField
+              key={field.key}
+              field={field}
+              value={values[field.key]}
               onChange={onChange}
               isError={errorField === field.key}
+              isVisible={true}
             />
           ))}
         </div>
@@ -476,12 +489,13 @@ export function DynamicForm({
             {isExpanded && (
               <div className="mt-3 grid grid-cols-1 gap-5 animate-in slide-in-from-top-1 duration-200">
                 {fields.map(field => (
-                   <FormField 
-                     key={field.key} 
-                     field={field} 
-                     value={values[field.key]} 
+                   <FormField
+                     key={field.key}
+                     field={field}
+                     value={values[field.key]}
                      onChange={onChange}
                      isError={errorField === field.key}
+                     isVisible={isExpanded}
                    />
                 ))}
               </div>

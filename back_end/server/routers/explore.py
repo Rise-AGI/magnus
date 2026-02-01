@@ -9,7 +9,7 @@ import threading
 import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Any, AsyncGenerator, cast
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -418,7 +418,7 @@ def update_session(
     if data.title:
         session.title = data.title
 
-    session.updated_at = datetime.utcnow()
+    session.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(session)
     return session
@@ -469,7 +469,7 @@ async def chat(
 
 
     is_first_message = len(session.messages) == 0
-    session.updated_at = datetime.utcnow()
+    session.updated_at = datetime.now(timezone.utc)
     db.commit()
 
 

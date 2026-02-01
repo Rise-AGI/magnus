@@ -7,9 +7,10 @@ function requireEnv(value: string | undefined, key: string): string {
   return value;
 }
 
-const API_PORT = process.env.NEXT_PUBLIC_BACK_END_PORT;
-const SERVER_ADDRESS = process.env.NEXT_PUBLIC_SERVER_ADDRESS;
-export const API_BASE = `${SERVER_ADDRESS}:${API_PORT}`;
+// API_BASE 使用空字符串，所有 /api/... 请求通过 Next.js API Routes 代理到后端
+// 这样无论是 HTTP 本地开发还是 HTTPS 公网访问都不会有 Mixed Content 问题
+// SDK 和其他客户端只需要配置前端地址即可
+export const API_BASE = "";
 export const FEISHU_APP_ID = requireEnv(
     process.env.NEXT_PUBLIC_FEISHU_APP_ID, 
     "NEXT_PUBLIC_FEISHU_APP_ID",
