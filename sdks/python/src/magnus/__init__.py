@@ -1,10 +1,11 @@
 # sdks/python/src/magnus/__init__.py
 import os
 import time
+import json
 import logging
 import asyncio
 import httpx
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, Literal
 
 __all__ = [
     # Core Client
@@ -125,6 +126,33 @@ class MagnusClient:
             raise ResourceNotFoundError(f"Resource not found: {detail}")
         else:
             raise MagnusError(f"API Error ({response.status_code}): {detail}")
+
+    def _join_url(self, base: str, part: Optional[str]) -> str:
+        if not part:
+            return base.rstrip("/")
+        return f"{base.rstrip('/')}/{part.lstrip('/')}"
+
+    def _parse_mcp_sse_response(self, text: str) -> str:
+        results = []
+        for line in text.splitlines():
+            if line.startswith("data: "):
+                try:
+                    data = json.loads(line[6:])
+                    if "result" in data and "content" in data["result"]:
+                        for item in data["result"]["content"]:
+                            if item.get("type") == "text":
+                                inner_text = item.get("text", "")
+                                try:
+                                    inner_json = json.loads(inner_text)
+                                    if isinstance(inner_json, dict) and "content" in inner_json:
+                                        results.append(str(inner_json["content"]))
+                                    else:
+                                        results.append(str(inner_text))
+                                except json.JSONDecodeError:
+                                    results.append(inner_text)
+                except json.JSONDecodeError:
+                    continue
+        return "".join(results) if results else text
 
     # === Blueprint Methods ===
 
@@ -450,24 +478,56 @@ class MagnusClient:
     def call_service(
         self,
         service_id: str,
-        payload: Union[Dict[str, Any], str, bytes],
+        payload: Union[Dict[str, Any], str, bytes, list],
+        endpoint: Optional[str] = None,
         timeout: float = 60.0,
+        protocol: Literal["http", "mcp"] = "http",
+        **kwargs: Any,
     ) -> Any:
         """
         调用托管服务 (RPC)。
         """
+        base_url = f"/services/{service_id}"
+        if protocol == "mcp" and endpoint is None:
+            endpoint = "mcp"
+            
+        url = self._join_url(base_url, endpoint)
+        
+        headers = {}
         request_kwargs = {}
-        if isinstance(payload, dict):
-            request_kwargs["json"] = payload
+
+        if protocol == "mcp":
+            tool_name = kwargs.get("tool_name")
+            if not tool_name:
+                raise ValueError("Protocol 'mcp' requires 'tool_name' in kwargs")
+            
+            headers["Accept"] = "application/json, text/event-stream"
+            rpc_payload = {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": payload if isinstance(payload, dict) else {"data": payload}
+                },
+                "id": 1
+            }
+            request_kwargs["json"] = rpc_payload
         else:
-            request_kwargs["content"] = payload
+            if isinstance(payload, (dict, list)):
+                request_kwargs["json"] = payload
+            else:
+                request_kwargs["content"] = payload
 
         resp = self.http.post(
-            f"/services/{service_id}/", 
+            url, 
             timeout=timeout,
+            headers=headers,
             **request_kwargs
         )
         self._handle_error(resp)
+
+        if protocol == "mcp":
+            return self._parse_mcp_sse_response(resp.text)
 
         content_type = resp.headers.get("content-type", "")
         if "application/json" in content_type:
@@ -477,21 +537,53 @@ class MagnusClient:
     async def call_service_async(
         self,
         service_id: str,
-        payload: Union[Dict[str, Any], str, bytes],
+        payload: Union[Dict[str, Any], str, bytes, list],
+        endpoint: Optional[str] = None,
         timeout: float = 60.0,
+        protocol: Literal["http", "mcp"] = "http",
+        **kwargs: Any,
     ) -> Any:
+        base_url = f"/services/{service_id}"
+        if protocol == "mcp" and endpoint is None:
+            endpoint = "mcp"
+            
+        url = self._join_url(base_url, endpoint)
+        
+        headers = {}
         request_kwargs = {}
-        if isinstance(payload, dict):
-            request_kwargs["json"] = payload
+
+        if protocol == "mcp":
+            tool_name = kwargs.get("tool_name")
+            if not tool_name:
+                raise ValueError("Protocol 'mcp' requires 'tool_name' in kwargs")
+            
+            headers["Accept"] = "application/json, text/event-stream"
+            rpc_payload = {
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": payload if isinstance(payload, dict) else {"data": payload}
+                },
+                "id": 1
+            }
+            request_kwargs["json"] = rpc_payload
         else:
-            request_kwargs["content"] = payload
+            if isinstance(payload, (dict, list)):
+                request_kwargs["json"] = payload
+            else:
+                request_kwargs["content"] = payload
 
         resp = await self.ahttp.post(
-            f"/services/{service_id}/", 
+            url, 
             timeout=timeout,
+            headers=headers,
             **request_kwargs
         )
         self._handle_error(resp)
+
+        if protocol == "mcp":
+            return self._parse_mcp_sse_response(resp.text)
 
         content_type = resp.headers.get("content-type", "")
         if "application/json" in content_type:
@@ -548,17 +640,23 @@ async def run_blueprint_async(
 
 def call_service(
     service_id: str, 
-    payload: Union[Dict[str, Any], str, bytes], 
-    timeout: float = 60.0
+    payload: Union[Dict[str, Any], str, bytes, list], 
+    endpoint: Optional[str] = None,
+    timeout: float = 60.0,
+    protocol: Literal["http", "mcp"] = "http",
+    **kwargs: Any,
 ) -> Any:
-    return default_client.call_service(service_id, payload, timeout)
+    return default_client.call_service(service_id, payload, endpoint, timeout, protocol, **kwargs)
 
 async def call_service_async(
     service_id: str,
-    payload: Union[Dict[str, Any], str, bytes],
-    timeout: float = 60.0
+    payload: Union[Dict[str, Any], str, bytes, list],
+    endpoint: Optional[str] = None,
+    timeout: float = 60.0,
+    protocol: Literal["http", "mcp"] = "http",
+    **kwargs: Any,
 ) -> Any:
-    return await default_client.call_service_async(service_id, payload, timeout)
+    return await default_client.call_service_async(service_id, payload, endpoint, timeout, protocol, **kwargs)
 
 
 def list_jobs(
