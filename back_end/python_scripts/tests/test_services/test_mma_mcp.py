@@ -21,17 +21,13 @@ async def execute_mathematica(
     code: str,
 )-> str:
 
-    result = await call_service_async(
+    return await call_service_async(
         service_id = "mma-mcp",
-        payload = {
-            "code": code
-        },
+        payload = {"code": code},
+        protocol = "mcp",
+        tool_name = "execute_mathematica",
         timeout = 300.0,
     )
-    
-    if isinstance(result, dict) and "text" in result:
-        return str(result["text"])
-    return str(result)
 
 
 async def main():
