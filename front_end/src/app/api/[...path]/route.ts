@@ -9,7 +9,7 @@ const BACKEND_BASE = `${process.env.NEXT_PUBLIC_SERVER_ADDRESS}:${process.env.NE
 
 async function proxyRequest(request: NextRequest, path: string[]) {
   const targetPath = path.join("/");
-  const targetUrl = new URL(`/${targetPath}`, BACKEND_BASE);
+  const targetUrl = new URL(`/api/${targetPath}`, BACKEND_BASE);
   targetUrl.search = request.nextUrl.search;
 
   const headers = new Headers();
