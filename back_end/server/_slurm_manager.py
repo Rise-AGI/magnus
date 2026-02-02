@@ -111,12 +111,77 @@ class SlurmManager:
     def get_resource_snapshot(
         self,
     )-> dict:
-        
+
         cap, alloc = self._get_capacity_and_usage()
         return {
             "total_gpus": cap,
             "slurm_used_gpus": alloc
         }
+
+
+    def submit_job_simple(
+        self,
+        entry_command: str,
+        gpus: int,
+        job_name: str,
+        runner: str,
+        token: str,
+        gpu_type: Optional[str] = None,
+        output_path: Optional[str] = None,
+        overwrite_output: bool = True,
+        cpu_count: Optional[int] = None,
+        memory_demand: Optional[str] = None,
+    ) -> str:
+        """
+        简单提交任务（不含 sleep 和状态检查）
+        让 SLURM 自己管理队列和调度
+        """
+        script_content = f"#!/bin/bash\n\n{entry_command}"
+
+        command = [
+            "sbatch",
+            "--parsable",
+            f"--job-name={job_name}",
+        ]
+
+        log_file = output_path if output_path else "magnus_%j.log"
+        command.append(f"--output={log_file}")
+
+        if not overwrite_output:
+            command.append("--open-mode=append")
+
+        if gpus > 0:
+            if gpu_type and gpu_type != "cpu":
+                command.append(f"--gres=gpu:{gpu_type}:{gpus}")
+            else:
+                command.append(f"--gres=gpu:{gpus}")
+
+        if memory_demand is not None:
+            command.append(f"--mem={memory_demand}")
+        if cpu_count is not None and cpu_count > 0:
+            command.append(f"--cpus-per-task={cpu_count}")
+
+        env: Dict[str, str] = os.environ.copy()
+        if runner is not None:
+            env["MAGNUS_RUNNER"] = runner
+        if token is not None:
+            env["MAGNUS_TOKEN"] = token
+
+        gpu_info = f"{gpu_type}:{gpus}" if (gpu_type and gpus > 0) else f"{gpus}"
+        logger.info(f"🚀 Submitting '{job_name}' to SLURM queue (GPUs: {gpu_info})...")
+
+        result = subprocess.run(
+            command,
+            input=script_content,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+
+        job_id = result.stdout.strip()
+        logger.info(f"✅ Job '{job_name}' queued in SLURM (ID: {job_id})")
+        return job_id
 
 
     def submit_job(

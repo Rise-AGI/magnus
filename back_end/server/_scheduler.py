@@ -10,7 +10,7 @@ from typing import Any, List, Dict
 from pywheels.file_tools import guarantee_file_exist, delete_file
 from .database import SessionLocal
 from .models import *
-from ._slurm_manager import SlurmManager, SlurmResourceError
+from ._slurm_manager import SlurmManager
 from ._magnus_config import magnus_config
 
 
@@ -102,13 +102,48 @@ class MagnusScheduler:
 
     
     def _sync_reality(
-        self, 
+        self,
         db: Session,
     ):
         """
-        同步状态并收割指标
+        同步 SLURM 真实状态到数据库
         """
-        # 获取所有我们认为正在运行的任务
+        # 同步 QUEUED 任务：检查是否已开始运行
+        queued_jobs = db.query(Job).filter(Job.status == JobStatus.QUEUED).all()
+        for job in queued_jobs:
+            if not job.slurm_job_id:
+                logger.warning(f"Job {job.id} is QUEUED but has no slurm_id. Marking FAILED.")
+                job.status = JobStatus.FAILED
+                continue
+
+            real_status = self.slurm_manager.check_job_status(job.slurm_job_id)
+
+            if real_status == "RUNNING":
+                job.status = JobStatus.RUNNING
+                job.start_time = datetime.utcnow()
+                logger.info(f"Job {job.id} started running in SLURM (ID: {job.slurm_job_id})")
+            elif real_status == "COMPLETED":
+                marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
+                if os.path.exists(marker_path):
+                    logger.info(f"Job {job.id} completed successfully (Marker Verified).")
+                    job.status = JobStatus.SUCCESS
+                    result_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_result"
+                    job.result = ".magnus_result" if os.path.exists(result_path) else None
+                else:
+                    logger.warning(f"Job {job.id} completed but NO success marker found. Marking FAILED.")
+                    job.status = JobStatus.FAILED
+                job.slurm_job_id = None
+                self._clean_up_working_table(job.id)
+            elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
+                logger.warning(f"Job {job.id} failed in SLURM queue (Status: {real_status}).")
+                job.status = JobStatus.FAILED
+                job.slurm_job_id = None
+                self._clean_up_working_table(job.id)
+            # PENDING 保持 QUEUED 状态，等待 SLURM 调度
+
+        db.commit()
+
+        # 同步 RUNNING 任务
         running_jobs = db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
         for job in running_jobs:
             if not job.slurm_job_id:
@@ -201,99 +236,136 @@ class MagnusScheduler:
 
     
     def _make_decisions(
-        self, 
+        self,
         db: Session,
     ):
         """
-        第二阶段：调度决策
-        策略：Strict FIFO Blocking (严格队首阻塞)
-        一旦高优先级任务因资源不足受阻，立即停止调度，防止后排小任务插队导致饥饿。
+        调度决策 - 全量挂号 + 优先级重排
+        所有任务都提交到 SLURM 队列，优先级变化时撤销重排
         """
-        
-        real_free_gpus = self.slurm_manager.get_cluster_free_gpus()
-        
-        # 1. 获取所有待调度任务
-        candidates = db.query(Job).filter(
-            Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
-        ).all()
-        if not candidates: return
-
-        # 2. 严格排序：优先级 (A1>A2>B1>B2) > 创建时间 (FIFO)
         priority_map = {
             JobType.A1: 4, JobType.A2: 3,
             JobType.B1: 2, JobType.B2: 1,
         }
-        candidates.sort(
-            key = lambda x: (priority_map[x.job_type], -x.created_at.timestamp()), 
-            reverse = True,
+
+        pending_jobs = db.query(Job).filter(
+            Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
+        ).all()
+        queued_jobs = db.query(Job).filter(Job.status == JobStatus.QUEUED).all()
+
+        # 检查是否需要重排：新任务优先级高于已排队任务
+        need_reorder = False
+        if pending_jobs and queued_jobs:
+            pending_jobs.sort(
+                key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
+                reverse=True,
+            )
+            queued_jobs.sort(
+                key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
+            )
+
+            highest_pending = pending_jobs[0]
+            lowest_queued = queued_jobs[0]
+
+            hp = (priority_map[highest_pending.job_type], -highest_pending.created_at.timestamp())
+            lq = (priority_map[lowest_queued.job_type], -lowest_queued.created_at.timestamp())
+            need_reorder = hp > lq
+
+        if need_reorder:
+            logger.info(f"Priority reorder triggered: cancelling {len(queued_jobs)} queued jobs for resubmission")
+            for job in queued_jobs:
+                if job.slurm_job_id:
+                    self.slurm_manager.kill_job(
+                        job.slurm_job_id,
+                        runner=job.runner if job.runner else "magnus",
+                        token=job.user.token if job.user and job.user.token else "",
+                    )
+                self._clean_up_working_table(job.id)
+                job.status = JobStatus.PENDING
+                job.slurm_job_id = None
+            db.commit()
+            # 重新获取所有 pending 任务
+            pending_jobs = db.query(Job).filter(
+                Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
+            ).all()
+
+        if not pending_jobs:
+            return
+
+        # 按优先级排序后提交
+        pending_jobs.sort(
+            key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
+            reverse=True,
         )
 
-        for job in candidates:
-            job_launched = False
-            
-            # --- 尝试 A: 资源充足，直接启动 ---
-            if real_free_gpus >= job.gpu_count:
-                if self._start_job(db, job):
-                    real_free_gpus -= job.gpu_count
-                    job_launched = True
-            
-            # --- 尝试 B: A 类任务抢占 B 类 ---
-            elif job.job_type in [JobType.A1, JobType.A2]:
-                needed = job.gpu_count - real_free_gpus
-                
-                # 寻找受害者 (B类 Running)
-                potential_victims = db.query(Job).filter(
-                    Job.status == JobStatus.RUNNING,
-                    Job.job_type.in_([JobType.B1, JobType.B2])
-                ).all()
-                
-                # 优先杀 B2，同优先级先杀晚启动的 (LIFO)
-                kill_priority = {JobType.B2: 1, JobType.B1: 0}
-                potential_victims.sort(
-                    key = lambda x: (
-                        kill_priority.get(x.job_type, 0),
-                        x.start_time.timestamp() if x.start_time else 0
-                    ), 
-                    reverse = True,
-                )
-                
-                victims = []
-                recovered_gpus = 0
-                
-                for v in potential_victims:
-                    if recovered_gpus >= needed: break
-                    victims.append(v)
-                    recovered_gpus += v.gpu_count
-                
-                # 仅当受害者足够填补缺口时才动手
-                if recovered_gpus >= needed:
-                    logger.info(f"Preemption: Job {job.id} (Type {job.job_type}) reclaiming {needed} GPUs.")
-                    for v in victims: self._kill_and_pause(db, v)
-                    
-                    real_free_gpus += recovered_gpus
-                    if self._start_job(db, job):
-                        real_free_gpus -= job.gpu_count
-                        job_launched = True
-            
-            # --- 核心：阻塞逻辑 ---
-            if not job_launched:
-                # 队首任务受阻，立刻中断循环，禁止后续任务插队
-                logger.debug(f"Queue Blocked: Job {job.id} waiting for resources. Stopping scheduling.")
-                break
+        for job in pending_jobs:
+            self._submit_to_queue(db, job)
 
-    
-    def _start_job(
-        self, 
-        db: Session, 
+        # A 类任务抢占 RUNNING 的 B 类任务
+        self._handle_preemption(db, priority_map)
+
+    def _handle_preemption(self, db: Session, priority_map: dict):
+        """处理 A 类任务对 RUNNING B 类任务的抢占"""
+        queued_a_jobs = db.query(Job).filter(
+            Job.status == JobStatus.QUEUED,
+            Job.job_type.in_([JobType.A1, JobType.A2])
+        ).all()
+
+        if not queued_a_jobs:
+            return
+
+        running_b_jobs = db.query(Job).filter(
+            Job.status == JobStatus.RUNNING,
+            Job.job_type.in_([JobType.B1, JobType.B2])
+        ).all()
+
+        if not running_b_jobs:
+            return
+
+        queued_a_jobs.sort(
+            key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
+            reverse=True,
+        )
+
+        kill_priority = {JobType.B2: 1, JobType.B1: 0}
+        running_b_jobs.sort(
+            key=lambda x: (
+                kill_priority.get(x.job_type, 0),
+                x.start_time.timestamp() if x.start_time else 0
+            ),
+            reverse=True,
+        )
+
+        free_gpus = self.slurm_manager.get_cluster_free_gpus()
+
+        for a_job in queued_a_jobs:
+            if free_gpus >= a_job.gpu_count:
+                continue
+
+            needed = a_job.gpu_count - free_gpus
+            victims, recovered = [], 0
+
+            for b_job in running_b_jobs:
+                if recovered >= needed:
+                    break
+                if b_job.status != JobStatus.RUNNING:
+                    continue
+                victims.append(b_job)
+                recovered += b_job.gpu_count
+
+            if recovered >= needed:
+                logger.info(f"Preemption: Job {a_job.id} ({a_job.job_type}) reclaiming {needed} GPUs from {len(victims)} B-class jobs")
+                for v in victims:
+                    self._kill_and_pause(db, v)
+                    running_b_jobs.remove(v)
+                free_gpus += recovered
+
+    def _submit_to_queue(
+        self,
+        db: Session,
         job: Job,
-    )-> bool:
-        
-        """
-        原子操作：提交 SLURM + 更新 DB
-        使用 Python Wrapper 自动处理带认证的 Git Clone
-        [Magnus Update] 内置轻量级 GPU Spy Thread
-        """
-        
+    ) -> bool:
+        """提交任务到 SLURM 队列（不等待，不检查状态）"""
         try:
         
             user_magnus = magnus_config["cluster"]["resources"]["runner"]["default_user"]
@@ -518,33 +590,27 @@ if __name__ == "__main__":
             return False
 
         try:
-            # 提交任务：运行 wrapper.py
-            slurm_id = self.slurm_manager.submit_job(
-                entry_command = f"python3 {wrapper_path}",
-                gpus = job.gpu_count,
-                job_name = job.task_name,
-                gpu_type = job.gpu_type,
-                output_path = f"{job_working_table}/slurm/output.txt",
-                slurm_latency = magnus_config["server"]["scheduler"]["slurm_latency"],
-                overwrite_output = False,
-                runner = effective_runner,
-                cpu_count = job.cpu_count,
-                memory_demand = job.memory_demand,
-                token = job.user.token if job.user.token is not None else "",
+            # 提交任务到 SLURM 队列（不等待，不检查状态）
+            slurm_id = self.slurm_manager.submit_job_simple(
+                entry_command=f"python3 {wrapper_path}",
+                gpus=job.gpu_count,
+                job_name=job.task_name,
+                gpu_type=job.gpu_type,
+                output_path=f"{job_working_table}/slurm/output.txt",
+                overwrite_output=False,
+                runner=effective_runner,
+                cpu_count=job.cpu_count,
+                memory_demand=job.memory_demand,
+                token=job.user.token if job.user.token is not None else "",
             )
-            
-            job.status = JobStatus.RUNNING
+
+            job.status = JobStatus.QUEUED
             job.slurm_job_id = slurm_id
-            job.start_time = datetime.utcnow()
             db.commit()
-            
-            logger.info(f"Job {job.id} started (SLURM: {slurm_id}, Branch: {job.branch})")
+
+            logger.info(f"Job {job.id} queued in SLURM (ID: {slurm_id}, Branch: {job.branch})")
             return True
-            
-        except SlurmResourceError:
-            logger.warning(f"Job {job.id} submission failed: Resources unavailable immediately.")
-            return False
-            
+
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}")
             job.status = JobStatus.FAILED

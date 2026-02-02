@@ -36,6 +36,7 @@ class JobType(str, enum.Enum):
 
 class JobStatus(str, enum.Enum):
     PENDING = "Pending"
+    QUEUED = "Queued"
     RUNNING = "Running"
     PAUSED  = "Paused"
     SUCCESS = "Success"
