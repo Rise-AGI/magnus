@@ -153,7 +153,7 @@ def get_job_logs_paginated(
             msg = ""
             if job.status == JobStatus.FAILED:
                 msg = "Job failed. Log file missing.\n"
-            elif job.status in [JobStatus.PENDING, JobStatus.RUNNING]:
+            elif job.status in [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING]:
                 msg = "Waiting for output stream...\n"
             return {"logs": msg, "page": 0, "total_pages": 1}
 

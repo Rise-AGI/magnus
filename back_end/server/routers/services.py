@@ -4,7 +4,7 @@ import logging
 import asyncio
 import socket
 from typing import Optional, Dict, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 from pydantic import BaseModel
 
@@ -84,7 +84,7 @@ def _get_service_snapshot_standalone(service_id: str) -> ServiceSnapshot:
         if not service:
             raise HTTPException(status_code=404, detail="Service not found")
         # Keep-Alive: We update activity here as it's a "read" intent
-        service.last_activity_time = datetime.utcnow()
+        service.last_activity_time = datetime.now(timezone.utc)
         db.commit()
         return ServiceSnapshot.model_validate(service)
 
@@ -104,7 +104,7 @@ def _shutdown_service_resources_sync(service_id: str, db: Session):
     if service.current_job_id:
         job = db.query(models.Job).filter(models.Job.id == service.current_job_id).first()
         
-        if job and job.status in [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.PAUSED]:
+        if job and job.status in [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.PAUSED]:
             try:
                 logger.info(f"Terminating job {job.id} for service {service.id} via Scheduler...")
                 scheduler.terminate_job(db, job)
@@ -114,7 +114,7 @@ def _shutdown_service_resources_sync(service_id: str, db: Session):
     # Clean up Service runtime state
     service.assigned_port = None
     service.current_job_id = None
-    service.last_activity_time = datetime.utcnow()
+    service.last_activity_time = datetime.now(timezone.utc)
     
     db.flush()
 
@@ -217,7 +217,7 @@ def _update_activity_standalone(service_id: str):
     with SessionLocal() as db:
         service = db.query(models.Service).filter(models.Service.id == service_id).first()
         if service:
-            service.last_activity_time = datetime.utcnow()
+            service.last_activity_time = datetime.now(timezone.utc)
             db.commit()
 
 
@@ -248,7 +248,7 @@ def create_service(
         for k, v in data.items():
             setattr(existing, k, v)
         existing.owner_id = current_user.id
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = datetime.now(timezone.utc)
 
         if was_active and not will_be_active:
             _shutdown_service_resources_sync(existing.id, db)
@@ -262,8 +262,8 @@ def create_service(
     new_service = Service(
         **data,
         owner_id=current_user.id,
-        last_activity_time=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        last_activity_time=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
     )
     db.add(new_service)
     db.commit()
@@ -380,13 +380,13 @@ async def proxy_service_request(
 ) -> StreamingResponse:
     
     # === 1. Start SLA Timer ===
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     total_budget: Optional[float] = None 
 
     def get_remaining_time() -> float:
         # Before snapshot, allow a generous fallback
         if total_budget is None: return 30.0 
-        elapsed = (datetime.utcnow() - start_time).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
         return max(0.0, total_budget - elapsed)
 
     # === 2. Lightweight Pre-checks (Protected by Inner Bulkhead) ===

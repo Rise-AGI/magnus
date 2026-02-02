@@ -1,7 +1,7 @@
 # back_end/server/routers/cluster.py
 import random
 from typing import List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -131,8 +131,9 @@ def get_cluster_stats(
     paginated_running = sorted_all_running[running_skip : running_skip + running_limit]
 
     # --- 6. Pending Jobs 处理与分页 ---
+    # QUEUED 在前端显示为 Pending，所以这里要一起查询
     pending_jobs_orm = db.query(models.Job).filter(
-        models.Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
+        models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED])
     ).all()
 
     # 保持原有调度器排序逻辑
@@ -177,10 +178,10 @@ def get_my_active_jobs(
         models.Job.status == JobStatus.RUNNING,
     ).order_by(models.Job.start_time.desc()).all()
 
-    # 获取排队任务
+    # 获取排队任务 (QUEUED 在前端显示为 Pending)
     queued_orm = db.query(models.Job).filter(
         models.Job.user_id == current_user.id,
-        models.Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED]),
+        models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
     ).all()
 
     # 对排队任务应用调度排序
@@ -209,7 +210,7 @@ def get_dashboard_stats(
     - Occupancy (占有率): 真实数据 (基于 ClusterSnapshot 历史平均)
     - Utilization (利用率): Mock 数据 (因为没有 DCGM 监控)
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # --- 逻辑 A: 计算真实的 Occupancy (Allocation) ---
     def get_real_occupancy(hours: int) -> float:
