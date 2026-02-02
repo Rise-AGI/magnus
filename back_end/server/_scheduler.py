@@ -240,79 +240,53 @@ class MagnusScheduler:
         db: Session,
     ):
         """
-        调度决策 - 全量挂号 + 优先级重排
-        所有任务都提交到 SLURM 队列，优先级变化时撤销重排
+        调度决策 - 队头挂号模式
+
+        核心逻辑：
+        1. 只有当没有 QUEUED 任务时，才提交队头任务到 SLURM
+        2. Magnus 完全掌控调度顺序，避免 SLURM Fairshare 打乱优先级
+        3. A 类任务可以抢占 RUNNING 的 B 类任务
         """
         priority_map = {
             JobType.A1: 4, JobType.A2: 3,
             JobType.B1: 2, JobType.B2: 1,
         }
 
+        # 检查是否有任务正在 SLURM 队列中等待
+        queued_count = db.query(Job).filter(Job.status == JobStatus.QUEUED).count()
+
+        # 获取所有待调度任务
         pending_jobs = db.query(Job).filter(
             Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
         ).all()
-        queued_jobs = db.query(Job).filter(Job.status == JobStatus.QUEUED).all()
-
-        # 检查是否需要重排：新任务优先级高于已排队任务
-        need_reorder = False
-        if pending_jobs and queued_jobs:
-            pending_jobs.sort(
-                key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
-                reverse=True,
-            )
-            queued_jobs.sort(
-                key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
-            )
-
-            highest_pending = pending_jobs[0]
-            lowest_queued = queued_jobs[0]
-
-            hp = (priority_map[highest_pending.job_type], -highest_pending.created_at.timestamp())
-            lq = (priority_map[lowest_queued.job_type], -lowest_queued.created_at.timestamp())
-            need_reorder = hp > lq
-
-        if need_reorder:
-            logger.info(f"Priority reorder triggered: cancelling {len(queued_jobs)} queued jobs for resubmission")
-            for job in queued_jobs:
-                if job.slurm_job_id:
-                    self.slurm_manager.kill_job(
-                        job.slurm_job_id,
-                        runner=job.runner if job.runner else "magnus",
-                        token=job.user.token if job.user and job.user.token else "",
-                    )
-                self._clean_up_working_table(job.id)
-                job.status = JobStatus.PENDING
-                job.slurm_job_id = None
-            db.commit()
-            # 重新获取所有 pending 任务
-            pending_jobs = db.query(Job).filter(
-                Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
-            ).all()
 
         if not pending_jobs:
             return
 
-        # 按优先级排序后提交
+        # 按优先级排序
         pending_jobs.sort(
             key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
             reverse=True,
         )
 
-        for job in pending_jobs:
-            self._submit_to_queue(db, job)
+        head_job = pending_jobs[0]
 
-        # A 类任务抢占 RUNNING 的 B 类任务
-        self._handle_preemption(db, priority_map)
+        # 如果队头是 A 类任务，检查是否需要抢占 RUNNING 的 B 类任务
+        if head_job.job_type in [JobType.A1, JobType.A2]:
+            self._handle_preemption_for_job(db, head_job, priority_map)
 
-    def _handle_preemption(self, db: Session, priority_map: dict):
-        """处理 A 类任务对 RUNNING B 类任务的抢占"""
-        queued_a_jobs = db.query(Job).filter(
-            Job.status == JobStatus.QUEUED,
-            Job.job_type.in_([JobType.A1, JobType.A2])
-        ).all()
+        # 只有当没有 QUEUED 任务时，才提交队头
+        if queued_count == 0:
+            self._submit_to_queue(db, head_job)
 
-        if not queued_a_jobs:
-            return
+    def _handle_preemption_for_job(self, db: Session, job: Job, priority_map: dict):
+        """为指定的 A 类任务处理抢占逻辑"""
+        free_gpus = self.slurm_manager.get_cluster_free_gpus()
+
+        if free_gpus >= job.gpu_count:
+            return  # 资源充足，无需抢占
+
+        needed = job.gpu_count - free_gpus
 
         running_b_jobs = db.query(Job).filter(
             Job.status == JobStatus.RUNNING,
@@ -322,11 +296,7 @@ class MagnusScheduler:
         if not running_b_jobs:
             return
 
-        queued_a_jobs.sort(
-            key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
-            reverse=True,
-        )
-
+        # 优先杀 B2，同优先级先杀晚启动的 (LIFO)
         kill_priority = {JobType.B2: 1, JobType.B1: 0}
         running_b_jobs.sort(
             key=lambda x: (
@@ -336,29 +306,17 @@ class MagnusScheduler:
             reverse=True,
         )
 
-        free_gpus = self.slurm_manager.get_cluster_free_gpus()
-
-        for a_job in queued_a_jobs:
-            if free_gpus >= a_job.gpu_count:
-                continue
-
-            needed = a_job.gpu_count - free_gpus
-            victims, recovered = [], 0
-
-            for b_job in running_b_jobs:
-                if recovered >= needed:
-                    break
-                if b_job.status != JobStatus.RUNNING:
-                    continue
-                victims.append(b_job)
-                recovered += b_job.gpu_count
-
+        victims, recovered = [], 0
+        for b_job in running_b_jobs:
             if recovered >= needed:
-                logger.info(f"Preemption: Job {a_job.id} ({a_job.job_type}) reclaiming {needed} GPUs from {len(victims)} B-class jobs")
-                for v in victims:
-                    self._kill_and_pause(db, v)
-                    running_b_jobs.remove(v)
-                free_gpus += recovered
+                break
+            victims.append(b_job)
+            recovered += b_job.gpu_count
+
+        if recovered >= needed:
+            logger.info(f"Preemption: Job {job.id} ({job.job_type}) reclaiming {needed} GPUs from {len(victims)} B-class jobs")
+            for v in victims:
+                self._kill_and_pause(db, v)
 
     def _submit_to_queue(
         self,
