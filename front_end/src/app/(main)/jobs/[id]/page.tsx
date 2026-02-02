@@ -356,19 +356,19 @@ export default function JobDetailsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* Left Column: Configuration */}
-        <div className="lg:col-span-1 flex flex-col gap-6">
+        <div className="lg:col-span-1 flex flex-col gap-3 h-full">
 
           {/* Repository Info */}
           <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
+            <div className="px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <GitBranch className="w-4 h-4 text-zinc-400" />
               <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.repository")}</h3>
             </div>
-            <div className="p-5 space-y-5">
+            <div className="p-4 space-y-3">
 
               {/* Repo Name */}
               <div>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-1.5">
                   <a
                     href={`https://github.com/${job.namespace}/${job.repo_name}`}
                     target="_blank"
@@ -381,7 +381,7 @@ export default function JobDetailsPage() {
                   </a>
                 </div>
 
-                <div className="flex items-center gap-2 text-sm text-zinc-200 bg-zinc-950 px-3 py-2 rounded-lg border border-zinc-800/50 shadow-inner">
+                <div className="flex items-center gap-2 text-sm text-zinc-200 bg-zinc-950 px-3 py-1.5 rounded-lg border border-zinc-800/50 shadow-inner">
                   <Box className="w-4 h-4 text-zinc-500 flex-shrink-0" />
                   <CopyableText
                     text={`${job.namespace}/${job.repo_name}`}
@@ -391,10 +391,10 @@ export default function JobDetailsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-1 gap-2.5">
                 {/* Branch */}
                 <div>
-                  <div className="flex items-center gap-2 mb-1.5">
+                  <div className="flex items-center gap-2 mb-1">
                     <a
                       href={`https://github.com/${job.namespace}/${job.repo_name}/tree/${job.branch}`}
                       target="_blank"
@@ -417,7 +417,7 @@ export default function JobDetailsPage() {
 
                 {/* Commit SHA */}
                 <div>
-                  <div className="flex items-center gap-2 mb-1.5">
+                  <div className="flex items-center gap-2 mb-1">
                     <a
                       href={`https://github.com/${job.namespace}/${job.repo_name}/commit/${job.commit_sha}`}
                       target="_blank"
@@ -443,39 +443,39 @@ export default function JobDetailsPage() {
 
           {/* Resources */}
           <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
+            <div className="px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <Cpu className="w-4 h-4 text-zinc-400" />
               <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.resources")}</h3>
             </div>
-            <div className="p-5 grid grid-cols-2 gap-4">
+            <div className="p-4 grid grid-cols-2 gap-x-4 gap-y-3">
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("jobDetail.accelerator")}</label>
-                <span className="text-base text-white font-medium block">
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.accelerator")}</label>
+                <span className="text-sm text-white font-medium block">
                   {job.gpu_type === "CPU" ? t("jobDetail.cpuOnly") : job.gpu_type}
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("jobDetail.gpuCount")}</label>
-                <span className="text-base text-white font-medium block">{job.gpu_count} {job.gpu_count === 1 ? "GPU" : "GPUs"}</span>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.gpuCount")}</label>
+                <span className="text-sm text-white font-medium block">{job.gpu_count} {job.gpu_count === 1 ? "GPU" : "GPUs"}</span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("jobDetail.cpuCores")}</label>
-                <span className="text-base text-white font-medium block">
-                  {job.cpu_count ? job.cpu_count : <span className="text-zinc-500 text-sm">{t("jobDetail.stationDefault")}</span>}
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.cpuCores")}</label>
+                <span className="text-sm text-white font-medium block">
+                  {job.cpu_count ? job.cpu_count : <span className="text-zinc-500 text-xs">{t("jobDetail.stationDefault")}</span>}
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1.5">{t("jobDetail.memory")}</label>
-                <span className="text-base text-white font-medium block">
-                  {job.memory_demand ? job.memory_demand : <span className="text-zinc-500 text-sm">{t("jobDetail.stationDefault")}</span>}
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.memory")}</label>
+                <span className="text-sm text-white font-medium block">
+                  {job.memory_demand ? job.memory_demand : <span className="text-zinc-500 text-xs">{t("jobDetail.stationDefault")}</span>}
                 </span>
               </div>
             </div>
           </div>
 
           {/* Entry Command */}
-          <div className="flex-1 min-h-0 flex flex-col bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
-            <div className="shrink-0 px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
+          <div className="flex-1 min-h-0 flex flex-col bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
+            <div className="shrink-0 px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-zinc-400" />
                 <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.entryCommand")}</h3>
@@ -489,10 +489,12 @@ export default function JobDetailsPage() {
               </button>
             </div>
             
-            <div className="flex-1 overflow-auto p-4 bg-zinc-950 custom-scrollbar">
-              <pre className="text-xs font-mono text-green-400 leading-relaxed whitespace-pre-wrap break-all selection:bg-green-900/50 selection:text-green-200">
-                {job.entry_command}
-              </pre>
+            <div className="flex-1 relative min-h-0 bg-zinc-950 group">
+              <div className="absolute inset-0 overflow-y-auto p-4 custom-scrollbar">
+                <pre className="text-xs font-mono text-green-400 leading-relaxed whitespace-pre-wrap break-all selection:bg-green-900/50 selection:text-green-200">
+                  {job.entry_command}
+                </pre>
+              </div>
             </div>
           </div>
 
