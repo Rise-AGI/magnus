@@ -30,6 +30,7 @@ def main():
     magnus.configure(address=args.address)
     
     result = execute_mathematica(args.code, args.timeout)
+    print(result)
 
     result_path = os.environ.get("MAGNUS_RESULT")
     assert result_path is not None, "Environment variable MAGNUS_RESULT is not set."
