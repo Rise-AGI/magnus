@@ -154,6 +154,7 @@ class ResourceManager:
         commit_sha: str,
         target_dir: str,
         runner: str,
+        job_working_dir: str,
     ) -> Tuple[bool, Optional[str]]:
         """
         Clone 仓库到任务工作目录。返回 (success, error_msg)
@@ -195,7 +196,7 @@ class ResourceManager:
             logger.error(f"Failed to checkout {commit_sha}: {error_msg}")
             return False, f"git checkout failed: {error_msg}"
 
-        # 设置 ACL：runner 用户可读写
+        # 设置 ACL：runner 用户可读写整个工作目录（包括 success marker 等）
         default_runner = magnus_config["cluster"]["default_runner"]
         try:
             subprocess.run([
@@ -203,7 +204,7 @@ class ResourceManager:
                 "-m", f"u:{runner}:rwx",
                 "-d", "-m", f"u:{default_runner}:rwx",
                 "-d", "-m", f"u:{runner}:rwx",
-                target_dir,
+                job_working_dir,
             ], check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             logger.warning(f"setfacl failed: {e.stderr.decode()}")
