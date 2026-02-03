@@ -244,7 +244,7 @@ class MagnusScheduler:
             self._submit_to_slurm(db, head_job)
 
     async def _prepare_job_resources(self, job_id: str):
-        """异步准备任务资源：镜像 + 仓库"""
+        """异步准备任务资源：镜像 + 仓库（并行）"""
         with SessionLocal() as db:
             job = db.query(Job).filter(Job.id == job_id).first()
             if not job or job.status != JobStatus.PREPARING:
@@ -257,17 +257,9 @@ class MagnusScheduler:
             # 准备工作目录
             guarantee_file_exist(job_working_table, is_directory=True)
 
-            # 1. 准备镜像
-            success, error = await resource_manager.ensure_image(job.container_image)
-            if not success:
-                job.status = JobStatus.FAILED
-                job.result = f"Failed to pull image: {error}"
-                db.commit()
-                logger.error(f"Job {job.id} failed: {error}")
-                return
-
-            # 2. 准备仓库
-            success, error = await resource_manager.ensure_repo(
+            # 并行准备镜像和仓库
+            image_task = resource_manager.ensure_image(job.container_image)
+            repo_task = resource_manager.ensure_repo(
                 namespace=job.namespace,
                 repo_name=job.repo_name,
                 branch=job.branch,
@@ -275,11 +267,21 @@ class MagnusScheduler:
                 target_dir=repo_dir,
                 runner=effective_runner,
             )
-            if not success:
+
+            (image_ok, image_err), (repo_ok, repo_err) = await asyncio.gather(image_task, repo_task)
+
+            if not image_ok:
                 job.status = JobStatus.FAILED
-                job.result = f"Failed to clone repo: {error}"
+                job.result = f"Failed to pull image: {image_err}"
                 db.commit()
-                logger.error(f"Job {job.id} failed: {error}")
+                logger.error(f"Job {job.id} failed: {image_err}")
+                return
+
+            if not repo_ok:
+                job.status = JobStatus.FAILED
+                job.result = f"Failed to clone repo: {repo_err}"
+                db.commit()
+                logger.error(f"Job {job.id} failed: {repo_err}")
                 return
 
             # 资源就绪，进入待调度队列
