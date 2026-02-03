@@ -266,6 +266,7 @@ class MagnusScheduler:
                 commit_sha=job.commit_sha,
                 target_dir=repo_dir,
                 runner=effective_runner,
+                job_working_dir=job_working_table,
             )
 
             (image_ok, image_err), (repo_ok, repo_err) = await asyncio.gather(image_task, repo_task)
