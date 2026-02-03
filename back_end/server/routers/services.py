@@ -106,7 +106,7 @@ def _shutdown_service_resources_sync(service_id: str, db: Session):
     if service.current_job_id:
         job = db.query(models.Job).filter(models.Job.id == service.current_job_id).first()
         
-        if job and job.status in [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.PAUSED]:
+        if job and job.status in [JobStatus.PREPARING, JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.PAUSED]:
             try:
                 logger.info(f"Terminating job {job.id} for service {service.id} via Scheduler...")
                 scheduler.terminate_job(db, job)
@@ -166,7 +166,7 @@ def _try_revive_service_standalone(service_id: str) -> Tuple[str, int]:
                 memory_demand = service.memory_demand,
                 runner = service.runner,
                 entry_command = env_cmd,
-                status = JobStatus.PENDING,
+                status = JobStatus.PREPARING,
                 job_type = service.job_type,
                 container_image = service.container_image or magnus_config["cluster"]["default_container_image"],
                 system_entry_command = service.system_entry_command,

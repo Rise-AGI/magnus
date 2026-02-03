@@ -1,10 +1,9 @@
 # back_end/server/_scheduler.py
 import os
-import re
 import json
+import asyncio
 import logging
 import traceback
-import subprocess
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from typing import Any, List, Dict
@@ -13,19 +12,12 @@ from .database import SessionLocal
 from .models import *
 from ._slurm_manager import SlurmManager
 from ._magnus_config import magnus_config
+from ._resource_manager import resource_manager
 
 
 __all__ = [
     "scheduler",
 ]
-
-
-def _image_to_sif_filename(image: str) -> str:
-    """docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime -> pytorch_pytorch_2.5.1-cuda12.4-cudnn9-runtime.sif"""
-    name = re.sub(r'^[a-z]+://', '', image)
-    name = re.sub(r'[/:@]', '_', name)
-    name = re.sub(r'_+', '_', name).strip('_')
-    return f"{name}.sif"
 
 
 magnus_root = magnus_config['server']['root']
@@ -50,15 +42,16 @@ class MagnusScheduler:
             logger.critical(f"Scheduler disabled due to missing SLURM: {e}")
             self.enabled = False
         self.last_snapshot_time = datetime.min.replace(tzinfo=timezone.utc)
+        self.preparing_jobs: Dict[str, asyncio.Task] = {}  # job_id -> Task
 
 
-    def tick(self):
+    async def tick(self):
         """调度器心跳：同步状态 -> 决策调度"""
         if not self.enabled: return
         with SessionLocal() as db:
             try:
                 self._sync_reality(db)
-                self._make_decisions(db)
+                await self._make_decisions(db)
                 self._record_snapshot(db)
             except Exception as e:
                 logger.error(f"Scheduler tick failed: {e}", exc_info=True)
@@ -189,46 +182,110 @@ class MagnusScheduler:
             logger.error(f"Failed to harvest metrics for job {job.id}: {e}")
 
 
-    def _make_decisions(self, db: Session):
+    async def _make_decisions(self, db: Session):
         """
         调度决策 - 队头挂号模式
 
+        状态流转：Preparing → Pending → Queued → Running
+        - Preparing: 系统正在准备资源（镜像、仓库）
+        - Pending: 资源就绪，等待调度决策
+        - Queued: 已提交到 SLURM，等待执行
+        - Running: SLURM 正在执行
+
         核心逻辑：
-        1. 只有当没有 QUEUED 任务时，才提交队头任务到 SLURM
-        2. Magnus 完全掌控调度顺序，避免 SLURM Fairshare 打乱优先级
-        3. A 类任务可以抢占 RUNNING 的 B 类任务
+        1. 新任务以 Preparing 状态进入，启动异步资源准备
+        2. 资源准备完成后变为 Pending
+        3. 调度器从 Pending 任务中选择队头提交到 SLURM
+        4. A 类任务可以抢占 RUNNING 的 B 类任务
         """
         priority_map = {
             JobType.A1: 4, JobType.A2: 3,
             JobType.B1: 2, JobType.B2: 1,
         }
 
-        # 检查是否有任务正在 SLURM 队列中等待
-        queued_count = db.query(Job).filter(Job.status == JobStatus.QUEUED).count()
+        # Phase 1: 启动 Preparing 任务的资源准备
+        preparing_jobs = db.query(Job).filter(Job.status == JobStatus.PREPARING).all()
+        for job in preparing_jobs:
+            if job.id not in self.preparing_jobs:
+                task = asyncio.create_task(self._prepare_job_resources(job.id))
+                self.preparing_jobs[job.id] = task
+                logger.info(f"Job {job.id} started resource preparation")
 
-        # 获取所有待调度任务
-        pending_jobs = db.query(Job).filter(
+        # Phase 2: 清理已完成的 preparing tasks
+        done_jobs = [jid for jid, task in self.preparing_jobs.items() if task.done()]
+        for jid in done_jobs:
+            del self.preparing_jobs[jid]
+
+        # Phase 3: 调度 Pending 任务（资源已就绪，等待提交到 SLURM）
+        # 获取所有待调度任务（Pending 和 Paused）
+        schedulable_jobs = db.query(Job).filter(
             Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
         ).all()
 
-        if not pending_jobs:
+        if not schedulable_jobs:
             return
 
         # 按优先级排序
-        pending_jobs.sort(
-            key=lambda x: (priority_map[x.job_type], -x.created_at.timestamp()),
+        schedulable_jobs.sort(
+            key=lambda x: (priority_map.get(x.job_type, 0), -x.created_at.timestamp()),
             reverse=True,
         )
 
-        head_job = pending_jobs[0]
+        head_job = schedulable_jobs[0]
 
         # 如果队头是 A 类任务，检查是否需要抢占 RUNNING 的 B 类任务
         if head_job.job_type in [JobType.A1, JobType.A2]:
             self._handle_preemption_for_job(db, head_job)
 
-        # 只有当没有 QUEUED 任务时，才提交队头
-        if queued_count == 0:
-            self._submit_to_queue(db, head_job)
+        # 只有当没有任务在 SLURM 队列中等待时，才提交队头
+        slurm_queued_count = db.query(Job).filter(Job.status == JobStatus.QUEUED).count()
+
+        if slurm_queued_count == 0:
+            self._submit_to_slurm(db, head_job)
+
+    async def _prepare_job_resources(self, job_id: str):
+        """异步准备任务资源：镜像 + 仓库"""
+        with SessionLocal() as db:
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if not job or job.status != JobStatus.PREPARING:
+                return
+
+            effective_runner = job.runner or magnus_config["cluster"]["default_runner"]
+            job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
+            repo_dir = f"{job_working_table}/repository"
+
+            # 准备工作目录
+            guarantee_file_exist(job_working_table, is_directory=True)
+
+            # 1. 准备镜像
+            success, error = await resource_manager.ensure_image(job.container_image)
+            if not success:
+                job.status = JobStatus.FAILED
+                job.result = f"Failed to pull image: {error}"
+                db.commit()
+                logger.error(f"Job {job.id} failed: {error}")
+                return
+
+            # 2. 准备仓库
+            success, error = await resource_manager.ensure_repo(
+                namespace=job.namespace,
+                repo_name=job.repo_name,
+                branch=job.branch,
+                commit_sha=job.commit_sha,
+                target_dir=repo_dir,
+                runner=effective_runner,
+            )
+            if not success:
+                job.status = JobStatus.FAILED
+                job.result = f"Failed to clone repo: {error}"
+                db.commit()
+                logger.error(f"Job {job.id} failed: {error}")
+                return
+
+            # 资源就绪，进入待调度队列
+            job.status = JobStatus.PENDING
+            db.commit()
+            logger.info(f"Job {job.id} resources ready, status -> PENDING")
 
     def _handle_preemption_for_job(self, db: Session, job: Job):
         """为指定的 A 类任务处理抢占逻辑"""
@@ -269,24 +326,19 @@ class MagnusScheduler:
             for v in victims:
                 self._kill_and_pause(db, v)
 
-    def _submit_to_queue(self, db: Session, job: Job) -> bool:
+    def _submit_to_slurm(self, db: Session, job: Job) -> bool:
         """
         提交任务到 SLURM 队列
-        执行流程: system_entry_command (host) → wrapper.py → git clone → apptainer exec → epilogue
+        资源（镜像、仓库）已在 Preparing 阶段准备好
+        执行流程: wrapper.py → system_entry_command → apptainer exec → epilogue
         """
         try:
             user_magnus = magnus_config["cluster"]["default_runner"]
             effective_runner = job.runner if job.runner is not None else user_magnus
 
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
+            repo_dir = f"{job_working_table}/repository"
             guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
-            subprocess.run([
-                "setfacl", "-R",
-                "-m", f"u:{effective_runner}:rwx",
-                "-d", "-m", f"u:{user_magnus}:rwx",
-                "-d", "-m", f"u:{effective_runner}:rwx",
-                job_working_table,
-            ], check=True)
 
             gpu_status_path = f"{job_working_table}/gpu_status.json"
             try:
@@ -305,7 +357,6 @@ class MagnusScheduler:
                     except OSError:
                         pass
 
-            auth_repo_url = f"git@github.com:{job.namespace}/{job.repo_name}.git"
             spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
             user_token = job.user.token or ""
 
@@ -315,11 +366,8 @@ class MagnusScheduler:
             db.commit()
             return False
 
-        container_image = job.container_image
-        sif_filename = _image_to_sif_filename(container_image)
+        sif_path = resource_manager.get_sif_path(job.container_image)
         default_system_entry_command = magnus_config["cluster"]["default_system_entry_command"]
-
-        # System entry command: user override or config defaults
         base_system_entry_command = job.system_entry_command if job.system_entry_command else default_system_entry_command
         system_entry_command = base_system_entry_command.strip()
 
@@ -352,14 +400,14 @@ def _spy_gpu_thread(status_path):
         time.sleep(interval)
 
 def main():
-    repo_url = {repr(auth_repo_url)}
-    branch = {repr(job.branch)}
-    commit_sha = {repr(job.commit_sha)}
     work_dir = {repr(job_working_table)}
-    repo_dir = os.path.join(work_dir, "repository")
+    repo_dir = {repr(repo_dir)}
     success_marker_path = {repr(success_marker_path)}
     result_marker_path = {repr(result_marker_path)}
     gpu_status_path = {repr(gpu_status_path)}
+    sif_path = {repr(sif_path)}
+    system_entry_command = {repr(system_entry_command)}
+    user_token = {repr(user_token)}
 
     user_cmd_str = {repr(job.entry_command)}
     if "sudo" in user_cmd_str:
@@ -368,14 +416,6 @@ def main():
     if effective_runner == "root":
         raise RuntimeError("Error: Not privileged.")
 
-    container_image = {repr(container_image)}
-    container_cache_dir = {repr(magnus_container_cache_path)}
-    sif_filename = {repr(sif_filename)}
-    sif_path = os.path.join(container_cache_dir, sif_filename)
-
-    system_entry_command = {repr(system_entry_command)}
-    user_token = {repr(user_token)}
-
     # Phase 1: Start GPU Spy
     try:
         spy = threading.Thread(target=_spy_gpu_thread, args=(gpu_status_path,), daemon=True)
@@ -383,33 +423,7 @@ def main():
     except Exception as e:
         print(f"Magnus Warning: Failed to start GPU spy: {{e}}", file=sys.stderr)
 
-    # Phase 2: Git Clone
-    try:
-        stealth_key_path = os.path.expanduser("~/.ssh/.sys_fallback")
-        git_ssh_cmd = f"ssh -i {{stealth_key_path}} -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=no"
-        git_env = os.environ.copy()
-        git_env["GIT_SSH_COMMAND"] = git_ssh_cmd
-        subprocess.check_call(["git", "clone", "--branch", branch, "--single-branch", repo_url, repo_dir], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=git_env)
-        subprocess.check_call(["git", "checkout", commit_sha], cwd=repo_dir, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=git_env)
-    except subprocess.CalledProcessError as error:
-        print(f"Magnus System Error: Failed to setup repository environment.\\nTraceback: \\n{{traceback.format_exc()}}", file=sys.stderr, flush=True)
-        if error.stderr:
-            print(f"Git Error: {{error.stderr.decode().strip()}}", file=sys.stderr, flush=True)
-        sys.exit(1)
-    except Exception as error:
-        print(f"Magnus System Error: {{error}}", file=sys.stderr)
-        sys.exit(1)
-
-    # Phase 3: Pull Container Image
-    if not os.path.exists(sif_path):
-        print(f"Magnus: Pulling container image {{container_image}}...", file=sys.stderr, flush=True)
-        try:
-            subprocess.check_call(["apptainer", "pull", sif_path, container_image], stdout=sys.stderr, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError:
-            print(f"Magnus System Error: Failed to pull container image.\\nTraceback: \\n{{traceback.format_exc()}}", file=sys.stderr, flush=True)
-            sys.exit(1)
-
-    # Phase 4: Prepare user script
+    # Phase 2: Prepare user script
     user_script_path = os.path.join(work_dir, ".magnus_user_script.sh")
     with open(user_script_path, "w") as f:
         f.write("set -e\\n")
@@ -417,7 +431,7 @@ def main():
         f.write("\\n")
     os.chmod(user_script_path, 0o755)
 
-    # Phase 5: Execute with system_entry_command + apptainer
+    # Phase 3: Execute with system_entry_command + apptainer
     try:
         shell_cmd = f"""set -e
 export MAGNUS_TOKEN={{user_token}}
@@ -430,7 +444,7 @@ apptainer exec --nv --pwd "{{repo_dir}}" "{{sif_path}}" bash "{{user_script_path
 """
         ret_code = subprocess.call(shell_cmd, shell=True, executable="/bin/bash")
 
-        # Phase 6: Epilogue - only write success marker if user command succeeded
+        # Phase 4: Epilogue - only write success marker if user command succeeded
         if ret_code == 0:
             with open(success_marker_path, "w") as f:
                 f.write("success")
@@ -470,7 +484,7 @@ if __name__ == "__main__":
             job.slurm_job_id = slurm_id
             db.commit()
 
-            logger.info(f"Job {job.id} queued in SLURM (ID: {slurm_id}, Branch: {job.branch})")
+            logger.info(f"Job {job.id} submitted to SLURM (ID: {slurm_id}, Branch: {job.branch})")
             return True
 
         except Exception as error:
@@ -501,6 +515,11 @@ if __name__ == "__main__":
         if not self.enabled:
             logger.warning("Scheduler disabled, skipping termination logic.")
             return
+
+        # 取消 Preparing 状态的异步任务
+        if job.id in self.preparing_jobs:
+            self.preparing_jobs[job.id].cancel()
+            del self.preparing_jobs[job.id]
 
         if job.slurm_job_id:
             logger.info(f"Terminating job {job.id} (SLURM: {job.slurm_job_id}) by user request.")
