@@ -1,6 +1,7 @@
 # back_end/server/_resource_manager.py
 import os
 import re
+import time
 import asyncio
 import logging
 import subprocess
@@ -120,6 +121,7 @@ class ResourceManager:
             self._evict_lru_images()
 
             logger.info(f"Pulling container image: {image}")
+            start_time = time.time()
 
             proc = await asyncio.create_subprocess_exec(
                 "apptainer", "pull", sif_path, image,
@@ -138,9 +140,10 @@ class ResourceManager:
                         pass
                 return False, error_msg
 
+            elapsed = time.time() - start_time
             # 设置权限：所有用户可读
             os.chmod(sif_path, 0o644)
-            logger.info(f"Image ready: {sif_path}")
+            logger.info(f"Image ready: {sif_path} ({elapsed:.1f}s)")
             return True, None
 
     async def ensure_repo(
@@ -163,6 +166,7 @@ class ResourceManager:
         repo_url = f"git@github.com:{namespace}/{repo_name}.git"
 
         logger.info(f"Cloning repo: {repo_url} -> {target_dir}")
+        start_time = time.time()
 
         # git clone
         proc = await asyncio.create_subprocess_exec(
@@ -204,7 +208,8 @@ class ResourceManager:
         except subprocess.CalledProcessError as e:
             logger.warning(f"setfacl failed: {e.stderr.decode()}")
 
-        logger.info(f"Repo ready: {target_dir}")
+        elapsed = time.time() - start_time
+        logger.info(f"Repo ready: {target_dir} ({elapsed:.1f}s)")
         return True, None
 
 
