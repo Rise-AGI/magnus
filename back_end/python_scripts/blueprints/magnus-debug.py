@@ -1,8 +1,7 @@
-# ============ 复制进 web 端时省略这个导入 ============
-from server import *
+# ============ 复制进 web 端时省略这些导入 ============
+from server import JobSubmission, JobType
+from typing import Annotated, Literal, Optional, List
 # =====================================================
-from typing import Annotated
-
 UserName = Annotated[str, {
     "label": "User Name",
     "placeholder": "enter your username on liustation2 here",

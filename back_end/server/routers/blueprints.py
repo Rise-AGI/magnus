@@ -1,7 +1,7 @@
 # back_end/server/routers/blueprints.py
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
@@ -121,7 +121,7 @@ def create_blueprint(
         existing.title = bp.title
         existing.description = bp.description
         existing.code = bp.code
-        existing.updated_at = datetime.utcnow()
+        existing.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(existing)
         return existing
@@ -308,7 +308,7 @@ def run_blueprint(
             if pref:
                 pref.blueprint_hash = current_hash
                 pref.cached_params = serialized_params
-                pref.updated_at = datetime.utcnow()
+                pref.updated_at = datetime.now(timezone.utc)
             else:
                 new_pref = models.BlueprintUserPreference(
                     user_id=current_user.id,
@@ -384,7 +384,7 @@ def save_blueprint_preference(
     if pref: # Update
         pref.blueprint_hash = current_hash
         pref.cached_params = serialized_params
-        pref.updated_at = datetime.utcnow()
+        pref.updated_at = datetime.now(timezone.utc)
     else: # Create
         pref = models.BlueprintUserPreference(
             user_id=current_user.id,

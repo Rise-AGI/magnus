@@ -7,6 +7,12 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "magnus",
+    "python-scripts",
+]
+
 [[package]]
 name = "aiofiles"
 version = "25.1.0"
@@ -1513,6 +1519,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/78/96/804520d0850c7db98
 wheels = [
     { url = "https://files.pythonhosted.org/packages/aa/76/03af049af4dcee5d27442f71b6924f01f3efb5d2bd34f23fcd563f2cc5f5/python_multipart-0.0.21-py3-none-any.whl", hash = "sha256:cf7a6713e01c87aa35387f4774e812c4361150938d20d232800f75ffcf266090", size = 24541, upload-time = "2025-12-17T09:24:21.153Z" },
 ]
+
+[[package]]
+name = "python-scripts"
+version = "0.1.0"
+source = { virtual = "python_scripts" }
+dependencies = [
+    { name = "magnus-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "magnus-sdk", specifier = ">=0.2.5" }]
 
 [[package]]
 name = "pywheels"

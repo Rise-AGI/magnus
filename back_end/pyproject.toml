@@ -21,3 +21,8 @@ dependencies = [
     "torchvision>=0.24.1",
     "uvicorn>=0.38.0",
 ]
+
+[tool.uv.workspace]
+members = [
+    "python_scripts",
+]

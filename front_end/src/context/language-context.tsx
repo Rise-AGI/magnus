@@ -127,7 +127,7 @@ const translations = {
   "jobForm.runAsUser": { zh: "运行用户", en: "Run As User" },
   "jobForm.runAsUserDefault": { zh: "默认：{value}", en: "Default: {value}" },
   "jobForm.execution": { zh: "执行", en: "Execution" },
-  "jobForm.entryCommand": { zh: "入口命令", en: "Entry Command" },
+  "jobForm.entryCommand": { zh: "入口指令", en: "Entry Command" },
   "jobForm.waitingForLaunch": { zh: "等待启动", en: "Waiting for launch" },
   "jobForm.launchJob": { zh: "启动任务", en: "Launch Job" },
   "jobForm.reLaunch": { zh: "重新启动", en: "Re-Launch" },
@@ -254,7 +254,7 @@ const translations = {
   "validation.namespaceRequired": { zh: "命名空间为必填项", en: "Namespace is required" },
   "validation.repoRequired": { zh: "仓库名称为必填项", en: "Repository name is required" },
   "validation.branchRequired": { zh: "分支为必填项", en: "Branch is required" },
-  "validation.commandRequired": { zh: "入口命令为必填项", en: "Entry command is required" },
+  "validation.commandRequired": { zh: "入口指令为必填项", en: "Entry command is required" },
   "validation.serviceNameRequired": { zh: "服务名称为必填项", en: "Service name is required" },
   "validation.serviceIdRequired": { zh: "服务 ID 为必填项", en: "Service ID is required" },
   "validation.serviceIdInvalid": { zh: "服务 ID 只能包含小写字母、数字和连字符", en: "Service ID can only contain lowercase letters, numbers, and hyphens" },
@@ -438,7 +438,7 @@ const translations = {
   "serviceDetail.stationDefault": { zh: "（分区默认）", en: "(Station Default)" },
 
   // ===== Service Detail - Entry Command =====
-  "serviceDetail.entryCommand": { zh: "入口命令", en: "Entry Command" },
+  "serviceDetail.entryCommand": { zh: "入口指令", en: "Entry Command" },
 
   // ===== Service Detail - Dialogs =====
   "serviceDetail.deleteTitle": { zh: "删除 Service", en: "Delete Service" },
