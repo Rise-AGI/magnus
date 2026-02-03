@@ -76,7 +76,7 @@ const translations = {
   "cluster.queueDepthDesc": { zh: "等待资源的任务", en: "Jobs waiting for resources" },
   "cluster.runningJobs": { zh: "运行中的任务", en: "Running Jobs" },
   "cluster.noRunningJobs": { zh: "暂无运行中的任务。", en: "No running jobs." },
-  "cluster.queuedJobs": { zh: "排队中的任务", en: "Queued Jobs" },
+  "cluster.queuedJobs": { zh: "排队或准备中的任务", en: "Queued or Preparing Jobs" },
   "cluster.queueEmpty": { zh: "队列为空。", en: "Queue is empty." },
 
   // ===== Jobs =====
