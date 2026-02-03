@@ -134,6 +134,7 @@ export default function ServicesPage() {
 
   const handleDrawerSuccess = () => {
     setIsDrawerOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     fetchServices();
   };
 

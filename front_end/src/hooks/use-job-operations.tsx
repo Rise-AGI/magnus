@@ -96,6 +96,7 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
       onClose: () => setIsDrawerOpen(false),
       onSuccess: () => {
         setIsDrawerOpen(false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
         if (onSuccess) onSuccess();
       },
     },
