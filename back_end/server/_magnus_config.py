@@ -47,6 +47,8 @@ def _validate_magnus_config(config: Dict[str, Any]) -> None:
     _check_key(server, "front_end_port", int)
     _check_key(server, "back_end_port", int)
     _check_key(server, "root", str)
+    _check_key(server, "resource_cache", dict)
+    _check_key(server["resource_cache"], "container_cache_size", str)
 
     # cluster 配置
     cluster = config["cluster"]
