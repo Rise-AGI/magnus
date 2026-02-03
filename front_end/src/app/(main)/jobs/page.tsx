@@ -64,7 +64,8 @@ export default function JobsPage() {
     if (justLaunched) {
       sessionStorage.removeItem('magnus_new_job');
       setTimeout(() => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        const main = document.querySelector('main');
+        if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
       }, 100);
     }
   }, []);

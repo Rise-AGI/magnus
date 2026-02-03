@@ -46,7 +46,8 @@ export default function BlueprintsPage() {
     if (justCreated) {
       sessionStorage.removeItem('magnus_new_blueprint');
       setTimeout(() => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        const main = document.querySelector('main');
+        if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
       }, 100);
     }
   }, []);
@@ -112,7 +113,8 @@ export default function BlueprintsPage() {
     try {
       await client("/api/blueprints", { method: "POST", json: data });
       setIsEditorOpen(false);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      const main = document.querySelector('main');
+      if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
       fetchBlueprints();
     } finally {
       setIsSaving(false);
