@@ -158,7 +158,7 @@ function SingleFieldInput({
 
   if (field.type === "select") {
     return (
-      <div className={cn(disabled && "opacity-40 pointer-events-none")}>
+      <div className={cn("relative z-20", disabled && "opacity-40 pointer-events-none")}>
         <SearchableSelect
           value={String(value)}
           onChange={onChange}
@@ -176,7 +176,7 @@ function SingleFieldInput({
 
   if (field.type === "boolean") {
     return (
-      <div className={cn(disabled && "opacity-40 pointer-events-none")}>
+      <div className={cn("relative z-20", disabled && "opacity-40 pointer-events-none")}>
         <SearchableSelect
           value={String(value)}
           onChange={(val) => onChange(val === "true")}
@@ -453,9 +453,9 @@ export function DynamicForm({
   const sortedScopeNames = Object.keys(scopedFieldsMap).sort();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 isolate">
       {mainFields.length > 0 && (
-        <div className="space-y-5">
+        <div className="space-y-5 relative z-50">
           {mainFields.map(field => (
             <FormField
               key={field.key}
@@ -469,14 +469,14 @@ export function DynamicForm({
         </div>
       )}
 
-      {sortedScopeNames.map(scopeName => {
+      {sortedScopeNames.map((scopeName, index) => {
         const isExpanded = !!expandedScopes[scopeName];
         const fields = scopedFieldsMap[scopeName];
 
         return (
-          <div key={scopeName} className="pt-2 border-t border-zinc-800/50">
-            <button 
-              type="button" 
+          <div key={scopeName} className="pt-2 border-t border-zinc-800/50 relative z-0">
+            <button
+              type="button"
               onClick={() => toggleScope(scopeName)}
               className="flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors select-none group w-full text-left py-2"
             >
@@ -485,7 +485,7 @@ export function DynamicForm({
               </div>
               <span>{scopeName}</span>
             </button>
-            
+
             {isExpanded && (
               <div className="mt-3 grid grid-cols-1 gap-5 animate-in slide-in-from-top-1 duration-200">
                 {fields.map(field => (
