@@ -29,6 +29,8 @@ server:
     spy_gpu_interval: 5
     heartbeat_interval: 2
     snapshot_interval: 300
+  resource_cache:
+    container_cache_size: 80G
   service_proxy:
     max_concurrency: 1024
     pool_size: 1024

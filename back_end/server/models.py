@@ -36,6 +36,7 @@ class JobType(str, enum.Enum):
 
 class JobStatus(str, enum.Enum):
     PENDING = "Pending"
+    PREPARING = "Preparing"
     QUEUED = "Queued"
     RUNNING = "Running"
     PAUSED  = "Paused"
@@ -75,7 +76,7 @@ class Job(Base):
     gpu_type: Mapped[str] = mapped_column(String)
     cpu_count: Mapped[int | None] = mapped_column(Integer, default=None)
     memory_demand: Mapped[str | None] = mapped_column(String, default=None)
-    status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PENDING)
+    status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PREPARING)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.A2)
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     runner: Mapped[str | None] = mapped_column(String, nullable=None)

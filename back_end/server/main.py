@@ -67,10 +67,10 @@ async def run_scheduler_loop(
     logger.info("🚀 Scheduler loop started.")
     while True:
         try:
-            await asyncio.to_thread(scheduler.tick)
+            await scheduler.tick()
         except Exception as e:
             logger.error(f"Scheduler loop error: {e}")
-        
+
         await asyncio.sleep(magnus_config["server"]["scheduler"]["heartbeat_interval"])
 
 

@@ -120,7 +120,7 @@ export default function JobDetailsPage() {
   useEffect(() => {
     if (isSlurmTask) return;
     fetchLogs(-1);
-    if (job && ['Pending', 'Running'].includes(job.status)) {
+    if (job && ['Pending', 'Preparing', 'Queued', 'Running'].includes(job.status)) {
       setFollowMode(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,7 +129,7 @@ export default function JobDetailsPage() {
   // Follow mode polling (5x slower than POLL_INTERVAL)
   useEffect(() => {
     if (!followMode) return;
-    if (job && !['Pending', 'Running'].includes(job.status)) {
+    if (job && !['Pending', 'Preparing', 'Queued', 'Running'].includes(job.status)) {
       setFollowMode(false);
       return;
     }
@@ -303,7 +303,8 @@ export default function JobDetailsPage() {
               <span className={`text-base font-bold tracking-wide
                 ${job.status === "Running" ? "text-blue-400" :
                   job.status === "Success" ? "text-green-400" :
-                  job.status === "Failed" ? "text-red-400" : "text-zinc-300"}`}>
+                  job.status === "Failed" ? "text-red-400" :
+                  job.status === "Preparing" ? "text-cyan-400" : "text-zinc-300"}`}>
                 {(job.status === "Queued" ? "Pending" : job.status).toUpperCase()}
               </span>
             </div>
@@ -339,7 +340,7 @@ export default function JobDetailsPage() {
                 <RefreshCw className="w-5 h-5" />
               </button>
               {/* Terminate Button */}
-              {user?.id === job.user?.id && ["Pending", "Queued", "Running", "Paused"].includes(job.status) && (
+              {user?.id === job.user?.id && ["Pending", "Preparing", "Queued", "Running", "Paused"].includes(job.status) && (
                 <button
                   onClick={() => onClickTerminate(job)}
                   className="ml-2 p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
@@ -604,7 +605,7 @@ export default function JobDetailsPage() {
                     <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
                       <Terminal className="w-10 h-10 opacity-20" />
                       <p>
-                        {job && ['Pending', 'Running'].includes(job.status)
+                        {job && ['Pending', 'Preparing', 'Queued', 'Running'].includes(job.status)
                           ? t("jobDetail.waitingOutput")
                           : t("jobDetail.noOutput")}
                       </p>

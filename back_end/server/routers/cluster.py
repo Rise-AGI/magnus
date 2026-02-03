@@ -132,16 +132,25 @@ def get_cluster_stats(
     paginated_running = sorted_all_running[running_skip : running_skip + running_limit]
 
     # --- 6. Pending Jobs 处理与分页 ---
-    # QUEUED 在前端显示为 Pending，所以这里要一起查询
+    # QUEUED 在前端显示为 Pending，PREPARING 单独显示
+    # 排序：Pending/Queued/Paused 按调度优先级，Preparing 在最后
     pending_jobs_orm = db.query(models.Job).filter(
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED])
     ).all()
+    preparing_jobs_orm = db.query(models.Job).filter(
+        models.Job.status == JobStatus.PREPARING
+    ).all()
 
-    # 保持原有调度器排序逻辑
+    # Pending/Queued/Paused 按调度器排序
     pending_jobs_orm.sort(key=_scheduler_sort_key, reverse=True)
+    # Preparing 按创建时间排序
+    preparing_jobs_orm.sort(key=lambda x: x.created_at.timestamp(), reverse=True)
 
-    total_pending = len(pending_jobs_orm)
-    paginated_pending_orm = pending_jobs_orm[pending_skip : pending_skip + pending_limit]
+    # 合并：Pending 在前，Preparing 在后
+    all_pending_jobs_orm = pending_jobs_orm + preparing_jobs_orm
+
+    total_pending = len(all_pending_jobs_orm)
+    paginated_pending_orm = all_pending_jobs_orm[pending_skip : pending_skip + pending_limit]
 
     paginated_pending = [JobResponse.model_validate(job) for job in paginated_pending_orm]
 
@@ -179,17 +188,23 @@ def get_my_active_jobs(
         models.Job.status == JobStatus.RUNNING,
     ).order_by(models.Job.start_time.desc()).all()
 
-    # 获取排队任务 (QUEUED 在前端显示为 Pending)
+    # 获取排队任务 (QUEUED 在前端显示为 Pending，PREPARING 单独显示)
     queued_orm = db.query(models.Job).filter(
         models.Job.user_id == current_user.id,
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
     ).all()
+    preparing_orm = db.query(models.Job).filter(
+        models.Job.user_id == current_user.id,
+        models.Job.status == JobStatus.PREPARING,
+    ).all()
 
     # 对排队任务应用调度排序
     queued_orm.sort(key=_scheduler_sort_key, reverse=True)
+    # Preparing 按创建时间排序
+    preparing_orm.sort(key=lambda x: x.created_at.timestamp(), reverse=True)
 
-    # 合并全量列表
-    all_jobs_orm = running_orm + queued_orm
+    # 合并全量列表：Running > Pending/Queued/Paused > Preparing
+    all_jobs_orm = running_orm + queued_orm + preparing_orm
 
     # 计算总数与切片 (Pagination)
     total_count = len(all_jobs_orm)

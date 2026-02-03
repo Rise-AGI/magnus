@@ -71,7 +71,7 @@ export function JobTable({
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
             {jobs.map((job) => {
-              const isActive = ["Pending", "Queued", "Running", "Paused"].includes(job.status);
+              const isActive = ["Pending", "Preparing", "Queued", "Running", "Paused"].includes(job.status);
               const isOwner = currentUser?.id === job.user?.id;
               const canTerminate = isOwner && isActive;
 

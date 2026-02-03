@@ -32,8 +32,8 @@ def submit_job(
 ):
     """
     提交新任务。
-    注意：此接口只负责将任务写入数据库并标记为 PENDING。
-    后续的资源检查、抢占决策和 sbatch 提交由后台 _scheduler.py 负责。
+    注意：此接口只负责将任务写入数据库并标记为 PREPARING。
+    后续的资源准备、调度决策和 sbatch 提交由后台 _scheduler.py 负责。
     """
     job_dict = job_data.model_dump()
 
@@ -44,7 +44,7 @@ def submit_job(
     db_job = models.Job(
         **job_dict,
         user_id=current_user.id,
-        status=JobStatus.PENDING,
+        status=JobStatus.PREPARING,
     )
 
     db.add(db_job)

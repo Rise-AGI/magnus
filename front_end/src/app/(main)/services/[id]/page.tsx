@@ -191,7 +191,7 @@ export default function ServiceDetailsPage() {
   // Service Status Node
   let statusNode;
   const currentJobStatus = service.current_job?.status;
-  const hasLiveJob = service.current_job && ["Pending", "Queued", "Running", "Paused"].includes(currentJobStatus || "");
+  const hasLiveJob = service.current_job && ["Pending", "Preparing", "Queued", "Running", "Paused"].includes(currentJobStatus || "");
 
   if (!service.is_active) {
     statusNode = (
@@ -272,10 +272,13 @@ export default function ServiceDetailsPage() {
               <span className={`text-base font-bold tracking-wide ${
                 !service.is_active ? "text-zinc-400" :
                 hasLiveJob && currentJobStatus === "Running" ? "text-blue-400" :
-                hasLiveJob && currentJobStatus === "Pending" ? "text-amber-400" :
+                hasLiveJob && currentJobStatus === "Preparing" ? "text-cyan-400" :
+                hasLiveJob && (currentJobStatus === "Pending" || currentJobStatus === "Queued") ? "text-amber-400" :
                 "text-teal-400"
               }`}>
-                {!service.is_active ? t("serviceDetail.inactive").toUpperCase() : hasLiveJob ? currentJobStatus?.toUpperCase() : t("serviceDetail.idle").toUpperCase()}
+                {!service.is_active ? t("serviceDetail.inactive").toUpperCase() :
+                 hasLiveJob ? (currentJobStatus === "Queued" ? "PENDING" : currentJobStatus?.toUpperCase()) :
+                 t("serviceDetail.idle").toUpperCase()}
               </span>
             </div>
 
