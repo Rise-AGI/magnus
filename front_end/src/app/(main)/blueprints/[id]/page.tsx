@@ -22,6 +22,7 @@ import RenderMarkdown from "@/components/ui/render-markdown";
 
 import { Blueprint, BlueprintPreference } from "@/types/blueprint";
 import { FieldSchema, getFieldInitialValue, validateFieldValue } from "@/components/ui/dynamic-form/types";
+import { BlueprintImplicitImports } from "@/lib/blueprint-defaults";
 
 // Syntax Highlighting for Read-only view
 import Editor from "react-simple-code-editor";
@@ -382,8 +383,7 @@ export default function BlueprintDetailsPage() {
             </div>
             <div className="flex-1 overflow-auto bg-[#1e1e1e] relative group">
               <pre className="text-[13px] font-mono leading-relaxed px-5 pt-5 pb-2 text-zinc-500 border-b border-zinc-800/50 mb-0">
-                <span className="text-purple-400">from</span> server <span className="text-purple-400">import</span> JobSubmission, JobType{"\n"}
-                <span className="text-purple-400">from</span> typing <span className="text-purple-400">import</span> Annotated, Literal, Optional, List
+                <BlueprintImplicitImports />
               </pre>
               <Editor
                 value={blueprint.code}

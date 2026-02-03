@@ -8,6 +8,7 @@ import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
 import { BlueprintEditorHelp } from "@/components/ui/help-content";
 import { useLanguage } from "@/context/language-context";
+import { BlueprintImplicitImports } from "@/lib/blueprint-defaults";
 
 import Editor from "react-simple-code-editor";
 import { highlight, languages } from "prismjs";
@@ -314,6 +315,9 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
               <Terminal className="w-3 h-3" /> {t("blueprintEditor.pythonLogic")}
             </label>
             <div id="field-code" className={`relative rounded-xl overflow-hidden border bg-[#1e1e1e] focus-within:ring-1 transition-all shadow-inner min-h-[400px] ${errorField === 'code' ? 'border-red-500 animate-shake' : 'border-zinc-800 focus-within:ring-blue-500/50'}`}>
+              <pre className="text-[13px] font-mono leading-relaxed px-6 pt-5 pb-2 text-zinc-500 border-b border-zinc-800/50 mb-0">
+                <BlueprintImplicitImports />
+              </pre>
               <Editor
                 value={formData.code}
                 onValueChange={code => setFormData({ ...formData, code })}
