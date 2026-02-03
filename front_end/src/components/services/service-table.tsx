@@ -89,7 +89,7 @@ export function ServiceTable({
               } else {
                 // Active State Check
                 const currentStatus = svc.current_job?.status;
-                const isJobAlive = currentStatus && ["Pending", "Running", "Paused"].includes(currentStatus);
+                const isJobAlive = currentStatus && ["Pending", "Queued", "Running", "Paused"].includes(currentStatus);
 
                 if (isJobAlive) {
                   // Active Job Running

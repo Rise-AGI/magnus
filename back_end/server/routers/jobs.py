@@ -37,6 +37,10 @@ def submit_job(
     """
     job_dict = job_data.model_dump()
 
+    # 如果未提供 container_image，使用配置中的默认值
+    if job_dict.get("container_image") is None:
+        job_dict["container_image"] = magnus_config["cluster"]["default_container_image"]
+
     db_job = models.Job(
         **job_dict,
         user_id=current_user.id,

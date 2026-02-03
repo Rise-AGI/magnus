@@ -12,7 +12,9 @@ import {
   getGpuLimit,
   MAX_CPU_COUNT,
   DEFAULT_MEMORY,
-  DEFAULT_RUNNER
+  DEFAULT_RUNNER,
+  DEFAULT_CONTAINER_IMAGE,
+  DEFAULT_SYSTEM_ENTRY_COMMAND,
 } from "@/lib/config";
 
 const GPU_TYPES = [
@@ -44,6 +46,8 @@ export interface JobFormData {
   cpu_count?: number | null;
   memory_demand?: string | null;
   runner?: string | null;
+  container_image?: string | null;
+  system_entry_command?: string | null;
 }
 
 interface JobFormProps {
@@ -85,9 +89,12 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   const [cpuCount, setCpuCount] = useState<number>(0);
   const [memoryDemand, setMemoryDemand] = useState<string>(initialData?.memory_demand || "");
   const [runner, setRunner] = useState<string>(initialData?.runner || "");
+  const [containerImage, setContainerImage] = useState<string>(initialData?.container_image || DEFAULT_CONTAINER_IMAGE);
+  const [systemEntryCommand, setSystemEntryCommand] = useState<string>(initialData?.system_entry_command || DEFAULT_SYSTEM_ENTRY_COMMAND);
 
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const commandRef = useRef<HTMLTextAreaElement>(null);
+  const systemCommandRef = useRef<HTMLTextAreaElement>(null);
   const actionRef = useRef<HTMLDivElement>(null);
 
   // === Imperative Handle for Clipboard Actions ===
@@ -107,6 +114,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         cpu_count: cpuCount,
         memory_demand: memoryDemand,
         runner: runner,
+        container_image: containerImage,
+        // system_entry_command 不序列化，跨环境复制时用默认值更安全
       };
     },
     applyPayload: (payload: any) => {
@@ -142,6 +151,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       if (payload.cpu_count !== undefined) setCpuCount(payload.cpu_count);
       if (payload.memory_demand !== undefined) setMemoryDemand(payload.memory_demand);
       if (payload.runner !== undefined) setRunner(payload.runner);
+      if (payload.container_image !== undefined) setContainerImage(payload.container_image);
+      if (payload.system_entry_command !== undefined) setSystemEntryCommand(payload.system_entry_command);
 
       // Auto-scroll to actions
       setTimeout(() => {
@@ -165,6 +176,14 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       commandRef.current.style.height = `${commandRef.current.scrollHeight}px`;
     }
   }, [command]);
+
+  // Auto-resize for System Entry Command
+  useEffect(() => {
+    if (systemCommandRef.current) {
+      systemCommandRef.current.style.height = 'auto';
+      systemCommandRef.current.style.height = `${systemCommandRef.current.scrollHeight}px`;
+    }
+  }, [systemEntryCommand, showAdvanced]);
 
   const handleGpuTypeChange = (val: string) => {
     setGpuType(val);
@@ -255,17 +274,19 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     const payload = {
       task_name: taskName,
       description: description,
-      namespace, 
-      repo_name: repoName, 
-      branch: selectedBranch, 
-      commit_sha: selectedCommit, 
-      entry_command: command, 
-      gpu_count: gpuCount, 
+      namespace,
+      repo_name: repoName,
+      branch: selectedBranch,
+      commit_sha: selectedCommit,
+      entry_command: command,
+      gpu_count: gpuCount,
       gpu_type: gpuType,
-      job_type: jobType, 
+      job_type: jobType,
       cpu_count: cpuCount ? cpuCount : null,
       memory_demand: memoryDemand.trim() ? memoryDemand.trim() : null,
       runner: runner.trim() ? runner.trim() : null,
+      container_image: containerImage.trim() ? containerImage.trim() : null,
+      system_entry_command: systemEntryCommand.trim() ? systemEntryCommand.trim() : null,
     };
     
     try {
@@ -484,6 +505,40 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
                     value={runner}
                     placeholder={t("jobForm.runAsUserDefault", { value: DEFAULT_RUNNER })}
                     onChange={e => setRunner(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Container Image Override */}
+              <div className="sm:col-span-2">
+                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                  {t("jobForm.containerImage")}
+                </label>
+                <div className="relative">
+                    <input
+                    type="text"
+                    className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 font-mono"
+                    value={containerImage}
+                    placeholder={t("jobForm.containerImageDefault", { value: DEFAULT_CONTAINER_IMAGE })}
+                    onChange={e => setContainerImage(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* System Entry Command Override */}
+              <div className="sm:col-span-2">
+                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                  {t("jobForm.systemEntryCommand")}
+                </label>
+                <div className="relative group">
+                  <span className="absolute left-3 top-3 text-zinc-600 select-none font-mono text-sm">$</span>
+                  <textarea
+                    ref={systemCommandRef}
+                    className="w-full bg-zinc-950 border border-zinc-800 px-3 pl-7 py-3 rounded-lg text-green-400 font-mono text-sm focus:border-green-500/50 focus:shadow-[0_0_15px_rgba(34,197,94,0.1)] outline-none shadow-inner min-h-[100px] leading-relaxed placeholder-zinc-800 resize-none overflow-hidden"
+                    value={systemEntryCommand}
+                    placeholder={t("jobForm.systemEntryCommandDefault")}
+                    onChange={e => setSystemEntryCommand(e.target.value)}
+                    spellCheck={false}
                   />
                 </div>
               </div>

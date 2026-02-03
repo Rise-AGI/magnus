@@ -25,5 +25,7 @@ export interface Job {
   cpu_count?: number | null;
   memory_demand?: string | null;
   runner?: string | null;
+  container_image: string;
+  system_entry_command: string;
   result?: string;
 }

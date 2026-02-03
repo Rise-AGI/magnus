@@ -6,7 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178c6)
 ![Python](https://img.shields.io/badge/Python-3.14+-green)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-teal)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.9+-ee4c2c)
+![Image](https://img.shields.io/badge/Image-Apptainer-2496ED?logo=docker&logoColor=white)
 ![SLURM](https://img.shields.io/badge/Scheduler-SLURM-bf202f)
 
 
@@ -24,7 +24,7 @@
 - **严格环境检查**: 自动验证 SLURM 命令可用性
 - **资源监控**: 实时查询集群空闲 GPU 资源
 - **任务管理**: 完整的任务提交、查询、终止功能
-- **模拟 Immediate 模式**: 通过状态检查实现资源立即分配
+- **容器化执行**: 基于 Apptainer 的隔离执行环境，支持自定义容器镜像
 
 ### 👥 企业级用户系统
 - **飞书 OAuth 2.0 认证**: 支持飞书扫码登录
@@ -461,30 +461,25 @@ server:
     spy_gpu_interval: 5                 # GPU 状态监控间隔(秒)
     heartbeat_interval: 2               # 调度器心跳间隔(秒)
     snapshot_interval: 300              # 快照间隔(秒)
-    slurm_latency: 1                    # SLURM 延迟容忍(秒)
-    conda_shell_script_path: /opt/miniconda3/etc/profile.d/conda.sh
-    execution_conda_environment: magnus # 执行环境
 
   service_proxy:
     max_concurrency: 1024               # 服务代理最大并发
     pool_size: 1024                     # 连接池大小
 
-  juliaup_path: /opt/juliaup            # Julia 安装路径 (可选)
-
 cluster:
   name: "My Cluster"                    # 集群名称
-  resources:
-    gpus:
-      - value: "rtx5090"                # GPU 类型标识
-        label: "NVIDIA GeForce RTX 5090"
-        meta: "32GB • Blackwell"        # 显示的元信息
-        limit: 4                        # 单任务最大 GPU 数
-    cpus:
-      max_count: 128                    # 最大 CPU 核心数
-    memory:
-      default_limit: "1600M"            # 默认内存限制
-    runner:
-      default_user: "magnus"            # 默认运行用户
+  gpus:
+    - value: "rtx5090"                  # GPU 类型标识
+      label: "NVIDIA GeForce RTX 5090"
+      meta: "32GB • Blackwell"          # 显示的元信息
+      limit: 4                          # 单任务最大 GPU 数
+  max_cpu_count: 128                    # 最大 CPU 核心数
+  default_memory: "1600M"               # 默认内存限制
+  default_runner: "magnus"              # 默认运行用户
+  default_container_image: "docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
+  default_system_entry_command: |       # 容器启动前的宿主机命令
+    export APPTAINER_BIND="/home:/home"
+    export UV_CACHE_DIR=/home/magnus/magnus-data/uv_cache
 ```
 
 ### 2. 后端启动

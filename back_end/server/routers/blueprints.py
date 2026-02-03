@@ -20,6 +20,7 @@ from ..schemas import (
     BlueprintPreferenceResponse,
 )
 from .._blueprint_manager import blueprint_manager
+from .._magnus_config import magnus_config
 from .auth import get_current_user
 from library import *
 
@@ -286,6 +287,10 @@ def run_blueprint(
     try:
         job_submission = blueprint_manager.execute(bp.code, final_params)
         job_dict = job_submission.model_dump()
+
+        # 如果未提供 container_image，使用配置中的默认值
+        if job_dict.get("container_image") is None:
+            job_dict["container_image"] = magnus_config["cluster"]["default_container_image"]
 
         db_job = models.Job(
             **job_dict,

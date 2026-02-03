@@ -79,7 +79,13 @@ class ServiceManager:
     def allocate_port(
         self,
         db: Session,
+        service: Service,
     ) -> int:
+        """
+        为 Service 分配一个可用端口并立即写入数据库。
+        使用 SELECT FOR UPDATE 锁定所有已分配端口的行，防止竞态条件。
+        """
+        # 锁定所有已分配端口的 Service 行，防止并发分配相同端口
         used_ports = set(
             row[0] for row in db.query(Service.assigned_port)
             .filter(Service.assigned_port.is_not(None))
@@ -90,6 +96,10 @@ class ServiceManager:
         for _ in range(100):
             candidate = random.randint(10000, 30000)
             if candidate not in used_ports:
+                # 立即写入数据库，在事务提交前其他请求无法看到这个端口被占用
+                # 但由于 with_for_update 锁，其他请求会等待当前事务完成
+                service.assigned_port = candidate
+                db.flush()  # 立即写入但不提交，保持在同一事务中
                 return candidate
 
         raise RuntimeError("Failed to allocate a free port for Service after 100 attempts.")

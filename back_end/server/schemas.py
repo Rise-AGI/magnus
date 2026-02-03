@@ -54,9 +54,11 @@ class JobSubmission(BaseModel):
     gpu_type: str
     gpu_count: int = 1
     job_type: JobType = JobType.A2
+    container_image: Optional[str] = None
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
+    system_entry_command: Optional[str] = None
 
 
 class JobResponse(JobSubmission):
@@ -66,7 +68,7 @@ class JobResponse(JobSubmission):
     slurm_job_id: Optional[str] = None
     start_time: Optional[datetime] = None
     created_at: datetime
-    user: Optional[UserInfo] = None 
+    user: Optional[UserInfo] = None
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
@@ -201,6 +203,8 @@ class ServiceCreate(BaseModel):
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
+    container_image: Optional[str] = None
+    system_entry_command: Optional[str] = None
 
 
 class ServiceResponse(ServiceCreate):

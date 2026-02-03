@@ -126,6 +126,10 @@ const translations = {
   "jobForm.memoryDefault": { zh: "默认：{value}", en: "Default: {value}" },
   "jobForm.runAsUser": { zh: "运行用户", en: "Run As User" },
   "jobForm.runAsUserDefault": { zh: "默认：{value}", en: "Default: {value}" },
+  "jobForm.containerImage": { zh: "容器镜像", en: "Container Image" },
+  "jobForm.containerImageDefault": { zh: "默认：{value}", en: "Default: {value}" },
+  "jobForm.systemEntryCommand": { zh: "系统入口指令", en: "System Entry Command" },
+  "jobForm.systemEntryCommandDefault": { zh: "留空使用默认值", en: "Leave empty for default" },
   "jobForm.execution": { zh: "执行", en: "Execution" },
   "jobForm.entryCommand": { zh: "入口指令", en: "Entry Command" },
   "jobForm.waitingForLaunch": { zh: "等待启动", en: "Waiting for launch" },
@@ -385,7 +389,12 @@ const translations = {
   "jobDetail.stationDefault": { zh: "（分区默认）", en: "(Station Default)" },
 
   // ===== Job Detail - Entry Command =====
-  "jobDetail.entryCommand": { zh: "入口命令", en: "Entry Command" },
+  "jobDetail.entryCommand": { zh: "入口指令", en: "Entry Command" },
+
+  // ===== Job Detail - Execution Environment =====
+  "jobDetail.executionEnvironment": { zh: "执行环境", en: "Execution Environment" },
+  "jobDetail.containerImage": { zh: "容器镜像", en: "Container Image" },
+  "jobDetail.systemEntryCommand": { zh: "系统入口指令", en: "System Entry Command" },
 
   // ===== Job Detail - Tabs =====
   "jobDetail.consoleOutput": { zh: "控制台输出", en: "Console Output" },

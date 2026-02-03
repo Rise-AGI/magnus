@@ -339,7 +339,7 @@ export default function JobDetailsPage() {
                 <RefreshCw className="w-5 h-5" />
               </button>
               {/* Terminate Button */}
-              {user?.id === job.user?.id && ["Pending", "Running", "Paused"].includes(job.status) && (
+              {user?.id === job.user?.id && ["Pending", "Queued", "Running", "Paused"].includes(job.status) && (
                 <button
                   onClick={() => onClickTerminate(job)}
                   className="ml-2 p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"

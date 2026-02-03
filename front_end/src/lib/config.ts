@@ -30,22 +30,14 @@ export interface GpuConfig {
   limit: number;
 }
 
-export interface ClusterResources {
-  gpus: GpuConfig[];
-  cpus: {
-    max_count: number;
-  };
-  memory: {
-    default_limit: string;
-  };
-  runner: {
-    default_user: string;
-  };
-}
-
 export interface ClusterConfig {
   name: string;
-  resources: ClusterResources;
+  gpus: GpuConfig[];
+  max_cpu_count: number;
+  default_memory: string;
+  default_runner: string;
+  default_container_image: string;
+  default_system_entry_command: string;
 }
 
 const clusterConfigJson = requireEnv(
@@ -60,16 +52,18 @@ try {
   throw new Error(`❌ 致命错误: 集群配置 JSON 解析失败。请检查 magnus_config.yaml 内容是否合法。\n错误信息: ${(e as Error).message}`);
 }
 
-if (!parsedConfig.resources || !parsedConfig.resources.gpus || !parsedConfig.resources.cpus) {
-  throw new Error(`❌ 致命错误: 集群配置结构不完整。请确保 yaml 包含 resources.gpus 和 resources.cpus`);
+if (!parsedConfig.gpus) {
+  throw new Error(`❌ 致命错误: 集群配置结构不完整。请确保 yaml 包含 cluster.gpus`);
 }
 
 export const CLUSTER_CONFIG = parsedConfig;
 
-export const PHYSICAL_GPUS = CLUSTER_CONFIG.resources.gpus;
-export const MAX_CPU_COUNT = CLUSTER_CONFIG.resources.cpus.max_count;
-export const DEFAULT_MEMORY = CLUSTER_CONFIG.resources.memory.default_limit;
-export const DEFAULT_RUNNER = CLUSTER_CONFIG.resources.runner.default_user;
+export const PHYSICAL_GPUS = CLUSTER_CONFIG.gpus;
+export const MAX_CPU_COUNT = CLUSTER_CONFIG.max_cpu_count;
+export const DEFAULT_MEMORY = CLUSTER_CONFIG.default_memory;
+export const DEFAULT_RUNNER = CLUSTER_CONFIG.default_runner;
+export const DEFAULT_CONTAINER_IMAGE = CLUSTER_CONFIG.default_container_image;
+export const DEFAULT_SYSTEM_ENTRY_COMMAND = CLUSTER_CONFIG.default_system_entry_command;
 export function getGpuLimit(gpuType: string): number {
   if (gpuType === 'cpu') return 0;
   const gpu = PHYSICAL_GPUS.find(g => g.value === gpuType);

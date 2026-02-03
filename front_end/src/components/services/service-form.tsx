@@ -13,8 +13,11 @@ import {
   getGpuLimit,
   MAX_CPU_COUNT,
   DEFAULT_MEMORY,
-  DEFAULT_RUNNER
+  DEFAULT_RUNNER,
+  DEFAULT_CONTAINER_IMAGE,
+  DEFAULT_SYSTEM_ENTRY_COMMAND,
 } from "@/lib/config";
+import { ServiceImplicitExport } from "@/lib/service-defaults";
 
 const GPU_TYPES = [
   ...PHYSICAL_GPUS,
@@ -56,6 +59,8 @@ export interface ServiceFormData {
   cpu_count?: number | null;
   memory_demand?: string | null;
   runner?: string | null;
+  container_image?: string | null;
+  system_entry_command?: string | null;
 }
 
 interface ServiceFormProps {
@@ -111,6 +116,8 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
   const [cpuCount, setCpuCount] = useState<number>(0);
   const [memoryDemand, setMemoryDemand] = useState<string>(data?.memory_demand || "");
   const [runner, setRunner] = useState<string>(data?.runner || "");
+  const [containerImage, setContainerImage] = useState<string>(data?.container_image || DEFAULT_CONTAINER_IMAGE);
+  const [systemEntryCommand, setSystemEntryCommand] = useState<string>(data?.system_entry_command || DEFAULT_SYSTEM_ENTRY_COMMAND);
 
   const actionRef = useRef<HTMLDivElement>(null);
 
@@ -137,6 +144,8 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
         cpu_count: cpuCount,
         memory_demand: memoryDemand,
         runner: runner,
+        container_image: containerImage,
+        // system_entry_command 不序列化，跨环境复制时用默认值更安全
       };
     },
     applyPayload: (payload: any) => {
@@ -178,6 +187,8 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       if (payload.cpu_count !== undefined) setCpuCount(payload.cpu_count);
       if (payload.memory_demand !== undefined) setMemoryDemand(payload.memory_demand);
       if (payload.runner !== undefined) setRunner(payload.runner);
+      if (payload.container_image !== undefined) setContainerImage(payload.container_image);
+      if (payload.system_entry_command !== undefined) setSystemEntryCommand(payload.system_entry_command);
 
       setTimeout(() => {
         actionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -188,6 +199,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
   // Refs for auto-resize textareas
   const jobDescriptionRef = useRef<HTMLTextAreaElement>(null);
   const commandRef = useRef<HTMLTextAreaElement>(null);
+  const systemCommandRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-resize for Job Description
   useEffect(() => {
@@ -204,6 +216,14 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       commandRef.current.style.height = `${commandRef.current.scrollHeight}px`;
     }
   }, [command]);
+
+  // Auto-resize for System Entry Command
+  useEffect(() => {
+    if (systemCommandRef.current) {
+      systemCommandRef.current.style.height = 'auto';
+      systemCommandRef.current.style.height = `${systemCommandRef.current.scrollHeight}px`;
+    }
+  }, [systemEntryCommand, showAdvanced]);
 
   // Sync Service Name -> Job Task Name
   const handleServiceNameChange = (val: string) => {
@@ -294,6 +314,8 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       cpu_count: cpuCount || null,
       memory_demand: memoryDemand.trim() || null,
       runner: runner.trim() || null,
+      container_image: containerImage.trim() || null,
+      system_entry_command: systemEntryCommand.trim() || null,
     };
     
     try {
@@ -574,6 +596,40 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
                         placeholder={t("jobForm.runAsUserDefault", { value: DEFAULT_RUNNER })}
                       />
                 </div>
+
+                {/* Container Image Override */}
+                <div className="sm:col-span-2">
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                    {t("jobForm.containerImage")}
+                  </label>
+                  <div className="relative">
+                      <input
+                      type="text"
+                      className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 font-mono"
+                      value={containerImage}
+                      placeholder={t("jobForm.containerImageDefault", { value: DEFAULT_CONTAINER_IMAGE })}
+                      onChange={e => setContainerImage(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* System Entry Command Override */}
+                <div className="sm:col-span-2">
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                    {t("jobForm.systemEntryCommand")}
+                  </label>
+                  <div className="relative group">
+                    <span className="absolute left-3 top-3 text-zinc-600 select-none font-mono text-sm">$</span>
+                    <textarea
+                      ref={systemCommandRef}
+                      className="w-full bg-zinc-950 border border-zinc-800 px-3 pl-7 py-3 rounded-lg text-green-400 font-mono text-sm focus:border-green-500/50 focus:shadow-[0_0_15px_rgba(34,197,94,0.1)] outline-none shadow-inner min-h-[100px] leading-relaxed placeholder-zinc-800 resize-none overflow-hidden"
+                      value={systemEntryCommand}
+                      placeholder={t("jobForm.systemEntryCommandDefault")}
+                      onChange={e => setSystemEntryCommand(e.target.value)}
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
             </div>
           )}
         </div>
@@ -586,17 +642,21 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
         <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'command' ? 'text-red-500' : 'text-zinc-500'}`}>{t("jobForm.entryCommand")}</label>
-        <div className="relative group">
-            <span className="absolute left-3 top-3 text-zinc-600 select-none font-mono text-sm">$</span>
-            <textarea 
-                ref={commandRef} 
-                className={`w-full bg-zinc-950 border px-3 pl-7 py-3 rounded-lg text-green-400 font-mono text-sm focus:border-green-500/50 focus:shadow-[0_0_15px_rgba(34,197,94,0.1)] outline-none shadow-inner min-h-[100px] leading-relaxed placeholder-zinc-800 resize-none overflow-hidden
-                    ${errorField === 'command' ? 'animate-shake border-red-500' : 'border-zinc-800'}`}
-                value={command} 
-                onChange={e => { setCommand(e.target.value); clearError('command'); }} 
-                placeholder="python server.py" 
-                spellCheck={false}
-            />
+        <div className={`bg-zinc-950 border rounded-lg overflow-hidden focus-within:border-green-500/50 focus-within:shadow-[0_0_15px_rgba(34,197,94,0.1)] transition-all ${errorField === 'command' ? 'border-red-500 animate-shake' : 'border-zinc-800'}`}>
+            <pre className="px-3 pt-3 text-sm font-mono leading-relaxed select-text">
+              <ServiceImplicitExport showDollarSign />
+            </pre>
+            <div className="relative">
+                <span className="absolute left-3 top-3 text-zinc-600 select-none font-mono text-sm">$</span>
+                <textarea
+                    ref={commandRef}
+                    className="w-full bg-transparent px-3 pl-7 py-3 text-green-400 font-mono text-sm focus:outline-none min-h-[100px] leading-relaxed placeholder-zinc-700 resize-none overflow-hidden"
+                    value={command}
+                    onChange={e => { setCommand(e.target.value); clearError('command'); }}
+                    placeholder="python server.py --port $MAGNUS_PORT"
+                    spellCheck={false}
+                />
+            </div>
         </div>
       </div>
 

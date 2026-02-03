@@ -29,4 +29,6 @@ export interface Service {
   cpu_count?: number | null;
   memory_demand?: string | null;
   runner?: string | null;
+  container_image?: string | null;
+  system_entry_command?: string | null;
 }

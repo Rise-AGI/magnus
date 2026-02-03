@@ -1,39 +1,37 @@
 client:
   jobs:
     poll_interval: 2
-
 server:
   address: http://your-server-ip
   front_end_port: 3011
+  # during development, front_end_port += 2
   back_end_port: 8017
+  # during development, back_end_port += 2
+  # redirect_uri = f"{address}:{front_end_port}/auth/callback"
   root: /path/to/magnus-data
-
+  # magnus_database_path = f"{server_root}/database"
+  # sqlalchemy_database_url = f"sqlite:///{magnus_database_path}/magnus.db"
+  # magnus_workspace_path = f"{server_root}/workspace"
+  # job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
+  # job_repository_path = f"{job_working_table}/repository"
+  # job_wrapper_path = f"{job_working_table}/wrapper.py"
+  # magnus_uv_cache = f"{server_root}/uv_cache"
   jwt_signer:
     secret_key: your-secret-key
     algorithm: HS256
-    expire_minutes: 10080
-
+    expire_minutes: 10080  # 7 days
   github_client:
     token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
   feishu_client:
     app_id: cli_xxxxxxxxxxxxxxxx
     app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
   scheduler:
     spy_gpu_interval: 5
     heartbeat_interval: 2
     snapshot_interval: 300
-    slurm_latency: 1
-    conda_shell_script_path: /opt/miniconda3/etc/profile.d/conda.sh
-    execution_conda_environment: magnus_shared
-
   service_proxy:
     max_concurrency: 1024
     pool_size: 1024
-
-  juliaup_path: /opt/juliaup
-
   enchanter:
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-235b-a22b
@@ -43,15 +41,16 @@ server:
 
 cluster:
   name: Your Cluster Name
-  resources:
-    gpus:
-      - value: rtx4090
-        label: NVIDIA GeForce RTX 4090
-        meta: 24GB • Ada Lovelace
-        limit: 8
-    cpus:
-      max_count: 128
-    memory:
-      default_limit: 1600M
-    runner:
-      default_user: username
+  gpus:
+    -
+      value: rtx5090
+      label: NVIDIA GeForce RTX 5090
+      meta: 32GB • Blackwell
+      limit: 4
+  max_cpu_count: 128
+  default_memory: 1600M
+  default_runner: username
+  default_container_image: docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+  default_system_entry_command: |-
+    export APPTAINER_BIND="/home:/home"
+    export UV_CACHE_DIR=/path/to/magnus-data/uv_cache

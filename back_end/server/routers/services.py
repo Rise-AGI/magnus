@@ -62,6 +62,8 @@ class ServiceSnapshot(BaseModel):
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
+    container_image: Optional[str] = None
+    system_entry_command: Optional[str] = None
     job_type: str
 
     class Config:
@@ -143,7 +145,7 @@ def _try_revive_service_standalone(service_id: str) -> Tuple[str, int]:
 
         # Path B: Restart needed
         try:
-            port = service_manager.allocate_port(db)
+            port = service_manager.allocate_port(db, service)
 
             env_cmd = "\n".join([
                 f"export MAGNUS_PORT={port}",
@@ -166,13 +168,15 @@ def _try_revive_service_standalone(service_id: str) -> Tuple[str, int]:
                 entry_command = env_cmd,
                 status = JobStatus.PENDING,
                 job_type = service.job_type,
+                container_image = service.container_image or magnus_config["cluster"]["default_container_image"],
+                system_entry_command = service.system_entry_command,
             )
 
             db.add(new_job)
             db.flush()
 
             service.current_job_id = new_job.id
-            service.assigned_port = port
+            # assigned_port 已在 allocate_port 中设置
             db.commit()
 
             logger.info(f"Service {service.id} revived with Job {new_job.id} on port {port}")

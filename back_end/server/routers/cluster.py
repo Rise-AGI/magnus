@@ -16,7 +16,7 @@ from .._magnus_config import magnus_config
 
 
 _node_name = magnus_config["cluster"]["name"]
-_gpu_model = magnus_config["cluster"]["resources"]["gpus"][0]["label"]
+_gpu_model = magnus_config["cluster"]["gpus"][0]["label"]
 
 
 router = APIRouter()
@@ -98,7 +98,8 @@ def get_cluster_stats(
                 repo_name="N/A",
                 branch="N/A",
                 commit_sha="N/A",
-                entry_command="<binary execution>",
+                entry_command="N/A",
+                container_image="N/A",
                 gpu_type=task["gpu_type"].lower().replace(" ", ""),
                 gpu_count=task["gpu_count"],
                 job_type=JobType.EXTERNAL,

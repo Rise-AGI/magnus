@@ -19,7 +19,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { NotFound } from "@/components/ui/not-found";
 import { ServiceDrawer } from "@/components/services/service-drawer";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
-import RenderMarkdown from "@/components/ui/render-markdown";
+import { ServiceImplicitExport } from "@/lib/service-defaults";
 
 import { Service } from "@/types/service";
 
@@ -191,7 +191,7 @@ export default function ServiceDetailsPage() {
   // Service Status Node
   let statusNode;
   const currentJobStatus = service.current_job?.status;
-  const hasLiveJob = service.current_job && ["Pending", "Running", "Paused"].includes(currentJobStatus || "");
+  const hasLiveJob = service.current_job && ["Pending", "Queued", "Running", "Paused"].includes(currentJobStatus || "");
 
   if (!service.is_active) {
     statusNode = (
@@ -528,7 +528,7 @@ export default function ServiceDetailsPage() {
             </div>
             <div className="flex-1 overflow-auto p-4 bg-zinc-950">
               <pre className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-all selection:bg-green-900/50 selection:text-green-200">
-                <span className="text-blue-400">export MAGNUS_PORT=&lt;available_port&gt;</span>
+                <ServiceImplicitExport />
                 {"\n"}
                 <span className="text-green-400">{service.entry_command}</span>
               </pre>
