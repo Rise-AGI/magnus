@@ -304,7 +304,7 @@ export default function JobDetailsPage() {
                 ${job.status === "Running" ? "text-blue-400" :
                   job.status === "Success" ? "text-green-400" :
                   job.status === "Failed" ? "text-red-400" : "text-zinc-300"}`}>
-                {job.status.toUpperCase()}
+                {(job.status === "Queued" ? "Pending" : job.status).toUpperCase()}
               </span>
             </div>
             {/* Owner */}
