@@ -295,7 +295,7 @@ def run_blueprint(
         db_job = models.Job(
             **job_dict,
             user_id=current_user.id,
-            status=models.JobStatus.PENDING,
+            status=models.JobStatus.PREPARING,
         )
         db.add(db_job)
 
