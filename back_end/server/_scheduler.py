@@ -438,7 +438,7 @@ def main():
     try:
         shell_cmd = f"""set -e
 export MAGNUS_TOKEN={{user_token}}
-export MAGNUS_WORKSPACE=/workspace
+export MAGNUS_WORKSPACE=/magnus/workspace
 
 {{system_entry_command}}
 
