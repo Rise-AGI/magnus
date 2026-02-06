@@ -462,6 +462,10 @@ server:
     heartbeat_interval: 2               # 调度器心跳间隔(秒)
     snapshot_interval: 300              # 快照间隔(秒)
 
+  resource_cache:
+    container_cache_size: 80G           # 容器镜像缓存大小（LRU 淘汰）
+    repo_cache_size: 20G                # 代码仓库缓存大小（LRU 淘汰）
+
   service_proxy:
     max_concurrency: 1024               # 服务代理最大并发
     pool_size: 1024                     # 连接池大小
@@ -541,6 +545,7 @@ npm run dev
 - **B2**: 低优先级，可被 A 类任务抢占
 
 ### 任务状态
+- **Preparing**: 准备容器镜像和代码仓库
 - **Pending**: 在 Magnus 队列中等待调度
 - **Running**: 在 SLURM 集群中执行
 - **Paused**: 被高优先级任务抢占挂起
