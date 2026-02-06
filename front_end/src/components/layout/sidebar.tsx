@@ -20,12 +20,12 @@ import { useLanguage } from "@/context/language-context";
 import { CLUSTER_CONFIG } from "@/lib/config";
 
 const NAV_ITEMS = [
+  { name: "Explorer", href: "/explorer", icon: ArrowRight },
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Cluster", href: "/cluster", icon: Activity },
   { name: "Jobs", href: "/jobs", icon: Rocket },
   { name: "Blueprints", href: "/blueprints", icon: ScrollText },
   { name: "Services", href: "/services", icon: Layers },
-  { name: "Explorer", href: "/explorer", icon: ArrowRight },
   // { name: "Tools", href: "/tools", icon: Wrench },
 ];
 
