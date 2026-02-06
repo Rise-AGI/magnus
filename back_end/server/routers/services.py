@@ -500,11 +500,19 @@ async def proxy_service_request(
 
             try:
                 body = await request.body()
+
+                # 过滤 Host header，让 httpx 根据 base_url 自动设置正确的 Host
+                # 否则当存在 HTTP_PROXY 时，代理会根据错误的 Host 路由请求
+                filtered_headers = [
+                    (k, v) for k, v in request.headers.raw
+                    if k.lower() != b'host'
+                ]
+
                 rp_req = client.build_request(
                     request.method,
                     f"/{path}",
                     content=body,
-                    headers=request.headers.raw,
+                    headers=filtered_headers,
                     params=request.query_params,
                 )
 
