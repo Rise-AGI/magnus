@@ -158,7 +158,7 @@ function SingleFieldInput({
 
   if (field.type === "select") {
     return (
-      <div className={cn("relative z-20", disabled && "opacity-40 pointer-events-none")}>
+      <div className={cn("relative", disabled && "opacity-40 pointer-events-none")}>
         <SearchableSelect
           value={String(value)}
           onChange={onChange}
@@ -176,7 +176,7 @@ function SingleFieldInput({
 
   if (field.type === "boolean") {
     return (
-      <div className={cn("relative z-20", disabled && "opacity-40 pointer-events-none")}>
+      <div className={cn("relative", disabled && "opacity-40 pointer-events-none")}>
         <SearchableSelect
           value={String(value)}
           onChange={(val) => onChange(val === "true")}
@@ -453,9 +453,9 @@ export function DynamicForm({
   const sortedScopeNames = Object.keys(scopedFieldsMap).sort();
 
   return (
-    <div className="space-y-6 isolate">
+    <div className="space-y-6">
       {mainFields.length > 0 && (
-        <div className="space-y-5 relative z-50">
+        <div className="space-y-5">
           {mainFields.map(field => (
             <FormField
               key={field.key}
@@ -474,7 +474,7 @@ export function DynamicForm({
         const fields = scopedFieldsMap[scopeName];
 
         return (
-          <div key={scopeName} className="pt-2 border-t border-zinc-800/50 relative z-0">
+          <div key={scopeName} className="pt-2 border-t border-zinc-800/50">
             <button
               type="button"
               onClick={() => toggleScope(scopeName)}
