@@ -438,12 +438,13 @@ def main():
     try:
         shell_cmd = f"""set -e
 export MAGNUS_TOKEN={{user_token}}
-export MAGNUS_RESULT={{result_marker_path}}
-export MAGNUS_WORK_DIR={{work_dir}}
+export MAGNUS_WORKSPACE=/workspace
 
 {{system_entry_command}}
 
-apptainer exec --nv --pwd "{{repo_dir}}" "{{sif_path}}" bash "{{user_script_path}}"
+export MAGNUS_RESULT=$MAGNUS_WORKSPACE/.magnus_result
+export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:$MAGNUS_WORKSPACE"
+apptainer exec --nv --pwd "$MAGNUS_WORKSPACE/repository" "{{sif_path}}" bash "$MAGNUS_WORKSPACE/.magnus_user_script.sh"
 """
         ret_code = subprocess.call(shell_cmd, shell=True, executable="/bin/bash")
 
