@@ -35,7 +35,7 @@ server:
   service_proxy:
     max_concurrency: 1024
     pool_size: 1024
-  enchanter:
+  explorer:
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-235b-a22b
     visual_model_name: qwen-vl-max

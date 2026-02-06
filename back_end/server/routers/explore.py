@@ -33,10 +33,10 @@ from .auth import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-enchanter_config = magnus_config["server"]["enchanter"]
+explorer_config = magnus_config["server"]["explorer"]
 llm_client = OpenAI(
-    api_key=enchanter_config["api_key"],
-    base_url=enchanter_config["base_url"],
+    api_key=explorer_config["api_key"],
+    base_url=explorer_config["base_url"],
 )
 
 magnus_root = magnus_config["server"]["root"]
@@ -50,12 +50,7 @@ _active_generations: Dict[str, Dict[str, Any]] = {}
 def generate_session_title(
     user_message: str,
 ) -> str:
-    small_model = enchanter_config.get("small_fast_model_name")
-    if not small_model:
-        first_line = user_message.split('\n')[0][:50]
-        first_line = IMAGE_PATTERN.sub("[图片]", first_line)
-        return first_line if first_line else "New Session"
-
+    small_model = explorer_config["small_fast_model_name"]
     clean_message = IMAGE_PATTERN.sub("[图片]", user_message)[:500]
 
     try:
@@ -100,10 +95,7 @@ def understand_image_with_vlm(
     context_messages: List[Dict[str, Any]],
     current_text: str,
 ) -> str:
-    visual_model = enchanter_config.get("visual_model_name")
-    if not visual_model:
-        return f"[图片 {filename} 无法解析：未配置视觉模型]"
-
+    visual_model = explorer_config["visual_model_name"]
     image_url = image_to_base64_url(image_path)
     if not image_url:
         return f"[图片 {filename} 无法读取]"
@@ -552,7 +544,7 @@ def _run_generation_sync(
 
     try:
         stream = llm_client.chat.completions.create(
-            model=str(enchanter_config["model_name"]),
+            model=str(explorer_config["model_name"]),
             messages=cast(Any, messages),
             stream=True,
             extra_body={"enable_thinking": True},

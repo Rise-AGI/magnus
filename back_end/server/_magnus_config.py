@@ -51,6 +51,15 @@ def _validate_magnus_config(config: Dict[str, Any]) -> None:
     _check_key(server["resource_cache"], "container_cache_size", str)
     _check_key(server["resource_cache"], "repo_cache_size", str)
 
+    # explorer 配置
+    _check_key(server, "explorer", dict)
+    explorer = server["explorer"]
+    _check_key(explorer, "api_key", str)
+    _check_key(explorer, "base_url", str)
+    _check_key(explorer, "model_name", str)
+    _check_key(explorer, "visual_model_name", str)
+    _check_key(explorer, "small_fast_model_name", str)
+
     # cluster 配置
     cluster = config["cluster"]
     _check_key(cluster, "name", str)
