@@ -6,6 +6,8 @@ import logging
 import asyncio
 import httpx
 from typing import Optional, Dict, Any, Union, Literal, List
+
+from .croc_tools import download_file, download_file_async
 from .file_transfer import get_file_transfer_manager
 
 
@@ -32,6 +34,10 @@ __all__ = [
     "list_blueprints",
     "list_services",
     "get_blueprint_schema",
+
+    # File Transfer
+    "download_file",
+    "download_file_async",
 
     # Exceptions
     "MagnusError",
