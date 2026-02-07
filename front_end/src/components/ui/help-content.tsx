@@ -277,7 +277,7 @@ export function BlueprintEditorHelp() {
           {t("help.blueprintEditor.runtimeDesc").split(t("help.blueprintEditor.autoImported"))[1] || ""}
         </HelpParagraph>
         <div className="bg-black/50 p-4 rounded-lg text-[11px] text-zinc-300 font-mono">
-          <span className="text-purple-400">JobSubmission</span>, <span className="text-purple-400">JobType</span>, <span className="text-blue-400">Annotated</span>, <span className="text-blue-400">Literal</span>, <span className="text-blue-400">Optional</span>, <span className="text-blue-400">List</span>, <span className="text-blue-400">Dict</span>, <span className="text-blue-400">Any</span>
+          <span className="text-purple-400">JobSubmission</span>, <span className="text-purple-400">JobType</span>, <span className="text-purple-400">FileSecret</span>, <span className="text-blue-400">Annotated</span>, <span className="text-blue-400">Literal</span>, <span className="text-blue-400">Optional</span>, <span className="text-blue-400">List</span>, <span className="text-blue-400">Dict</span>, <span className="text-blue-400">Any</span>
         </div>
       </HelpSection>
 
@@ -357,6 +357,11 @@ def generate_job(
               <td className="py-2">{t("help.blueprintEditor.optionalField")}</td>
               <td className="py-2">{t("help.blueprintEditor.optionalDesc")}</td>
             </tr>
+            <tr className="border-b border-zinc-800/50">
+              <td className="py-2"><code className="text-purple-400">FileSecret</code></td>
+              <td className="py-2">{t("help.blueprintEditor.fileSecretInput")}</td>
+              <td className="py-2">placeholder</td>
+            </tr>
             <tr>
               <td className="py-2"><code className="text-blue-400">List[T]</code></td>
               <td className="py-2">{t("help.blueprintEditor.dynamicList")}</td>
@@ -410,7 +415,14 @@ def generate_job(
 job_id = submit_blueprint("blueprint-id", args={"param": "value"})
 
 # Submit & Wait
-result = run_blueprint("blueprint-id", args={"param": "value"})`}</HelpCodeBlock>
+result = run_blueprint("blueprint-id", args={"param": "value"})
+
+# FileSecret: SDK 传文件路径，自动启动 croc send
+job_id = submit_blueprint("bp-id", args={"data": "/local/path/file.csv"})
+
+# 蓝图内接收文件
+from magnus import download_file
+download_file(file_secret, "/workspace/data/")`}</HelpCodeBlock>
       </HelpSection>
     </>
   );
@@ -444,6 +456,11 @@ export function BlueprintRunnerHelp() {
           <li>
             {t("help.blueprintRunner.dropdown")}
           </li>
+          <li>
+            <span className="text-purple-400 font-medium">FileSecret</span>
+            <span className="mx-1.5">—</span>
+            {t("help.blueprintRunner.fileSecret")}
+          </li>
         </HelpFieldList>
       </HelpSection>
 
@@ -466,9 +483,12 @@ job_id = submit_blueprint("blueprint-id", args={"param": "value"})
 # 提交并等待完成 (Submit & Wait)
 result = run_blueprint("blueprint-id", args={"param": "value"})
 
+# FileSecret 参数：SDK 直接传文件路径
+job_id = submit_blueprint("bp-id", args={"data": "/path/to/file"})
+
 # CLI
 magnus submit <blueprint-id> --param value
-magnus run <blueprint-id> --param value`}</HelpCodeBlock>
+magnus run <blueprint-id> --data /path/to/file`}</HelpCodeBlock>
       </HelpSection>
 
       <HelpSection title={t("help.blueprintRunner.submitFlow")}>

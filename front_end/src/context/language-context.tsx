@@ -603,6 +603,7 @@ const translations = {
   },
   "help.blueprintEditor.optionalField": { zh: "带启用开关的字段", en: "Field with Enable Switch" },
   "help.blueprintEditor.optionalDesc": { zh: "禁用时不传参给函数", en: "Disabled means no param passed to function" },
+  "help.blueprintEditor.fileSecretInput": { zh: "croc secret 输入框", en: "croc secret input" },
   "help.blueprintEditor.dynamicList": { zh: "可动态增删的列表", en: "Dynamic Add/Remove List" },
   "help.blueprintEditor.nestedTypes": { zh: "支持嵌套基础类型", en: "Supports nested basic types" },
   "help.blueprintEditor.commonMetadata": { zh: "通用元数据属性", en: "Common Metadata Properties" },
@@ -656,6 +657,10 @@ const translations = {
   "help.blueprintRunner.dropdown": {
     zh: "下拉选择字段的选项由蓝图定义，部分选项可能带有说明文字。",
     en: "Dropdown options are defined by the blueprint, some options may have description text."
+  },
+  "help.blueprintRunner.fileSecret": {
+    zh: "文件传输字段，通过 croc 传输文件。在此输入 secret code，前缀 magnus-secret: 已预填。SDK 用户可直接传本地文件路径。",
+    en: "File transfer via croc. Enter the secret code, the magnus-secret: prefix is pre-filled. SDK users can pass a local file path directly."
   },
   "help.blueprintRunner.paramCache": { zh: "参数缓存", en: "Parameter Cache" },
   "help.blueprintRunner.paramCacheDesc": {

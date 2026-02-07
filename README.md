@@ -328,6 +328,7 @@ def generate_job(
 | 布尔 | `bool` | 开关 | - |
 | 枚举 | `Literal["a", "b"]` | 下拉选择器 | `options` (可含 label/description) |
 | 可选 | `Optional[T]` | 带启用开关的字段 | 禁用时不传参 |
+| 文件传输 | `FileSecret` | croc secret 输入框 | `placeholder` |
 | 列表 | `List[T]` | 动态添加/删除项 | - |
 | 组合 | `Optional[List[T]]` | 可选的列表字段 | - |
 
@@ -335,6 +336,35 @@ def generate_job(
 - `label`: 字段显示名称
 - `description`: 字段说明文字
 - `scope`: 参数分组（相同 scope 的参数会被归类显示）
+
+#### 文件传输 (FileSecret)
+
+`FileSecret` 类型用于将本地文件传输到远程执行环境，底层基于 [croc](https://github.com/schollz/croc)。
+
+```python
+# 蓝图定义
+InputData = Annotated[FileSecret, {
+    "label": "Input Data",
+    "placeholder": "croc secret code",
+}]
+
+def generate_job(data: InputData) -> JobSubmission:
+    ...
+```
+
+**Web 端**：用户输入 croc secret（前缀 `magnus-secret:` 已预填）
+
+**SDK 端**：直接传文件路径，SDK 自动启动 `croc send`
+```python
+from magnus import submit_blueprint
+submit_blueprint("my-bp", args={"data": "/local/path/to/file.csv"})
+```
+
+**蓝图内接收文件**：
+```python
+from magnus import download_file
+download_file(data, "/workspace/data/")  # data 是 FileSecret 参数
+```
 
 #### 工作流程：
 1. **编写蓝图**: 在 Blueprint 编辑器中编写 Python 函数
