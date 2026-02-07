@@ -24,13 +24,11 @@ front_end/*.tsbuildinfo
 
 
 # Back End: Python, FastAPI + SQLAlchemy
-back_end/**/__pycache__/
 back_end/*.py[oc]
 back_end/.venv
 back_end/run*.py
 back_end/run*.sh
 back_end/!scripts/**
-back_end/scripts/**/**__pycache__**
 back_end/api_keys.json
 back_end/python_scripts/run*.py
 
@@ -38,9 +36,10 @@ back_end/python_scripts/run*.py
 # Others
 *nohup*
 *slurm*
+*__pycache__*
 !back_end/python_scripts/blueprints/magnus-slurm.py
 !back_end/python_scripts/magnus_slurm.py
 documents/
-.DS_Store
-.vscode/
-**claude_report**
+*DS_Store*
+*vscode*
+*claude_report*

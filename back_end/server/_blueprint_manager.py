@@ -3,12 +3,50 @@ import inspect
 import logging
 from typing import Any, Dict, List, Optional, Union, Annotated, Literal, get_origin, get_args
 
-from pydantic import ValidationError, create_model, ConfigDict
+from pydantic import ValidationError, create_model, ConfigDict, GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
 
 from .models import JobType
 from .schemas import JobSubmission, BlueprintParamSchema, BlueprintParamOption
 
 logger = logging.getLogger(__name__)
+
+
+class FileSecret(str):
+    """
+    文件传输凭证类型。
+
+    用于蓝图参数，表示该参数需要一个文件/文件夹。
+    值必须以 "magnus-secret:" 开头，后跟 croc secret。
+
+    示例：magnus-secret:7454-phrase-love-ferrari
+
+    SDK 端支持语法糖：直接传文件路径，SDK 会自动启动 croc send 并转换为 secret 格式。
+    """
+
+    MAGIC_PREFIX = "magnus-secret:"
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: GetCoreSchemaHandler,
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(
+            cls._validate,
+            core_schema.str_schema(),
+        )
+
+    @classmethod
+    def _validate(cls, v: str) -> "FileSecret":
+        if not v.startswith(cls.MAGIC_PREFIX):
+            raise ValueError(f"FileSecret must start with '{cls.MAGIC_PREFIX}'")
+        return cls(v)
+
+    @property
+    def croc_secret(self) -> str:
+        """提取 croc secret 部分"""
+        return self[len(self.MAGIC_PREFIX):]
 
 
 def _is_optional_type(tp) -> bool:
@@ -54,6 +92,7 @@ class BlueprintManager:
         self.execution_globals = {
             "JobSubmission": JobSubmission,
             "JobType": JobType,
+            "FileSecret": FileSecret,
             "Annotated": Annotated,
             "Literal": Literal,
             "Optional": Optional,
@@ -74,10 +113,10 @@ class BlueprintManager:
 
         def restricted_import(
             name: str,
-            globals: Optional[Dict[str, Any]] = None,
-            locals: Optional[Dict[str, Any]] = None,
-            fromlist: tuple = (),
-            level: int = 0,
+            _globals: Optional[Dict[str, Any]] = None,
+            _locals: Optional[Dict[str, Any]] = None,
+            _fromlist: tuple = (),
+            _level: int = 0,
         ) -> Any:
             if name in allowed_modules:
                 return allowed_modules[name]
@@ -238,6 +277,11 @@ class BlueprintManager:
                 if "border_color" in meta_dict: schema.border_color = meta_dict["border_color"]
                 if "multi_line" in meta_dict: schema.multi_line = bool(meta_dict["multi_line"])
                 if "min_lines" in meta_dict: schema.min_lines = int(meta_dict["min_lines"])
+
+            elif base_type is FileSecret or (isinstance(base_type, type) and issubclass(base_type, FileSecret)):  # type: ignore[arg-type]
+                schema.type = "file_secret"
+                schema.allow_empty = False
+                if "placeholder" in meta_dict: schema.placeholder = meta_dict["placeholder"]
 
             elif origin_base is Literal:
                 schema.type = "select"

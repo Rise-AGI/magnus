@@ -2,14 +2,14 @@
 import React from "react";
 
 // Single source of truth for blueprint implicit imports
-export const BLUEPRINT_IMPLICIT_IMPORTS = `from server import JobSubmission, JobType
+export const BLUEPRINT_IMPLICIT_IMPORTS = `from server import JobSubmission, JobType, FileSecret
 from typing import Annotated, Literal, Optional, List`;
 
 // Styled version for display
 export function BlueprintImplicitImports() {
   return (
     <>
-      <span className="text-purple-400">from</span> server <span className="text-purple-400">import</span> JobSubmission, JobType{"\n"}
+      <span className="text-purple-400">from</span> server <span className="text-purple-400">import</span> JobSubmission, JobType, FileSecret{"\n"}
       <span className="text-purple-400">from</span> typing <span className="text-purple-400">import</span> Annotated, Literal, Optional, List
     </>
   );

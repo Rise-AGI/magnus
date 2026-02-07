@@ -191,6 +191,35 @@ function SingleFieldInput({
     );
   }
 
+  if (field.type === "file_secret") {
+    const prefix = "magnus-secret:";
+    const secretValue = typeof value === "string" && value.startsWith(prefix)
+      ? value.slice(prefix.length)
+      : (value ?? "");
+
+    return (
+      <div className="flex items-center gap-0">
+        <span className="px-3 py-2.5 bg-zinc-900 border border-r-0 border-zinc-800 rounded-l-lg text-sm text-zinc-500 select-none">
+          {prefix}
+        </span>
+        <input
+          type="text"
+          value={secretValue}
+          onChange={(e) => onChange(prefix + e.target.value)}
+          placeholder={field.placeholder || "croc-secret-code"}
+          className={cn(
+            "flex-1 bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-r-lg text-sm transition-all outline-none placeholder-zinc-700",
+            "focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20",
+            disabled && "opacity-40 cursor-not-allowed",
+            hasError && "border-red-500 animate-shake"
+          )}
+          spellCheck={false}
+          disabled={disabled}
+        />
+      </div>
+    );
+  }
+
   return (
     <DynamicStringInput
       field={field}

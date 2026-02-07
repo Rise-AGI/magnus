@@ -30,7 +30,9 @@ from .. import (
     get_cluster_stats as api_get_cluster_stats,
     list_blueprints as api_list_blueprints,
     list_services as api_list_services,
+    get_blueprint_schema as api_get_blueprint_schema,
 )
+from ..file_transfer import get_file_transfer_manager
 
 # === UI Setup ===
 
@@ -254,9 +256,19 @@ def apply_cli_defaults(parsed_cli_args: Dict[str, Any], command_type: str = "sub
     # 特殊逻辑：Run 模式下若未指定 timeout，默认应为无限等待 (None)，而非 submit 的 10s
     if command_type == "run" and "timeout" not in parsed_cli_args:
         config["timeout"] = None
-        
+
     config.update(parsed_cli_args)
     return config
+
+
+def _get_file_secret_keys(blueprint_id: str) -> List[str]:
+    """获取蓝图中所有 FileSecret 类型的参数 key"""
+    try:
+        schema = api_get_blueprint_schema(blueprint_id)
+        return [param["key"] for param in schema if param.get("type") == "file_secret"]
+    except Exception:
+        return []
+
 
 # === CLI App Definition ===
 
@@ -320,18 +332,30 @@ def submit(
     Submit a blueprint job (Fire & Forget).
     All unrecognized arguments are passed to the blueprint as strings.
     """
+    file_transfer_mgr = get_file_transfer_manager()
     try:
         cli_args, bp_args = partition_args(ctx.args)
         cli_config = apply_cli_defaults(cli_args, command_type="submit")
-        
+
         if cli_config["verbose"]:
             console.rule("[dim]DEBUG: Argument Partition[/dim]")
             console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
             console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
             console.rule()
 
+        file_secret_keys = _get_file_secret_keys(blueprint_id)
+        if file_secret_keys:
+            bp_args, errors = file_transfer_mgr.prepare_file_secrets(bp_args, file_secret_keys)
+            if errors:
+                for err in errors:
+                    print_error(err)
+                raise typer.Exit(code=1)
+            if cli_config["verbose"]:
+                console.print(f"[dim]FileSecret keys: {file_secret_keys}[/dim]")
+                console.print(f"[dim]Processed args: {bp_args}[/dim]")
+
         print_msg(f"Submitting blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
-        
+
         job_id = submit_blueprint(
             blueprint_id=blueprint_id,
             use_preference=cli_config["preference"],
@@ -340,13 +364,15 @@ def submit(
         )
 
         print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
-        
+
     except MagnusError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
+    finally:
+        file_transfer_mgr.cleanup()
 
 
 @app.command(
@@ -359,6 +385,7 @@ def run(
     """
     Execute a blueprint and wait for completion.
     """
+    file_transfer_mgr = get_file_transfer_manager()
     try:
         cli_args, bp_args = partition_args(ctx.args)
         cli_config = apply_cli_defaults(cli_args, command_type="run")
@@ -368,6 +395,17 @@ def run(
             console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
             console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
             console.rule()
+
+        file_secret_keys = _get_file_secret_keys(blueprint_id)
+        if file_secret_keys:
+            bp_args, errors = file_transfer_mgr.prepare_file_secrets(bp_args, file_secret_keys)
+            if errors:
+                for err in errors:
+                    print_error(err)
+                raise typer.Exit(code=1)
+            if cli_config["verbose"]:
+                console.print(f"[dim]FileSecret keys: {file_secret_keys}[/dim]")
+                console.print(f"[dim]Processed args: {bp_args}[/dim]")
 
         print_msg(f"Running blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
 
@@ -379,11 +417,11 @@ def run(
                 poll_interval=cli_config["poll_interval"],
                 args=bp_args
             )
-        
+
         console.print("")
         print_msg("Job finished.")
         console.rule("[bold green]MAGNUS RESULT[/bold green]")
-        
+
         try:
             if isinstance(result, str):
                 json_obj = json.loads(result)
@@ -403,6 +441,8 @@ def run(
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
+    finally:
+        file_transfer_mgr.cleanup()
 
 
 CLI_RESERVED_KEYS = {"timeout", "verbose"}

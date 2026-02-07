@@ -5,7 +5,9 @@ import json
 import logging
 import asyncio
 import httpx
-from typing import Optional, Dict, Any, Union, Literal
+from typing import Optional, Dict, Any, Union, Literal, List
+from .file_transfer import get_file_transfer_manager
+
 
 __all__ = [
     # Core Client
@@ -29,6 +31,7 @@ __all__ = [
     "get_cluster_stats",
     "list_blueprints",
     "list_services",
+    "get_blueprint_schema",
 
     # Exceptions
     "MagnusError",
@@ -36,6 +39,7 @@ __all__ = [
     "ResourceNotFoundError",
     "ExecutionError",
 ]
+
 
 # === Configuration ===
 
@@ -156,6 +160,14 @@ class MagnusClient:
 
     # === Blueprint Methods ===
 
+    def _get_file_secret_keys(self, blueprint_id: str) -> List[str]:
+        """获取蓝图中所有 FileSecret 类型的参数 key"""
+        try:
+            schema = self.get_blueprint_schema(blueprint_id)
+            return [param["key"] for param in schema if param.get("type") == "file_secret"]
+        except Exception:
+            return []
+
     def submit_blueprint(
         self,
         blueprint_id: str,
@@ -170,9 +182,22 @@ class MagnusClient:
         :param use_preference: 是否合并已缓存的偏好参数。
         :param save_preference: 成功后是否保存参数为新偏好。
         :param timeout: HTTP 请求超时时间（非任务执行时间）。
+
+        注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
+        croc 进程会在后台运行，直到远程接收完成或进程退出时自动清理。
         """
+
+        final_args = dict(args) if args else {}
+
+        file_secret_keys = self._get_file_secret_keys(blueprint_id)
+        if file_secret_keys and final_args:
+            file_transfer_mgr = get_file_transfer_manager()
+            final_args, errors = file_transfer_mgr.prepare_file_secrets(final_args, file_secret_keys)
+            if errors:
+                raise MagnusError(f"Failed to prepare file transfers: {'; '.join(errors)}")
+
         payload = {
-            "parameters": args or {},
+            "parameters": final_args,
             "use_preference": use_preference,
             "save_preference": save_preference,
         }
@@ -196,8 +221,24 @@ class MagnusClient:
         save_preference: bool = True,
         timeout: float = 10.0,
     ) -> str:
+        """
+        异步提交蓝图任务，立即返回 Job ID (Fire & Forget)。
+
+        注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
+        croc 进程会在后台运行，直到远程接收完成或进程退出时自动清理。
+        """
+
+        final_args = dict(args) if args else {}
+
+        file_secret_keys = self._get_file_secret_keys(blueprint_id)
+        if file_secret_keys and final_args:
+            file_transfer_mgr = get_file_transfer_manager()
+            final_args, errors = file_transfer_mgr.prepare_file_secrets(final_args, file_secret_keys)
+            if errors:
+                raise MagnusError(f"Failed to prepare file transfers: {'; '.join(errors)}")
+
         payload = {
-            "parameters": args or {},
+            "parameters": final_args,
             "use_preference": use_preference,
             "save_preference": save_preference,
         }
@@ -225,32 +266,40 @@ class MagnusClient:
         """
         提交任务并轮询等待完成 (Submit & Wait)。
         :param timeout: 最大任务执行等待时间（秒）。默认为 None（无限等待）。
+
+        注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
+        Job 完成后会自动清理 croc 进程。
         """
-        job_id = self.submit_blueprint(
-            blueprint_id=blueprint_id,
-            args=args,
-            use_preference=use_preference,
-            save_preference=save_preference,
-            timeout=10.0  # Network timeout
-        )
-        logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
-        start_time = time.time()
-        while True:
-            if timeout and (time.time() - start_time > timeout):
-                raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
+        file_transfer_mgr = get_file_transfer_manager()
+        try:
+            job_id = self.submit_blueprint(
+                blueprint_id=blueprint_id,
+                args=args,
+                use_preference=use_preference,
+                save_preference=save_preference,
+                timeout=10.0  # Network timeout
+            )
+            logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
-            resp = self.http.get(f"/jobs/{job_id}")
-            self._handle_error(resp)
-            data = resp.json()
-            status = data["status"]
+            start_time = time.time()
+            while True:
+                if timeout and (time.time() - start_time > timeout):
+                    raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
 
-            if status == "Success":
-                return data.get("result", "")
-            elif status in ["Failed", "Terminated"]:
-                raise ExecutionError(f"Job {job_id} ended with status: {status}")
-            
-            time.sleep(poll_interval)
+                resp = self.http.get(f"/jobs/{job_id}")
+                self._handle_error(resp)
+                data = resp.json()
+                status = data["status"]
+
+                if status == "Success":
+                    return data.get("result", "")
+                elif status in ["Failed", "Terminated"]:
+                    raise ExecutionError(f"Job {job_id} ended with status: {status}")
+
+                time.sleep(poll_interval)
+        finally:
+            file_transfer_mgr.cleanup()
 
     async def run_blueprint_async(
         self,
@@ -261,31 +310,42 @@ class MagnusClient:
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
     ) -> Optional[str]:
-        job_id = await self.submit_blueprint_async(
-            blueprint_id=blueprint_id,
-            args=args,
-            use_preference=use_preference,
-            save_preference=save_preference,
-            timeout=10.0
-        )
-        logger.info(f"Job {job_id} submitted. Waiting for completion...")
+        """
+        异步提交任务并轮询等待完成 (Submit & Wait)。
 
-        start_time = time.time()
-        while True:
-            if timeout and (time.time() - start_time > timeout):
-                raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
+        注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
+        Job 完成后会自动清理 croc 进程。
+        """
 
-            resp = await self.ahttp.get(f"/jobs/{job_id}")
-            self._handle_error(resp)
-            data = resp.json()
-            status = data["status"]
+        file_transfer_mgr = get_file_transfer_manager()
+        try:
+            job_id = await self.submit_blueprint_async(
+                blueprint_id=blueprint_id,
+                args=args,
+                use_preference=use_preference,
+                save_preference=save_preference,
+                timeout=10.0
+            )
+            logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
-            if status == "Success":
-                return data.get("result", "")
-            elif status in ["Failed", "Terminated"]:
-                raise ExecutionError(f"Job {job_id} ended with status: {status}")
-            
-            await asyncio.sleep(poll_interval)
+            start_time = time.time()
+            while True:
+                if timeout and (time.time() - start_time > timeout):
+                    raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
+
+                resp = await self.ahttp.get(f"/jobs/{job_id}")
+                self._handle_error(resp)
+                data = resp.json()
+                status = data["status"]
+
+                if status == "Success":
+                    return data.get("result", "")
+                elif status in ["Failed", "Terminated"]:
+                    raise ExecutionError(f"Job {job_id} ended with status: {status}")
+
+                await asyncio.sleep(poll_interval)
+        finally:
+            file_transfer_mgr.cleanup()
 
     # === Job Management Methods ===
 
@@ -445,6 +505,23 @@ class MagnusClient:
             return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while listing blueprints.")
+
+
+    def get_blueprint_schema(
+        self,
+        blueprint_id: str,
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取蓝图的参数 Schema。
+        :return: List[BlueprintParamSchema]
+        """
+        try:
+            resp = self.http.get(f"/blueprints/{blueprint_id}/schema", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting blueprint schema.")
 
 
     def list_services(
@@ -736,3 +813,10 @@ def list_services(
     timeout: float = 10.0,
 ) -> Dict[str, Any]:
     return default_client.list_services(limit, skip, search, active_only, timeout)
+
+
+def get_blueprint_schema(
+    blueprint_id: str,
+    timeout: float = 10.0,
+) -> List[Dict[str, Any]]:
+    return default_client.get_blueprint_schema(blueprint_id, timeout)
