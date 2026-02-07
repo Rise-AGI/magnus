@@ -1,5 +1,5 @@
 <!-- README.md -->
-# Magnus - Rise-AGI 计算基础设施平台
+# Magnus - PKU Plasma & Rise-AGI 计算基础设施平台
 
 ![Magnus Logo](https://img.shields.io/badge/Magnus-Platform-blue)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black)
@@ -10,7 +10,7 @@
 ![SLURM](https://img.shields.io/badge/Scheduler-SLURM-bf202f)
 
 
-**Magnus** 是 Rise-AGI 的科学计算与机器学习计算基础设施，集成了智能调度、资源监控、用户认证等企业级功能。
+**Magnus** 是 PKU Plasma 和 Rise-AGI 的科学计算与机器学习计算基础设施，集成了智能调度、资源监控、用户认证等企业级功能。
 
 ## 🚀 核心特性
 
@@ -803,6 +803,14 @@ magnus config
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 开启 Pull Request
 
+## 📜 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
+
+## 🙏 致谢
+
+- [OpenCode](https://github.com/anomalyco/opencode) - 优秀的开源 AI Coding Agent，Explorer 模块的部分实现参考了该项目
+
 ---
 
-**Magnus** - 为 Rise-AGI 提供强大的计算基础设施支持 🚀
+**Magnus** - 为 PKU Plasma 和 Rise-AGI 提供强大的计算基础设施支持 🚀
