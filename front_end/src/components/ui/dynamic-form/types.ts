@@ -121,5 +121,14 @@ function validateSingleValue(field: FieldSchema, value: any, label: string): str
     if (field.max != null && num > field.max) return `${label} must be ≤ ${field.max}`;
   }
 
+  // FileSecret 校验
+  if (field.type === "file_secret") {
+    const prefix = "magnus-secret:";
+    const str = String(value ?? "");
+    if (!str.startsWith(prefix) || !str.slice(prefix.length).trim()) {
+      return `${label} is required`;
+    }
+  }
+
   return null;
 }

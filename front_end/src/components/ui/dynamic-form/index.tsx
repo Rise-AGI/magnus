@@ -325,7 +325,7 @@ function FormField({
   isError?: boolean;
   isVisible?: boolean;
 }) {
-  const showRequiredStar = field.type === "text" && field.allow_empty === false;
+  const showRequiredStar = field.type === "file_secret" || (field.type === "text" && field.allow_empty === false);
 
   // Optional 字段：value 为 null 表示禁用
   const isOptionalEnabled = field.is_optional ? value !== null : true;
