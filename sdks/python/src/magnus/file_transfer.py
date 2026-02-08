@@ -6,7 +6,7 @@ FileSecret 文件传输支持模块。
 SDK 端启动 croc send，蓝图执行时通过 croc receive 接收。
 """
 import atexit
-import secrets
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -16,37 +16,22 @@ from dataclasses import dataclass, field
 FILE_SECRET_PREFIX = "magnus-secret:"
 
 
-def generate_croc_secret() -> str:
-    """生成随机的 croc secret（4 个单词格式）"""
-    words = [
-        "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
-        "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
-        "quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey",
-        "xray", "yankee", "zulu", "apple", "banana", "cherry", "dragon", "eagle",
-        "falcon", "grape", "hammer", "iron", "jade", "knight", "lemon", "mango",
-        "ninja", "orange", "pearl", "queen", "river", "storm", "tiger", "ultra",
-    ]
-    random_words = secrets.SystemRandom().sample(words, 4)
-    return "-".join(random_words)
-
-
 @dataclass
 class CrocSender:
     """管理一个 croc send 进程"""
     path: str
-    secret: str
+    secret: Optional[str] = None
     process: Optional[subprocess.Popen] = field(default=None, repr=False)
     ready_event: threading.Event = field(default_factory=threading.Event, repr=False)
     error: Optional[str] = None
 
     def start(self) -> bool:
-        """启动 croc send 进程，返回是否成功"""
+        """启动 croc send 进程，从输出中解析 croc 生成的 code，返回是否成功"""
         if not Path(self.path).exists():
             self.error = f"Path does not exist: {self.path}"
             return False
 
-        # send 端用 --code 指定 secret，跨平台一致
-        cmd = ["croc", "send", "--code", self.secret, self.path]
+        cmd = ["croc", "send", self.path]
 
         try:
             self.process = subprocess.Popen(
@@ -75,7 +60,10 @@ class CrocSender:
             assert self.process is not None
             assert self.process.stdout is not None
             for line in self.process.stdout:
-                if "Sending" in line or "Code is:" in line:
+                # croc 输出格式: "Code is: xxxx-yyyy-zzzz"
+                m = re.search(r"Code is:\s*(\S+)", line)
+                if m:
+                    self.secret = m.group(1)
                     self.ready_event.set()
 
         thread = threading.Thread(target=monitor, daemon=True)
@@ -144,12 +132,13 @@ class FileTransferManager:
             if value.startswith(FILE_SECRET_PREFIX):
                 continue
 
-            secret = generate_croc_secret()
-            sender = CrocSender(path=value, secret=secret)
+            sender = CrocSender(path=value)
 
             if not sender.start():
                 errors.append(f"[{key}] {sender.error}")
                 continue
+
+            assert sender.secret is not None
 
             with self._lock:
                 self._senders.append(sender)
