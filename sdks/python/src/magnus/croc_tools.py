@@ -4,6 +4,7 @@ Croc 文件传输工具封装。
 
 提供简洁的 API 用于通过 croc 接收文件。
 """
+import os
 import sys
 import asyncio
 import subprocess
@@ -50,11 +51,12 @@ def download_file(
         out_dir = target.parent
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = _build_croc_command(secret, out_dir, overwrite)
+    cmd, env = _build_croc_receive(secret, out_dir, overwrite)
 
     try:
         result = subprocess.run(
             cmd,
+            env=env,
             cwd=str(out_dir),
             capture_output=True,
             text=True,
@@ -96,12 +98,13 @@ async def download_file_async(
         out_dir = target.parent
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = _build_croc_command(secret, out_dir, overwrite)
+    cmd, env = _build_croc_receive(secret, out_dir, overwrite)
 
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(out_dir),
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -130,19 +133,19 @@ def _normalize_secret(file_secret: str) -> str:
     return file_secret
 
 
-def _build_croc_command(secret: str, out_dir: Path, overwrite: bool) -> list:
-    """构建 croc 命令"""
+def _build_croc_receive(secret: str, out_dir: Path, overwrite: bool) -> tuple:
+    """构建 croc 接收命令，返回 (cmd, env)"""
     is_windows = sys.platform == "win32"
 
     cmd = ["croc", "--yes"]
     if overwrite:
         cmd.append("--overwrite")
-    cmd.append("--out")
-    cmd.append(str(out_dir))
+    cmd.extend(["--out", str(out_dir)])
 
     if is_windows:
         cmd.append(secret)
+        return cmd, None
     else:
-        cmd.append(secret)
-
-    return cmd
+        env = os.environ.copy()
+        env["CROC_SECRET"] = secret
+        return cmd, env

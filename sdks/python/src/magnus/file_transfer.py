@@ -5,9 +5,6 @@ FileSecret 文件传输支持模块。
 通过 croc 实现本地文件到远程蓝图执行环境的传输。
 SDK 端启动 croc send，蓝图执行时通过 croc receive 接收。
 """
-import os
-import re
-import sys
 import atexit
 import secrets
 import subprocess
@@ -48,22 +45,14 @@ class CrocSender:
             self.error = f"Path does not exist: {self.path}"
             return False
 
-        is_windows = sys.platform == "win32"
-
-        if is_windows:
-            cmd = ["croc", "send", "--code", self.secret, self.path]
-            env = None
-        else:
-            cmd = ["croc", "send", "--code", self.secret, self.path]
-            env = os.environ.copy()
-            env["CROC_SECRET"] = self.secret
+        # send 端用 --code 指定 secret，跨平台一致
+        cmd = ["croc", "send", "--code", self.secret, self.path]
 
         try:
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                env=env,
                 text=True,
             )
         except FileNotFoundError:
