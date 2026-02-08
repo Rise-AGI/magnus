@@ -6,9 +6,12 @@ import logging
 import asyncio
 import httpx
 from typing import Optional, Dict, Any, Union, Literal, List
+from importlib.metadata import version as _pkg_version
 
 from .croc_tools import download_file, download_file_async
 from .file_transfer import get_file_transfer_manager
+
+__version__ = _pkg_version("magnus-sdk")
 
 
 __all__ = [
