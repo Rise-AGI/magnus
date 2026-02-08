@@ -279,8 +279,11 @@ class ResourceManager:
         if proc.returncode != 0:
             logger.warning(f"git fetch failed (may be ok): {stderr.decode().strip()}")
 
+        # HEAD 是符号引用，git checkout HEAD 只会 checkout 本地（陈旧的）HEAD；
+        # 需要 checkout origin/<branch> 才能拿到 fetch 后的最新提交
+        effective_sha = f"origin/{branch}" if commit_sha == "HEAD" else commit_sha
         proc = await asyncio.create_subprocess_exec(
-            "git", "checkout", commit_sha,
+            "git", "checkout", effective_sha,
             cwd=target_dir,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
