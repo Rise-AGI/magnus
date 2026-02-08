@@ -1021,5 +1021,77 @@ def list_services_cmd(
         raise typer.Exit(code=1)
 
 
+CROC_INSTALL_HINT = (
+    "croc is not installed or not in PATH.\n"
+    "         Magnus file transfer depends on croc.\n"
+    "         Install via conda: conda install -c conda-forge croc"
+)
+
+
+def _check_croc() -> str:
+    """检查 croc 是否可用，返回 croc 路径"""
+    import shutil
+    path = shutil.which("croc")
+    if not path:
+        print_error(CROC_INSTALL_HINT)
+        raise typer.Exit(code=1)
+    return path
+
+
+@app.command(name="send")
+def send_cmd(
+    path: str = typer.Argument(..., help="File or folder to send"),
+):
+    """
+    Send a file or folder via croc.
+
+    Wrapper around 'croc send'. Requires croc to be installed.
+
+    Examples:
+      magnus send data.csv
+      magnus send ./my_folder
+    """
+    _check_croc()
+
+    target = Path(path)
+    if not target.exists():
+        print_error(f"Path does not exist: {path}")
+        raise typer.Exit(code=1)
+
+    try:
+        subprocess.run(["croc", "send", str(target)], check=False)
+    except KeyboardInterrupt:
+        pass
+
+
+@app.command(name="receive")
+def receive_cmd(
+    secret: str = typer.Argument(..., help="croc secret code"),
+):
+    """
+    Receive a file or folder via croc.
+
+    Wrapper around 'croc <secret>'. Requires croc to be installed.
+    On Linux/macOS, uses CROC_SECRET env var.
+
+    Examples:
+      magnus receive 1234-apple-banana-cherry
+    """
+    _check_croc()
+
+    if sys.platform == "win32":
+        cmd = ["croc", secret]
+        env = None
+    else:
+        cmd = ["croc"]
+        env = os.environ.copy()
+        env["CROC_SECRET"] = secret
+
+    try:
+        subprocess.run(cmd, env=env, check=False)
+    except KeyboardInterrupt:
+        pass
+
+
 if __name__ == "__main__":
     app()

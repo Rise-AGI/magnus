@@ -417,12 +417,12 @@ job_id = submit_blueprint("blueprint-id", args={"param": "value"})
 # Submit & Wait
 result = run_blueprint("blueprint-id", args={"param": "value"})
 
-# FileSecret: SDK 传文件路径，自动启动 croc send
-job_id = submit_blueprint("bp-id", args={"data": "/local/path/file.csv"})
+# FileSecret: SDK 传文件路径，自动启动 magnus send
+job_id = submit_blueprint("bp-id", args={"data": "my_table.csv"})
 
 # 蓝图内接收文件
 from magnus import download_file
-download_file(file_secret, "/workspace/data/")`}</HelpCodeBlock>
+download_file(file_secret, "my_table.csv")`}</HelpCodeBlock>
       </HelpSection>
     </>
   );

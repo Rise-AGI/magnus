@@ -363,7 +363,7 @@ submit_blueprint("my-bp", args={"data": "/local/path/to/file.csv"})
 **蓝图内接收文件**：
 ```python
 from magnus import download_file
-download_file(data, "/workspace/data/")  # data 是 FileSecret 参数
+download_file(data, "my_table.csv")  # data 是 FileSecret 参数
 ```
 
 #### 工作流程：
@@ -795,6 +795,17 @@ magnus services -a         # 仅活跃服务
 ```bash
 # 查看当前 SDK 配置
 magnus config
+```
+
+### 文件传输
+
+```bash
+# 发送文件/文件夹（封装 croc send）
+magnus send my_table.csv
+magnus send ./my_folder
+
+# 接收文件/文件夹（封装 croc receive，自动处理平台差异）
+magnus receive 1234-apple-banana-cherry
 ```
 
 **输出示例**：

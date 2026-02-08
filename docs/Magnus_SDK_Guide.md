@@ -30,6 +30,8 @@
   - [magnus cluster](#magnus-cluster)
   - [magnus blueprints](#magnus-blueprints)
   - [magnus services](#magnus-services)
+  - [magnus send](#magnus-send)
+  - [magnus receive](#magnus-receive)
   - [magnus connect](#magnus-connect)
   - [magnus disconnect](#magnus-disconnect)
 - [附录](#附录)
@@ -348,6 +350,76 @@ print(f"排队任务: {stats['total_pending']}")
 **返回值**：
 - `dict`: 包含 `resources`, `running_jobs`, `pending_jobs` 等字段
 
+### 文件传输
+
+Magnus 通过 [croc](https://github.com/schollz/croc) 实现文件传输。蓝图中使用 `FileSecret` 类型声明文件参数，SDK 自动处理发送；蓝图代码中使用 `download_file` 接收。
+
+#### FileSecret 参数 - 自动发送
+
+当蓝图参数类型为 `FileSecret` 时，SDK 的 `submit_blueprint` / `run_blueprint` 会自动检测：如果传入的值是本地文件路径（而非 `magnus-secret:` 格式），SDK 会启动 `croc send`，将路径替换为 croc secret。
+
+```python
+import magnus
+
+# 传文件路径，SDK 自动启动 croc send
+job_id = magnus.submit_blueprint(
+    "my-blueprint",
+    args={"input_data": "/home/user/data.csv"},
+)
+```
+
+#### download_file - 接收文件
+
+在蓝图执行环境中接收文件。
+
+```python
+from magnus import download_file
+
+# 下载到指定路径（croc 下载后自动重命名）
+download_file(file_secret, "/workspace/data/input.csv")
+
+# 支持相对路径
+download_file(file_secret, "data/input.csv")
+```
+
+**参数说明**：
+- `file_secret` (str): croc secret，可以带或不带 `magnus-secret:` 前缀
+- `target_path` (str): 下载后的目标路径（支持相对路径）
+- `timeout` (float, 可选): 超时时间（秒），默认无限等待
+- `overwrite` (bool, 可选): 是否覆盖已存在的文件，默认 True
+
+**返回值**：
+- `Path`: target_path 的 Path 对象
+
+**异常**：
+- `MagnusError`: croc 未安装、下载超时、传输失败等
+
+#### download_file_async - 异步接收文件
+
+`download_file` 的异步版本，参数和行为完全一致。
+
+```python
+from magnus import download_file_async
+
+path = await download_file_async(file_secret, "/workspace/data/input.csv")
+```
+
+#### get_blueprint_schema - 获取蓝图参数 Schema
+
+```python
+import magnus
+
+schema = magnus.get_blueprint_schema("my-blueprint")
+for param in schema:
+    print(f"{param['key']}: {param['type']}")
+```
+
+**参数说明**：
+- `blueprint_id` (str): 蓝图 ID
+
+**返回值**：
+- `list`: 参数 Schema 列表，每项包含 `key`, `type`, `label`, `description` 等字段
+
 ### 异步 API
 
 所有同步 API 均有对应的异步版本，函数名添加 `_async` 后缀：
@@ -409,6 +481,7 @@ asyncio.run(run_experiments())
 | `submit_blueprint(id, args, ...)` | 提交蓝图任务，立即返回 | Job ID |
 | `run_blueprint(id, args, timeout, ...)` | 提交并等待完成 | 任务结果 |
 | `list_blueprints(limit, search)` | 列出蓝图 | `{total, items}` |
+| `get_blueprint_schema(id)` | 获取蓝图参数 Schema | 参数列表 |
 | `call_service(id, payload, timeout)` | 调用弹性服务 | 服务响应 |
 | `list_services(limit, search, active_only)` | 列出服务 | `{total, items}` |
 | `list_jobs(limit, search)` | 列出任务 | `{total, items}` |
@@ -416,9 +489,10 @@ asyncio.run(run_experiments())
 | `get_job_logs(job_id, page)` | 获取任务日志 | `{logs, page, total_pages}` |
 | `terminate_job(job_id)` | 终止任务 | 状态信息 |
 | `get_cluster_stats()` | 获取集群状态 | 集群信息 |
+| `download_file(secret, target_path)` | 通过 croc 接收文件 | Path |
 | `configure(token, address)` | 配置 SDK | None |
 
-所有函数均有 `_async` 异步版本（`get_cluster_stats`, `get_job_logs`, `list_blueprints`, `list_services` 除外）。
+所有函数均有 `_async` 异步版本（`get_cluster_stats`, `get_job_logs`, `list_blueprints`, `list_services`, `get_blueprint_schema` 除外）。
 
 ---
 
@@ -733,6 +807,37 @@ magnus services -f yaml      # YAML 输出
 └────────────────────┴──────────────────────┴────────┴─────┴────────────┘
 ```
 
+### magnus send
+
+通过 croc 发送文件或文件夹。封装 `croc send`，自动检查 croc 是否安装。
+
+```bash
+# 基本用法
+magnus send <path>
+
+# 示例
+magnus send data.csv
+magnus send ./my_folder
+```
+
+croc 会生成一个 secret code 并显示在终端，接收方使用该 code 接收文件。
+
+### magnus receive
+
+通过 croc 接收文件或文件夹。封装 `croc <secret>`，自动处理 Linux/macOS 与 Windows 的命令差异。
+
+```bash
+# 基本用法
+magnus receive <secret>
+
+# 示例
+magnus receive 1234-apple-banana-cherry
+```
+
+**平台差异**（由 CLI 自动处理）：
+- **Linux/macOS**: 通过 `CROC_SECRET` 环境变量传递 secret
+- **Windows**: 通过命令行参数传递 secret
+
 ### magnus connect
 
 连接到运行中的 Magnus Debug 会话。用于进入调试任务的交互式环境。
@@ -841,3 +946,11 @@ A: 偏好是用户上次运行蓝图时使用的参数缓存。当 `use_preferen
 **Q: --format yaml 和管道自动切换有什么区别？**
 
 A: 管道自动切换是智能检测：当输出不是终端时自动使用 YAML。`--format yaml` 是强制指定，即使在终端也输出 YAML。
+
+**Q: FileSecret 文件传输需要什么依赖？**
+
+A: 需要安装 [croc](https://github.com/schollz/croc)。推荐通过 conda 安装：`conda install -c conda-forge croc`。发送端和接收端都需要安装 croc。
+
+**Q: magnus send/receive 和 croc 命令有什么区别？**
+
+A: `magnus send` 等价于 `croc send`，`magnus receive` 等价于 `croc <secret>`（Linux/macOS 自动使用 `CROC_SECRET` 环境变量）。主要好处是统一入口和友好的错误提示。
