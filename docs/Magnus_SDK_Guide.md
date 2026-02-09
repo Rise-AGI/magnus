@@ -15,6 +15,8 @@
   - [服务调用](#服务调用)
   - [任务管理](#任务管理)
   - [集群与资源](#集群与资源)
+  - [文件传输](#文件传输)
+  - [文件代管](#文件代管)
   - [异步 API](#异步-api)
   - [API 参考](#api-参考)
 - [命令行工具 (CLI)](#命令行工具-cli)
@@ -32,6 +34,7 @@
   - [magnus services](#magnus-services)
   - [magnus send](#magnus-send)
   - [magnus receive](#magnus-receive)
+  - [magnus custody](#magnus-custody)
   - [magnus connect](#magnus-connect)
   - [magnus disconnect](#magnus-disconnect)
 - [附录](#附录)
@@ -404,6 +407,49 @@ from magnus import download_file_async
 path = await download_file_async(file_secret, "/workspace/data/input.csv")
 ```
 
+### 文件代管
+
+#### custody_file - 代管文件
+
+将本地文件/文件夹上传到 Magnus 后端代管，后端通过 croc 重新托管，返回新的 file_secret。任何人都可以用这个 secret 下载文件，直到过期。
+
+```python
+import magnus
+
+# 基本用法
+secret = magnus.custody_file("/path/to/results.csv")
+
+# 指定过期时间
+secret = magnus.custody_file(
+    "/path/to/output_dir",
+    expire_minutes=120,  # 2 小时后过期
+)
+
+# 在蓝图中使用：将结果文件代管后写入 MAGNUS_RESULT
+secret = magnus.custody_file("/workspace/output.tar.gz")
+```
+
+**参数说明**：
+- `path` (str): 本地文件或文件夹路径
+- `expire_minutes` (int, 可选): 过期时间（分钟），默认 60
+- `timeout` (float, 可选): HTTP 请求超时时间（秒），默认 300
+
+**返回值**：
+- `str`: 新的 file_secret（`magnus-secret:xxxx` 格式），可供 `download_file()` 或 `croc` 使用
+
+**异常**：
+- `MagnusError`: croc 未安装、文件不存在、传输失败等
+
+#### custody_file_async - 异步代管文件
+
+`custody_file` 的异步版本，参数和行为完全一致。
+
+```python
+from magnus import custody_file_async
+
+secret = await custody_file_async("/path/to/results.csv", expire_minutes=120)
+```
+
 #### get_blueprint_schema - 获取蓝图参数 Schema
 
 ```python
@@ -490,6 +536,7 @@ asyncio.run(run_experiments())
 | `terminate_job(job_id)` | 终止任务 | 状态信息 |
 | `get_cluster_stats()` | 获取集群状态 | 集群信息 |
 | `download_file(secret, target_path)` | 通过 croc 接收文件 | Path |
+| `custody_file(path, expire_minutes)` | 代管文件到后端，返回新 secret | file_secret |
 | `configure(token, address)` | 配置 SDK | None |
 
 所有函数均有 `_async` 异步版本（`get_cluster_stats`, `get_job_logs`, `list_blueprints`, `list_services`, `get_blueprint_schema` 除外）。
@@ -837,6 +884,30 @@ magnus receive 1234-apple-banana-cherry
 **平台差异**（由 CLI 自动处理）：
 - **Linux/macOS**: 通过 `CROC_SECRET` 环境变量传递 secret
 - **Windows**: 通过命令行参数传递 secret
+
+### magnus custody
+
+将文件上传到 Magnus 后端代管。后端接收文件后重新通过 croc 托管，返回新的 secret。
+
+```bash
+# 基本用法
+magnus custody <path> [OPTIONS]
+
+# 示例
+magnus custody results.csv
+magnus custody ./output_dir --expire-minutes 120
+```
+
+**选项**：
+- `-t, --expire-minutes`: 过期时间（分钟），默认 60
+
+**输出**：
+```
+[Magnus] File custodied successfully. Expires in 60 min.
+[Magnus] Secret: magnus-secret:1234-apple-banana-cherry
+[Magnus] Download: magnus receive 1234-apple-banana-cherry
+[Magnus] Or:       croc 1234-apple-banana-cherry
+```
 
 ### magnus connect
 

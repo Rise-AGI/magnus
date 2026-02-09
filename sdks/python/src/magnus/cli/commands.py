@@ -23,6 +23,7 @@ from .. import (
     submit_blueprint,
     run_blueprint,
     call_service,
+    custody_file as api_custody_file,
     list_jobs as api_list_jobs,
     get_job as api_get_job,
     get_job_logs as api_get_job_logs,
@@ -1091,6 +1092,50 @@ def receive_cmd(
         subprocess.run(cmd, env=env, check=False)
     except KeyboardInterrupt:
         pass
+
+
+@app.command(name="custody")
+def custody_cmd(
+    path: str = typer.Argument(..., help="File or folder to custody via server relay"),
+    expire_minutes: int = typer.Option(60, "--expire-minutes", "-t", help="Time-to-live in minutes for the custodied file"),
+):
+    """
+    Custody a file: send to server, server re-hosts for download.
+
+    Returns a new file_secret that anyone with access can use to download.
+
+    Examples:
+      magnus custody results.csv
+      magnus custody ./output_dir --expire-minutes 120
+    """
+    _check_croc()
+
+    target = Path(path)
+    if not target.exists():
+        print_error(f"Path does not exist: {path}")
+        raise typer.Exit(code=1)
+
+    try:
+        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Custodying file..."):
+            new_secret = api_custody_file(
+                path=str(target.resolve()),
+                expire_minutes=expire_minutes,
+            )
+
+        console.print()
+        print_msg(f"File custodied successfully. Expires in {expire_minutes} min.")
+        print_msg(f"Secret: [bold green]{new_secret}[/bold green]")
+        console.print()
+        raw_secret = new_secret.removeprefix("magnus-secret:")
+        print_msg(f"Download: [cyan]magnus receive {raw_secret}[/cyan]")
+        print_msg(f"Or:       [cyan]croc {raw_secret}[/cyan]")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

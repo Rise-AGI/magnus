@@ -51,6 +51,30 @@ def _validate_magnus_config(config: Dict[str, Any]) -> None:
     _check_key(server["resource_cache"], "container_cache_size", str)
     _check_key(server["resource_cache"], "repo_cache_size", str)
 
+    # jwt_signer 配置
+    _check_key(server, "jwt_signer", dict)
+    jwt_signer = server["jwt_signer"]
+    _check_key(jwt_signer, "secret_key", str)
+    _check_key(jwt_signer, "algorithm", str)
+    _check_key(jwt_signer, "expire_minutes", int)
+
+    # github_client 配置
+    _check_key(server, "github_client", dict)
+    _check_key(server["github_client"], "token", str)
+
+    # feishu_client 配置
+    _check_key(server, "feishu_client", dict)
+    feishu_client = server["feishu_client"]
+    _check_key(feishu_client, "app_id", str)
+    _check_key(feishu_client, "app_secret", str)
+
+    # scheduler 配置
+    _check_key(server, "scheduler", dict)
+    scheduler = server["scheduler"]
+    _check_key(scheduler, "spy_gpu_interval", int)
+    _check_key(scheduler, "heartbeat_interval", int)
+    _check_key(scheduler, "snapshot_interval", int)
+
     # explorer 配置
     _check_key(server, "explorer", dict)
     explorer = server["explorer"]
@@ -59,6 +83,14 @@ def _validate_magnus_config(config: Dict[str, Any]) -> None:
     _check_key(explorer, "model_name", str)
     _check_key(explorer, "visual_model_name", str)
     _check_key(explorer, "small_fast_model_name", str)
+
+    # file_custody 配置
+    _check_key(server, "file_custody", dict)
+    file_custody = server["file_custody"]
+    _check_key(file_custody, "max_size", str)
+    _check_key(file_custody, "max_processes", int)
+    _check_key(file_custody, "default_ttl_minutes", int)
+    _check_key(file_custody, "max_ttl_minutes", int)
 
     # cluster 配置
     cluster = config["cluster"]

@@ -807,6 +807,9 @@ magnus send ./my_folder
 
 # 接收文件/文件夹（封装 croc receive，自动处理平台差异）
 magnus receive 1234-apple-banana-cherry
+
+# 代管文件到后端（后端中继 croc，返回新 secret）
+magnus custody results.csv --expire-minutes 120
 ```
 
 **输出示例**：

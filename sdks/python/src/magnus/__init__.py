@@ -41,6 +41,8 @@ __all__ = [
     # File Transfer
     "download_file",
     "download_file_async",
+    "custody_file",
+    "custody_file_async",
 
     # Exceptions
     "MagnusError",
@@ -561,6 +563,57 @@ class MagnusClient:
 
     # === Service Methods ===
 
+    def custody_file(
+        self,
+        path: str,
+        expire_minutes: int = 60,
+        timeout: float = 300.0,
+    ) -> str:
+        """
+        代管文件/文件夹，返回可供 download_file() 使用的 file_secret。
+        内部流程：本地 croc send → 后端 croc receive → 后端 croc send → 返回新 secret。
+        """
+        file_transfer_mgr = get_file_transfer_manager()
+        try:
+            from .file_transfer import CrocSender
+            sender = CrocSender(path=path)
+            if not sender.start():
+                raise MagnusError(f"Failed to start croc send: {sender.error}")
+
+            resp = self.http.post(
+                "/files/custody",
+                json={"file_secret": sender.file_secret, "expire_minutes": expire_minutes},
+                timeout=timeout,
+            )
+            self._handle_error(resp)
+            return resp.json()["file_secret"]
+        finally:
+            file_transfer_mgr.cleanup()
+
+    async def custody_file_async(
+        self,
+        path: str,
+        expire_minutes: int = 60,
+        timeout: float = 300.0,
+    ) -> str:
+        """异步版本的 custody_file。"""
+        file_transfer_mgr = get_file_transfer_manager()
+        try:
+            from .file_transfer import CrocSender
+            sender = CrocSender(path=path)
+            if not sender.start():
+                raise MagnusError(f"Failed to start croc send: {sender.error}")
+
+            resp = await self.ahttp.post(
+                "/files/custody",
+                json={"file_secret": sender.file_secret, "expire_minutes": expire_minutes},
+                timeout=timeout,
+            )
+            self._handle_error(resp)
+            return resp.json()["file_secret"]
+        finally:
+            file_transfer_mgr.cleanup()
+
     def call_service(
         self,
         service_id: str,
@@ -743,6 +796,22 @@ async def call_service_async(
     **kwargs: Any,
 ) -> Any:
     return await default_client.call_service_async(service_id, payload, endpoint, timeout, protocol, **kwargs)
+
+
+def custody_file(
+    path: str,
+    expire_minutes: int = 60,
+    timeout: float = 300.0,
+) -> str:
+    return default_client.custody_file(path, expire_minutes, timeout)
+
+
+async def custody_file_async(
+    path: str,
+    expire_minutes: int = 60,
+    timeout: float = 300.0,
+) -> str:
+    return await default_client.custody_file_async(path, expire_minutes, timeout)
 
 
 def list_jobs(

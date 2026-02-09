@@ -15,7 +15,8 @@ server:
   # job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
   # job_repository_path = f"{job_working_table}/repository"
   # job_wrapper_path = f"{job_working_table}/wrapper.py"
-  # magnus_uv_cache = f"{server_root}/uv_cache"
+  # magnus_uv_cache = f"{server_root}/uv_cache/{user}"
+  # file_custody_path = f"{server_root}/file_custody"
   jwt_signer:
     secret_key: your-secret-key
     algorithm: HS256
@@ -35,6 +36,11 @@ server:
   service_proxy:
     max_concurrency: 1024
     pool_size: 1024
+  file_custody:
+    max_size: 10G
+    max_processes: 128
+    default_ttl_minutes: 60  # 1 hour
+    max_ttl_minutes: 1440    # 1 day
   explorer:
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-235b-a22b

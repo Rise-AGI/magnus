@@ -31,7 +31,7 @@ def _croc_error(msg: str) -> Exception:
 
 def download_file(
     file_secret: str,
-    target_path: str,
+    target_path: Optional[str] = None,
     timeout: Optional[float] = None,
     overwrite: bool = True,
 ) -> Path:
@@ -39,13 +39,12 @@ def download_file(
     通过 croc 接收文件/文件夹。
 
     :param file_secret: croc secret，可以带或不带 "magnus-secret:" 前缀
-    :param target_path: 下载后的目标路径（文件或文件夹）
+    :param target_path: 下载后的目标路径；None 时使用原始文件名存到当前目录
     :param timeout: 超时时间（秒），None 表示无限等待
     :param overwrite: 是否覆盖已存在的文件
-    :return: target_path 的 Path
+    :return: 最终文件路径的 Path
     """
     secret = _normalize_secret(file_secret)
-    target = Path(target_path).resolve()
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -75,6 +74,9 @@ def download_file(
                 f"Expected 1 item from croc, got {len(downloaded)}: {downloaded}"
             )
 
+        target = Path(target_path).resolve() if target_path else Path.cwd() / downloaded[0].name
+        if overwrite and target.exists():
+            shutil.rmtree(target) if target.is_dir() else target.unlink()
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(downloaded[0]), str(target))
 
@@ -83,7 +85,7 @@ def download_file(
 
 async def download_file_async(
     file_secret: str,
-    target_path: str,
+    target_path: Optional[str] = None,
     timeout: Optional[float] = None,
     overwrite: bool = True,
 ) -> Path:
@@ -91,13 +93,12 @@ async def download_file_async(
     异步版本的 download_file。
 
     :param file_secret: croc secret，可以带或不带 "magnus-secret:" 前缀
-    :param target_path: 下载后的目标路径（文件或文件夹）
+    :param target_path: 下载后的目标路径；None 时使用原始文件名存到当前目录
     :param timeout: 超时时间（秒），None 表示无限等待
     :param overwrite: 是否覆盖已存在的文件
-    :return: target_path 的 Path
+    :return: 最终文件路径的 Path
     """
     secret = _normalize_secret(file_secret)
-    target = Path(target_path).resolve()
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -132,6 +133,9 @@ async def download_file_async(
                 f"Expected 1 item from croc, got {len(downloaded)}: {downloaded}"
             )
 
+        target = Path(target_path).resolve() if target_path else Path.cwd() / downloaded[0].name
+        if overwrite and target.exists():
+            shutil.rmtree(target) if target.is_dir() else target.unlink()
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(downloaded[0]), str(target))
 
