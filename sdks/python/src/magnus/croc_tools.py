@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from .file_transfer import FILE_SECRET_PREFIX
+from .file_transfer import FILE_SECRET_PREFIX, normalize_secret
 
 
 def _croc_not_found_error() -> Exception:
@@ -44,7 +44,7 @@ def download_file(
     :param overwrite: 是否覆盖已存在的文件
     :return: 最终文件路径的 Path
     """
-    secret = _normalize_secret(file_secret)
+    secret = normalize_secret(file_secret)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -98,7 +98,7 @@ async def download_file_async(
     :param overwrite: 是否覆盖已存在的文件
     :return: 最终文件路径的 Path
     """
-    secret = _normalize_secret(file_secret)
+    secret = normalize_secret(file_secret)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -140,13 +140,6 @@ async def download_file_async(
         shutil.move(str(downloaded[0]), str(target))
 
     return target
-
-
-def _normalize_secret(file_secret: str) -> str:
-    """去掉 magnus-secret: 前缀（如果有）"""
-    if file_secret.startswith(FILE_SECRET_PREFIX):
-        return file_secret[len(FILE_SECRET_PREFIX):]
-    return file_secret
 
 
 def _build_croc_cmd(secret: str, out_dir: Path, overwrite: bool) -> list:

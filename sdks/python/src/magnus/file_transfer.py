@@ -177,8 +177,8 @@ def is_file_secret(value: str) -> bool:
     return value.startswith(FILE_SECRET_PREFIX)
 
 
-def extract_croc_secret(file_secret: str) -> str:
-    """从 FileSecret 值中提取 croc secret"""
-    if not file_secret.startswith(FILE_SECRET_PREFIX):
-        raise ValueError(f"Invalid FileSecret format: {file_secret}")
-    return file_secret[len(FILE_SECRET_PREFIX):]
+def normalize_secret(file_secret: str) -> str:
+    """去掉 magnus-secret: 前缀（如果有），返回纯 croc secret"""
+    if file_secret.startswith(FILE_SECRET_PREFIX):
+        return file_secret[len(FILE_SECRET_PREFIX):]
+    return file_secret
