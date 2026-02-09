@@ -362,6 +362,8 @@ class MagnusScheduler:
 
             spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
             user_token = job.user.token or ""
+            magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['front_end_port']}"
+            job_id = str(job.id)
 
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}\nTraceback:\n{traceback.format_exc()}")
@@ -411,6 +413,8 @@ def main():
     sif_path = {repr(sif_path)}
     system_entry_command = {repr(system_entry_command)}
     user_token = {repr(user_token)}
+    magnus_address = {repr(magnus_address)}
+    job_id = {repr(job_id)}
 
     user_cmd_str = {repr(job.entry_command)}
     if "sudo" in user_cmd_str:
@@ -438,6 +442,8 @@ def main():
     try:
         shell_cmd = f"""set -e
 export MAGNUS_TOKEN={{user_token}}
+export MAGNUS_ADDRESS={{magnus_address}}
+export MAGNUS_JOB_ID={{job_id}}
 export MAGNUS_WORKSPACE=/magnus/workspace
 
 {{system_entry_command}}
