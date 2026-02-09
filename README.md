@@ -328,7 +328,7 @@ def generate_job(
 | 布尔 | `bool` | 开关 | - |
 | 枚举 | `Literal["a", "b"]` | 下拉选择器 | `options` (可含 label/description) |
 | 可选 | `Optional[T]` | 带启用开关的字段 | 禁用时不传参 |
-| 文件传输 | `FileSecret` | croc secret 输入框 | `placeholder` |
+| 文件传输 | `FileSecret` | croc secret 输入框 | `placeholder`, `description` |
 | 列表 | `List[T]` | 动态添加/删除项 | - |
 | 组合 | `Optional[List[T]]` | 可选的列表字段 | - |
 
@@ -345,6 +345,7 @@ def generate_job(
 # 蓝图定义
 InputData = Annotated[FileSecret, {
     "label": "Input Data",
+    "description": "Upload your dataset via croc",
     "placeholder": "croc secret code",
 }]
 

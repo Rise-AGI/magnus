@@ -360,7 +360,7 @@ def generate_job(
             <tr className="border-b border-zinc-800/50">
               <td className="py-2"><code className="text-purple-400">FileSecret</code></td>
               <td className="py-2">{t("help.blueprintEditor.fileSecretInput")}</td>
-              <td className="py-2">placeholder</td>
+              <td className="py-2">placeholder, description</td>
             </tr>
             <tr>
               <td className="py-2"><code className="text-blue-400">List[T]</code></td>
