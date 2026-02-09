@@ -33,7 +33,8 @@ from .. import (
     list_services as api_list_services,
     get_blueprint_schema as api_get_blueprint_schema,
 )
-from ..file_transfer import get_file_transfer_manager
+from ..file_transfer import get_file_transfer_manager, normalize_secret
+from ..croc_tools import _build_env
 
 # === UI Setup ===
 
@@ -1079,17 +1080,15 @@ def receive_cmd(
       magnus receive 1234-apple-banana-cherry
     """
     _check_croc()
+    croc_secret = normalize_secret(secret)
 
     if sys.platform == "win32":
-        cmd = ["croc", secret]
-        env = None
+        cmd = ["croc", croc_secret]
     else:
         cmd = ["croc"]
-        env = os.environ.copy()
-        env["CROC_SECRET"] = secret
 
     try:
-        subprocess.run(cmd, env=env, check=False)
+        subprocess.run(cmd, env=_build_env(croc_secret), check=False)
     except KeyboardInterrupt:
         pass
 
@@ -1126,7 +1125,7 @@ def custody_cmd(
         print_msg(f"File custodied successfully. Expires in {expire_minutes} min.")
         print_msg(f"Secret: [bold green]{new_secret}[/bold green]")
         console.print()
-        raw_secret = new_secret.removeprefix("magnus-secret:")
+        raw_secret = normalize_secret(new_secret)
         print_msg(f"Download: [cyan]magnus receive {raw_secret}[/cyan]")
         print_msg(f"Or:       [cyan]croc {raw_secret}[/cyan]")
 
