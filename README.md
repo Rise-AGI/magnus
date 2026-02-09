@@ -855,6 +855,7 @@ magnus custody results.csv --expire-minutes 120
 ## 🙏 致谢
 
 - [OpenCode](https://github.com/anomalyco/opencode) - 优秀的开源 AI Coding Agent，Explorer 模块的部分实现参考了该项目
+- [croc](https://github.com/schollz/croc) - 简洁高效的跨平台文件传输工具，Magnus 文件传输功能的底层依赖
 
 ---
 

@@ -1045,9 +1045,7 @@ def send_cmd(
     path: str = typer.Argument(..., help="File or folder to send"),
 ):
     """
-    Send a file or folder via croc.
-
-    Wrapper around 'croc send'. Requires croc to be installed.
+    Send a file or folder.
 
     Examples:
       magnus send data.csv
@@ -1060,23 +1058,34 @@ def send_cmd(
         print_error(f"Path does not exist: {path}")
         raise typer.Exit(code=1)
 
+    from ..file_transfer import CrocSender
+    sender = CrocSender(path=str(target))
+    if not sender.start():
+        print_error(f"Failed to start file transfer: {sender.error}")
+        raise typer.Exit(code=1)
+
+    console.print()
+    print_msg(f"On the other computer run:")
+    console.print(f"    [cyan]magnus receive {sender.file_secret}[/cyan]")
+    console.print()
+
     try:
-        subprocess.run(["croc", "send", str(target)], check=False)
+        assert sender.process is not None
+        sender.process.wait()
+        print_msg("Transfer complete.")
     except KeyboardInterrupt:
-        pass
+        sender.stop()
 
 
 @app.command(name="receive")
 def receive_cmd(
-    secret: str = typer.Argument(..., help="croc secret code"),
+    secret: str = typer.Argument(..., help="File secret code"),
 ):
     """
-    Receive a file or folder via croc.
-
-    Wrapper around 'croc <secret>'. Requires croc to be installed.
-    On Linux/macOS, uses CROC_SECRET env var.
+    Receive a file or folder.
 
     Examples:
+      magnus receive magnus-secret:1234-apple-banana-cherry
       magnus receive 1234-apple-banana-cherry
     """
     _check_croc()
@@ -1123,11 +1132,8 @@ def custody_cmd(
 
         console.print()
         print_msg(f"File custodied successfully. Expires in {expire_minutes} min.")
-        print_msg(f"Secret: [bold green]{new_secret}[/bold green]")
         console.print()
-        raw_secret = normalize_secret(new_secret)
-        print_msg(f"Download: [cyan]magnus receive {raw_secret}[/cyan]")
-        print_msg(f"Or:       [cyan]croc {raw_secret}[/cyan]")
+        print_msg(f"Download: [cyan]magnus receive {new_secret}[/cyan]")
 
     except MagnusError as e:
         print_error(str(e))

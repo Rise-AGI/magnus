@@ -6,6 +6,7 @@ import time
 import shutil
 import asyncio
 import logging
+import threading
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List
@@ -87,8 +88,6 @@ class FileCustodyManager:
         self,
         path: str,
     ) -> Tuple[subprocess.Popen, str]:
-        import threading
-
         cmd = ["croc", "send", path]
         proc = subprocess.Popen(
             cmd,
@@ -174,6 +173,7 @@ class FileCustodyManager:
             expires_at=time.time() + expire_minutes * 60,
         )
         self._entries[entry_id] = entry
+        self._start_exit_watcher(entry_id, send_proc)
 
         logger.info(f"File custody created: {entry_id}, expire_minutes={expire_minutes}")
         assert entry.file_secret is not None
@@ -196,6 +196,16 @@ class FileCustodyManager:
         if entry.file_dir.exists():
             shutil.rmtree(entry.file_dir, ignore_errors=True)
 
+    def _start_exit_watcher(self, entry_id: str, proc: subprocess.Popen) -> None:
+        def watcher():
+            proc.wait()
+            entry = self._entries.pop(entry_id, None)
+            if entry:
+                self._cleanup_entry(entry)
+                logger.info(f"File custody completed (received): {entry_id}")
+
+        threading.Thread(target=watcher, daemon=True).start()
+
     async def cleanup_loop(self) -> None:
         logger.info("File custody cleanup loop started.")
         while True:
@@ -207,7 +217,9 @@ class FileCustodyManager:
                 or (entry.send_process is not None and entry.send_process.poll() is not None)
             ]
             for eid in expired_ids:
-                entry = self._entries.pop(eid)
+                entry = self._entries.pop(eid, None)
+                if entry is None:
+                    continue
                 self._cleanup_entry(entry)
                 logger.info(f"File custody expired: {eid}")
 
