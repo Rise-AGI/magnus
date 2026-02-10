@@ -625,8 +625,8 @@ const translations = {
   },
   "help.blueprintEditor.paramCache": { zh: "参数缓存", en: "Parameter Cache" },
   "help.blueprintEditor.paramCacheDesc": {
-    zh: "通过 Web 界面成功运行蓝图后，系统会自动保存用户填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。",
-    en: "After successfully running a blueprint via the web interface, the system auto-saves user-filled parameter values. Next time opening the same blueprint, if the signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the parameter signature."
+    zh: "通过 Web 界面成功运行蓝图后，系统会自动保存用户填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。注意：FileSecret 类型的参数不会被预填，因为 croc secret 是一次性凭证。",
+    en: "After successfully running a blueprint via the web interface, the system auto-saves user-filled parameter values. Next time opening the same blueprint, if the signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the parameter signature. Note: FileSecret parameters are never pre-filled, as croc secrets are one-time credentials."
   },
   "help.blueprintEditor.autoSave": { zh: "自动保存", en: "auto-save" },
   "help.blueprintEditor.autoRestore": { zh: "自动恢复", en: "auto-restore" },
@@ -664,8 +664,8 @@ const translations = {
   },
   "help.blueprintRunner.paramCache": { zh: "参数缓存", en: "Parameter Cache" },
   "help.blueprintRunner.paramCacheDesc": {
-    zh: "成功提交任务后，系统会自动保存当前填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。",
-    en: "After successful submission, the system auto-saves current parameter values. Next time opening the same blueprint, if signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the signature."
+    zh: "成功提交任务后，系统会自动保存当前填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。注意：FileSecret 类型的参数不会被预填，因为 croc secret 是一次性凭证。",
+    en: "After successful submission, the system auto-saves current parameter values. Next time opening the same blueprint, if signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the signature. Note: FileSecret parameters are never pre-filled, as croc secrets are one-time credentials."
   },
   "help.blueprintRunner.sdkCall": { zh: "SDK 调用", en: "SDK Call" },
   "help.blueprintRunner.sdkCallDesc": {

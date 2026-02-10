@@ -171,6 +171,7 @@ def list_blueprints(
     search: Optional[str] = None,
     creator_id: Optional[str] = None,
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ):
     """
     获取蓝图列表（支持分页、搜索、筛选）
@@ -212,6 +213,7 @@ def list_blueprints(
 def get_blueprint(
     blueprint_id: str,
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ):
     blueprint = db.query(models.Blueprint)\
         .options(joinedload(models.Blueprint.user))\
@@ -231,6 +233,7 @@ def get_blueprint(
 def get_blueprint_schema(
     blueprint_id: str,
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ):
     bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
     if not bp:
@@ -275,8 +278,16 @@ def run_blueprint(
                 try:
                     cached = deserialize_json(pref.cached_params)
                     if isinstance(cached, dict):
+                        # FileSecret 是一次性凭证，不从缓存预填
+                        file_secret_keys = {
+                            s.key for s in blueprint_manager.analyze_signature(bp.code)
+                            if s.type == "file_secret"
+                        }
+                        base_params = {
+                            k: v for k, v in cached.items()
+                            if k not in file_secret_keys
+                        }
                         # 优先级：显式传入 > 缓存
-                        base_params = cached.copy()
                         base_params.update(final_params)
                         final_params = base_params
                 except Exception as e:

@@ -308,6 +308,7 @@ def list_services(
     active_only: bool = False,
     sort_by: str = Query("activity", regex="^(activity|updated)$"),
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     query = db.query(models.Service)
 
@@ -340,6 +341,7 @@ def list_services(
 def get_service(
     service_id: str,
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ) -> models.Service:
     service = db.query(models.Service).filter(models.Service.id == service_id).first()
 

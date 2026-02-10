@@ -1,7 +1,7 @@
 # back_end/server/schemas.py
 from typing import Any, List, Dict, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from .models import JobType, JobStatus
 
 
@@ -37,7 +37,6 @@ __all__ = [
 class UserInfo(BaseModel):
     id: str
     name: str
-    token: Optional[str] = None
     avatar_url: Optional[str] = None
     email: Optional[str] = None
     class Config: from_attributes = True
@@ -59,6 +58,11 @@ class JobSubmission(BaseModel):
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
     system_entry_command: Optional[str] = None
+
+    @field_validator("description", "entry_command", "system_entry_command", mode="before")
+    @classmethod
+    def _strip_whitespace(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if isinstance(v, str) else v
 
 
 class JobResponse(JobSubmission):
@@ -95,6 +99,10 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserInfo
+
+
+class TokenResponse(BaseModel):
+    magnus_token: str
     
     
 class ClusterResources(BaseModel):

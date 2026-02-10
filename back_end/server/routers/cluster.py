@@ -47,6 +47,7 @@ def get_cluster_stats(
     pending_skip: int = 0,
     pending_limit: int = 10,
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ):
     # --- 1. 获取 Slurm 真实数据 ---
     # SlurmManager 涉及阻塞 Shell 命令，必须在线程池中运行 (def)

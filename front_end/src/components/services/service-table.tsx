@@ -130,7 +130,11 @@ export function ServiceTable({
               return (
                 <tr
                   key={svc.id}
-                  onClick={() => router.push(`/services/${svc.id}`)}
+                  onClick={() => {
+                    const sel = window.getSelection();
+                    if (sel && sel.toString().length > 0) return;
+                    router.push(`/services/${svc.id}`);
+                  }}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >
                   {/* Column 1: Service / ID */}

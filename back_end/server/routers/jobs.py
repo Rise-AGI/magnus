@@ -64,6 +64,7 @@ def get_jobs(
     search: Optional[str] = None,
     creator_id: Optional[str] = None,
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ):
     query = db.query(models.Job)
 
@@ -94,6 +95,7 @@ def get_jobs(
 def get_job_detail(
     job_id: str,
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ):
     
     MAX_RESULT_PREVIEW_SIZE = 1024 * 1024
@@ -142,6 +144,7 @@ def get_job_logs_paginated(
     job_id: str,
     page: int = Query(default=-1, description="Page number, -1 for last page"),
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     PAGE_SIZE = 200 * 1024
     OVERLAP = 0.3
@@ -200,6 +203,7 @@ def get_job_logs_paginated(
 def get_job_metrics(
     job_id: str,
     db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     latest_metric: Optional[models.JobMetric] = db.query(models.JobMetric)\
         .filter(models.JobMetric.job_id == job_id)\

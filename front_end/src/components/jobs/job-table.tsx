@@ -78,7 +78,11 @@ export function JobTable({
               return (
                 <tr
                   key={job.id}
-                  onClick={() => router.push(`/jobs/${job.id}?from=${fromSource}`)}
+                  onClick={() => {
+                    const sel = window.getSelection();
+                    if (sel && sel.toString().length > 0) return;
+                    router.push(`/jobs/${job.id}?from=${fromSource}`);
+                  }}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >
                   <td className="px-6 py-4 align-top whitespace-normal break-all">

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .. import database
 from .. import models
-from ..schemas import UserInfo, LoginResponse, FeishuLoginRequest
+from ..schemas import UserInfo, LoginResponse, FeishuLoginRequest, TokenResponse
 from .._magnus_config import magnus_config
 from .._jwt_signer import jwt_signer
 from .._feishu_client import feishu_client
@@ -185,12 +185,12 @@ async def feishu_login(
 
 @router.post(
     "/auth/token/refresh",
-    response_model = UserInfo,
+    response_model = TokenResponse,
 )
 def refresh_trust_token(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
-) -> models.User:
+) -> Dict[str, Any]:
     new_token = generate_trust_token()
     current_user.token = new_token
 
@@ -199,7 +199,17 @@ def refresh_trust_token(
 
     logger.info(f"User {current_user.id} ({current_user.name}) refreshed their trust token.")
 
-    return current_user
+    return {"magnus_token": new_token}
+
+
+@router.get(
+    "/auth/my-token",
+    response_model = TokenResponse,
+)
+def get_my_token(
+    current_user: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return {"magnus_token": current_user.token or ""}
 
 
 @router.get(
@@ -207,7 +217,8 @@ def refresh_trust_token(
     response_model = List[UserInfo],
 )
 def get_users(
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
 ) -> List[models.User]:
     users = db.query(models.User).order_by(models.User.name).all()
     return users

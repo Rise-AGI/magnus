@@ -6,7 +6,6 @@ export interface User {
   name: string;
   avatar_url?: string | null;
   email?: string | null;
-  token?: string | null;
 }
 
 export interface LoginResponse {

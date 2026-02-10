@@ -18,6 +18,7 @@ export function Header() {
 
   const [isOpen, setIsOpen] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [magnusToken, setMagnusToken] = useState<string | null>(null);
 
   const [showResetDialog, setShowResetDialog] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -40,22 +41,20 @@ export function Header() {
     };
   }, [isOpen]);
 
+  // 打开 popover 时按需拉取 MAGNUS_TOKEN
+  useEffect(() => {
+    if (isOpen && magnusToken === null) {
+      client("/api/auth/my-token")
+        .then((resp) => setMagnusToken(resp.magnus_token || ""))
+        .catch(() => setMagnusToken(""));
+    }
+  }, [isOpen, magnusToken]);
+
   const handleRefreshToken = async () => {
     setIsRefreshing(true);
     try {
-      const token = localStorage.getItem("magnus_token");
-      if (!token) throw new Error(t("header.noLoginToken"));
-
-      const updatedUser = await client("/api/auth/token/refresh", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json"
-        }
-      });
-
-      localStorage.setItem("magnus_user", JSON.stringify(updatedUser));
-      window.dispatchEvent(new Event("magnus-auth-change"));
+      const resp = await client("/api/auth/token/refresh", { method: "POST" });
+      setMagnusToken(resp.magnus_token);
 
       setShowResetDialog(false);
       setShowToken(false);
@@ -67,9 +66,11 @@ export function Header() {
     }
   };
 
-  const realToken = user?.token || "sk-not-generated";
-  const maskedToken = "sk-" + "•".repeat(24);
-  const displayToken = showToken ? realToken : maskedToken;
+  // sk- (3) + token_urlsafe(24) (32) = 35 字符
+  const MAGNUS_TOKEN_LENGTH = 35;
+  const realToken = magnusToken || "";
+  const maskedToken = "sk-" + "•".repeat(MAGNUS_TOKEN_LENGTH - 3);
+  const displayToken = showToken && realToken ? realToken : maskedToken;
 
   return (
     <>
@@ -105,14 +106,14 @@ export function Header() {
             </button>
 
             {isOpen && (
-              <div className="absolute top-full right-0 mt-3 w-72 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl ring-1 ring-white/5 p-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="absolute top-full right-0 mt-3 w-fit bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl ring-1 ring-white/5 p-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center gap-1 bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-2 py-1.5">
-                  <div className="flex-1 min-w-0">
-                    <CopyableText 
-                      text={displayToken} 
+                  <div className="whitespace-nowrap">
+                    <CopyableText
+                      text={displayToken}
                       copyValue={realToken}
                       variant="id"
-                      className="w-full !text-zinc-400 hover:!text-blue-400"
+                      className="!text-zinc-400 hover:!text-blue-400 [&>span]:!whitespace-nowrap [&>span]:!overflow-visible"
                     />
                   </div>
                   
