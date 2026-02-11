@@ -61,7 +61,8 @@ __all__ = [
 
 # === Configuration ===
 
-DEFAULT_ADDRESS = "http://127.0.0.1:8017"
+DEFAULT_ADDRESS = "https://magnus.pkuplasma.com"
+DEFAULT_TOKEN = "sk-" + "1" * 32
 ENV_MAGNUS_TOKEN = "MAGNUS_TOKEN"
 ENV_MAGNUS_ADDRESS = "MAGNUS_ADDRESS"
 CONFIG_DIR = Path.home() / ".magnus"
@@ -127,7 +128,7 @@ class MagnusClient:
     def __init__(self, token: Optional[str] = None, address: Optional[str] = None):
         # Priority: explicit param > env var > config file > default
         file_config = _load_config_file()
-        self.token = token or os.getenv(ENV_MAGNUS_TOKEN) or file_config.get("token")
+        self.token = token or os.getenv(ENV_MAGNUS_TOKEN) or file_config.get("token") or DEFAULT_TOKEN
 
         raw_address = (
             address

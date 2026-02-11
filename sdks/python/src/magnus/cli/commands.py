@@ -321,29 +321,26 @@ def show_config():
     Show current SDK configuration (address and token).
     Resolution order: environment variable > ~/.magnus/config.json > default.
     """
-    from .. import _load_config_file, CONFIG_FILE
+    from .. import _load_config_file, CONFIG_FILE, DEFAULT_ADDRESS, DEFAULT_TOKEN
     file_config = _load_config_file()
 
     env_address = os.getenv("MAGNUS_ADDRESS")
     env_token = os.getenv("MAGNUS_TOKEN")
 
-    address = env_address or file_config.get("address") or "http://127.0.0.1:8017"
-    token = env_token or file_config.get("token") or ""
+    address = env_address or file_config.get("address") or DEFAULT_ADDRESS
+    token = env_token or file_config.get("token") or DEFAULT_TOKEN
 
     address_source = "env" if env_address else ("file" if "address" in file_config else "default")
-    token_source = "env" if env_token else ("file" if "token" in file_config else "")
+    token_source = "env" if env_token else ("file" if "token" in file_config else "default")
 
     console.print()
     console.print(f"  [bold]MAGNUS_ADDRESS[/bold]  {address}  [dim]({address_source})[/dim]")
 
-    if token:
-        if len(token) > 12:
-            masked = f"{token[:4]}{'*' * 16}{token[-4:]}"
-        else:
-            masked = "*" * len(token)
-        console.print(f"  [bold]MAGNUS_TOKEN[/bold]    {masked}  [dim]({token_source})[/dim]")
+    if len(token) > 12:
+        masked = f"{token[:4]}{'*' * 16}{token[-4:]}"
     else:
-        console.print("  [bold]MAGNUS_TOKEN[/bold]    [dim](not set)[/dim]")
+        masked = "*" * len(token)
+    console.print(f"  [bold]MAGNUS_TOKEN[/bold]    {masked}  [dim]({token_source})[/dim]")
 
     if CONFIG_FILE.is_file():
         console.print(f"  [bold]Config file[/bold]    {CONFIG_FILE}")
@@ -381,8 +378,9 @@ def login_cmd():
     Examples:
       magnus login
     """
-    current_address = os.getenv("MAGNUS_ADDRESS", "http://127.0.0.1:8017")
-    current_token = os.getenv("MAGNUS_TOKEN", "")
+    from .. import DEFAULT_ADDRESS, DEFAULT_TOKEN
+    current_address = os.getenv("MAGNUS_ADDRESS", DEFAULT_ADDRESS)
+    current_token = os.getenv("MAGNUS_TOKEN", DEFAULT_TOKEN)
 
     # Fall back to config file for display if env vars are not set
     if not os.getenv("MAGNUS_TOKEN") or not os.getenv("MAGNUS_ADDRESS"):
