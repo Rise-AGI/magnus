@@ -393,12 +393,14 @@ def login_cmd():
 
     token_display = _mask_token(current_token) if current_token else "(not set)"
 
-    address = input(f"[Magnus] Magnus Address (current: {current_address}): ").strip()
+    print_msg(f"Magnus Address (current: {current_address}): ", end="")
+    address = input().strip()
     if not address:
         address = current_address
     address = address.rstrip("/")
 
-    token = input(f"[Magnus] Magnus Token (current: {token_display}): ").strip()
+    print_msg(f"Magnus Token (current: {token_display}): ", end="")
+    token = input().strip()
     if not token:
         token = current_token
 
