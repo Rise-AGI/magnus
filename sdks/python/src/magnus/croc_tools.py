@@ -29,42 +29,38 @@ def _croc_error(msg: str) -> Exception:
     return MagnusError(msg)
 
 
-def download_file(
+def _download_file_using_croc(
     file_secret: str,
     target_path: Optional[str] = None,
     timeout: Optional[float] = None,
     overwrite: bool = True,
+    show_progress: bool = False,
 ) -> Path:
-    """
-    通过 croc 接收文件/文件夹。
-
-    :param file_secret: croc secret，可以带或不带 "magnus-secret:" 前缀
-    :param target_path: 下载后的目标路径；None 时使用原始文件名存到当前目录
-    :param timeout: 超时时间（秒），None 表示无限等待
-    :param overwrite: 是否覆盖已存在的文件
-    :return: 最终文件路径的 Path
-    """
     secret = normalize_secret(file_secret)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         cmd = _build_croc_cmd(secret, tmp_dir, overwrite)
 
+        run_kwargs: dict = {
+            "env": _build_env(secret),
+            "cwd": str(tmp_dir),
+            "timeout": timeout,
+        }
+        if not show_progress:
+            run_kwargs["capture_output"] = True
+            run_kwargs["text"] = True
+
         try:
-            result = subprocess.run(
-                cmd,
-                env=_build_env(secret),
-                cwd=str(tmp_dir),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            result = subprocess.run(cmd, **run_kwargs)
         except FileNotFoundError:
             raise _croc_not_found_error()
         except subprocess.TimeoutExpired:
             raise _croc_error(f"croc download timed out after {timeout}s")
 
         if result.returncode != 0:
+            if show_progress:
+                raise _croc_error(f"croc failed (exit {result.returncode})")
             all_output = (result.stderr.strip() + "\n" + result.stdout.strip()).strip()
             raise _croc_error(f"croc failed (exit {result.returncode}): {all_output}")
 
@@ -81,6 +77,24 @@ def download_file(
         shutil.move(str(downloaded[0]), str(target))
 
     return target
+
+
+def download_file(
+    file_secret: str,
+    target_path: Optional[str] = None,
+    timeout: Optional[float] = None,
+    overwrite: bool = True,
+) -> Path:
+    """
+    通过 croc 接收文件/文件夹。
+
+    :param file_secret: croc secret，可以带或不带 "magnus-secret:" 前缀
+    :param target_path: 下载后的目标路径；None 时使用原始文件名存到当前目录
+    :param timeout: 超时时间（秒），None 表示无限等待
+    :param overwrite: 是否覆盖已存在的文件
+    :return: 最终文件路径的 Path
+    """
+    return _download_file_using_croc(file_secret, target_path, timeout, overwrite)
 
 
 async def download_file_async(

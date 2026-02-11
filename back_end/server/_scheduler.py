@@ -444,13 +444,14 @@ def main():
 export MAGNUS_TOKEN={{user_token}}
 export MAGNUS_ADDRESS={{magnus_address}}
 export MAGNUS_JOB_ID={{job_id}}
-export MAGNUS_WORKSPACE=/magnus/workspace
+export MAGNUS_HOME=/magnus
 
 {{system_entry_command}}
 
-export MAGNUS_RESULT=$MAGNUS_WORKSPACE/.magnus_result
-export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:$MAGNUS_WORKSPACE"
-apptainer exec --nv --pwd "$MAGNUS_WORKSPACE/repository" "{{sif_path}}" bash "$MAGNUS_WORKSPACE/.magnus_user_script.sh"
+export HOME=$MAGNUS_HOME
+export MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
+export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:$MAGNUS_HOME/workspace"
+apptainer exec --nv --pwd "$MAGNUS_HOME/workspace/repository" "{{sif_path}}" bash "$MAGNUS_HOME/workspace/.magnus_user_script.sh"
 """
         ret_code = subprocess.call(shell_cmd, shell=True, executable="/bin/bash")
 
