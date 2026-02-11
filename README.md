@@ -666,6 +666,10 @@ uv add magnus-sdk
 ### 环境配置
 
 ```bash
+# 推荐：交互式配置（保存到 ~/.magnus/config.json，即时生效）
+magnus login
+
+# 或手动设置环境变量（优先级高于配置文件）
 export MAGNUS_TOKEN="your-jwt-token"
 export MAGNUS_ADDRESS="http://your-server:8017"
 ```
@@ -807,6 +811,9 @@ magnus send ./my_folder
 
 # 接收文件/文件夹（封装 croc receive，自动处理平台差异）
 magnus receive 1234-apple-banana-cherry
+
+# 接收（可选 -o/--output 重命名）
+magnus receive 1234-apple-banana-cherry --output my_data.csv
 
 # 代管文件到后端（后端中继 croc，返回新 secret）
 magnus custody results.csv --expire-minutes 120

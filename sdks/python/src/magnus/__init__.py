@@ -6,6 +6,7 @@ import logging
 import asyncio
 import httpx
 from typing import Optional, Dict, Any, Union, Literal, List
+from pathlib import Path
 from importlib.metadata import version as _pkg_version
 
 from .croc_tools import download_file, download_file_async
@@ -44,6 +45,9 @@ __all__ = [
     "custody_file",
     "custody_file_async",
 
+    # Configuration
+    "save_config_file",
+
     # Exceptions
     "MagnusError",
     "AuthenticationError",
@@ -57,8 +61,30 @@ __all__ = [
 DEFAULT_ADDRESS = "http://127.0.0.1:8017"
 ENV_MAGNUS_TOKEN = "MAGNUS_TOKEN"
 ENV_MAGNUS_ADDRESS = "MAGNUS_ADDRESS"
+CONFIG_DIR = Path.home() / ".magnus"
+CONFIG_FILE = CONFIG_DIR / "config.json"
 
 logger = logging.getLogger("magnus")
+
+
+def _load_config_file() -> Dict[str, str]:
+    """Load ~/.magnus/config.json. Returns empty dict on any failure."""
+    try:
+        if CONFIG_FILE.is_file():
+            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def save_config_file(address: str, token: str) -> Path:
+    """Write address and token to ~/.magnus/config.json. Returns the file path."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(
+        json.dumps({"address": address, "token": token}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return CONFIG_FILE
 
 # === Exceptions ===
 
@@ -83,10 +109,16 @@ class MagnusClient:
     """
 
     def __init__(self, token: Optional[str] = None, address: Optional[str] = None):
-        self.token = token or os.getenv(ENV_MAGNUS_TOKEN)
-        
-        # 处理地址格式，移除末尾斜杠及 /api 后缀以保证拼接正确
-        raw_address = address or os.getenv(ENV_MAGNUS_ADDRESS, DEFAULT_ADDRESS)
+        # Priority: explicit param > env var > config file > default
+        file_config = _load_config_file()
+        self.token = token or os.getenv(ENV_MAGNUS_TOKEN) or file_config.get("token")
+
+        raw_address = (
+            address
+            or os.getenv(ENV_MAGNUS_ADDRESS)
+            or file_config.get("address")
+            or DEFAULT_ADDRESS
+        )
         self.address = raw_address.rstrip("/")
         if self.address.endswith("/api"):
             self.address = self.address[:-4]

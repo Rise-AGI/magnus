@@ -6,6 +6,7 @@ import json
 import signal
 import subprocess
 import typer
+import httpx
 from typing import List, Optional, Any, Dict, Tuple, Literal
 from pathlib import Path
 from rich.console import Console
@@ -20,6 +21,7 @@ __version__ = version("magnus-sdk")
 
 from .. import (
     MagnusError,
+    save_config_file,
     submit_blueprint,
     run_blueprint,
     call_service,
@@ -33,8 +35,7 @@ from .. import (
     list_services as api_list_services,
     get_blueprint_schema as api_get_blueprint_schema,
 )
-from ..file_transfer import get_file_transfer_manager, normalize_secret
-from ..croc_tools import _build_env
+from ..file_transfer import get_file_transfer_manager
 
 # === UI Setup ===
 
@@ -162,39 +163,47 @@ def _resolve_job_ref(ref: str) -> str:
 
 # === Argument Parsing Logic ===
 
+# CLI control parameters have a known schema — convert explicitly, never guess.
+_CLI_KEY_TYPES: Dict[str, type] = {
+    "timeout": float,
+    "poll_interval": float,
+    "verbose": bool,
+    "preference": bool,
+}
+
+
+def _coerce_cli_value(key: str, raw: str) -> Any:
+    """Convert a raw CLI string to the expected type for a known key."""
+    expected = _CLI_KEY_TYPES.get(key)
+    if expected is bool:
+        return raw.lower() not in ("false", "0", "no")
+    if expected is float:
+        return float(raw)
+    if expected is int:
+        return int(raw)
+    return raw
+
+
 def parse_cli_args(args: List[str]) -> Dict[str, Any]:
     """
-    [Smart Parser] 用于 Magnus CLI 自身的控制参数 (如 --timeout, --verbose)。
-    采用积极类型推断策略 (Int/Float/Bool)，方便内部逻辑处理。
+    解析 CLI 自身的控制参数 (如 --timeout, --verbose)。
+    只对 _CLI_KEY_TYPES 中已知的 key 做显式类型转换，未知 key 保持字符串。
     """
-    params = {}
+    params: Dict[str, Any] = {}
     i = 0
     while i < len(args):
         key = args[i]
         if key.startswith("--"):
-            key = key[2:]
-            key = key.replace("-", "_")
-            
-            # Check for value
+            key = key[2:].replace("-", "_")
+
             if i + 1 < len(args) and not args[i + 1].startswith("--"):
-                value = args[i + 1]
+                raw_value = args[i + 1]
                 i += 2
             else:
-                value = True  # Flag defaults to True
+                raw_value = "true"
                 i += 1
-            
-            # Type Inference
-            if isinstance(value, str):
-                lower_val = value.lower()
-                if lower_val == "true": value = True
-                elif lower_val == "false": value = False
-                elif value.isdigit(): value = int(value)
-                else:
-                    try:
-                        value = float(value)
-                    except ValueError:
-                        pass
-            params[key] = value
+
+            params[key] = _coerce_cli_value(key, raw_value)
         else:
             i += 1
     return params
@@ -291,12 +300,13 @@ app = typer.Typer(
     help="Magnus CLI - Focus on your Blueprint.",
     add_completion=False,
     no_args_is_help=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
 @app.callback()
 def main_callback(
-    _version: bool = typer.Option(False, "--version", "-V", callback=_version_callback, is_eager=True, help="Show version"),
+    _version: bool = typer.Option(False, "--version", "-v", "-V", callback=_version_callback, is_eager=True, help="Show version"),
 ):
     pass
 
@@ -305,23 +315,124 @@ def main_callback(
 def show_config():
     """
     Show current SDK configuration (address and token).
+    Resolution order: environment variable > ~/.magnus/config.json > default.
     """
-    address = os.getenv("MAGNUS_ADDRESS", "http://127.0.0.1:8017")
-    token = os.getenv("MAGNUS_TOKEN", "")
+    from .. import _load_config_file, CONFIG_FILE
+    file_config = _load_config_file()
+
+    env_address = os.getenv("MAGNUS_ADDRESS")
+    env_token = os.getenv("MAGNUS_TOKEN")
+
+    address = env_address or file_config.get("address") or "http://127.0.0.1:8017"
+    token = env_token or file_config.get("token") or ""
+
+    address_source = "env" if env_address else ("file" if "address" in file_config else "default")
+    token_source = "env" if env_token else ("file" if "token" in file_config else "")
 
     console.print()
-    console.print(f"  [bold]MAGNUS_ADDRESS[/bold]  {address}")
+    console.print(f"  [bold]MAGNUS_ADDRESS[/bold]  {address}  [dim]({address_source})[/dim]")
 
     if token:
         if len(token) > 12:
             masked = f"{token[:4]}{'*' * 16}{token[-4:]}"
         else:
             masked = "*" * len(token)
-        console.print(f"  [bold]MAGNUS_TOKEN[/bold]    {masked}")
+        console.print(f"  [bold]MAGNUS_TOKEN[/bold]    {masked}  [dim]({token_source})[/dim]")
     else:
         console.print("  [bold]MAGNUS_TOKEN[/bold]    [dim](not set)[/dim]")
 
+    if CONFIG_FILE.is_file():
+        console.print(f"  [bold]Config file[/bold]    {CONFIG_FILE}")
+
     console.print()
+
+# === Login ===
+
+def _mask_token(token: str) -> str:
+    if len(token) > 12:
+        return f"{token[:4]}{'*' * 4}{token[-4:]}"
+    return "*" * len(token)
+
+
+def _verify_connection(address: str, token: str) -> bool:
+    """Verify connectivity by calling GET /api/auth/my-token."""
+    try:
+        resp = httpx.get(
+            f"{address}/api/auth/my-token",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5.0,
+        )
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+@app.command(name="login")
+def login_cmd():
+    """
+    Interactive login: configure MAGNUS_ADDRESS and MAGNUS_TOKEN.
+    Saves to ~/.magnus/config.json (takes effect immediately, no restart needed).
+    Environment variables always override the config file.
+
+    Examples:
+      magnus login
+    """
+    current_address = os.getenv("MAGNUS_ADDRESS", "http://127.0.0.1:8017")
+    current_token = os.getenv("MAGNUS_TOKEN", "")
+
+    # Fall back to config file for display if env vars are not set
+    if not os.getenv("MAGNUS_TOKEN") or not os.getenv("MAGNUS_ADDRESS"):
+        from .. import _load_config_file
+        file_config = _load_config_file()
+        if not os.getenv("MAGNUS_ADDRESS"):
+            current_address = file_config.get("address", current_address)
+        if not os.getenv("MAGNUS_TOKEN"):
+            current_token = file_config.get("token", current_token)
+
+    console.print()
+
+    token_display = _mask_token(current_token) if current_token else "(not set)"
+
+    address = input(f"[Magnus] Magnus Address (current: {current_address}): ").strip()
+    if not address:
+        address = current_address
+    address = address.rstrip("/")
+
+    token = input(f"[Magnus] Magnus Token (current: {token_display}): ").strip()
+    if not token:
+        token = current_token
+
+    if not token:
+        print_error("Token is required.")
+        raise typer.Exit(code=1)
+
+    console.print()
+    with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Verifying connection..."):
+        ok = _verify_connection(address, token)
+
+    if ok:
+        print_msg("[green]Connection verified.[/green]")
+    else:
+        print_msg("[yellow]Warning:[/yellow] Could not verify connection. Saving anyway.")
+
+    try:
+        config_path = save_config_file(address, token)
+        print_msg(f"Saved to [cyan]{config_path}[/cyan]")
+    except OSError as e:
+        print_error(f"Failed to save configuration: {e}")
+        raise typer.Exit(code=1)
+
+    env_overrides = []
+    if os.getenv("MAGNUS_ADDRESS"):
+        env_overrides.append("MAGNUS_ADDRESS")
+    if os.getenv("MAGNUS_TOKEN"):
+        env_overrides.append("MAGNUS_TOKEN")
+    if env_overrides:
+        names = ", ".join(env_overrides)
+        print_msg(f"[dim]Note: {names} environment variable(s) will take priority over this file.[/dim]")
+
+    console.print()
+
 
 @app.command(
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
@@ -479,15 +590,7 @@ def parse_call_args(args: List[str]) -> Tuple[Dict[str, Any], Dict[str, str]]:
                 i += 1
 
             if key in CLI_RESERVED_KEYS:
-                if value == "true":
-                    cli_config[key] = True
-                elif value.isdigit():
-                    cli_config[key] = int(value)
-                else:
-                    try:
-                        cli_config[key] = float(value)
-                    except ValueError:
-                        cli_config[key] = value
+                cli_config[key] = _coerce_cli_value(key, value)
             else:
                 payload[key] = value
         else:
@@ -670,8 +773,7 @@ def job_status_cmd(
         console.print(f"  [bold]GPU:[/bold]     {job.get('gpu_count', 0)}")
         console.print(f"  [bold]Type:[/bold]    {job.get('job_type', '-')}")
         console.print(f"  [bold]Created:[/bold] {_format_time(job.get('created_at'))}")
-        console.print(f"  [bold]Started:[/bold] {_format_time(job.get('started_at'))}")
-        console.print(f"  [bold]Ended:[/bold]   {_format_time(job.get('ended_at'))}")
+        console.print(f"  [bold]Started:[/bold] {_format_time(job.get('start_time'))}")
 
         result = job.get("result")
         if result and result != ".magnus_result":
@@ -786,6 +888,11 @@ def connect_cmd(
       magnus connect           # auto-detect and connect to latest debug job
       magnus connect 12345     # connect to specific SLURM job
     """
+    import shutil
+    if not shutil.which("srun"):
+        print_error("srun not found. This command requires a SLURM environment.")
+        raise typer.Exit(code=1)
+
     slurm_job_id = os.environ.get("SLURM_JOB_ID")
     if slurm_job_id:
         print_msg(f"Already in a Magnus session (Job ID: {slurm_job_id}).")
@@ -833,7 +940,7 @@ def disconnect_cmd():
     slurm_job_id = os.environ.get("SLURM_JOB_ID")
 
     if not slurm_job_id:
-        print_msg("Not in a Magnus session.")
+        print_msg("Not in a Magnus session (no SLURM_JOB_ID). Nothing to disconnect.")
         raise typer.Exit(code=1)
 
     print_msg("Disconnected.")
@@ -1031,13 +1138,22 @@ CROC_INSTALL_HINT = (
 
 
 def _check_croc() -> str:
-    """检查 croc 是否可用，返回 croc 路径"""
+    """检查 croc 是否可用，不可用则提示安装方式并退出"""
     import shutil
     path = shutil.which("croc")
-    if not path:
-        print_error(CROC_INSTALL_HINT)
-        raise typer.Exit(code=1)
-    return path
+    if path:
+        return path
+
+    console.print()
+    print_error("croc is not installed or not in PATH.")
+    print_msg("Magnus file transfer depends on [cyan]croc[/cyan].")
+    console.print()
+    print_msg("Install options:")
+    print_msg("  [cyan]conda install -c conda-forge croc[/cyan]  (recommended)")
+    print_msg("  [cyan]curl https://getcroc.schollz.com | bash[/cyan]")
+    print_msg("  [cyan]brew install croc[/cyan]  (macOS)")
+    print_msg("  See: [cyan]https://github.com/schollz/croc#install[/cyan]")
+    raise typer.Exit(code=1)
 
 
 @app.command(name="send")
@@ -1080,6 +1196,7 @@ def send_cmd(
 @app.command(name="receive")
 def receive_cmd(
     secret: str = typer.Argument(..., help="File secret code"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Target path (rename/move after receive)"),
 ):
     """
     Receive a file or folder.
@@ -1087,19 +1204,19 @@ def receive_cmd(
     Examples:
       magnus receive magnus-secret:1234-apple-banana-cherry
       magnus receive 1234-apple-banana-cherry
+      magnus receive 1234-apple-banana-cherry -o my_data.csv
     """
     _check_croc()
-    croc_secret = normalize_secret(secret)
 
-    if sys.platform == "win32":
-        cmd = ["croc", croc_secret]
-    else:
-        cmd = ["croc"]
-
+    from ..croc_tools import _download_file_using_croc
     try:
-        subprocess.run(cmd, env=_build_env(croc_secret), check=False)
+        result_path = _download_file_using_croc(secret, target_path=output, show_progress=True)
+        print_msg(f"Saved to [cyan]{result_path}[/cyan]")
     except KeyboardInterrupt:
         pass
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
 
 
 @app.command(name="custody")
