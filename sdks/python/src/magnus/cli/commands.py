@@ -28,6 +28,8 @@ from .. import (
     custody_file as api_custody_file,
     list_jobs as api_list_jobs,
     get_job as api_get_job,
+    get_job_result as api_get_job_result,
+    get_job_action as api_get_job_action,
     get_job_logs as api_get_job_logs,
     terminate_job as api_terminate_job,
     get_cluster_stats as api_get_cluster_stats,
@@ -169,6 +171,7 @@ _CLI_KEY_TYPES: Dict[str, type] = {
     "poll_interval": float,
     "verbose": bool,
     "preference": bool,
+    "execute_action": bool,
 }
 
 
@@ -258,7 +261,8 @@ DEFAULT_CLI_CONFIG = {
     "timeout": 10.0,      # HTTP Network Timeout
     "preference": True,   # User Preference
     "verbose": False,     # Debug Mode
-    "poll_interval": 2.0  # Polling Interval (Run only)
+    "poll_interval": 2.0, # Polling Interval (Run only)
+    "execute_action": True,  # Auto-execute MAGNUS_ACTION (Run only)
 }
 
 def apply_cli_defaults(parsed_cli_args: Dict[str, Any], command_type: str = "submit") -> Dict[str, Any]:
@@ -499,6 +503,7 @@ def run(
 ):
     """
     Execute a blueprint and wait for completion.
+    Use --execute-action false to skip automatic action execution.
     """
     file_transfer_mgr = get_file_transfer_manager()
     try:
@@ -524,28 +529,64 @@ def run(
 
         print_msg(f"Running blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
 
+        # SDK handles action execution internally; CLI disables it to control display
         with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
             result = run_blueprint(
                 blueprint_id=blueprint_id,
                 use_preference=cli_config["preference"],
                 timeout=cli_config["timeout"],
                 poll_interval=cli_config["poll_interval"],
+                execute_action=False,  # CLI handles action display + execution itself
                 args=bp_args
             )
 
         console.print("")
         print_msg("Job finished.")
-        console.rule("[bold green]MAGNUS RESULT[/bold green]")
 
-        try:
-            if isinstance(result, str):
-                json_obj = json.loads(result)
-                console.print_json(data=json_obj)
-            else:
-                console.print(result)
-        except Exception:
-            console.print(result)
-        console.rule()
+        has_result = result is not None
+        has_action = False
+        action_text: Optional[str] = None
+
+        # Fetch action via the job_id stashed by run_blueprint
+        from .. import default_client
+        if default_client.last_job_id:
+            try:
+                action_raw = api_get_job_action(default_client.last_job_id)
+                if action_raw:
+                    action_text = action_raw.strip()
+                    has_action = bool(action_text)
+            except Exception:
+                pass
+
+        if not has_result and not has_action:
+            print_msg("[dim]No result or action returned.[/dim]")
+        else:
+            if has_result:
+                console.rule("[bold green]MAGNUS RESULT[/bold green]")
+                try:
+                    assert isinstance(result, str)
+                    json_obj = json.loads(result)
+                    console.print_json(data=json_obj)
+                except Exception:
+                    console.print(result)
+                console.rule()
+
+            if has_action:
+                assert action_text is not None
+                if cli_config["execute_action"]:
+                    print_msg("Executing action...")
+                    for line in action_text.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        ret = subprocess.call(line, shell=True)
+                        if ret != 0:
+                            print_error(f"Action command failed (exit {ret}): {line}")
+                            raise typer.Exit(code=1)
+                else:
+                    console.rule("[bold yellow]MAGNUS ACTION[/bold yellow]")
+                    console.print(action_text)
+                    console.rule()
 
     except MagnusError as e:
         print_error(str(e))
@@ -560,7 +601,7 @@ def run(
         file_transfer_mgr.cleanup()
 
 
-CLI_RESERVED_KEYS = {"timeout", "verbose"}
+CLI_RESERVED_KEYS = {"timeout", "verbose", "execute_action"}
 
 
 def parse_call_args(args: List[str]) -> Tuple[Dict[str, Any], Dict[str, str]]:
@@ -785,6 +826,12 @@ def job_status_cmd(
                 console.print_json(data=json.loads(result))
             except Exception:
                 console.print(result)
+
+        action = job.get("action")
+        if action and action != ".magnus_action":
+            console.print()
+            console.rule("[bold yellow]Action[/bold yellow]")
+            console.print(action)
 
         console.rule()
 

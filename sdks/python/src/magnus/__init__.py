@@ -4,6 +4,7 @@ import time
 import json
 import logging
 import asyncio
+import subprocess as _subprocess
 import httpx
 from typing import Optional, Dict, Any, Union, Literal, List
 from pathlib import Path
@@ -31,6 +32,8 @@ __all__ = [
     "list_jobs_async",
     "get_job",
     "get_job_async",
+    "get_job_result",
+    "get_job_action",
     "get_job_logs",
     "terminate_job",
     "terminate_job_async",
@@ -100,6 +103,19 @@ class ResourceNotFoundError(MagnusError):
 class ExecutionError(MagnusError):
     pass
 
+# === Action Execution ===
+
+def _execute_action(action: str) -> None:
+    """Execute action commands returned by MAGNUS_ACTION. Raises ExecutionError on failure."""
+    for line in action.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        ret = _subprocess.call(line, shell=True)
+        if ret != 0:
+            raise ExecutionError(f"Action command failed (exit {ret}): {line}")
+
+
 # === Core Client ===
 
 class MagnusClient:
@@ -125,6 +141,7 @@ class MagnusClient:
         
         self._client: Optional[httpx.Client] = None
         self._async_client: Optional[httpx.AsyncClient] = None
+        self.last_job_id: Optional[str] = None
 
     @property
     def api_base(self) -> str:
@@ -305,10 +322,12 @@ class MagnusClient:
         save_preference: bool = True,
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
+        execute_action: bool = True,
     ) -> Optional[str]:
         """
         提交任务并轮询等待完成 (Submit & Wait)。
         :param timeout: 最大任务执行等待时间（秒）。默认为 None（无限等待）。
+        :param execute_action: 任务完成后是否自动执行 MAGNUS_ACTION（默认 True）。
 
         注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
         Job 完成后会自动清理 croc 进程。
@@ -323,6 +342,7 @@ class MagnusClient:
                 save_preference=save_preference,
                 timeout=10.0  # Network timeout
             )
+            self.last_job_id = job_id
             logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
             start_time = time.time()
@@ -336,7 +356,13 @@ class MagnusClient:
                 status = data["status"]
 
                 if status == "Success":
-                    return data.get("result", "")
+                    result: Optional[str] = data.get("result")
+                    action: Optional[str] = data.get("action")
+
+                    if execute_action and action:
+                        _execute_action(action)
+
+                    return result
                 elif status in ["Failed", "Terminated"]:
                     raise ExecutionError(f"Job {job_id} ended with status: {status}")
 
@@ -352,9 +378,11 @@ class MagnusClient:
         save_preference: bool = True,
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
+        execute_action: bool = True,
     ) -> Optional[str]:
         """
         异步提交任务并轮询等待完成 (Submit & Wait)。
+        :param execute_action: 任务完成后是否自动执行 MAGNUS_ACTION（默认 True）。
 
         注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
         Job 完成后会自动清理 croc 进程。
@@ -369,6 +397,7 @@ class MagnusClient:
                 save_preference=save_preference,
                 timeout=10.0
             )
+            self.last_job_id = job_id
             logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
             start_time = time.time()
@@ -382,7 +411,13 @@ class MagnusClient:
                 status = data["status"]
 
                 if status == "Success":
-                    return data.get("result", "")
+                    result: Optional[str] = data.get("result")
+                    action: Optional[str] = data.get("action")
+
+                    if execute_action and action:
+                        _execute_action(action)
+
+                    return result
                 elif status in ["Failed", "Terminated"]:
                     raise ExecutionError(f"Job {job_id} ended with status: {status}")
 
@@ -461,6 +496,32 @@ class MagnusClient:
             return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting job info.")
+
+    def get_job_result(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Optional[str]:
+        """获取任务的 result。文件不存在返回 None，文件为空返回空字符串。"""
+        try:
+            resp = self.http.get(f"/jobs/{job_id}/result", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting job result.")
+
+    def get_job_action(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Optional[str]:
+        """获取任务的 action。文件不存在返回 None，文件为空返回空字符串。"""
+        try:
+            resp = self.http.get(f"/jobs/{job_id}/action", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting job action.")
 
 
     def terminate_job(
@@ -795,9 +856,10 @@ def run_blueprint(
     use_preference: bool = True,
     save_preference: bool = True,
     timeout: Optional[float] = None,
-    poll_interval: float = 2.0
+    poll_interval: float = 2.0,
+    execute_action: bool = True,
 ) -> Optional[str]:
-    return default_client.run_blueprint(blueprint_id, args, use_preference, save_preference, timeout, poll_interval)
+    return default_client.run_blueprint(blueprint_id, args, use_preference, save_preference, timeout, poll_interval, execute_action)
 
 async def run_blueprint_async(
     blueprint_id: str,
@@ -805,9 +867,10 @@ async def run_blueprint_async(
     use_preference: bool = True,
     save_preference: bool = True,
     timeout: Optional[float] = None,
-    poll_interval: float = 2.0
+    poll_interval: float = 2.0,
+    execute_action: bool = True,
 ) -> Optional[str]:
-    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, timeout, poll_interval)
+    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, timeout, poll_interval, execute_action)
 
 def call_service(
     service_id: str, 
@@ -869,6 +932,20 @@ def get_job(
     timeout: float = 10.0,
 ) -> Dict[str, Any]:
     return default_client.get_job(job_id, timeout)
+
+
+def get_job_result(
+    job_id: str,
+    timeout: float = 10.0,
+) -> Optional[str]:
+    return default_client.get_job_result(job_id, timeout)
+
+
+def get_job_action(
+    job_id: str,
+    timeout: float = 10.0,
+) -> Optional[str]:
+    return default_client.get_job_action(job_id, timeout)
 
 
 async def get_job_async(

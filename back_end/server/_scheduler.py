@@ -105,6 +105,8 @@ class MagnusScheduler:
                     job.status = JobStatus.SUCCESS
                     result_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_result"
                     job.result = ".magnus_result" if os.path.exists(result_path) else None
+                    action_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_action"
+                    job.action = ".magnus_action" if os.path.exists(action_path) else None
                 else:
                     logger.warning(f"Job {job.id} completed but NO success marker found. Marking FAILED.")
                     job.status = JobStatus.FAILED
@@ -137,6 +139,8 @@ class MagnusScheduler:
                     job.status = JobStatus.SUCCESS
                     result_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_result"
                     job.result = ".magnus_result" if os.path.exists(result_path) else None
+                    action_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_action"
+                    job.action = ".magnus_action" if os.path.exists(action_path) else None
                 else:
                     logger.warning(f"Job {job.id} disappeared from queue but NO success marker found. Marking FAILED.")
                     job.status = JobStatus.FAILED
@@ -353,7 +357,8 @@ class MagnusScheduler:
 
             success_marker_path = f"{job_working_table}/.magnus_success"
             result_marker_path = f"{job_working_table}/.magnus_result"
-            for marker in [success_marker_path, result_marker_path]:
+            action_marker_path = f"{job_working_table}/.magnus_action"
+            for marker in [success_marker_path, result_marker_path, action_marker_path]:
                 if os.path.exists(marker):
                     try:
                         os.remove(marker)
@@ -408,7 +413,6 @@ def main():
     work_dir = {repr(job_working_table)}
     repo_dir = {repr(repo_dir)}
     success_marker_path = {repr(success_marker_path)}
-    result_marker_path = {repr(result_marker_path)}
     gpu_status_path = {repr(gpu_status_path)}
     sif_path = {repr(sif_path)}
     system_entry_command = {repr(system_entry_command)}
@@ -450,6 +454,7 @@ export MAGNUS_HOME=/magnus
 
 export HOME=$MAGNUS_HOME
 export MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
+export MAGNUS_ACTION=$MAGNUS_HOME/workspace/.magnus_action
 export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:$MAGNUS_HOME/workspace"
 apptainer exec --nv --pwd "$MAGNUS_HOME/workspace/repository" "{{sif_path}}" bash "$MAGNUS_HOME/workspace/.magnus_user_script.sh"
 """

@@ -77,6 +77,7 @@ class JobResponse(JobSubmission):
     memory_demand: Optional[str] = None
     runner: Optional[str] = None
     result: Optional[str] = None
+    action: Optional[str] = None
     class Config: from_attributes = True
     
     

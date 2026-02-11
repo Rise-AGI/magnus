@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _read_marker_file(path: str, max_size: int) -> str:
+    """Read a marker file (.magnus_result / .magnus_action), return content or empty string."""
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(max_size)
+        if os.path.getsize(path) > max_size:
+            content += "\n... (Content truncated, please download full file) ..."
+        return content
+    except Exception as e:
+        return f"<Error reading file: {str(e)}>"
+
+
 @router.post(
     "/jobs/submit",
     response_model=JobResponse,
@@ -97,31 +111,68 @@ def get_job_detail(
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
 ):
-    
+
     MAX_RESULT_PREVIEW_SIZE = 1024 * 1024
-    
+
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # [Magnus Patch] 
+    workspace = magnus_config['server']['root']
+
+    # Lazy-read result
     if job.result == ".magnus_result":
-        workspace = magnus_config['server']['root']
         result_path = f"{workspace}/workspace/jobs/{job.id}/.magnus_result"
-        
-        content: str = ""
-        if os.path.exists(result_path):
-            try:
-                with open(result_path, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read(MAX_RESULT_PREVIEW_SIZE)
-                if os.path.getsize(result_path) > MAX_RESULT_PREVIEW_SIZE:
-                    content += "\n... (Content truncated, please download full file) ..."
-            except Exception as e:
-                content = f"<Error reading result: {str(e)}>"
-        # 临时覆写 ORM 对象属性，不 commit 到 DB
-        job.result = content
+        job.result = _read_marker_file(result_path, MAX_RESULT_PREVIEW_SIZE)
+
+    # Lazy-read action
+    if job.action == ".magnus_action":
+        action_path = f"{workspace}/workspace/jobs/{job.id}/.magnus_action"
+        job.action = _read_marker_file(action_path, MAX_RESULT_PREVIEW_SIZE)
 
     return job
+
+
+@router.get("/jobs/{job_id}/result")
+def get_job_result(
+    job_id: str,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
+) -> Optional[str]:
+    """文件不存在返回 null，文件存在但为空返回空字符串。"""
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.result is None:
+        return None
+    if job.result == ".magnus_result":
+        workspace = magnus_config['server']['root']
+        path = f"{workspace}/workspace/jobs/{job.id}/.magnus_result"
+        if not os.path.exists(path):
+            return None
+        return _read_marker_file(path, 1024 * 1024)
+    return job.result
+
+
+@router.get("/jobs/{job_id}/action")
+def get_job_action(
+    job_id: str,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
+) -> Optional[str]:
+    """文件不存在返回 null，文件存在但为空返回空字符串。"""
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.action is None:
+        return None
+    if job.action == ".magnus_action":
+        workspace = magnus_config['server']['root']
+        path = f"{workspace}/workspace/jobs/{job.id}/.magnus_action"
+        if not os.path.exists(path):
+            return None
+        return _read_marker_file(path, 1024 * 1024)
+    return job.action
 
 
 def _safe_utf8_truncate(data: bytes) -> bytes:

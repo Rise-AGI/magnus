@@ -28,4 +28,5 @@ export interface Job {
   container_image: string;
   system_entry_command: string;
   result?: string;
+  action?: string;
 }
