@@ -46,6 +46,11 @@ const translations = {
   "header.resetTokenNote": { zh: "您需要在集群上更新信任设置。", en: "You will need to update your trust settings on the cluster." },
   "header.noLoginToken": { zh: "未找到登录令牌。", en: "No login token found." },
   "header.refreshFailed": { zh: "刷新令牌失败：", en: "Failed to refresh token:" },
+  "header.editToken": { zh: "自定义令牌", en: "Edit Token" },
+  "header.customTokenLabel": { zh: "输入自定义令牌", en: "Enter custom token" },
+  "header.customTokenWarning": { zh: "不建议普通用户使用此功能。", en: "This feature is not recommended for regular users." },
+  "header.customTokenInvalid": { zh: "令牌必须以 sk- 开头且长度为 35", en: "Token must start with sk- and be 35 characters" },
+  "header.saveCustomToken": { zh: "保存令牌", en: "Save Token" },
 
   // ===== Notifications =====
   "notifications.title": { zh: "通知", en: "Notifications" },

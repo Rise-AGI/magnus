@@ -202,6 +202,34 @@ def refresh_trust_token(
     return {"magnus_token": new_token}
 
 
+MAGNUS_TOKEN_LENGTH = 35
+
+
+@router.post(
+    "/auth/token/set",
+    response_model = TokenResponse,
+)
+def set_custom_token(
+    payload: Dict[str, Any],
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    token = payload.get("token", "")
+    if not token.startswith("sk-") or len(token) != MAGNUS_TOKEN_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Token must start with 'sk-' and be exactly {MAGNUS_TOKEN_LENGTH} characters.",
+        )
+
+    current_user.token = token
+    db.commit()
+    db.refresh(current_user)
+
+    logger.info(f"User {current_user.id} ({current_user.name}) set a custom trust token.")
+
+    return {"magnus_token": token}
+
+
 @router.get(
     "/auth/my-token",
     response_model = TokenResponse,
