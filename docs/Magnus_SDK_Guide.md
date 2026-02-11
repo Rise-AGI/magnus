@@ -12,6 +12,7 @@
   - [安装](#安装)
   - [环境配置](#环境配置)
   - [配置优先级](#配置优先级)
+  - [容器内环境变量](#容器内环境变量)
   - [蓝图操作](#蓝图操作)
   - [服务调用](#服务调用)
   - [任务管理](#任务管理)
@@ -111,6 +112,22 @@ SDK 按以下顺序解析配置，**先找到的生效**：
 - **老用户**：如果已在 `.bashrc` 中 `export MAGNUS_TOKEN=...`，环境变量优先级更高，完全无感。
 - **Trust Forwarding**：Magnus 在容器内执行任务时会注入 `MAGNUS_TOKEN` 环境变量，天然覆盖配置文件，蓝图调蓝图（Job-in-Job）场景零阻碍。
 - **`magnus config`** 命令会显示每个配置项的实际来源（env / file / default），方便排查。
+
+### 容器内环境变量
+
+Magnus 任务在 Apptainer 容器内执行时，以下环境变量自动注入：
+
+| 变量 | 说明 | 示例值 |
+|------|------|--------|
+| `MAGNUS_HOME` | 容器内 Magnus 根目录，同时设为 `HOME`（`echo ~` 输出此值） | `/magnus` |
+| `MAGNUS_TOKEN` | 当前用户的 Trust Token，用于容器内调用 Magnus API | `sk-...` |
+| `MAGNUS_ADDRESS` | Magnus 后端地址 | `http://162.105.151.196:3011` |
+| `MAGNUS_JOB_ID` | 当前任务 ID | `abc123` |
+| `MAGNUS_RESULT` | 任务结果文件路径，写入此文件的内容会作为任务结果返回 | `$MAGNUS_HOME/workspace/.magnus_result` |
+
+工作区位于 `$MAGNUS_HOME/workspace/`，代码仓库在 `$MAGNUS_HOME/workspace/repository/`。
+
+`MAGNUS_HOME` 在 `system_entry_command` 之前预设，用户可在 `system_entry_command` 中覆盖。`HOME` 在 `system_entry_command` 之后设为 `$MAGNUS_HOME`。
 
 ### 蓝图操作
 
