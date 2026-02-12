@@ -106,7 +106,7 @@ from typing import Annotated, Literal, Optional, List
 | `float` | `"float"` | 数字输入框 |
 | `bool` | `"boolean"` | 开关 |
 | `Literal["a", "b", ...]` | `"select"` | 下拉选择器 |
-| `FileSecret` | `"file_secret"` | croc secret 输入框 |
+| `FileSecret` | `"file_secret"` | 文件凭证输入框 |
 
 ### 4.2 类型包装器
 
@@ -205,13 +205,13 @@ FileSecret 的 `allow_empty` 始终为 `False`（必填）。
 
 ## 6. FileSecret 文件传输
 
-`FileSecret` 用于将本地文件传输到远程执行环境，底层基于 croc。
+`FileSecret` 用于将本地文件传输到远程执行环境，通过 Magnus 服务器中转。
 
 ### 格式
 
-值必须以 `magnus-secret:` 开头，后跟 croc secret code：
+值必须以 `magnus-secret:` 开头，后跟服务器返回的文件凭证：
 ```
-magnus-secret:7454-phrase-love-ferrari
+magnus-secret:a1b2c3d4e5f6
 ```
 
 ### 蓝图中定义
@@ -220,11 +220,11 @@ magnus-secret:7454-phrase-love-ferrari
 InputData = Annotated[FileSecret, {
     "label": "Input Data",
     "description": "Upload your dataset",
-    "placeholder": "croc secret code",
+    "placeholder": "file secret code",
 }]
 
 def generate_job(data: InputData) -> JobSubmission:
-    # data 的值形如 "magnus-secret:7454-phrase-love-ferrari"
+    # data 的值形如 "magnus-secret:a1b2c3d4e5f6"
     # 在容器内用 magnus SDK 接收文件：
     #   from magnus import download_file
     #   download_file(data, "my_data.csv")
@@ -233,8 +233,8 @@ def generate_job(data: InputData) -> JobSubmission:
 
 ### 使用方式
 
-- **Web 端**：用户输入 croc secret（`magnus-secret:` 前缀已预填）
-- **SDK 端**：直接传文件路径，SDK 自动启动 `croc send` 并转换为 secret
+- **Web 端**：用户输入文件凭证（`magnus-secret:` 前缀已预填）
+- **SDK 端**：直接传文件路径，SDK 自动上传到服务器并转换为 secret
 - **缓存行为**：FileSecret 是一次性凭证，**永远不会**从参数缓存中预填
 
 ---
@@ -358,7 +358,7 @@ def generate_job(
 InputData = Annotated[FileSecret, {
     "label": "Training Data",
     "description": "Upload via: magnus send data.tar.gz",
-    "placeholder": "croc secret code",
+    "placeholder": "file secret code",
 }]
 
 BaseConfig = Annotated[Literal["default", "large", "debug"], {

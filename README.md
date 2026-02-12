@@ -328,7 +328,7 @@ def generate_job(
 | 布尔 | `bool` | 开关 | - |
 | 枚举 | `Literal["a", "b"]` | 下拉选择器 | `options` (可含 label/description) |
 | 可选 | `Optional[T]` | 带启用开关的字段 | 禁用时不传参 |
-| 文件传输 | `FileSecret` | croc secret 输入框 | `placeholder`, `description` |
+| 文件传输 | `FileSecret` | 文件凭证输入框 | `placeholder`, `description` |
 | 列表 | `List[T]` | 动态添加/删除项 | - |
 | 组合 | `Optional[List[T]]` | 可选的列表字段 | - |
 
@@ -339,23 +339,23 @@ def generate_job(
 
 #### 文件传输 (FileSecret)
 
-`FileSecret` 类型用于将本地文件传输到远程执行环境，底层基于 [croc](https://github.com/schollz/croc)。
+`FileSecret` 类型用于将本地文件传输到远程执行环境，通过 Magnus 服务器中转。
 
 ```python
 # 蓝图定义
 InputData = Annotated[FileSecret, {
     "label": "Input Data",
-    "description": "Upload your dataset via croc",
-    "placeholder": "croc secret code",
+    "description": "Upload your dataset",
+    "placeholder": "file secret code",
 }]
 
 def generate_job(data: InputData) -> JobSubmission:
     ...
 ```
 
-**Web 端**：用户输入 croc secret（前缀 `magnus-secret:` 已预填）
+**Web 端**：用户输入文件凭证（前缀 `magnus-secret:` 已预填）
 
-**SDK 端**：直接传文件路径，SDK 自动启动 `croc send`
+**SDK 端**：直接传文件路径，SDK 自动上传到服务器
 ```python
 from magnus import submit_blueprint
 submit_blueprint("my-bp", args={"data": "/local/path/to/file.csv"})
@@ -805,17 +805,17 @@ magnus config
 ### 文件传输
 
 ```bash
-# 发送文件/文件夹（封装 croc send）
+# 发送文件/文件夹（上传到服务器）
 magnus send my_table.csv
 magnus send ./my_folder
 
-# 接收文件/文件夹（封装 croc receive，自动处理平台差异）
-magnus receive 1234-apple-banana-cherry
+# 接收文件/文件夹（从服务器下载）
+magnus receive a1b2c3d4e5f6
 
 # 接收（可选 -o/--output 重命名）
-magnus receive 1234-apple-banana-cherry --output my_data.csv
+magnus receive a1b2c3d4e5f6 --output my_data.csv
 
-# 代管文件到后端（后端中继 croc，返回新 secret）
+# 代管文件到后端（上传到服务器，返回文件凭证）
 magnus custody results.csv --expire-minutes 120
 ```
 
@@ -863,7 +863,7 @@ magnus custody results.csv --expire-minutes 120
 
 - [Apptainer](https://github.com/apptainer/apptainer) - 高性能容器运行时，Magnus 任务执行的隔离环境基础
 - [OpenCode](https://github.com/anomalyco/opencode) - 优秀的开源 AI Coding Agent，Explorer 模块的部分实现参考了该项目
-- [croc](https://github.com/schollz/croc) - 简洁高效的跨平台文件传输工具，Magnus 文件传输功能的底层依赖
+- [croc](https://github.com/schollz/croc) - 简洁高效的跨平台文件传输工具，Magnus 文件传输功能的早期设计参考
 
 ---
 

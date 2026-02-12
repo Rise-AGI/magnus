@@ -608,7 +608,7 @@ const translations = {
   },
   "help.blueprintEditor.optionalField": { zh: "带启用开关的字段", en: "Field with Enable Switch" },
   "help.blueprintEditor.optionalDesc": { zh: "禁用时不传参给函数", en: "Disabled means no param passed to function" },
-  "help.blueprintEditor.fileSecretInput": { zh: "croc secret 输入框", en: "croc secret input" },
+  "help.blueprintEditor.fileSecretInput": { zh: "文件凭证输入框", en: "File secret input" },
   "help.blueprintEditor.dynamicList": { zh: "可动态增删的列表", en: "Dynamic Add/Remove List" },
   "help.blueprintEditor.nestedTypes": { zh: "支持嵌套基础类型", en: "Supports nested basic types" },
   "help.blueprintEditor.commonMetadata": { zh: "通用元数据属性", en: "Common Metadata Properties" },
@@ -630,8 +630,8 @@ const translations = {
   },
   "help.blueprintEditor.paramCache": { zh: "参数缓存", en: "Parameter Cache" },
   "help.blueprintEditor.paramCacheDesc": {
-    zh: "通过 Web 界面成功运行蓝图后，系统会自动保存用户填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。注意：FileSecret 类型的参数不会被预填，因为 croc secret 是一次性凭证。",
-    en: "After successfully running a blueprint via the web interface, the system auto-saves user-filled parameter values. Next time opening the same blueprint, if the signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the parameter signature. Note: FileSecret parameters are never pre-filled, as croc secrets are one-time credentials."
+    zh: "通过 Web 界面成功运行蓝图后，系统会自动保存用户填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。注意：FileSecret 类型的参数不会被预填，因为文件凭证是一次性的。",
+    en: "After successfully running a blueprint via the web interface, the system auto-saves user-filled parameter values. Next time opening the same blueprint, if the signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the parameter signature. Note: FileSecret parameters are never pre-filled, as file secrets are one-time credentials."
   },
   "help.blueprintEditor.autoSave": { zh: "自动保存", en: "auto-save" },
   "help.blueprintEditor.autoRestore": { zh: "自动恢复", en: "auto-restore" },
@@ -664,13 +664,13 @@ const translations = {
     en: "Dropdown options are defined by the blueprint, some options may have description text."
   },
   "help.blueprintRunner.fileSecret": {
-    zh: "文件传输字段，通过 croc 传输文件。在此输入 secret code，前缀 magnus-secret: 已预填。SDK 用户可直接传本地文件路径。",
-    en: "File transfer via croc. Enter the secret code, the magnus-secret: prefix is pre-filled. SDK users can pass a local file path directly."
+    zh: "文件传输字段。在此输入 secret code，前缀 magnus-secret: 已预填。SDK 用户可直接传本地文件路径。",
+    en: "File transfer field. Enter the secret code, the magnus-secret: prefix is pre-filled. SDK users can pass a local file path directly."
   },
   "help.blueprintRunner.paramCache": { zh: "参数缓存", en: "Parameter Cache" },
   "help.blueprintRunner.paramCacheDesc": {
-    zh: "成功提交任务后，系统会自动保存当前填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。注意：FileSecret 类型的参数不会被预填，因为 croc secret 是一次性凭证。",
-    en: "After successful submission, the system auto-saves current parameter values. Next time opening the same blueprint, if signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the signature. Note: FileSecret parameters are never pre-filled, as croc secrets are one-time credentials."
+    zh: "成功提交任务后，系统会自动保存当前填写的参数值。下次打开同一蓝图时，如果蓝图签名未发生变化，会自动恢复上次的参数值，无需重复填写。当蓝图代码修改导致参数签名变化时，缓存会自动失效。注意：FileSecret 类型的参数不会被预填，因为文件凭证是一次性的。",
+    en: "After successful submission, the system auto-saves current parameter values. Next time opening the same blueprint, if signature hasn't changed, previous values auto-restore. Cache invalidates when blueprint code changes alter the signature. Note: FileSecret parameters are never pre-filled, as file secrets are one-time credentials."
   },
   "help.blueprintRunner.sdkCall": { zh: "SDK 调用", en: "SDK Call" },
   "help.blueprintRunner.sdkCallDesc": {

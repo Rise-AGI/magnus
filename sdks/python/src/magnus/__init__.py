@@ -10,8 +10,8 @@ from typing import Optional, Dict, Any, Union, Literal, List
 from pathlib import Path
 from importlib.metadata import version as _pkg_version
 
-from .croc_tools import download_file, download_file_async
-from .file_transfer import get_file_transfer_manager
+from .http_download import download_file, download_file_async
+from .file_transfer import is_file_secret
 
 __version__ = _pkg_version("magnus-sdk")
 
@@ -219,6 +219,48 @@ class MagnusClient:
                     continue
         return "".join(results) if results else text
 
+    # === File Upload ===
+
+    def _upload_file(
+        self,
+        path: str,
+        expire_minutes: int = 60,
+        timeout: float = 300.0,
+    ) -> str:
+        import tarfile as _tarfile
+        import tempfile as _tempfile
+
+        p = Path(path)
+        if not p.exists():
+            raise MagnusError(f"Path does not exist: {path}")
+
+        is_dir = p.is_dir()
+        if is_dir:
+            tmp = _tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)
+            try:
+                with _tarfile.open(tmp.name, "w:gz") as tar:
+                    tar.add(str(p), arcname=p.name)
+                with open(tmp.name, "rb") as f:
+                    resp = self.http.post(
+                        "/files/upload",
+                        files={"file": (f"{p.name}.tar.gz", f)},
+                        data={"expire_minutes": str(expire_minutes), "is_directory": "true"},
+                        timeout=timeout,
+                    )
+            finally:
+                os.unlink(tmp.name)
+        else:
+            with open(p, "rb") as f:
+                resp = self.http.post(
+                    "/files/upload",
+                    files={"file": (p.name, f)},
+                    data={"expire_minutes": str(expire_minutes)},
+                    timeout=timeout,
+                )
+
+        self._handle_error(resp)
+        return resp.json()["file_secret"]
+
     # === Blueprint Methods ===
 
     def _get_file_secret_keys(self, blueprint_id: str) -> List[str]:
@@ -239,23 +281,19 @@ class MagnusClient:
     ) -> str:
         """
         提交蓝图任务，立即返回 Job ID (Fire & Forget)。
-        :param args: 传递给蓝图的参数字典。
-        :param use_preference: 是否合并已缓存的偏好参数。
-        :param save_preference: 成功后是否保存参数为新偏好。
-        :param timeout: HTTP 请求超时时间（非任务执行时间）。
-
-        注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
-        croc 进程会在后台运行，直到远程接收完成或进程退出时自动清理。
+        对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动上传到服务器。
         """
 
         final_args = dict(args) if args else {}
 
         file_secret_keys = self._get_file_secret_keys(blueprint_id)
-        if file_secret_keys and final_args:
-            file_transfer_mgr = get_file_transfer_manager()
-            final_args, errors = file_transfer_mgr.prepare_file_secrets(final_args, file_secret_keys)
-            if errors:
-                raise MagnusError(f"Failed to prepare file transfers: {'; '.join(errors)}")
+        for key in file_secret_keys:
+            if key not in final_args:
+                continue
+            value = str(final_args[key])
+            if is_file_secret(value):
+                continue
+            final_args[key] = self._upload_file(value)
 
         payload = {
             "parameters": final_args,
@@ -284,19 +322,19 @@ class MagnusClient:
     ) -> str:
         """
         异步提交蓝图任务，立即返回 Job ID (Fire & Forget)。
-
-        注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
-        croc 进程会在后台运行，直到远程接收完成或进程退出时自动清理。
+        对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动上传到服务器。
         """
 
         final_args = dict(args) if args else {}
 
         file_secret_keys = self._get_file_secret_keys(blueprint_id)
-        if file_secret_keys and final_args:
-            file_transfer_mgr = get_file_transfer_manager()
-            final_args, errors = file_transfer_mgr.prepare_file_secrets(final_args, file_secret_keys)
-            if errors:
-                raise MagnusError(f"Failed to prepare file transfers: {'; '.join(errors)}")
+        for key in file_secret_keys:
+            if key not in final_args:
+                continue
+            value = str(final_args[key])
+            if is_file_secret(value):
+                continue
+            final_args[key] = await asyncio.to_thread(self._upload_file, value)
 
         payload = {
             "parameters": final_args,
@@ -327,49 +365,41 @@ class MagnusClient:
     ) -> Optional[str]:
         """
         提交任务并轮询等待完成 (Submit & Wait)。
-        :param timeout: 最大任务执行等待时间（秒）。默认为 None（无限等待）。
-        :param execute_action: 任务完成后是否自动执行 MAGNUS_ACTION（默认 True）。
-
-        注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
-        Job 完成后会自动清理 croc 进程。
+        对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动上传到服务器。
         """
 
-        file_transfer_mgr = get_file_transfer_manager()
-        try:
-            job_id = self.submit_blueprint(
-                blueprint_id=blueprint_id,
-                args=args,
-                use_preference=use_preference,
-                save_preference=save_preference,
-                timeout=10.0  # Network timeout
-            )
-            self.last_job_id = job_id
-            logger.info(f"Job {job_id} submitted. Waiting for completion...")
+        job_id = self.submit_blueprint(
+            blueprint_id=blueprint_id,
+            args=args,
+            use_preference=use_preference,
+            save_preference=save_preference,
+            timeout=10.0
+        )
+        self.last_job_id = job_id
+        logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
-            start_time = time.time()
-            while True:
-                if timeout and (time.time() - start_time > timeout):
-                    raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
+        start_time = time.time()
+        while True:
+            if timeout and (time.time() - start_time > timeout):
+                raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
 
-                resp = self.http.get(f"/jobs/{job_id}")
-                self._handle_error(resp)
-                data = resp.json()
-                status = data["status"]
+            resp = self.http.get(f"/jobs/{job_id}")
+            self._handle_error(resp)
+            data = resp.json()
+            status = data["status"]
 
-                if status == "Success":
-                    result: Optional[str] = data.get("result")
-                    action: Optional[str] = data.get("action")
+            if status == "Success":
+                result: Optional[str] = data.get("result")
+                action: Optional[str] = data.get("action")
 
-                    if execute_action and action:
-                        _execute_action(action)
+                if execute_action and action:
+                    _execute_action(action)
 
-                    return result
-                elif status in ["Failed", "Terminated"]:
-                    raise ExecutionError(f"Job {job_id} ended with status: {status}")
+                return result
+            elif status in ["Failed", "Terminated"]:
+                raise ExecutionError(f"Job {job_id} ended with status: {status}")
 
-                time.sleep(poll_interval)
-        finally:
-            file_transfer_mgr.cleanup()
+            time.sleep(poll_interval)
 
     async def run_blueprint_async(
         self,
@@ -383,48 +413,41 @@ class MagnusClient:
     ) -> Optional[str]:
         """
         异步提交任务并轮询等待完成 (Submit & Wait)。
-        :param execute_action: 任务完成后是否自动执行 MAGNUS_ACTION（默认 True）。
-
-        注意：对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动启动 croc send。
-        Job 完成后会自动清理 croc 进程。
+        对于 FileSecret 类型的参数，可以直接传文件路径，SDK 会自动上传到服务器。
         """
 
-        file_transfer_mgr = get_file_transfer_manager()
-        try:
-            job_id = await self.submit_blueprint_async(
-                blueprint_id=blueprint_id,
-                args=args,
-                use_preference=use_preference,
-                save_preference=save_preference,
-                timeout=10.0
-            )
-            self.last_job_id = job_id
-            logger.info(f"Job {job_id} submitted. Waiting for completion...")
+        job_id = await self.submit_blueprint_async(
+            blueprint_id=blueprint_id,
+            args=args,
+            use_preference=use_preference,
+            save_preference=save_preference,
+            timeout=10.0
+        )
+        self.last_job_id = job_id
+        logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
-            start_time = time.time()
-            while True:
-                if timeout and (time.time() - start_time > timeout):
-                    raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
+        start_time = time.time()
+        while True:
+            if timeout and (time.time() - start_time > timeout):
+                raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
 
-                resp = await self.ahttp.get(f"/jobs/{job_id}")
-                self._handle_error(resp)
-                data = resp.json()
-                status = data["status"]
+            resp = await self.ahttp.get(f"/jobs/{job_id}")
+            self._handle_error(resp)
+            data = resp.json()
+            status = data["status"]
 
-                if status == "Success":
-                    result: Optional[str] = data.get("result")
-                    action: Optional[str] = data.get("action")
+            if status == "Success":
+                result: Optional[str] = data.get("result")
+                action: Optional[str] = data.get("action")
 
-                    if execute_action and action:
-                        _execute_action(action)
+                if execute_action and action:
+                    _execute_action(action)
 
-                    return result
-                elif status in ["Failed", "Terminated"]:
-                    raise ExecutionError(f"Job {job_id} ended with status: {status}")
+                return result
+            elif status in ["Failed", "Terminated"]:
+                raise ExecutionError(f"Job {job_id} ended with status: {status}")
 
-                await asyncio.sleep(poll_interval)
-        finally:
-            file_transfer_mgr.cleanup()
+            await asyncio.sleep(poll_interval)
 
     # === Job Management Methods ===
 
@@ -663,26 +686,8 @@ class MagnusClient:
         expire_minutes: int = 60,
         timeout: float = 300.0,
     ) -> str:
-        """
-        代管文件/文件夹，返回可供 download_file() 使用的 file_secret。
-        内部流程：本地 croc send → 后端 croc receive → 后端 croc send → 返回新 secret。
-        """
-        file_transfer_mgr = get_file_transfer_manager()
-        try:
-            from .file_transfer import CrocSender
-            sender = CrocSender(path=path)
-            if not sender.start():
-                raise MagnusError(f"Failed to start croc send: {sender.error}")
-
-            resp = self.http.post(
-                "/files/custody",
-                json={"file_secret": sender.file_secret, "expire_minutes": expire_minutes},
-                timeout=timeout,
-            )
-            self._handle_error(resp)
-            return resp.json()["file_secret"]
-        finally:
-            file_transfer_mgr.cleanup()
+        """代管文件/文件夹，返回可供 download_file() 使用的 file_secret。"""
+        return self._upload_file(path, expire_minutes, timeout)
 
     async def custody_file_async(
         self,
@@ -691,22 +696,7 @@ class MagnusClient:
         timeout: float = 300.0,
     ) -> str:
         """异步版本的 custody_file。"""
-        file_transfer_mgr = get_file_transfer_manager()
-        try:
-            from .file_transfer import CrocSender
-            sender = CrocSender(path=path)
-            if not sender.start():
-                raise MagnusError(f"Failed to start croc send: {sender.error}")
-
-            resp = await self.ahttp.post(
-                "/files/custody",
-                json={"file_secret": sender.file_secret, "expire_minutes": expire_minutes},
-                timeout=timeout,
-            )
-            self._handle_error(resp)
-            return resp.json()["file_secret"]
-        finally:
-            file_transfer_mgr.cleanup()
+        return await asyncio.to_thread(self._upload_file, path, expire_minutes, timeout)
 
     def call_service(
         self,
