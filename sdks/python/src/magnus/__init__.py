@@ -189,6 +189,8 @@ class MagnusClient:
             raise AuthenticationError(f"Authentication failed: {detail}")
         elif response.status_code == 404:
             raise ResourceNotFoundError(f"Resource not found: {detail}")
+        elif response.status_code == 413:
+            raise MagnusError(f"Upload rejected: {detail}")
         else:
             raise MagnusError(f"API Error ({response.status_code}): {detail}")
 
@@ -327,7 +329,7 @@ class MagnusClient:
 
         final_args = dict(args) if args else {}
 
-        file_secret_keys = self._get_file_secret_keys(blueprint_id)
+        file_secret_keys = await asyncio.to_thread(self._get_file_secret_keys, blueprint_id)
         for key in file_secret_keys:
             if key not in final_args:
                 continue

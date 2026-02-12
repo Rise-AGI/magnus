@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from .auth import get_current_user
 from .. import models
 from .._magnus_config import magnus_config
-from .._file_custody_manager import file_custody_manager, FILE_SECRET_PREFIX
+from .._file_custody_manager import file_custody_manager, FILE_SECRET_PREFIX, FileTooLargeError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -36,13 +36,16 @@ async def upload_file(
     filename = file.filename or "upload"
     logger.info(f"File upload from {user.name}: {filename}, expire_minutes={expire_minutes}")
 
-    token = await asyncio.to_thread(
-        file_custody_manager.store_file,
-        filename,
-        file.file,
-        expire_minutes,
-        is_directory,
-    )
+    try:
+        token = await asyncio.to_thread(
+            file_custody_manager.store_file,
+            filename,
+            file.file,
+            expire_minutes,
+            is_directory,
+        )
+    except FileTooLargeError as e:
+        raise HTTPException(status_code=413, detail=str(e))
     return FileCustodyResponse(file_secret=f"{FILE_SECRET_PREFIX}{token}")
 
 

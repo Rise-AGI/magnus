@@ -9,27 +9,17 @@ __all__ = [
 ]
 
 
-def _check_key(config: dict, key: str, expected_type: Type) -> None:
-    """
-    检查配置字典中的键是否存在且类型正确。
-    快速失败：启动时立即发现配置问题，而非运行时模糊错误。
-
-    Args:
-        config: 配置字典
-        key: 要检查的键名
-        expected_type: 期望的值类型
-
-    Raises:
-        KeyError: 键不存在
-        TypeError: 值类型不匹配
-    """
+def _check_key(config: dict, key: str, expected_type: Type, nullable: bool = False) -> None:
     if key not in config:
         raise KeyError(f"❌ 配置缺少必需的键: '{key}'")
 
     value = config[key]
+    if nullable and value is None:
+        return
     if not isinstance(value, expected_type):
+        expected = f"{expected_type.__name__} 或 None" if nullable else expected_type.__name__
         raise TypeError(
-            f"❌ 配置键 '{key}' 类型错误: 期望 {expected_type.__name__}, 实际 {type(value).__name__}"
+            f"❌ 配置键 '{key}' 类型错误: 期望 {expected}, 实际 {type(value).__name__}"
         )
 
 
@@ -88,6 +78,7 @@ def _validate_magnus_config(config: Dict[str, Any]) -> None:
     _check_key(server, "file_custody", dict)
     file_custody = server["file_custody"]
     _check_key(file_custody, "max_size", str)
+    _check_key(file_custody, "max_file_size", str, nullable=True)
     _check_key(file_custody, "max_processes", int)
     _check_key(file_custody, "default_ttl_minutes", int)
     _check_key(file_custody, "max_ttl_minutes", int)

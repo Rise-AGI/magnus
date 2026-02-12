@@ -16,6 +16,23 @@ from ._resource_manager import _parse_size_string
 logger = logging.getLogger(__name__)
 
 FILE_SECRET_PREFIX = "magnus-secret:"
+_COPY_CHUNK_SIZE = 64 * 1024
+
+
+def _format_size(size_bytes: int) -> str:
+    value = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024:
+            return f"{value:g} {unit}"
+        value /= 1024
+    return f"{value:g} PB"
+
+
+class FileTooLargeError(Exception):
+    def __init__(self, filename: str, limit: int):
+        self.filename = filename
+        self.limit = limit
+        super().__init__(f'File "{filename}" exceeds the {_format_size(limit)} limit.')
 
 
 # === Human-friendly token generation ===
@@ -255,6 +272,8 @@ class FileCustodyManager:
     def __init__(self):
         config = magnus_config["server"]["file_custody"]
         self._max_size: int = _parse_size_string(config["max_size"])
+        raw_file_size = config["max_file_size"]
+        self._max_file_size: Optional[int] = _parse_size_string(raw_file_size) if raw_file_size is not None else None
         self._max_processes: int = config["max_processes"]
         self._default_ttl_minutes: int = config["default_ttl_minutes"]
         self._max_ttl_minutes: int = config["max_ttl_minutes"]
@@ -329,7 +348,15 @@ class FileCustodyManager:
         file_path = file_dir / filename
         try:
             with open(file_path, "wb") as f:
-                shutil.copyfileobj(file_obj, f)
+                written = 0
+                while True:
+                    chunk = file_obj.read(_COPY_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if self._max_file_size is not None and written > self._max_file_size:
+                        raise FileTooLargeError(filename, self._max_file_size)
+                    f.write(chunk)
 
             if self._get_storage_size() > self._max_size:
                 raise RuntimeError(

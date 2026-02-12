@@ -19,14 +19,14 @@ async function proxyRequest(request: NextRequest, path: string[]) {
     }
   });
 
-  const body = request.method !== "GET" && request.method !== "HEAD"
-    ? await request.arrayBuffer()
-    : undefined;
+  const hasBody = request.method !== "GET" && request.method !== "HEAD";
 
   const response = await fetch(targetUrl.toString(), {
     method: request.method,
     headers,
-    body,
+    body: hasBody ? request.body : undefined,
+    // @ts-expect-error duplex required for streaming request body in Node.js
+    duplex: hasBody ? "half" : undefined,
   });
 
   const responseHeaders = new Headers();

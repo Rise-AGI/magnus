@@ -38,6 +38,7 @@ server:
     pool_size: 1024
   file_custody:
     max_size: 10G
+    max_file_size: 2G        # per-file limit, None = no limit
     max_processes: 128
     default_ttl_minutes: 60  # 1 hour
     max_ttl_minutes: 1440    # 1 day
