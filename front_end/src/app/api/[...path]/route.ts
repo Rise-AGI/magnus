@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND_BASE = `${process.env.NEXT_PUBLIC_SERVER_ADDRESS}:${process.env.NEXT_PUBLIC_BACK_END_PORT}`;
+const BACKEND_BASE = `http://127.0.0.1:${process.env.NEXT_PUBLIC_BACK_END_PORT}`;
 
 async function proxyRequest(request: NextRequest, path: string[]) {
   const targetPath = path.join("/");
