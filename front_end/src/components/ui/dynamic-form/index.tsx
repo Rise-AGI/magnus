@@ -338,7 +338,7 @@ function FormField({
         // 启用时给一个默认值
         let defaultVal: any = field.default ?? "";
         if (field.is_list) defaultVal = [];
-        else if (field.type === "number") defaultVal = field.default ?? 0;
+        else if (field.type === "number") defaultVal = field.default ?? field.min ?? 0;
         else if (field.type === "boolean") defaultVal = field.default ?? false;
         else if (field.type === "select" && field.options?.length) defaultVal = field.default ?? field.options[0].value;
         onChange(field.key, defaultVal);

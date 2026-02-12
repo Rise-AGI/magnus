@@ -53,7 +53,7 @@ export function getFieldInitialValue(field: FieldSchema, cached?: any): any {
   }
 
   if (field.is_list) return [];
-  if (field.type === "number") return 0;
+  if (field.type === "number") return field.min ?? 0;
   if (field.type === "boolean") return false;
   return "";
 }
