@@ -1,6 +1,8 @@
 import os
 import sys
+import signal
 import socket
+import argparse
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -43,8 +45,14 @@ def is_port_in_use(port: int) -> bool:
         return s.connect_ex(('localhost', port)) == 0
 
 def deploy():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--foreground", action="store_true")
+    args = parser.parse_args()
+    foreground = args.foreground
+
     print(f"🚀 Starting Magnus Platform Deployment...")
     print(f"📂 Project Root: {PROJECT_ROOT}")
+    print(f"   Mode: {'foreground' if foreground else 'detached'}")
 
     # 1. Configuration Parsing
     fe_port = parse_port_from_yaml("front_end_port")
@@ -69,35 +77,48 @@ def deploy():
     print("🔄 Launching Backend (UV)...")
     be_env = os.environ.copy()
     be_env["PYTHONUNBUFFERED"] = "1"
-    be_log = open(BE_LOG_PATH, "w")
+    be_out = None if foreground else open(BE_LOG_PATH, "w")
     be_proc = subprocess.Popen(
         ["uv", "run", "-m", "server.main", "--deliver"],
         cwd=BACKEND_DIR,
-        stdout=be_log,
-        stderr=be_log,
-        start_new_session=True,
+        stdout=be_out,
+        stderr=be_out,
+        start_new_session=not foreground,
         env = be_env,
     )
-    print(f"✅ Backend started [PID: {be_proc.pid}] -> {BE_LOG_PATH.name}")
+    print(f"✅ Backend started [PID: {be_proc.pid}]")
 
     # 4. Launch Frontend (Next.js)
     print("🔄 Launching Frontend (Next.js Production)...")
     fe_env = os.environ.copy()
     fe_env["MAGNUS_DELIVER"] = "TRUE"
-    
-    fe_log = open(FE_LOG_PATH, "w")
+
+    fe_out = None if foreground else open(FE_LOG_PATH, "w")
     fe_proc = subprocess.Popen(
         ["npm", "run", "start", "--", "-p", str(fe_port), "-H", "0.0.0.0"],
         cwd=FRONTEND_DIR,
-        stdout=fe_log,
-        stderr=fe_log,
-        start_new_session=True,
+        stdout=fe_out,
+        stderr=fe_out,
+        start_new_session=not foreground,
         env=fe_env,
     )
-    print(f"✅ Frontend started [PID: {fe_proc.pid}] -> {FE_LOG_PATH.name}")
+    print(f"✅ Frontend started [PID: {fe_proc.pid}]")
 
     print("\n🎉 Deployment Initiated Successfully!")
-    print("   Monitor logs via: tail -f nohup_*.out")
+
+    if foreground:
+        def _shutdown(sig, frame):
+            be_proc.terminate()
+            fe_proc.terminate()
+        signal.signal(signal.SIGTERM, _shutdown)
+        signal.signal(signal.SIGINT, _shutdown)
+        try:
+            fe_proc.wait()
+        finally:
+            be_proc.terminate()
+            be_proc.wait()
+    else:
+        print(f"   Monitor logs via: tail -f nohup_*.out")
 
 if __name__ == "__main__":
     deploy()
