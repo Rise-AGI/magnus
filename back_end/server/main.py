@@ -143,8 +143,8 @@ if __name__ == "__main__":
         logger.info("🏭 Starting Magnus Backend in DELIVERY Mode (Reload Disabled)")
     
     uvicorn.run(
-        "server.main:app", 
-        host = "0.0.0.0",
+        "server.main:app",
+        host = "127.0.0.1",
         port = magnus_config["server"]["back_end_port"],
         reload = reload,
     )
