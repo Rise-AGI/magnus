@@ -810,10 +810,10 @@ magnus send my_table.csv
 magnus send ./my_folder
 
 # 接收文件/文件夹（从服务器下载）
-magnus receive a1b2c3d4e5f6
+magnus receive 7453-calm-boat-fire
 
 # 接收（可选 -o/--output 重命名）
-magnus receive a1b2c3d4e5f6 --output my_data.csv
+magnus receive 7453-calm-boat-fire --output my_data.csv
 
 # 代管文件到后端（上传到服务器，返回文件凭证）
 magnus custody results.csv --expire-minutes 120

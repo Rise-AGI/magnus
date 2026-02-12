@@ -211,7 +211,7 @@ FileSecret 的 `allow_empty` 始终为 `False`（必填）。
 
 值必须以 `magnus-secret:` 开头，后跟服务器返回的文件凭证：
 ```
-magnus-secret:a1b2c3d4e5f6
+magnus-secret:7453-calm-boat-fire
 ```
 
 ### 蓝图中定义
@@ -224,7 +224,7 @@ InputData = Annotated[FileSecret, {
 }]
 
 def generate_job(data: InputData) -> JobSubmission:
-    # data 的值形如 "magnus-secret:a1b2c3d4e5f6"
+    # data 的值形如 "magnus-secret:7453-calm-boat-fire"
     # 在容器内用 magnus SDK 接收文件：
     #   from magnus import download_file
     #   download_file(data, "my_data.csv")

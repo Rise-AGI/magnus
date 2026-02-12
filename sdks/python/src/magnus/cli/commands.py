@@ -1185,9 +1185,9 @@ def receive_cmd(
     Receive a file or folder.
 
     Examples:
-      magnus receive magnus-secret:abc123def456
-      magnus receive abc123def456
-      magnus receive abc123def456 -o my_data.csv
+      magnus receive magnus-secret:7453-calm-boat-fire
+      magnus receive 7453-calm-boat-fire
+      magnus receive 7453-calm-boat-fire -o my_data.csv
     """
     from ..http_download import download_file as _download_file
     try:
