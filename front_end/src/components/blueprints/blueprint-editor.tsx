@@ -80,8 +80,8 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
         });
 
         const newBlock = newLines.join('\n');
-        const newValue = value.substring(0, firstLineStart) + newBlock + value.substring(blockEnd);
-        setFormData(prev => ({ ...prev, code: newValue }));
+        target.setSelectionRange(firstLineStart, blockEnd);
+        document.execCommand('insertText', false, newBlock);
 
         setTimeout(() => {
           const newStart = Math.max(firstLineStart, selectionStart - firstLineRemoved);
@@ -94,8 +94,8 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
         if (hasMultipleLines) {
           const newLines = lines.map(line => '    ' + line);
           const newBlock = newLines.join('\n');
-          const newValue = value.substring(0, firstLineStart) + newBlock + value.substring(blockEnd);
-          setFormData(prev => ({ ...prev, code: newValue }));
+          target.setSelectionRange(firstLineStart, blockEnd);
+          document.execCommand('insertText', false, newBlock);
 
           setTimeout(() => {
             target.selectionStart = selectionStart + 4;
@@ -103,9 +103,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
           }, 0);
         } else {
           // 单行无选中：插入 4 空格
-          const newValue = value.substring(0, selectionStart) + "    " + value.substring(selectionEnd);
-          setFormData(prev => ({ ...prev, code: newValue }));
-          setTimeout(() => { target.selectionStart = target.selectionEnd = selectionStart + 4; }, 0);
+          document.execCommand('insertText', false, "    ");
         }
       }
     }
@@ -144,8 +142,8 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
       });
 
       const newBlock = newLines.join('\n');
-      const newValue = value.substring(0, firstLineStart) + newBlock + value.substring(blockEnd);
-      setFormData(prev => ({ ...prev, code: newValue }));
+      target.setSelectionRange(firstLineStart, blockEnd);
+      document.execCommand('insertText', false, newBlock);
 
       setTimeout(() => {
         const newStart = Math.max(firstLineStart, selectionStart + firstLineDelta);
