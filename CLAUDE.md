@@ -260,7 +260,7 @@ cd front_end && npx tsc --noEmit
 
 ## 协作红线
 
-1. **不要 git push**：用户自己 review 并 push
+1. **禁止一切非本地持久化**：不要 git push、不要 git commit（除非用户明确要求）、不要写远程数据库、不要调外部 API 产生副作用。所有变更仅停留在本地工作区，由用户自行 review 后决定是否持久化
 2. **library 纯净**：library 里不能有 Magnus 相关逻辑
 3. **不管 SDK 版本号**：版本号由用户掌管
 4. **沙箱执行**：用户代码（Blueprint）在受限 builtins 环境运行，仅允许 `typing` 模块导入

@@ -970,9 +970,9 @@ magnus receive <secret>
 magnus receive <secret> -o <target_path>
 
 # 示例
-magnus receive abc123def456
-magnus receive abc123def456 -o my_data.csv
-magnus receive abc123def456 --output ./downloads/result.tar.gz
+magnus receive 7453-calm-boat-fire
+magnus receive 7453-calm-boat-fire -o my_data.csv
+magnus receive 7453-calm-boat-fire --output ./downloads/result.tar.gz
 ```
 
 **选项**：
@@ -1000,7 +1000,7 @@ magnus custody ./output_dir --expire-minutes 120
 **输出**：
 ```
 [Magnus] File custodied successfully. Expires in 60 min.
-[Magnus] Download: magnus receive magnus-secret:abc123def456
+[Magnus] Download: magnus receive magnus-secret:7453-calm-boat-fire
 ```
 
 ### magnus connect

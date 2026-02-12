@@ -19,7 +19,7 @@ class FileSecret(str):
     用于蓝图参数，表示该参数需要一个文件/文件夹。
     值必须以 "magnus-secret:" 开头，后跟 download token。
 
-    示例：magnus-secret:abc123def456
+    示例：magnus-secret:7453-calm-boat-fire
 
     SDK 端支持语法糖：直接传文件路径，SDK 会自动上传并转换为 secret 格式。
     """
