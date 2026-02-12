@@ -104,7 +104,7 @@ def create_blueprint(
     # 1. 验证代码签名
     try:
         blueprint_manager.analyze_signature(bp.code)
-    except ValueError as e:
+    except (ValueError, NameError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     # 2. 检查 ID 是否冲突（如果是新建）
@@ -241,8 +241,8 @@ def get_blueprint_schema(
 
     try:
         return blueprint_manager.analyze_signature(bp.code)
-    except ValueError as e:
-        raise HTTPException(status_code=500, detail=f"Invalid blueprint code: {e}")
+    except (ValueError, NameError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid blueprint code: {e}")
 
 
 @router.post("/blueprints/{blueprint_id}/run")

@@ -94,7 +94,7 @@ export function BlueprintTable({
                     </div>
                   </td>
                   <td className="px-6 py-4 align-top whitespace-normal">
-                    <p className="text-zinc-400 text-sm leading-relaxed break-all">{bp.description}</p>
+                    <p className="text-zinc-400 text-sm leading-relaxed break-words whitespace-pre-line">{bp.description}</p>
                   </td>
                   <td className="px-6 py-4 align-top">
                     <div className="flex justify-center">
