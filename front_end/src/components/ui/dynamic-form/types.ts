@@ -41,7 +41,7 @@ export interface FieldSchema {
  * 非 Optional 字段：返回 default 或类型对应的空值
  */
 export function getFieldInitialValue(field: FieldSchema, cached?: any): any {
-  // FileSecret 是一次性凭证（croc code 用完即失效），不预填缓存值
+  // FileSecret 是一次性凭证，不预填缓存值
   if (cached !== undefined && field.type !== "file_secret") return cached;
 
   if (field.is_optional) {

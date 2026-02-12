@@ -206,7 +206,7 @@ function SingleFieldInput({
           type="text"
           value={secretValue}
           onChange={(e) => onChange(prefix + e.target.value)}
-          placeholder={field.placeholder || "croc-secret-code"}
+          placeholder={field.placeholder || "secret-code"}
           className={cn(
             "flex-1 bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-r-lg text-sm transition-all outline-none placeholder-zinc-700",
             "focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20",

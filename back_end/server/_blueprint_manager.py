@@ -17,11 +17,11 @@ class FileSecret(str):
     文件传输凭证类型。
 
     用于蓝图参数，表示该参数需要一个文件/文件夹。
-    值必须以 "magnus-secret:" 开头，后跟 croc secret。
+    值必须以 "magnus-secret:" 开头，后跟 download token。
 
-    示例：magnus-secret:7454-phrase-love-ferrari
+    示例：magnus-secret:abc123def456
 
-    SDK 端支持语法糖：直接传文件路径，SDK 会自动启动 croc send 并转换为 secret 格式。
+    SDK 端支持语法糖：直接传文件路径，SDK 会自动上传并转换为 secret 格式。
     """
 
     MAGIC_PREFIX = "magnus-secret:"
@@ -44,8 +44,7 @@ class FileSecret(str):
         return cls(v)
 
     @property
-    def croc_secret(self) -> str:
-        """提取 croc secret 部分"""
+    def token(self) -> str:
         return self[len(self.MAGIC_PREFIX):]
 
 

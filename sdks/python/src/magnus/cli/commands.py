@@ -35,9 +35,7 @@ from .. import (
     get_cluster_stats as api_get_cluster_stats,
     list_blueprints as api_list_blueprints,
     list_services as api_list_services,
-    get_blueprint_schema as api_get_blueprint_schema,
 )
-from ..file_transfer import get_file_transfer_manager
 
 # === UI Setup ===
 
@@ -276,14 +274,6 @@ def apply_cli_defaults(parsed_cli_args: Dict[str, Any], command_type: str = "sub
     return config
 
 
-def _get_file_secret_keys(blueprint_id: str) -> List[str]:
-    """获取蓝图中所有 FileSecret 类型的参数 key"""
-    try:
-        schema = api_get_blueprint_schema(blueprint_id)
-        return [param["key"] for param in schema if param.get("type") == "file_secret"]
-    except Exception:
-        return []
-
 
 # === CLI App Definition ===
 
@@ -449,7 +439,6 @@ def submit(
     Submit a blueprint job (Fire & Forget).
     All unrecognized arguments are passed to the blueprint as strings.
     """
-    file_transfer_mgr = get_file_transfer_manager()
     try:
         cli_args, bp_args = partition_args(ctx.args)
         cli_config = apply_cli_defaults(cli_args, command_type="submit")
@@ -459,17 +448,6 @@ def submit(
             console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
             console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
             console.rule()
-
-        file_secret_keys = _get_file_secret_keys(blueprint_id)
-        if file_secret_keys:
-            bp_args, errors = file_transfer_mgr.prepare_file_secrets(bp_args, file_secret_keys)
-            if errors:
-                for err in errors:
-                    print_error(err)
-                raise typer.Exit(code=1)
-            if cli_config["verbose"]:
-                console.print(f"[dim]FileSecret keys: {file_secret_keys}[/dim]")
-                console.print(f"[dim]Processed args: {bp_args}[/dim]")
 
         print_msg(f"Submitting blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
 
@@ -488,8 +466,6 @@ def submit(
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
-    finally:
-        file_transfer_mgr.cleanup()
 
 
 @app.command(
@@ -503,7 +479,6 @@ def run(
     Execute a blueprint and wait for completion.
     Use --execute-action false to skip automatic action execution.
     """
-    file_transfer_mgr = get_file_transfer_manager()
     try:
         cli_args, bp_args = partition_args(ctx.args)
         cli_config = apply_cli_defaults(cli_args, command_type="run")
@@ -513,17 +488,6 @@ def run(
             console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
             console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
             console.rule()
-
-        file_secret_keys = _get_file_secret_keys(blueprint_id)
-        if file_secret_keys:
-            bp_args, errors = file_transfer_mgr.prepare_file_secrets(bp_args, file_secret_keys)
-            if errors:
-                for err in errors:
-                    print_error(err)
-                raise typer.Exit(code=1)
-            if cli_config["verbose"]:
-                console.print(f"[dim]FileSecret keys: {file_secret_keys}[/dim]")
-                console.print(f"[dim]Processed args: {bp_args}[/dim]")
 
         print_msg(f"Running blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
 
@@ -595,8 +559,6 @@ def run(
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
-    finally:
-        file_transfer_mgr.cleanup()
 
 
 CLI_RESERVED_KEYS = {"timeout", "verbose", "execute_action"}
@@ -1177,67 +1139,41 @@ def list_services_cmd(
         raise typer.Exit(code=1)
 
 
-CROC_INSTALL_HINT = (
-    "croc is not installed or not in PATH.\n"
-    "         Magnus file transfer depends on croc.\n"
-    "         Install via conda: conda install -c conda-forge croc"
-)
-
-
-def _check_croc() -> str:
-    """检查 croc 是否可用，不可用则提示安装方式并退出"""
-    import shutil
-    path = shutil.which("croc")
-    if path:
-        return path
-
-    console.print()
-    print_error("croc is not installed or not in PATH.")
-    print_msg("Magnus file transfer depends on [cyan]croc[/cyan].")
-    console.print()
-    print_msg("Install options:")
-    print_msg("  [cyan]conda install -c conda-forge croc[/cyan]  (recommended)")
-    print_msg("  [cyan]curl https://getcroc.schollz.com | bash[/cyan]")
-    print_msg("  [cyan]brew install croc[/cyan]  (macOS)")
-    print_msg("  See: [cyan]https://github.com/schollz/croc#install[/cyan]")
-    raise typer.Exit(code=1)
-
-
 @app.command(name="send")
 def send_cmd(
     path: str = typer.Argument(..., help="File or folder to send"),
+    expire_minutes: int = typer.Option(60, "--expire-minutes", "-t", help="Time-to-live in minutes"),
 ):
     """
-    Send a file or folder.
+    Send a file or folder via Magnus server.
 
     Examples:
       magnus send data.csv
       magnus send ./my_folder
     """
-    _check_croc()
-
     target = Path(path)
     if not target.exists():
         print_error(f"Path does not exist: {path}")
         raise typer.Exit(code=1)
 
-    from ..file_transfer import CrocSender
-    sender = CrocSender(path=str(target))
-    if not sender.start():
-        print_error(f"Failed to start file transfer: {sender.error}")
-        raise typer.Exit(code=1)
-
-    console.print()
-    print_msg(f"On the other computer run:")
-    console.print(f"    [cyan]magnus receive {sender.file_secret}[/cyan]")
-    console.print()
-
     try:
-        assert sender.process is not None
-        sender.process.wait()
-        print_msg("Transfer complete.")
-    except KeyboardInterrupt:
-        sender.stop()
+        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Uploading..."):
+            new_secret = api_custody_file(
+                path=str(target.resolve()),
+                expire_minutes=expire_minutes,
+            )
+
+        console.print()
+        print_msg(f"On the other computer run:")
+        console.print(f"    [cyan]magnus receive {new_secret}[/cyan]")
+        console.print()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
 
 
 @app.command(name="receive")
@@ -1249,15 +1185,14 @@ def receive_cmd(
     Receive a file or folder.
 
     Examples:
-      magnus receive magnus-secret:1234-apple-banana-cherry
-      magnus receive 1234-apple-banana-cherry
-      magnus receive 1234-apple-banana-cherry -o my_data.csv
+      magnus receive magnus-secret:abc123def456
+      magnus receive abc123def456
+      magnus receive abc123def456 -o my_data.csv
     """
-    _check_croc()
-
-    from ..croc_tools import _download_file_using_croc
+    from ..http_download import download_file as _download_file
     try:
-        result_path = _download_file_using_croc(secret, target_path=output, show_progress=True)
+        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Downloading..."):
+            result_path = _download_file(secret, target_path=output)
         print_msg(f"Saved to [cyan]{result_path}[/cyan]")
     except KeyboardInterrupt:
         pass
@@ -1272,7 +1207,7 @@ def custody_cmd(
     expire_minutes: int = typer.Option(60, "--expire-minutes", "-t", help="Time-to-live in minutes for the custodied file"),
 ):
     """
-    Custody a file: send to server, server re-hosts for download.
+    Custody a file: upload to server for download by others.
 
     Returns a new file_secret that anyone with access can use to download.
 
@@ -1280,15 +1215,13 @@ def custody_cmd(
       magnus custody results.csv
       magnus custody ./output_dir --expire-minutes 120
     """
-    _check_croc()
-
     target = Path(path)
     if not target.exists():
         print_error(f"Path does not exist: {path}")
         raise typer.Exit(code=1)
 
     try:
-        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Custodying file..."):
+        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Uploading..."):
             new_secret = api_custody_file(
                 path=str(target.resolve()),
                 expire_minutes=expire_minutes,

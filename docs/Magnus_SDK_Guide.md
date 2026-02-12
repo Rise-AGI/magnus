@@ -405,16 +405,16 @@ print(f"排队任务: {stats['total_pending']}")
 
 ### 文件传输
 
-Magnus 通过 [croc](https://github.com/schollz/croc) 实现文件传输。蓝图中使用 `FileSecret` 类型声明文件参数，SDK 自动处理发送；蓝图代码中使用 `download_file` 接收。
+蓝图中使用 `FileSecret` 类型声明文件参数，SDK 自动处理上传；蓝图代码中使用 `download_file` 接收。
 
-#### FileSecret 参数 - 自动发送
+#### FileSecret 参数 - 自动上传
 
-当蓝图参数类型为 `FileSecret` 时，SDK 的 `submit_blueprint` / `run_blueprint` 会自动检测：如果传入的值是本地文件路径（而非 `magnus-secret:` 格式），SDK 会启动 `croc send`，将路径替换为 croc secret。
+当蓝图参数类型为 `FileSecret` 时，SDK 的 `submit_blueprint` / `run_blueprint` 会自动检测：如果传入的值是本地文件路径（而非 `magnus-secret:` 格式），SDK 会自动上传文件到服务器，将路径替换为 file secret。
 
 ```python
 import magnus
 
-# 传文件路径，SDK 自动启动 croc send
+# 传文件路径，SDK 自动上传到服务器
 job_id = magnus.submit_blueprint(
     "my-blueprint",
     args={"input_data": "/home/user/data.csv"},
@@ -428,7 +428,7 @@ job_id = magnus.submit_blueprint(
 ```python
 from magnus import download_file
 
-# 下载到指定路径（croc 下载后自动重命名）
+# 下载到指定路径
 download_file(file_secret, "/workspace/data/input.csv")
 
 # 支持相对路径
@@ -436,7 +436,7 @@ download_file(file_secret, "data/input.csv")
 ```
 
 **参数说明**：
-- `file_secret` (str): croc secret，可以带或不带 `magnus-secret:` 前缀
+- `file_secret` (str): file secret，可以带或不带 `magnus-secret:` 前缀
 - `target_path` (str): 下载后的目标路径（支持相对路径）
 - `timeout` (float, 可选): 超时时间（秒），默认无限等待
 - `overwrite` (bool, 可选): 是否覆盖已存在的文件，默认 True
@@ -445,7 +445,7 @@ download_file(file_secret, "data/input.csv")
 - `Path`: target_path 的 Path 对象
 
 **异常**：
-- `MagnusError`: croc 未安装、下载超时、传输失败等
+- `MagnusError`: 文件不存在或已过期、下载超时、传输失败等
 
 #### download_file_async - 异步接收文件
 
@@ -461,7 +461,7 @@ path = await download_file_async(file_secret, "/workspace/data/input.csv")
 
 #### custody_file - 代管文件
 
-将本地文件/文件夹上传到 Magnus 后端代管，后端通过 croc 重新托管，返回新的 file_secret。任何人都可以用这个 secret 下载文件，直到过期。
+将本地文件/文件夹上传到 Magnus 后端代管，返回新的 file_secret。任何人都可以用这个 secret 下载文件，直到过期。
 
 ```python
 import magnus
@@ -492,10 +492,10 @@ with open(os.environ["MAGNUS_ACTION"], "w") as f:
 - `timeout` (float, 可选): HTTP 请求超时时间（秒），默认 300
 
 **返回值**：
-- `str`: 新的 file_secret（`magnus-secret:xxxx` 格式），可供 `download_file()` 或 `croc` 使用
+- `str`: 新的 file_secret（`magnus-secret:xxxx` 格式），可供 `download_file()` 使用
 
 **异常**：
-- `MagnusError`: croc 未安装、文件不存在、传输失败等
+- `MagnusError`: 文件不存在、存储空间不足等
 
 #### custody_file_async - 异步代管文件
 
@@ -594,7 +594,7 @@ asyncio.run(run_experiments())
 | `get_job_logs(job_id, page)` | 获取任务日志 | `{logs, page, total_pages}` |
 | `terminate_job(job_id)` | 终止任务 | 状态信息 |
 | `get_cluster_stats()` | 获取集群状态 | 集群信息 |
-| `download_file(secret, target_path)` | 通过 croc 接收文件 | Path |
+| `download_file(secret, target_path)` | 接收文件 | Path |
 | `custody_file(path, expire_minutes)` | 代管文件到后端，返回新 secret | file_secret |
 | `configure(token, address)` | 配置 SDK | None |
 
@@ -945,7 +945,7 @@ magnus services -f yaml      # YAML 输出
 
 ### magnus send
 
-通过 croc 发送文件或文件夹。封装 `croc send`，自动检查 croc 是否安装。
+上传文件或文件夹到 Magnus 服务器，返回 file secret 供接收方下载。
 
 ```bash
 # 基本用法
@@ -956,11 +956,11 @@ magnus send data.csv
 magnus send ./my_folder
 ```
 
-croc 会生成一个 secret code 并显示在终端，接收方使用该 code 接收文件。
+上传完成后会显示 file secret，接收方使用该 secret 接收文件。
 
 ### magnus receive
 
-通过 croc 接收文件或文件夹。支持通过 `-o` 指定目标路径（重命名/移动）。
+从 Magnus 服务器下载文件或文件夹。支持通过 `-o` 指定目标路径（重命名/移动）。
 
 ```bash
 # 基本用法（文件落到当前目录，保留原始文件名）
@@ -970,9 +970,9 @@ magnus receive <secret>
 magnus receive <secret> -o <target_path>
 
 # 示例
-magnus receive 1234-apple-banana-cherry
-magnus receive 1234-apple-banana-cherry -o my_data.csv
-magnus receive 1234-apple-banana-cherry --output ./downloads/result.tar.gz
+magnus receive abc123def456
+magnus receive abc123def456 -o my_data.csv
+magnus receive abc123def456 --output ./downloads/result.tar.gz
 ```
 
 **选项**：
@@ -983,7 +983,7 @@ magnus receive 1234-apple-banana-cherry --output ./downloads/result.tar.gz
 
 ### magnus custody
 
-将文件上传到 Magnus 后端代管。后端接收文件后重新通过 croc 托管，返回新的 secret。
+将文件上传到 Magnus 后端代管，返回新的 file secret。
 
 ```bash
 # 基本用法
@@ -1000,9 +1000,7 @@ magnus custody ./output_dir --expire-minutes 120
 **输出**：
 ```
 [Magnus] File custodied successfully. Expires in 60 min.
-[Magnus] Secret: magnus-secret:1234-apple-banana-cherry
-[Magnus] Download: magnus receive 1234-apple-banana-cherry
-[Magnus] Or:       croc 1234-apple-banana-cherry
+[Magnus] Download: magnus receive magnus-secret:abc123def456
 ```
 
 ### magnus connect
@@ -1116,8 +1114,4 @@ A: 管道自动切换是智能检测：当输出不是终端时自动使用 YAML
 
 **Q: FileSecret 文件传输需要什么依赖？**
 
-A: 需要安装 [croc](https://github.com/schollz/croc)。推荐通过 conda 安装：`conda install -c conda-forge croc`。发送端和接收端都需要安装 croc。如果未安装，`magnus send/receive/custody` 会检测并提示安装方式。
-
-**Q: magnus send/receive 和 croc 命令有什么区别？**
-
-A: `magnus send` 封装 `croc send`，`magnus receive` 封装 `croc receive`，自动处理跨平台差异（Linux/macOS 通过环境变量传递 secret，Windows 通过命令行参数）。额外好处：统一入口、友好错误提示、`-o` 支持接收时重命名、未安装 croc 时提示安装方式。
+A: 无额外依赖。安装 Magnus SDK（`pip install magnus-sdk`）后即可使用 `magnus send/receive/custody` 以及 `download_file()`。文件通过 Magnus 服务器中转，只需配置好 `MAGNUS_ADDRESS` 和 `MAGNUS_TOKEN`。
