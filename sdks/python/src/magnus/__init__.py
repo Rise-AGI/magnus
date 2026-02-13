@@ -277,7 +277,7 @@ class MagnusClient:
         self,
         blueprint_id: str,
         args: Optional[Dict[str, Any]] = None,
-        use_preference: bool = True,
+        use_preference: bool = False,
         save_preference: bool = True,
         expire_minutes: int = 60,
         timeout: float = 10.0,
@@ -319,7 +319,7 @@ class MagnusClient:
         self,
         blueprint_id: str,
         args: Optional[Dict[str, Any]] = None,
-        use_preference: bool = True,
+        use_preference: bool = False,
         save_preference: bool = True,
         expire_minutes: int = 60,
         timeout: float = 10.0,
@@ -361,7 +361,7 @@ class MagnusClient:
         self,
         blueprint_id: str,
         args: Optional[Dict[str, Any]] = None,
-        use_preference: bool = True,
+        use_preference: bool = False,
         save_preference: bool = True,
         expire_minutes: int = 60,
         timeout: Optional[float] = None,
@@ -411,7 +411,7 @@ class MagnusClient:
         self,
         blueprint_id: str,
         args: Optional[Dict[str, Any]] = None,
-        use_preference: bool = True,
+        use_preference: bool = False,
         save_preference: bool = True,
         expire_minutes: int = 60,
         timeout: Optional[float] = None,
@@ -834,7 +834,7 @@ def configure(token: Optional[str] = None, address: Optional[str] = None):
 def submit_blueprint(
     blueprint_id: str,
     args: Optional[Dict[str, Any]] = None,
-    use_preference: bool = True,
+    use_preference: bool = False,
     save_preference: bool = True,
     expire_minutes: int = 60,
     timeout: float = 10.0
@@ -844,7 +844,7 @@ def submit_blueprint(
 async def submit_blueprint_async(
     blueprint_id: str,
     args: Optional[Dict[str, Any]] = None,
-    use_preference: bool = True,
+    use_preference: bool = False,
     save_preference: bool = True,
     expire_minutes: int = 60,
     timeout: float = 10.0
@@ -854,7 +854,7 @@ async def submit_blueprint_async(
 def run_blueprint(
     blueprint_id: str,
     args: Optional[Dict[str, Any]] = None,
-    use_preference: bool = True,
+    use_preference: bool = False,
     save_preference: bool = True,
     expire_minutes: int = 60,
     timeout: Optional[float] = None,
@@ -866,7 +866,7 @@ def run_blueprint(
 async def run_blueprint_async(
     blueprint_id: str,
     args: Optional[Dict[str, Any]] = None,
-    use_preference: bool = True,
+    use_preference: bool = False,
     save_preference: bool = True,
     expire_minutes: int = 60,
     timeout: Optional[float] = None,

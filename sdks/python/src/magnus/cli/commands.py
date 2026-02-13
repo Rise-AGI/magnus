@@ -257,7 +257,7 @@ def partition_args(raw_args: List[str]) -> Tuple[Dict[str, Any], Dict[str, str]]
 
 DEFAULT_CLI_CONFIG = {
     "timeout": 10.0,      # HTTP Network Timeout
-    "preference": True,   # User Preference
+    "preference": False,  # User Preference
     "verbose": False,     # Debug Mode
     "poll_interval": 2.0, # Polling Interval (Run only)
     "execute_action": True,  # Auto-execute MAGNUS_ACTION (Run only)

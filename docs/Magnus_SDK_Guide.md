@@ -156,7 +156,7 @@ job_id = magnus.submit_blueprint(
 job_id = magnus.submit_blueprint(
     "quadre-simulation",
     args={"Te": "2.0"},
-    use_preference=True,   # 合并用户缓存的偏好参数
+    use_preference=False,  # 是否合并用户缓存的偏好参数（SDK 默认不合并）
     save_preference=True,  # 成功后保存参数为新偏好
 )
 
@@ -166,11 +166,9 @@ print(f"任务已提交: {job_id}")
 **参数说明**：
 - `blueprint_id` (str): 蓝图 ID
 - `args` (dict, 可选): 传递给蓝图函数的参数，键值对形式
-- `use_preference` (bool, 可选): 是否合并已缓存的偏好参数，默认 True
+- `use_preference` (bool, 可选): 是否合并已缓存的偏好参数，默认 False（Web UI 默认合并，SDK/CLI 默认不合并）
 - `save_preference` (bool, 可选): 成功后是否保存参数为新偏好，默认 True
 
-**返回值**：
-- `str`: 提交成功的 Job ID
 
 #### run_blueprint - 提交并等待完成
 
@@ -199,7 +197,7 @@ print(f"任务结果: {result}")
 **参数说明**：
 - `blueprint_id` (str): 蓝图 ID
 - `args` (dict, 可选): 传递给蓝图函数的参数
-- `use_preference` (bool, 可选): 是否合并已缓存的偏好参数，默认 True
+- `use_preference` (bool, 可选): 是否合并已缓存的偏好参数，默认 False
 - `save_preference` (bool, 可选): 成功后是否保存参数为新偏好，默认 True
 - `timeout` (int, 可选): 超时时间，单位秒，默认无限等待
 - `poll_interval` (int, 可选): 轮询间隔，单位秒，默认 2
@@ -1106,7 +1104,7 @@ A: `connect` 和 `disconnect` 是终端会话管理命令，通过 `srun` 建立
 
 **Q: 什么是偏好 (Preference)？**
 
-A: 偏好是用户上次运行蓝图时使用的参数缓存。当 `use_preference=True` 时，SDK 会自动合并缓存的参数（显式传入的优先）。当 `save_preference=True` 时，成功运行后会保存当前参数供下次使用。注意：`FileSecret` 类型的参数也会被缓存，但 secret 有 TTL，过期后需重新上传。
+A: 偏好是用户上次运行蓝图时使用的参数缓存。当 `use_preference=True` 时，会自动合并缓存的参数（显式传入的优先）。当 `save_preference=True` 时，成功运行后会保存当前参数供下次使用。SDK/CLI 默认 `use_preference=False`（避免不可见的外部状态），Web UI 默认合并。`FileSecret` 类型的参数也会被缓存，但 secret 有 TTL，过期后需重新上传。
 
 **Q: --format yaml 和管道自动切换有什么区别？**
 

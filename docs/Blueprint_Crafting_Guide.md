@@ -246,7 +246,7 @@ def generate_job(data: InputData) -> JobSubmission:
 规则：
 - 显式传入的参数 > 缓存的参数
 - 蓝图代码修改导致参数签名变化时，缓存自动失效
-- `FileSecret` 类型的参数永远不预填
+- Web UI 默认合并缓存，SDK/CLI 默认不合并（避免不可见的外部状态）
 
 ---
 
