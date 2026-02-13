@@ -296,6 +296,16 @@ class ResourceManager:
             shutil.rmtree(target_dir, ignore_errors=True)
             return False, f"git checkout failed: {error_msg}"
 
+        # 解析真实 SHA（将 HEAD / origin/branch 等符号引用固化为 40 位哈希）
+        proc = await asyncio.create_subprocess_exec(
+            "git", "rev-parse", "HEAD",
+            cwd=target_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        resolved_sha = stdout.decode().strip() if proc.returncode == 0 else commit_sha
+
         # Phase 4: 设置 ACL
         default_runner = magnus_config["cluster"]["default_runner"]
         try:
@@ -311,7 +321,7 @@ class ResourceManager:
 
         elapsed = time.time() - start_time
         logger.info(f"Repo ready: {target_dir} ({elapsed:.1f}s)")
-        return True, None
+        return True, resolved_sha
 
 
 resource_manager = ResourceManager()
