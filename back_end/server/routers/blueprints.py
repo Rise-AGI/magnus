@@ -278,16 +278,8 @@ def run_blueprint(
                 try:
                     cached = deserialize_json(pref.cached_params)
                     if isinstance(cached, dict):
-                        # FileSecret 是一次性凭证，不从缓存预填
-                        file_secret_keys = {
-                            s.key for s in blueprint_manager.analyze_signature(bp.code)
-                            if s.type == "file_secret"
-                        }
-                        base_params = {
-                            k: v for k, v in cached.items()
-                            if k not in file_secret_keys
-                        }
                         # 优先级：显式传入 > 缓存
+                        base_params = dict(cached)
                         base_params.update(final_params)
                         final_params = base_params
                 except Exception as e:

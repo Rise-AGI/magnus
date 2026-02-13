@@ -417,7 +417,7 @@ job_id = submit_blueprint("blueprint-id", args={"param": "value"})
 # Submit & Wait
 result = run_blueprint("blueprint-id", args={"param": "value"})
 
-# FileSecret: SDK 传文件路径，自动启动 magnus send
+# FileSecret: SDK 传文件路径，自动上传
 job_id = submit_blueprint("bp-id", args={"data": "my_table.csv"})
 
 # 蓝图内接收文件

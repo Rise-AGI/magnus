@@ -235,7 +235,7 @@ def generate_job(data: InputData) -> JobSubmission:
 
 - **Web 端**：用户输入文件凭证（`magnus-secret:` 前缀已预填）
 - **SDK 端**：直接传文件路径，SDK 自动上传到服务器并转换为 secret
-- **缓存行为**：FileSecret 是一次性凭证，**永远不会**从参数缓存中预填
+- **缓存行为**：FileSecret 与其他参数一样参与缓存预填（注意 secret 会过期）
 
 ---
 

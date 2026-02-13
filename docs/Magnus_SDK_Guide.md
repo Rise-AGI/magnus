@@ -1106,7 +1106,7 @@ A: `connect` 和 `disconnect` 是终端会话管理命令，通过 `srun` 建立
 
 **Q: 什么是偏好 (Preference)？**
 
-A: 偏好是用户上次运行蓝图时使用的参数缓存。当 `use_preference=True` 时，SDK 会自动合并缓存的参数（显式传入的优先）。当 `save_preference=True` 时，成功运行后会保存当前参数供下次使用。注意：`FileSecret` 类型的参数不会被预填——magnus secret 是一次性凭证，过期后无法复用。
+A: 偏好是用户上次运行蓝图时使用的参数缓存。当 `use_preference=True` 时，SDK 会自动合并缓存的参数（显式传入的优先）。当 `save_preference=True` 时，成功运行后会保存当前参数供下次使用。注意：`FileSecret` 类型的参数也会被缓存，但 secret 有 TTL，过期后需重新上传。
 
 **Q: --format yaml 和管道自动切换有什么区别？**
 

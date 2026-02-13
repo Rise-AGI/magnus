@@ -279,6 +279,7 @@ class MagnusClient:
         args: Optional[Dict[str, Any]] = None,
         use_preference: bool = True,
         save_preference: bool = True,
+        expire_minutes: int = 60,
         timeout: float = 10.0,
     ) -> str:
         """
@@ -295,7 +296,7 @@ class MagnusClient:
             value = str(final_args[key])
             if is_file_secret(value):
                 continue
-            final_args[key] = self._upload_file(value)
+            final_args[key] = self._upload_file(value, expire_minutes)
 
         payload = {
             "parameters": final_args,
@@ -320,6 +321,7 @@ class MagnusClient:
         args: Optional[Dict[str, Any]] = None,
         use_preference: bool = True,
         save_preference: bool = True,
+        expire_minutes: int = 60,
         timeout: float = 10.0,
     ) -> str:
         """
@@ -336,7 +338,7 @@ class MagnusClient:
             value = str(final_args[key])
             if is_file_secret(value):
                 continue
-            final_args[key] = await asyncio.to_thread(self._upload_file, value)
+            final_args[key] = await asyncio.to_thread(self._upload_file, value, expire_minutes)
 
         payload = {
             "parameters": final_args,
@@ -361,6 +363,7 @@ class MagnusClient:
         args: Optional[Dict[str, Any]] = None,
         use_preference: bool = True,
         save_preference: bool = True,
+        expire_minutes: int = 60,
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
         execute_action: bool = True,
@@ -375,6 +378,7 @@ class MagnusClient:
             args=args,
             use_preference=use_preference,
             save_preference=save_preference,
+            expire_minutes=expire_minutes,
             timeout=10.0
         )
         self.last_job_id = job_id
@@ -409,6 +413,7 @@ class MagnusClient:
         args: Optional[Dict[str, Any]] = None,
         use_preference: bool = True,
         save_preference: bool = True,
+        expire_minutes: int = 60,
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
         execute_action: bool = True,
@@ -423,6 +428,7 @@ class MagnusClient:
             args=args,
             use_preference=use_preference,
             save_preference=save_preference,
+            expire_minutes=expire_minutes,
             timeout=10.0
         )
         self.last_job_id = job_id
@@ -830,40 +836,44 @@ def submit_blueprint(
     args: Optional[Dict[str, Any]] = None,
     use_preference: bool = True,
     save_preference: bool = True,
+    expire_minutes: int = 60,
     timeout: float = 10.0
 ) -> str:
-    return default_client.submit_blueprint(blueprint_id, args, use_preference, save_preference, timeout)
+    return default_client.submit_blueprint(blueprint_id, args, use_preference, save_preference, expire_minutes, timeout)
 
 async def submit_blueprint_async(
     blueprint_id: str,
     args: Optional[Dict[str, Any]] = None,
     use_preference: bool = True,
     save_preference: bool = True,
+    expire_minutes: int = 60,
     timeout: float = 10.0
 ) -> str:
-    return await default_client.submit_blueprint_async(blueprint_id, args, use_preference, save_preference, timeout)
+    return await default_client.submit_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, timeout)
 
 def run_blueprint(
     blueprint_id: str,
     args: Optional[Dict[str, Any]] = None,
     use_preference: bool = True,
     save_preference: bool = True,
+    expire_minutes: int = 60,
     timeout: Optional[float] = None,
     poll_interval: float = 2.0,
     execute_action: bool = True,
 ) -> Optional[str]:
-    return default_client.run_blueprint(blueprint_id, args, use_preference, save_preference, timeout, poll_interval, execute_action)
+    return default_client.run_blueprint(blueprint_id, args, use_preference, save_preference, expire_minutes, timeout, poll_interval, execute_action)
 
 async def run_blueprint_async(
     blueprint_id: str,
     args: Optional[Dict[str, Any]] = None,
     use_preference: bool = True,
     save_preference: bool = True,
+    expire_minutes: int = 60,
     timeout: Optional[float] = None,
     poll_interval: float = 2.0,
     execute_action: bool = True,
 ) -> Optional[str]:
-    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, timeout, poll_interval, execute_action)
+    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, timeout, poll_interval, execute_action)
 
 def call_service(
     service_id: str, 
