@@ -170,6 +170,8 @@ _CLI_KEY_TYPES: Dict[str, type] = {
     "verbose": bool,
     "preference": bool,
     "execute_action": bool,
+    "expire_minutes": int,
+    "max_downloads": int,
 }
 
 
@@ -261,6 +263,8 @@ DEFAULT_CLI_CONFIG = {
     "verbose": False,     # Debug Mode
     "poll_interval": 2.0, # Polling Interval (Run only)
     "execute_action": True,  # Auto-execute MAGNUS_ACTION (Run only)
+    "expire_minutes": 60, # FileSecret TTL (minutes)
+    "max_downloads": 1,   # FileSecret max download count
 }
 
 def apply_cli_defaults(parsed_cli_args: Dict[str, Any], command_type: str = "submit") -> Dict[str, Any]:
@@ -454,8 +458,10 @@ def submit(
         job_id = submit_blueprint(
             blueprint_id=blueprint_id,
             use_preference=cli_config["preference"],
+            expire_minutes=cli_config["expire_minutes"],
+            max_downloads=cli_config["max_downloads"],
             timeout=cli_config["timeout"],
-            args=bp_args
+            args=bp_args,
         )
 
         print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
@@ -496,10 +502,12 @@ def run(
             result = run_blueprint(
                 blueprint_id=blueprint_id,
                 use_preference=cli_config["preference"],
+                expire_minutes=cli_config["expire_minutes"],
+                max_downloads=cli_config["max_downloads"],
                 timeout=cli_config["timeout"],
                 poll_interval=cli_config["poll_interval"],
                 execute_action=False,  # CLI handles action display + execution itself
-                args=bp_args
+                args=bp_args,
             )
 
         console.print("")
@@ -1143,6 +1151,7 @@ def list_services_cmd(
 def send_cmd(
     path: str = typer.Argument(..., help="File or folder to send"),
     expire_minutes: int = typer.Option(60, "--expire-minutes", "-t", help="Time-to-live in minutes"),
+    max_downloads: Optional[int] = typer.Option(1, "--max-downloads", "-d", help="Max download count (default: 1)"),
 ):
     """
     Send a file or folder via Magnus server.
@@ -1150,6 +1159,7 @@ def send_cmd(
     Examples:
       magnus send data.csv
       magnus send ./my_folder
+      magnus send data.csv --max-downloads 3
     """
     target = Path(path)
     if not target.exists():
@@ -1161,6 +1171,7 @@ def send_cmd(
             new_secret = api_custody_file(
                 path=str(target.resolve()),
                 expire_minutes=expire_minutes,
+                max_downloads=max_downloads,
             )
 
         console.print()
@@ -1205,6 +1216,7 @@ def receive_cmd(
 def custody_cmd(
     path: str = typer.Argument(..., help="File or folder to custody via server relay"),
     expire_minutes: int = typer.Option(60, "--expire-minutes", "-t", help="Time-to-live in minutes for the custodied file"),
+    max_downloads: Optional[int] = typer.Option(None, "--max-downloads", "-d", help="Max download count (default: unlimited)"),
 ):
     """
     Custody a file: upload to server for download by others.
@@ -1214,6 +1226,7 @@ def custody_cmd(
     Examples:
       magnus custody results.csv
       magnus custody ./output_dir --expire-minutes 120
+      magnus custody data.csv --max-downloads 5
     """
     target = Path(path)
     if not target.exists():
@@ -1225,6 +1238,7 @@ def custody_cmd(
             new_secret = api_custody_file(
                 path=str(target.resolve()),
                 expire_minutes=expire_minutes,
+                max_downloads=max_downloads,
             )
 
         console.print()

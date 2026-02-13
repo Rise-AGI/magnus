@@ -168,6 +168,8 @@ print(f"任务已提交: {job_id}")
 - `args` (dict, 可选): 传递给蓝图函数的参数，键值对形式
 - `use_preference` (bool, 可选): 是否合并已缓存的偏好参数，默认 False（Web UI 默认合并，SDK/CLI 默认不合并）
 - `save_preference` (bool, 可选): 成功后是否保存参数为新偏好，默认 True
+- `expire_minutes` (int, 可选): FileSecret 自动上传的过期时间（分钟），默认 60
+- `max_downloads` (int, 可选): FileSecret 自动上传的最大下载次数，默认 1
 
 
 #### run_blueprint - 提交并等待完成
@@ -199,6 +201,8 @@ print(f"任务结果: {result}")
 - `args` (dict, 可选): 传递给蓝图函数的参数
 - `use_preference` (bool, 可选): 是否合并已缓存的偏好参数，默认 False
 - `save_preference` (bool, 可选): 成功后是否保存参数为新偏好，默认 True
+- `expire_minutes` (int, 可选): FileSecret 自动上传的过期时间（分钟），默认 60
+- `max_downloads` (int, 可选): FileSecret 自动上传的最大下载次数，默认 1
 - `timeout` (int, 可选): 超时时间，单位秒，默认无限等待
 - `poll_interval` (int, 可选): 轮询间隔，单位秒，默认 2
 - `execute_action` (bool, 可选): 是否自动执行 MAGNUS_ACTION，默认 True
@@ -487,6 +491,7 @@ with open(os.environ["MAGNUS_ACTION"], "w") as f:
 **参数说明**：
 - `path` (str): 本地文件或文件夹路径
 - `expire_minutes` (int, 可选): 过期时间（分钟），默认 60
+- `max_downloads` (int, 可选): 最大下载次数，默认无限制
 - `timeout` (float, 可选): HTTP 请求超时时间（秒），默认 300
 
 **返回值**：
@@ -593,7 +598,7 @@ asyncio.run(run_experiments())
 | `terminate_job(job_id)` | 终止任务 | 状态信息 |
 | `get_cluster_stats()` | 获取集群状态 | 集群信息 |
 | `download_file(secret, target_path)` | 接收文件 | Path |
-| `custody_file(path, expire_minutes)` | 代管文件到后端，返回新 secret | file_secret |
+| `custody_file(path, expire_minutes, max_downloads)` | 代管文件到后端，返回新 secret | file_secret |
 | `configure(token, address)` | 配置 SDK | None |
 
 所有函数均有 `_async` 异步版本（`get_cluster_stats`, `get_job_logs`, `list_blueprints`, `list_services`, `get_blueprint_schema` 除外）。
@@ -666,11 +671,18 @@ magnus submit <blueprint-id> [OPTIONS] [-- ARGS...]
 magnus submit quadre-simulation
 magnus submit quadre-simulation --Te 2.0 --B 1.5
 magnus submit my-blueprint -- --param value --flag
+magnus submit my-blueprint --expire-minutes 120 --max-downloads 3 -- --data /path/to/file
 ```
 
 **参数说明**：
 - `<blueprint-id>`: 蓝图 ID (必填)
 - `-- ARGS...`: 传递给蓝图的参数，使用 `--key value` 格式
+
+**选项**（防波堤 `--` 左侧）：
+- `--expire-minutes`: FileSecret 自动上传的过期时间（分钟），默认 60
+- `--max-downloads`: FileSecret 自动上传的最大下载次数，默认 1
+- `--preference`: 是否合并用户缓存的偏好参数，默认 false
+- `--timeout`: HTTP 请求超时时间（秒），默认 10
 
 **输出**：
 ```
@@ -689,6 +701,7 @@ magnus run <blueprint-id> [OPTIONS] [-- ARGS...]
 # 示例
 magnus run my-blueprint --timeout 300 -- --param value
 magnus run long-task --timeout 3600 --poll-interval 30
+magnus run my-blueprint --expire-minutes 120 --max-downloads 3 -- --data /path/to/file
 
 # 一键处理文件（蓝图内部写 MAGNUS_ACTION 实现自动下载）
 magnus run scan-pdf-to-vector --file original.pdf --output processed.pdf
@@ -697,10 +710,13 @@ magnus run scan-pdf-to-vector --file original.pdf --output processed.pdf
 magnus run my-blueprint --execute-action false -- --param value
 ```
 
-**选项**：
-- `--timeout, -t`: 超时时间 (秒)，默认无限等待
+**选项**（防波堤 `--` 左侧）：
+- `--timeout`: 超时时间 (秒)，默认无限等待
 - `--poll-interval`: 轮询间隔 (秒)，默认 2
 - `--execute-action`: 是否自动执行 MAGNUS_ACTION，默认 true
+- `--expire-minutes`: FileSecret 自动上传的过期时间（分钟），默认 60
+- `--max-downloads`: FileSecret 自动上传的最大下载次数，默认 1
+- `--preference`: 是否合并用户缓存的偏好参数，默认 false
 
 **输出**：
 ```
@@ -952,7 +968,12 @@ magnus send <path>
 # 示例
 magnus send data.csv
 magnus send ./my_folder
+magnus send data.csv --max-downloads 3
 ```
+
+**选项**：
+- `-t, --expire-minutes`: 过期时间（分钟），默认 60
+- `-d, --max-downloads`: 最大下载次数，默认 1
 
 上传完成后会显示 file secret，接收方使用该 secret 接收文件。
 
@@ -994,6 +1015,7 @@ magnus custody ./output_dir --expire-minutes 120
 
 **选项**：
 - `-t, --expire-minutes`: 过期时间（分钟），默认 60
+- `-d, --max-downloads`: 最大下载次数，默认无限制
 
 **输出**：
 ```

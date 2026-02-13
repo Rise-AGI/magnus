@@ -808,6 +808,7 @@ magnus config
 # 发送文件/文件夹（上传到服务器）
 magnus send my_table.csv
 magnus send ./my_folder
+magnus send my_table.csv --max-downloads 3   # 允许下载 3 次（默认 1）
 
 # 接收文件/文件夹（从服务器下载）
 magnus receive 7453-calm-boat-fire
@@ -817,6 +818,7 @@ magnus receive 7453-calm-boat-fire --output my_data.csv
 
 # 代管文件到后端（上传到服务器，返回文件凭证）
 magnus custody results.csv --expire-minutes 120
+magnus custody results.csv --max-downloads 5  # 限制下载次数（默认无限制）
 ```
 
 **输出示例**：

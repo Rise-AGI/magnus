@@ -227,6 +227,7 @@ class MagnusClient:
         self,
         path: str,
         expire_minutes: int = 60,
+        max_downloads: Optional[int] = 1,
         timeout: float = 300.0,
     ) -> str:
         import tarfile as _tarfile
@@ -236,8 +237,13 @@ class MagnusClient:
         if not p.exists():
             raise MagnusError(f"Path does not exist: {path}")
 
+        data: Dict[str, str] = {"expire_minutes": str(expire_minutes)}
+        if max_downloads is not None:
+            data["max_downloads"] = str(max_downloads)
+
         is_dir = p.is_dir()
         if is_dir:
+            data["is_directory"] = "true"
             tmp = _tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)
             try:
                 with _tarfile.open(tmp.name, "w:gz") as tar:
@@ -246,7 +252,7 @@ class MagnusClient:
                     resp = self.http.post(
                         "/files/upload",
                         files={"file": (f"{p.name}.tar.gz", f)},
-                        data={"expire_minutes": str(expire_minutes), "is_directory": "true"},
+                        data=data,
                         timeout=timeout,
                     )
             finally:
@@ -256,7 +262,7 @@ class MagnusClient:
                 resp = self.http.post(
                     "/files/upload",
                     files={"file": (p.name, f)},
-                    data={"expire_minutes": str(expire_minutes)},
+                    data=data,
                     timeout=timeout,
                 )
 
@@ -280,6 +286,7 @@ class MagnusClient:
         use_preference: bool = False,
         save_preference: bool = True,
         expire_minutes: int = 60,
+        max_downloads: Optional[int] = 1,
         timeout: float = 10.0,
     ) -> str:
         """
@@ -296,7 +303,7 @@ class MagnusClient:
             value = str(final_args[key])
             if is_file_secret(value):
                 continue
-            final_args[key] = self._upload_file(value, expire_minutes)
+            final_args[key] = self._upload_file(value, expire_minutes, max_downloads)
 
         payload = {
             "parameters": final_args,
@@ -322,6 +329,7 @@ class MagnusClient:
         use_preference: bool = False,
         save_preference: bool = True,
         expire_minutes: int = 60,
+        max_downloads: Optional[int] = 1,
         timeout: float = 10.0,
     ) -> str:
         """
@@ -338,7 +346,7 @@ class MagnusClient:
             value = str(final_args[key])
             if is_file_secret(value):
                 continue
-            final_args[key] = await asyncio.to_thread(self._upload_file, value, expire_minutes)
+            final_args[key] = await asyncio.to_thread(self._upload_file, value, expire_minutes, max_downloads)
 
         payload = {
             "parameters": final_args,
@@ -364,6 +372,7 @@ class MagnusClient:
         use_preference: bool = False,
         save_preference: bool = True,
         expire_minutes: int = 60,
+        max_downloads: Optional[int] = 1,
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
         execute_action: bool = True,
@@ -379,6 +388,7 @@ class MagnusClient:
             use_preference=use_preference,
             save_preference=save_preference,
             expire_minutes=expire_minutes,
+            max_downloads=max_downloads,
             timeout=10.0
         )
         self.last_job_id = job_id
@@ -414,6 +424,7 @@ class MagnusClient:
         use_preference: bool = False,
         save_preference: bool = True,
         expire_minutes: int = 60,
+        max_downloads: Optional[int] = 1,
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
         execute_action: bool = True,
@@ -429,6 +440,7 @@ class MagnusClient:
             use_preference=use_preference,
             save_preference=save_preference,
             expire_minutes=expire_minutes,
+            max_downloads=max_downloads,
             timeout=10.0
         )
         self.last_job_id = job_id
@@ -692,19 +704,24 @@ class MagnusClient:
         self,
         path: str,
         expire_minutes: int = 60,
+        max_downloads: Optional[int] = None,
         timeout: float = 300.0,
     ) -> str:
         """代管文件/文件夹，返回可供 download_file() 使用的 file_secret。"""
-        return self._upload_file(path, expire_minutes, timeout)
+        return self._upload_file(path, expire_minutes=expire_minutes, max_downloads=max_downloads, timeout=timeout)
 
     async def custody_file_async(
         self,
         path: str,
         expire_minutes: int = 60,
+        max_downloads: Optional[int] = None,
         timeout: float = 300.0,
     ) -> str:
         """异步版本的 custody_file。"""
-        return await asyncio.to_thread(self._upload_file, path, expire_minutes, timeout)
+        return await asyncio.to_thread(
+            self._upload_file, path,
+            expire_minutes, max_downloads, timeout,
+        )
 
     def call_service(
         self,
@@ -837,9 +854,10 @@ def submit_blueprint(
     use_preference: bool = False,
     save_preference: bool = True,
     expire_minutes: int = 60,
+    max_downloads: Optional[int] = 1,
     timeout: float = 10.0
 ) -> str:
-    return default_client.submit_blueprint(blueprint_id, args, use_preference, save_preference, expire_minutes, timeout)
+    return default_client.submit_blueprint(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout)
 
 async def submit_blueprint_async(
     blueprint_id: str,
@@ -847,9 +865,10 @@ async def submit_blueprint_async(
     use_preference: bool = False,
     save_preference: bool = True,
     expire_minutes: int = 60,
+    max_downloads: Optional[int] = 1,
     timeout: float = 10.0
 ) -> str:
-    return await default_client.submit_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, timeout)
+    return await default_client.submit_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout)
 
 def run_blueprint(
     blueprint_id: str,
@@ -857,11 +876,12 @@ def run_blueprint(
     use_preference: bool = False,
     save_preference: bool = True,
     expire_minutes: int = 60,
+    max_downloads: Optional[int] = 1,
     timeout: Optional[float] = None,
     poll_interval: float = 2.0,
     execute_action: bool = True,
 ) -> Optional[str]:
-    return default_client.run_blueprint(blueprint_id, args, use_preference, save_preference, expire_minutes, timeout, poll_interval, execute_action)
+    return default_client.run_blueprint(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout, poll_interval, execute_action)
 
 async def run_blueprint_async(
     blueprint_id: str,
@@ -869,11 +889,12 @@ async def run_blueprint_async(
     use_preference: bool = False,
     save_preference: bool = True,
     expire_minutes: int = 60,
+    max_downloads: Optional[int] = 1,
     timeout: Optional[float] = None,
     poll_interval: float = 2.0,
     execute_action: bool = True,
 ) -> Optional[str]:
-    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, timeout, poll_interval, execute_action)
+    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout, poll_interval, execute_action)
 
 def call_service(
     service_id: str, 
@@ -899,17 +920,19 @@ async def call_service_async(
 def custody_file(
     path: str,
     expire_minutes: int = 60,
+    max_downloads: Optional[int] = None,
     timeout: float = 300.0,
 ) -> str:
-    return default_client.custody_file(path, expire_minutes, timeout)
+    return default_client.custody_file(path, expire_minutes, max_downloads, timeout)
 
 
 async def custody_file_async(
     path: str,
     expire_minutes: int = 60,
+    max_downloads: Optional[int] = None,
     timeout: float = 300.0,
 ) -> str:
-    return await default_client.custody_file_async(path, expire_minutes, timeout)
+    return await default_client.custody_file_async(path, expire_minutes, max_downloads, timeout)
 
 
 def list_jobs(

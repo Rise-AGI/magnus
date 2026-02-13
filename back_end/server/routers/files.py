@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -23,6 +23,7 @@ class FileCustodyResponse(BaseModel):
 async def upload_file(
     file: UploadFile,
     expire_minutes: Optional[int] = Form(default=None),
+    max_downloads: Optional[int] = Form(default=None),
     is_directory: bool = Form(default=False),
     user: models.User = Depends(get_current_user),
 ) -> FileCustodyResponse:
@@ -32,9 +33,14 @@ async def upload_file(
             status_code=400,
             detail=f"expire_minutes exceeds maximum allowed ({max_ttl} min)",
         )
+    if max_downloads is not None and max_downloads < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="max_downloads must be at least 1",
+        )
 
     filename = file.filename or "upload"
-    logger.info(f"File upload from {user.name}: {filename}, expire_minutes={expire_minutes}")
+    logger.info(f"File upload from {user.name}: {filename}, expire_minutes={expire_minutes}, max_downloads={max_downloads}")
 
     try:
         token = await asyncio.to_thread(
@@ -43,6 +49,7 @@ async def upload_file(
             file.file,
             expire_minutes,
             is_directory,
+            max_downloads,
         )
     except FileTooLargeError as e:
         raise HTTPException(status_code=413, detail=str(e))
@@ -50,15 +57,18 @@ async def upload_file(
 
 
 @router.get("/files/download/{token}")
-async def download_file(token: str):
+async def download_file(token: str, background_tasks: BackgroundTasks):
     result = file_custody_manager.get_file_path(token)
     if result is None:
         raise HTTPException(status_code=404, detail="File not found or expired")
 
-    file_path, filename, is_directory = result
+    file_path, filename, is_directory, exhausted = result
     headers = {}
     if is_directory:
         headers["X-Magnus-Directory"] = "true"
+
+    if exhausted:
+        background_tasks.add_task(file_custody_manager.delete_entry, token)
 
     return FileResponse(
         path=str(file_path),
