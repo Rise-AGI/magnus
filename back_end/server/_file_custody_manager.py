@@ -265,6 +265,8 @@ class CustodyEntry:
     original_filename: str
     is_directory: bool
     expires_at: float
+    max_downloads: Optional[int] = None
+    download_count: int = 0
 
 
 class FileCustodyManager:
@@ -312,6 +314,7 @@ class FileCustodyManager:
         file_obj: BinaryIO,
         expire_minutes: Optional[int] = None,
         is_directory: bool = False,
+        max_downloads: Optional[int] = None,
     ) -> str:
         if expire_minutes is None:
             expire_minutes = self._default_ttl_minutes
@@ -331,6 +334,7 @@ class FileCustodyManager:
                 original_filename=filename,
                 is_directory=is_directory,
                 expires_at=0.0,
+                max_downloads=max_downloads,
             )
             self._entries[entry_id] = placeholder
 
@@ -383,14 +387,28 @@ class FileCustodyManager:
             return None
         return entry
 
-    def get_file_path(self, token: str) -> Optional[Tuple[Path, str, bool]]:
-        entry = self.get_entry(token)
-        if entry is None:
-            return None
-        file_path = entry.file_dir / entry.original_filename
-        if not file_path.exists():
-            return None
-        return (file_path, entry.original_filename, entry.is_directory)
+    def get_file_path(self, token: str) -> Optional[Tuple[Path, str, bool, bool]]:
+        with self._lock:
+            entry = self._entries.get(token)
+            if entry is None:
+                return None
+            if entry.expires_at == 0.0 or time.time() >= entry.expires_at:
+                return None
+            if entry.max_downloads is not None and entry.download_count >= entry.max_downloads:
+                return None
+            file_path = entry.file_dir / entry.original_filename
+            if not file_path.exists():
+                return None
+            entry.download_count += 1
+            exhausted = entry.max_downloads is not None and entry.download_count >= entry.max_downloads
+        return (file_path, entry.original_filename, entry.is_directory, exhausted)
+
+    def delete_entry(self, token: str) -> None:
+        with self._lock:
+            entry = self._entries.pop(token, None)
+        if entry is not None and entry.file_dir.exists():
+            shutil.rmtree(entry.file_dir, ignore_errors=True)
+            logger.info(f"File custody purged (download limit): {token}")
 
     async def cleanup_loop(self) -> None:
         logger.info("File custody cleanup loop started.")
@@ -401,7 +419,8 @@ class FileCustodyManager:
                 snapshot = list(self._entries.items())
             expired_ids = [
                 eid for eid, entry in snapshot
-                if entry.expires_at > 0.0 and now >= entry.expires_at
+                if (entry.expires_at > 0.0 and now >= entry.expires_at)
+                or (entry.max_downloads is not None and entry.download_count >= entry.max_downloads)
             ]
             for eid in expired_ids:
                 with self._lock:
