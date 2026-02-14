@@ -237,6 +237,10 @@ def generate_job(data: InputData) -> JobSubmission:
 - **SDK 端**：直接传文件路径，SDK 自动上传到服务器并转换为 secret
 - **缓存行为**：FileSecret 与其他参数一样参与缓存预填（注意 secret 会过期）
 
+FileSecret 与其他基本类型一样，天然支持 `Optional` 和 `List` 包装（参见 Section 4）。
+
+SDK/CLI 的特殊行为：对 FileSecret 参数，SDK 自动将本地路径上传为 secret；列表中逐个上传，已是 `magnus-secret:` 的跳过。CLI 用重复 flag 传多文件：`--batch-files a.csv --batch-files b.csv`。
+
 ---
 
 ## 7. 参数缓存（Preference）

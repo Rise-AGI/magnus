@@ -211,34 +211,44 @@ def parse_cli_args(args: List[str]) -> Dict[str, Any]:
             i += 1
     return params
 
-def parse_blueprint_args(args: List[str]) -> Dict[str, str]:
+def parse_blueprint_args(args: List[str]) -> Dict[str, Any]:
     """
     [Raw Parser] 用于传递给 Blueprints 的业务参数。
     原则：不猜测，不转换。所有值均保持为字符串，类型转换由后端/蓝图负责。
+    重复 key 自动收集为列表，用于 List[T] 参数。
     Example:
-      --count 2   -> {"count": "2"}
-      --enable    -> {"enable": "true"}
+      --count 2              -> {"count": "2"}
+      --enable               -> {"enable": "true"}
+      --files a --files b    -> {"files": ["a", "b"]}
     """
-    params = {}
+    params: Dict[str, Any] = {}
     i = 0
     while i < len(args):
         key = args[i]
         if key.startswith("--"):
             key = key[2:]
             key = key.replace("-", "_")
-            
+
             if i + 1 < len(args) and not args[i + 1].startswith("--"):
                 value = args[i + 1] # Keep as raw string
                 i += 2
             else:
                 value = "true"      # Flag defaults to string "true"
                 i += 1
-            params[key] = value
+
+            if key in params:
+                existing = params[key]
+                if isinstance(existing, list):
+                    existing.append(value)
+                else:
+                    params[key] = [existing, value]
+            else:
+                params[key] = value
         else:
             i += 1
     return params
 
-def partition_args(raw_args: List[str]) -> Tuple[Dict[str, Any], Dict[str, str]]:
+def partition_args(raw_args: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     根据 '--' 防波堤切分参数。
     Left Slice  -> CLI Args (Typed)
@@ -287,8 +297,8 @@ def _version_callback(value: bool):
         console.print(f"  [bold blue]Magnus SDK[/bold blue] v{__version__}", highlight=False)
         console.print("  [italic dim]An agentic infrastructure automating scientific discoveries.[/italic dim]")
         console.print()
-        console.print("  [dim]PKU Plasma · PKU HET · Rise-AGI[/dim]")
-        console.print("  [dim]© PKU Plasma Lab. All rights reserved.[/dim]")
+        console.print("  [#94070A]PKU Plasma · Rise-AGI[/#94070A]")
+        console.print("  [#94070A]© PKU Plasma Lab. All rights reserved.[/#94070A]")
         console.print()
         raise typer.Exit()
 

@@ -271,13 +271,38 @@ class MagnusClient:
 
     # === Blueprint Methods ===
 
-    def _get_file_secret_keys(self, blueprint_id: str) -> List[str]:
-        """获取蓝图中所有 FileSecret 类型的参数 key"""
+    def _get_file_secret_params(self, blueprint_id: str) -> List[Dict[str, Any]]:
+        """获取蓝图中所有 FileSecret 类型的参数信息（含 is_list 标记）"""
         try:
             schema = self.get_blueprint_schema(blueprint_id)
-            return [param["key"] for param in schema if param.get("type") == "file_secret"]
+            return [
+                {"key": param["key"], "is_list": bool(param.get("is_list"))}
+                for param in schema
+                if param.get("type") == "file_secret"
+            ]
         except Exception:
             return []
+
+    def _upload_file_secret_value(
+        self,
+        value: Any,
+        is_list: bool,
+        expire_minutes: int,
+        max_downloads: Optional[int],
+    ) -> Any:
+        """处理单个 FileSecret 参数的上传：支持标量、列表、None"""
+        if value is None:
+            return None
+        if is_list:
+            items = value if isinstance(value, list) else [value]
+            return [
+                item if is_file_secret(str(item)) else self._upload_file(str(item), expire_minutes, max_downloads)
+                for item in items
+            ]
+        value_str = str(value)
+        if is_file_secret(value_str):
+            return value
+        return self._upload_file(value_str, expire_minutes, max_downloads)
 
     def submit_blueprint(
         self,
@@ -296,14 +321,13 @@ class MagnusClient:
 
         final_args = dict(args) if args else {}
 
-        file_secret_keys = self._get_file_secret_keys(blueprint_id)
-        for key in file_secret_keys:
+        for param in self._get_file_secret_params(blueprint_id):
+            key = param["key"]
             if key not in final_args:
                 continue
-            value = str(final_args[key])
-            if is_file_secret(value):
-                continue
-            final_args[key] = self._upload_file(value, expire_minutes, max_downloads)
+            final_args[key] = self._upload_file_secret_value(
+                final_args[key], param["is_list"], expire_minutes, max_downloads,
+            )
 
         payload = {
             "parameters": final_args,
@@ -339,14 +363,15 @@ class MagnusClient:
 
         final_args = dict(args) if args else {}
 
-        file_secret_keys = await asyncio.to_thread(self._get_file_secret_keys, blueprint_id)
-        for key in file_secret_keys:
+        file_secret_params = await asyncio.to_thread(self._get_file_secret_params, blueprint_id)
+        for param in file_secret_params:
+            key = param["key"]
             if key not in final_args:
                 continue
-            value = str(final_args[key])
-            if is_file_secret(value):
-                continue
-            final_args[key] = await asyncio.to_thread(self._upload_file, value, expire_minutes, max_downloads)
+            final_args[key] = await asyncio.to_thread(
+                self._upload_file_secret_value,
+                final_args[key], param["is_list"], expire_minutes, max_downloads,
+            )
 
         payload = {
             "parameters": final_args,

@@ -320,29 +320,45 @@ class BlueprintManager:
         """
         local_scope = self._compile_code(code, extra_globals={})
         func = local_scope.get("generate_job")
-        
+
         if not func or not callable(func):
             raise ValueError("Blueprint must define a 'generate_job' function.")
 
         # 动态构建 Pydantic 模型
         sig = inspect.signature(func)
         field_definitions = {}
-        
+
         for param_name, param in sig.parameters.items():
             annotation = param.annotation if param.annotation != inspect.Parameter.empty else Any
             default = param.default if param.default != inspect.Parameter.empty else ...
             field_definitions[param_name] = (annotation, default)
 
+        # CLI 对 List[T] 参数可能发送标量字符串，Pydantic v2 不会自动包装为列表。
+        # 在构建动态模型前，检查函数签名中的 List[T] 参数，标量则包装为列表。
+        processed_inputs = dict(inputs)
+        for param_name, param in sig.parameters.items():
+            if param_name not in processed_inputs:
+                continue
+            annotation = param.annotation if param.annotation != inspect.Parameter.empty else Any
+            if get_origin(annotation) is Annotated:
+                annotation = get_args(annotation)[0]
+            if _is_optional_type(annotation):
+                annotation = _unwrap_optional(annotation)
+            if _is_list_type(annotation):
+                value = processed_inputs[param_name]
+                if value is not None and not isinstance(value, list):
+                    processed_inputs[param_name] = [value]
+
         DynamicModel = create_model(
             "DynamicBlueprintModel",
             **field_definitions,
-            __config__=ConfigDict(extra='ignore') 
+            __config__=ConfigDict(extra='ignore')
         )
 
         try:
-            # 这里的 **inputs 包含了 CLI 传来的原始字符串
+            # 这里的 **processed_inputs 包含了 CLI 传来的原始字符串（标量已包装为列表）
             # DynamicModel 初始化时会自动执行类型转换 (如 "10" -> 10, "true" -> True)
-            validated_data_obj = DynamicModel(**inputs)
+            validated_data_obj = DynamicModel(**processed_inputs)
             validated_args = validated_data_obj.model_dump()
 
         except ValidationError as e:

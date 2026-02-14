@@ -411,15 +411,27 @@ print(f"排队任务: {stats['total_pending']}")
 
 #### FileSecret 参数 - 自动上传
 
-当蓝图参数类型为 `FileSecret` 时，SDK 的 `submit_blueprint` / `run_blueprint` 会自动检测：如果传入的值是本地文件路径（而非 `magnus-secret:` 格式），SDK 会自动上传文件到服务器，将路径替换为 file secret。
+当蓝图参数类型为 `FileSecret` 时，SDK 的 `submit_blueprint` / `run_blueprint` 会自动检测：如果传入的值是本地文件路径（而非 `magnus-secret:` 格式），SDK 会自动上传文件到服务器，将路径替换为 file secret。与其他类型一样，`FileSecret` 天然支持 `Optional` 和 `List` 包装。
 
 ```python
 import magnus
 
-# 传文件路径，SDK 自动上传到服务器
+# 单文件：传文件路径，SDK 自动上传到服务器
 job_id = magnus.submit_blueprint(
     "my-blueprint",
     args={"input_data": "/home/user/data.csv"},
+)
+
+# 多文件 (List[FileSecret])：传路径列表，SDK 逐个上传
+job_id = magnus.submit_blueprint(
+    "batch-process",
+    args={"files": ["/home/user/a.csv", "/home/user/b.csv"]},
+)
+
+# 已有 secret 和本地路径可以混用
+job_id = magnus.submit_blueprint(
+    "batch-process",
+    args={"files": ["magnus-secret:abc-123", "/home/user/new.csv"]},
 )
 ```
 
@@ -672,6 +684,9 @@ magnus submit quadre-simulation
 magnus submit quadre-simulation --Te 2.0 --B 1.5
 magnus submit my-blueprint -- --param value --flag
 magnus submit my-blueprint --expire-minutes 120 --max-downloads 3 -- --data /path/to/file
+
+# 多文件参数 (List[FileSecret])：重复 flag 自动收集为列表
+magnus submit batch-process -- --files a.csv --files b.csv
 ```
 
 **参数说明**：
@@ -702,6 +717,9 @@ magnus run <blueprint-id> [OPTIONS] [-- ARGS...]
 magnus run my-blueprint --timeout 300 -- --param value
 magnus run long-task --timeout 3600 --poll-interval 30
 magnus run my-blueprint --expire-minutes 120 --max-downloads 3 -- --data /path/to/file
+
+# 多文件参数：重复 flag 自动收集为列表
+magnus run batch-process -- --files a.csv --files b.csv
 
 # 一键处理文件（蓝图内部写 MAGNUS_ACTION 实现自动下载）
 magnus run scan-pdf-to-vector --file original.pdf --output processed.pdf
