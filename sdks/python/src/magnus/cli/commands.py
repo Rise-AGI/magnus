@@ -297,8 +297,8 @@ def _version_callback(value: bool):
         console.print(f"  [bold blue]Magnus SDK[/bold blue] v{__version__}", highlight=False)
         console.print("  [italic dim]An agentic infrastructure automating scientific discoveries.[/italic dim]")
         console.print()
-        console.print("  [#94070A]PKU Plasma · Rise-AGI[/#94070A]")
-        console.print("  [#94070A]© PKU Plasma Lab. All rights reserved.[/#94070A]")
+        console.print("  [bold #94070A]PKU Plasma · Rise-AGI[/bold #94070A]")
+        console.print("  [dim]© PKU Plasma Lab. All rights reserved.[/dim]")
         console.print()
         raise typer.Exit()
 
