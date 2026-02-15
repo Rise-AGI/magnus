@@ -61,6 +61,7 @@ cluster:
   default_memory: 1600M
   default_runner: username
   default_container_image: docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+  default_ephemeral_storage: 10G
   default_system_entry_command: |-
     export APPTAINER_BIND="/home:/home"
     export UV_CACHE_DIR=/path/to/magnus-data/uv_cache

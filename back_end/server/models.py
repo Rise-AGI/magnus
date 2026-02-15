@@ -76,6 +76,7 @@ class Job(Base):
     gpu_type: Mapped[str] = mapped_column(String)
     cpu_count: Mapped[int | None] = mapped_column(Integer, default=None)
     memory_demand: Mapped[str | None] = mapped_column(String, default=None)
+    ephemeral_storage: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PREPARING)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.A2)
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -147,12 +148,13 @@ class Service(Base):
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.B2)
     cpu_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     memory_demand: Mapped[str | None] = mapped_column(String, nullable=True)
+    ephemeral_storage: Mapped[str | None] = mapped_column(String, nullable=True)
     runner: Mapped[str | None] = mapped_column(String, nullable=True)
     container_image: Mapped[str | None] = mapped_column(String, nullable=True)
     system_entry_command: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    
-    
+
+
 class BlueprintUserPreference(Base):
     __tablename__ = "blueprint_user_preferences"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

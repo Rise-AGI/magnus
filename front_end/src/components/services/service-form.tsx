@@ -13,6 +13,7 @@ import {
   getGpuLimit,
   MAX_CPU_COUNT,
   DEFAULT_MEMORY,
+  DEFAULT_EPHEMERAL_STORAGE,
   DEFAULT_RUNNER,
   DEFAULT_CONTAINER_IMAGE,
   DEFAULT_SYSTEM_ENTRY_COMMAND,
@@ -58,6 +59,7 @@ export interface ServiceFormData {
   job_type: string;
   cpu_count?: number | null;
   memory_demand?: string | null;
+  ephemeral_storage?: string | null;
   runner?: string | null;
   container_image?: string | null;
   system_entry_command?: string | null;
@@ -99,7 +101,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
   const [command, setCommand] = useState(data?.entry_command || "");
   
   // === Resources ===
-  const [gpuCount, setGpuCount] = useState(data?.gpu_count ?? 1);
+  const [gpuCount, setGpuCount] = useState(data?.gpu_count ?? 0);
   const [gpuType, setGpuType] = useState(
     data?.gpu_type || (data?.gpu_count === 0 ? "cpu" : PHYSICAL_GPUS[0].value)
   ); 
@@ -115,6 +117,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
   // === Advanced Overrides ===
   const [cpuCount, setCpuCount] = useState<number>(0);
   const [memoryDemand, setMemoryDemand] = useState<string>(data?.memory_demand || "");
+  const [ephemeralStorage, setEphemeralStorage] = useState<string>(data?.ephemeral_storage || "");
   const [runner, setRunner] = useState<string>(data?.runner || "");
   const [containerImage, setContainerImage] = useState<string>(data?.container_image || DEFAULT_CONTAINER_IMAGE);
   const [systemEntryCommand, setSystemEntryCommand] = useState<string>(data?.system_entry_command || DEFAULT_SYSTEM_ENTRY_COMMAND);
@@ -143,6 +146,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
         job_type: jobType,
         cpu_count: cpuCount,
         memory_demand: memoryDemand,
+        ephemeral_storage: ephemeralStorage,
         runner: runner,
         container_image: containerImage,
         // system_entry_command 不序列化，跨环境复制时用默认值更安全
@@ -186,6 +190,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       // Advanced
       if (payload.cpu_count !== undefined) setCpuCount(payload.cpu_count);
       if (payload.memory_demand !== undefined) setMemoryDemand(payload.memory_demand);
+      if (payload.ephemeral_storage !== undefined) setEphemeralStorage(payload.ephemeral_storage);
       if (payload.runner !== undefined) setRunner(payload.runner);
       if (payload.container_image !== undefined) setContainerImage(payload.container_image);
       if (payload.system_entry_command !== undefined) setSystemEntryCommand(payload.system_entry_command);
@@ -313,6 +318,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
       job_type: jobType,
       cpu_count: cpuCount || null,
       memory_demand: memoryDemand.trim() || null,
+      ephemeral_storage: ephemeralStorage.trim() || null,
       runner: runner.trim() || null,
       container_image: containerImage.trim() || null,
       system_entry_command: systemEntryCommand.trim() || null,
@@ -585,6 +591,15 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
                         value={memoryDemand}
                         onChange={e => setMemoryDemand(e.target.value)}
                         placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
+                      />
+                </div>
+                <div>
+                      <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("jobForm.ephemeralStorage")}</label>
+                      <input
+                        className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+                        value={ephemeralStorage}
+                        onChange={e => setEphemeralStorage(e.target.value)}
+                        placeholder={t("jobForm.ephemeralStorageDefault", { value: DEFAULT_EPHEMERAL_STORAGE })}
                       />
                 </div>
                 <div className="sm:col-span-2">

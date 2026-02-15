@@ -89,6 +89,7 @@ def _validate_magnus_config(config: Dict[str, Any]) -> None:
     _check_key(cluster, "gpus", list)
     _check_key(cluster, "default_runner", str)
     _check_key(cluster, "default_container_image", str)
+    _check_key(cluster, "default_ephemeral_storage", str)
     _check_key(cluster, "default_system_entry_command", str)
 
 

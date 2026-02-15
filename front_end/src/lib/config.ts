@@ -38,6 +38,7 @@ export interface ClusterConfig {
   default_memory: string;
   default_runner: string;
   default_container_image: string;
+  default_ephemeral_storage: string;
   default_system_entry_command: string;
 }
 
@@ -64,6 +65,7 @@ export const MAX_CPU_COUNT = CLUSTER_CONFIG.max_cpu_count;
 export const DEFAULT_MEMORY = CLUSTER_CONFIG.default_memory;
 export const DEFAULT_RUNNER = CLUSTER_CONFIG.default_runner;
 export const DEFAULT_CONTAINER_IMAGE = CLUSTER_CONFIG.default_container_image;
+export const DEFAULT_EPHEMERAL_STORAGE = CLUSTER_CONFIG.default_ephemeral_storage;
 export const DEFAULT_SYSTEM_ENTRY_COMMAND = CLUSTER_CONFIG.default_system_entry_command;
 export function getGpuLimit(gpuType: string): number {
   if (gpuType === 'cpu') return 0;

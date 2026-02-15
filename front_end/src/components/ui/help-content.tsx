@@ -186,6 +186,37 @@ export function JobFormHelp() {
           {t("help.jobForm.configReuseDesc")}
         </HelpParagraph>
       </HelpSection>
+
+      <HelpSection title={t("help.jobForm.runtimeEnv")}>
+        <HelpParagraph>
+          {t("help.jobForm.runtimeEnvDesc")}
+        </HelpParagraph>
+        <HelpCodeBlock>{`/magnus/                     ← $HOME, $MAGNUS_HOME
+└── workspace/               ← bind mount (host → container)
+    ├── repository/          ← git repo root (working directory)
+    ├── .magnus_result       ← $MAGNUS_RESULT
+    └── .magnus_action       ← $MAGNUS_ACTION`}</HelpCodeBlock>
+        <HelpFieldList>
+          <HelpField name="MAGNUS_TOKEN" color="text-green-400">
+            {t("help.jobForm.envToken")}
+          </HelpField>
+          <HelpField name="MAGNUS_ADDRESS" color="text-green-400">
+            {t("help.jobForm.envAddress")}
+          </HelpField>
+          <HelpField name="MAGNUS_JOB_ID" color="text-green-400">
+            {t("help.jobForm.envJobId")}
+          </HelpField>
+          <HelpField name="MAGNUS_RESULT" color="text-green-400">
+            {t("help.jobForm.envResult")}
+          </HelpField>
+          <HelpField name="MAGNUS_ACTION" color="text-green-400">
+            {t("help.jobForm.envAction")}
+          </HelpField>
+        </HelpFieldList>
+        <HelpParagraph>
+          {t("help.jobForm.runtimeWritability")}
+        </HelpParagraph>
+      </HelpSection>
     </>
   );
 }
@@ -313,6 +344,7 @@ def generate_job(
         job_type=JobType.A2,           # 优先级
         cpu_count=None,                # CPU 核心数 (可选)
         memory_demand=None,            # 内存需求 (可选)
+        ephemeral_storage=None,        # 临时存储大小 (可选, 如 "10G")
         runner=None,                   # 指定运行用户 (可选)
     )`}</HelpCodeBlock>
       </HelpSection>
