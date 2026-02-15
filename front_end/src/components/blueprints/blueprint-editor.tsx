@@ -41,6 +41,8 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
   const [toastFading, setToastFading] = useState(false);
   const keepOpenRef = useRef(false);
   const handleSubmitRef = useRef<() => void>(() => {});
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (isOpen) {
@@ -221,10 +223,12 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
     try {
       await onSave({ ...formData, id, title, description });
       if (keepOpenRef.current) {
+        clearTimeout(fadeTimerRef.current);
+        clearTimeout(hideTimerRef.current);
         setShowSaveToast(true);
         setToastFading(false);
-        setTimeout(() => setToastFading(true), 1500);
-        setTimeout(() => { setShowSaveToast(false); setToastFading(false); }, 2000);
+        fadeTimerRef.current = setTimeout(() => setToastFading(true), 1500);
+        hideTimerRef.current = setTimeout(() => { setShowSaveToast(false); setToastFading(false); }, 2000);
       } else {
         onClose();
       }
