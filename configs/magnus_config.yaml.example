@@ -58,7 +58,8 @@ cluster:
       meta: 32GB • Blackwell
       limit: 4
   max_cpu_count: 128
-  default_memory: 1600M
+  default_cpu_count: 4
+  default_memory_demand: 1600M
   default_runner: username
   default_container_image: docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
   default_ephemeral_storage: 10G

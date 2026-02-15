@@ -35,7 +35,8 @@ export interface ClusterConfig {
   name: string;
   gpus: GpuConfig[];
   max_cpu_count: number;
-  default_memory: string;
+  default_cpu_count: number;
+  default_memory_demand: string;
   default_runner: string;
   default_container_image: string;
   default_ephemeral_storage: string;
@@ -62,7 +63,8 @@ export const CLUSTER_CONFIG = parsedConfig;
 
 export const PHYSICAL_GPUS = CLUSTER_CONFIG.gpus;
 export const MAX_CPU_COUNT = CLUSTER_CONFIG.max_cpu_count;
-export const DEFAULT_MEMORY = CLUSTER_CONFIG.default_memory;
+export const DEFAULT_CPU_COUNT = CLUSTER_CONFIG.default_cpu_count;
+export const DEFAULT_MEMORY = CLUSTER_CONFIG.default_memory_demand;
 export const DEFAULT_RUNNER = CLUSTER_CONFIG.default_runner;
 export const DEFAULT_CONTAINER_IMAGE = CLUSTER_CONFIG.default_container_image;
 export const DEFAULT_EPHEMERAL_STORAGE = CLUSTER_CONFIG.default_ephemeral_storage;

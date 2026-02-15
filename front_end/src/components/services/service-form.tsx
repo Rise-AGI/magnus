@@ -14,6 +14,7 @@ import {
   MAX_CPU_COUNT,
   DEFAULT_MEMORY,
   DEFAULT_EPHEMERAL_STORAGE,
+  DEFAULT_CPU_COUNT,
   DEFAULT_RUNNER,
   DEFAULT_CONTAINER_IMAGE,
   DEFAULT_SYSTEM_ENTRY_COMMAND,
@@ -582,7 +583,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
                       min={0}
                       max={MAX_CPU_COUNT}
                     />
-                    <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">{t("jobForm.cpuCoresHint")}</p>
+                    <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">{t("jobForm.cpuCoresHint", { value: DEFAULT_CPU_COUNT.toString() })}</p>
                 </div>
                 <div>
                       <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("jobForm.memory")}</label>

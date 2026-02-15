@@ -13,6 +13,7 @@ import {
   MAX_CPU_COUNT,
   DEFAULT_MEMORY,
   DEFAULT_EPHEMERAL_STORAGE,
+  DEFAULT_CPU_COUNT,
   DEFAULT_RUNNER,
   DEFAULT_CONTAINER_IMAGE,
   DEFAULT_SYSTEM_ENTRY_COMMAND,
@@ -481,7 +482,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
                   max={MAX_CPU_COUNT}
                 />
                 <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">
-                  {t("jobForm.cpuCoresHint")}
+                  {t("jobForm.cpuCoresHint", { value: DEFAULT_CPU_COUNT.toString() })}
                 </p>
               </div>
 

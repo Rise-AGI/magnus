@@ -126,7 +126,7 @@ const translations = {
   "jobForm.gpuAccelerator": { zh: "GPU 加速器", en: "GPU Accelerator" },
   "jobForm.gpuCount": { zh: "GPU 数量", en: "GPU Count" },
   "jobForm.cpuCores": { zh: "CPU 核心数", en: "CPU Cores" },
-  "jobForm.cpuCoresHint": { zh: "设为 0 使用分区默认值。", en: "Set to 0 to use partition default." },
+  "jobForm.cpuCoresHint": { zh: "设为 0 使用默认值 ({value})。", en: "Set to 0 for default ({value})." },
   "jobForm.memory": { zh: "内存", en: "Memory" },
   "jobForm.memoryDefault": { zh: "默认：{value}", en: "Default: {value}" },
   "jobForm.ephemeralStorage": { zh: "临时存储", en: "Ephemeral Storage" },

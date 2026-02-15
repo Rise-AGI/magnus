@@ -238,6 +238,21 @@ def create_service(
     existing = db.query(Service).filter(Service.id == service_data.id).first()
     data = service_data.model_dump()
 
+    # 所有 Optional 字段填入集群默认值
+    cluster = magnus_config["cluster"]
+    if data.get("cpu_count") is None or data["cpu_count"] == 0:
+        data["cpu_count"] = cluster["default_cpu_count"]
+    if data.get("memory_demand") is None:
+        data["memory_demand"] = cluster["default_memory_demand"]
+    if data.get("ephemeral_storage") is None:
+        data["ephemeral_storage"] = cluster["default_ephemeral_storage"]
+    if data.get("runner") is None:
+        data["runner"] = cluster["default_runner"]
+    if data.get("container_image") is None:
+        data["container_image"] = cluster["default_container_image"]
+    if data.get("system_entry_command") is None:
+        data["system_entry_command"] = cluster["default_system_entry_command"]
+
     if existing:
         if existing.owner_id != current_user.id:
             raise HTTPException(status_code=403, detail="You cannot modify a service created by another user.")
