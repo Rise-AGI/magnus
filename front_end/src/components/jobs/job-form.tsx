@@ -500,7 +500,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
               </div>
 
               {/* Ephemeral Storage */}
-              <div>
+              <div className="sm:col-span-2">
                 <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
                   {t("jobForm.ephemeralStorage")}
                 </label>

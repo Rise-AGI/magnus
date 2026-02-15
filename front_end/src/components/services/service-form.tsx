@@ -593,7 +593,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
                         placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
                       />
                 </div>
-                <div>
+                <div className="sm:col-span-2">
                       <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("jobForm.ephemeralStorage")}</label>
                       <input
                         className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
