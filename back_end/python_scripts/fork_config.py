@@ -1,4 +1,17 @@
 # back_end/python_scripts/fork_config.py
+#
+# Fork a YAML config with optional key overrides (dot-notation, type-inferred).
+#
+# Usage:
+#   python fork_config.py --source src.yaml --target dst.yaml [key.path=value ...]
+#
+# Examples:
+#   python fork_config.py --source configs/magnus_config.yaml --target configs/magnus_config_develop.yaml \
+#       server.port=8002 server.develop_mode=true
+#
+#   python fork_config.py --source configs/magnus_config.yaml --target /tmp/test_config.yaml \
+#       server.host=0.0.0.0
+
 import argparse
 import sys
 from typing import Any, Dict

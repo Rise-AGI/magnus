@@ -56,6 +56,7 @@ class JobSubmission(BaseModel):
     container_image: Optional[str] = None
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
+    ephemeral_storage: Optional[str] = None
     runner: Optional[str] = None
     system_entry_command: Optional[str] = None
 
@@ -211,6 +212,7 @@ class ServiceCreate(BaseModel):
     job_type: JobType = JobType.A2
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
+    ephemeral_storage: Optional[str] = None
     runner: Optional[str] = None
     container_image: Optional[str] = None
     system_entry_command: Optional[str] = None

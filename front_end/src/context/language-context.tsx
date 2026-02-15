@@ -129,6 +129,8 @@ const translations = {
   "jobForm.cpuCoresHint": { zh: "设为 0 使用分区默认值。", en: "Set to 0 to use partition default." },
   "jobForm.memory": { zh: "内存", en: "Memory" },
   "jobForm.memoryDefault": { zh: "默认：{value}", en: "Default: {value}" },
+  "jobForm.ephemeralStorage": { zh: "临时存储", en: "Ephemeral Storage" },
+  "jobForm.ephemeralStorageDefault": { zh: "默认：{value}", en: "Default: {value}" },
   "jobForm.runAsUser": { zh: "运行用户", en: "Run As User" },
   "jobForm.runAsUserDefault": { zh: "默认：{value}", en: "Default: {value}" },
   "jobForm.containerImage": { zh: "容器镜像", en: "Container Image" },
@@ -518,13 +520,42 @@ const translations = {
     en: "Number of GPUs requested. Multi-GPU tasks are allocated to consecutive GPUs on the same node."
   },
   "help.jobForm.advancedOptions": {
-    zh: "展开可配置 CPU 核心数、内存大小、指定运行用户等高级选项。",
-    en: "Expand to configure advanced options like CPU cores, memory size, and specified runner user."
+    zh: "展开可配置 CPU 核心数、内存大小、临时存储大小、指定运行用户等高级选项。",
+    en: "Expand to configure advanced options like CPU cores, memory size, ephemeral storage size, and specified runner user."
   },
   "help.jobForm.configReuse": { zh: "配置复用", en: "Configuration Reuse" },
   "help.jobForm.configReuseDesc": {
     zh: "右上角提供配置的导出和导入功能。点击复制按钮可将当前配置导出为 JSON，点击粘贴按钮可从剪贴板导入之前保存的配置。支持跨浏览器、跨设备复用配置。",
     en: "Export and import configuration options are available in the top right. Click the copy button to export current configuration as JSON, click paste to import previously saved configuration. Supports cross-browser and cross-device configuration reuse."
+  },
+  "help.jobForm.runtimeEnv": { zh: "运行时环境", en: "Runtime Environment" },
+  "help.jobForm.runtimeEnvDesc": {
+    zh: "任务在 Apptainer 容器中以 --containall 模式隔离运行。宿主机环境变量、/tmp、home 目录均不会泄露到容器内。目录结构如下：",
+    en: "Tasks run in isolated Apptainer containers with --containall. Host environment variables, /tmp, and home directory are not leaked into the container. Directory structure:"
+  },
+  "help.jobForm.envToken": {
+    zh: "用于 SDK 认证的 JWT 令牌",
+    en: "JWT token for SDK authentication"
+  },
+  "help.jobForm.envAddress": {
+    zh: "Magnus 服务地址，SDK 回调用",
+    en: "Magnus server address for SDK callbacks"
+  },
+  "help.jobForm.envJobId": {
+    zh: "当前任务 ID",
+    en: "Current job ID"
+  },
+  "help.jobForm.envResult": {
+    zh: "结果文件路径，任务结束后由调度器读取",
+    en: "Result file path, read by scheduler after task completion"
+  },
+  "help.jobForm.envAction": {
+    zh: "Action 文件路径，用于任务后续动作",
+    en: "Action file path, for post-task actions"
+  },
+  "help.jobForm.runtimeWritability": {
+    zh: "workspace/ 下的写入会持久化到宿主机。容器其余路径通过 Ephemeral Storage（临时存储）提供可写层，任务结束后自动销毁。",
+    en: "Writes under workspace/ persist to the host. Other container paths are writable via Ephemeral Storage overlay, automatically destroyed after task completion."
   },
 
   // ===== Service Form Help =====

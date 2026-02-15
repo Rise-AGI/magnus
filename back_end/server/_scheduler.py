@@ -385,6 +385,9 @@ class MagnusScheduler:
         base_system_entry_command = job.system_entry_command if job.system_entry_command else default_system_entry_command
         system_entry_command = base_system_entry_command.strip()
 
+        default_ephemeral_storage = magnus_config["cluster"]["default_ephemeral_storage"]
+        ephemeral_storage = job.ephemeral_storage if job.ephemeral_storage else default_ephemeral_storage
+
         wrapper_content = f'''import os
 import sys
 import traceback
@@ -392,6 +395,14 @@ import subprocess
 import threading
 import time
 import json
+
+def _parse_size_to_mb(size_str):
+    size_str = size_str.strip().upper()
+    if size_str.endswith("G"):
+        return int(float(size_str[:-1]) * 1024)
+    if size_str.endswith("M"):
+        return int(float(size_str[:-1]))
+    return int(size_str)
 
 def _spy_gpu_thread(status_path):
     interval = {spy_gpu_interval}
@@ -423,6 +434,7 @@ def main():
     user_token = {repr(user_token)}
     magnus_address = {repr(magnus_address)}
     job_id = {repr(job_id)}
+    ephemeral_storage = {repr(ephemeral_storage)}
 
     user_cmd_str = {repr(job.entry_command)}
     if "sudo" in user_cmd_str:
@@ -446,21 +458,25 @@ def main():
         f.write("\\n")
     os.chmod(user_script_path, 0o755)
 
-    # Phase 3: Execute with system_entry_command + apptainer
+    # Phase 3: Create overlay + execute with --containall
+    overlay_path = os.path.join(work_dir, "ephemeral_overlay.img")
     try:
+        size_mb = _parse_size_to_mb(ephemeral_storage)
+        subprocess.check_call(["apptainer", "overlay", "create", "--size", str(size_mb), overlay_path])
+
         shell_cmd = f"""set -e
-export MAGNUS_TOKEN={{user_token}}
-export MAGNUS_ADDRESS={{magnus_address}}
-export MAGNUS_JOB_ID={{job_id}}
-export MAGNUS_HOME=/magnus
+export APPTAINERENV_MAGNUS_TOKEN={{user_token}}
+export APPTAINERENV_MAGNUS_ADDRESS={{magnus_address}}
+export APPTAINERENV_MAGNUS_JOB_ID={{job_id}}
+export APPTAINERENV_HOME=/magnus
+export APPTAINERENV_MAGNUS_HOME=/magnus
+export APPTAINERENV_MAGNUS_RESULT=/magnus/workspace/.magnus_result
+export APPTAINERENV_MAGNUS_ACTION=/magnus/workspace/.magnus_action
 
 {{system_entry_command}}
 
-export HOME=$MAGNUS_HOME
-export MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
-export MAGNUS_ACTION=$MAGNUS_HOME/workspace/.magnus_action
-export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:$MAGNUS_HOME/workspace"
-apptainer exec --nv --pwd "$MAGNUS_HOME/workspace/repository" "{{sif_path}}" bash "$MAGNUS_HOME/workspace/.magnus_user_script.sh"
+export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:/magnus/workspace"
+apptainer exec --nv --containall --overlay {{overlay_path}} --pwd "/magnus/workspace/repository" "{{sif_path}}" bash "/magnus/workspace/.magnus_user_script.sh"
 """
         ret_code = subprocess.call(shell_cmd, shell=True, executable="/bin/bash")
 
@@ -473,6 +489,13 @@ apptainer exec --nv --pwd "$MAGNUS_HOME/workspace/repository" "{{sif_path}}" bas
     except Exception as error:
         print(f"Magnus Execution Error: {{error}}\\nTraceback: \\n{{traceback.format_exc()}}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        # Clean up overlay
+        try:
+            if os.path.exists(overlay_path):
+                os.remove(overlay_path)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()
@@ -562,6 +585,7 @@ if __name__ == "__main__":
             delete_file(os.path.join(job_working_table, "wrapper.py"))
             delete_file(os.path.join(job_working_table, ".magnus_success"))
             delete_file(os.path.join(job_working_table, ".magnus_user_script.sh"))
+            delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")
 

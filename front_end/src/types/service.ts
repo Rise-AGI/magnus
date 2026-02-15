@@ -28,6 +28,7 @@ export interface Service {
   job_type: string;
   cpu_count?: number | null;
   memory_demand?: string | null;
+  ephemeral_storage?: string | null;
   runner?: string | null;
   container_image?: string | null;
   system_entry_command?: string | null;
