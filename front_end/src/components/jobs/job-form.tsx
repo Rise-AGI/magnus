@@ -88,7 +88,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   
-  const [cpuCount, setCpuCount] = useState<number>(0);
+  const [cpuCount, setCpuCount] = useState<number>(initialData?.cpu_count ?? 0);
   const [memoryDemand, setMemoryDemand] = useState<string>(initialData?.memory_demand || "");
   const [ephemeralStorage, setEphemeralStorage] = useState<string>(initialData?.ephemeral_storage || "");
   const [runner, setRunner] = useState<string>(initialData?.runner || "");

@@ -115,7 +115,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // === Advanced Overrides ===
-  const [cpuCount, setCpuCount] = useState<number>(0);
+  const [cpuCount, setCpuCount] = useState<number>(data?.cpu_count ?? 0);
   const [memoryDemand, setMemoryDemand] = useState<string>(data?.memory_demand || "");
   const [ephemeralStorage, setEphemeralStorage] = useState<string>(data?.ephemeral_storage || "");
   const [runner, setRunner] = useState<string>(data?.runner || "");
