@@ -50,6 +50,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
       setShowSaveToast(false);
       setToastFading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omit initialData: only reset form on open, not on parent refetch
   }, [isOpen]);
 
   // Ctrl+S / Cmd+S: save without closing
