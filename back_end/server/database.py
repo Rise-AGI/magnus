@@ -1,5 +1,5 @@
 # back_end/server/database.py
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from pywheels.file_tools import guarantee_file_exist
@@ -12,11 +12,18 @@ sqlalchemy_database_url = f"sqlite:///{magnus_database_path}/magnus.db"
 
 
 engine = create_engine(
-    url = sqlalchemy_database_url, 
+    url = sqlalchemy_database_url,
     connect_args = {
         "check_same_thread": False
     },
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
 SessionLocal = sessionmaker(
     autocommit = False, 
     autoflush = False, 
