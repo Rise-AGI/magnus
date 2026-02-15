@@ -164,6 +164,7 @@ def _try_revive_service_standalone(service_id: str) -> Tuple[str, int]:
                 gpu_type = service.gpu_type,
                 cpu_count = service.cpu_count,
                 memory_demand = service.memory_demand,
+                ephemeral_storage = service.ephemeral_storage,
                 runner = service.runner,
                 entry_command = env_cmd,
                 status = JobStatus.PREPARING,

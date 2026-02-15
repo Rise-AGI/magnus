@@ -376,6 +376,16 @@ const translations = {
   "jobDetail.externalTaskDesc": { zh: "此任务由 Slurm CLI 直接管理，不在 Magnus 范围内。详细日志和配置在此不可用。", en: "This task is managed directly by Slurm CLI outside of Magnus. Detailed logs and configuration are not available here." },
 
   // ===== Job Detail - Status Card =====
+  // ===== Job Status =====
+  "jobStatus.running": { zh: "运行中", en: "Running" },
+  "jobStatus.success": { zh: "成功", en: "Success" },
+  "jobStatus.failed": { zh: "失败", en: "Failed" },
+  "jobStatus.paused": { zh: "已暂停", en: "Paused" },
+  "jobStatus.pending": { zh: "排队中", en: "Pending" },
+  "jobStatus.preparing": { zh: "准备中", en: "Preparing" },
+  "jobStatus.terminated": { zh: "已终止", en: "Terminated" },
+
+  // ===== Job Detail - Header =====
   "jobDetail.status": { zh: "状态", en: "Status" },
   "jobDetail.creator": { zh: "创建者", en: "Creator" },
   "jobDetail.live": { zh: "实时", en: "Live" },

@@ -468,7 +468,6 @@ def main():
 export APPTAINERENV_MAGNUS_TOKEN={{user_token}}
 export APPTAINERENV_MAGNUS_ADDRESS={{magnus_address}}
 export APPTAINERENV_MAGNUS_JOB_ID={{job_id}}
-export APPTAINERENV_HOME=/magnus
 export APPTAINERENV_MAGNUS_HOME=/magnus
 export APPTAINERENV_MAGNUS_RESULT=/magnus/workspace/.magnus_result
 export APPTAINERENV_MAGNUS_ACTION=/magnus/workspace/.magnus_action

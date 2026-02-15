@@ -308,7 +308,8 @@ export default function JobDetailsPage() {
                   job.status === "Success" ? "text-green-400" :
                   job.status === "Failed" ? "text-red-400" :
                   job.status === "Preparing" ? "text-cyan-400" : "text-zinc-300"}`}>
-                {(job.status === "Queued" ? "Pending" : job.status).toUpperCase()}
+                {/* status 是运行时动态值，无法满足 TranslationKey 字面量类型 */}
+                {t(`jobStatus.${(job.status === "Queued" ? "pending" : job.status.toLowerCase())}` as any)?.toUpperCase() || job.status.toUpperCase()}
               </span>
             </div>
             {/* Owner */}

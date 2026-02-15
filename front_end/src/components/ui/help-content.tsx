@@ -191,7 +191,7 @@ export function JobFormHelp() {
         <HelpParagraph>
           {t("help.jobForm.runtimeEnvDesc")}
         </HelpParagraph>
-        <HelpCodeBlock>{`/magnus/                     ← $HOME, $MAGNUS_HOME
+        <HelpCodeBlock>{`/magnus/                     ← $MAGNUS_HOME
 └── workspace/               ← bind mount (host → container)
     ├── repository/          ← git repo root (working directory)
     ├── .magnus_result       ← $MAGNUS_RESULT
