@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Loader2, Terminal, RefreshCw, DraftingCompass, Save } from "lucide-react";
+import { Loader2, Terminal, RefreshCw, DraftingCompass, Save, Check } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
@@ -37,14 +37,34 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
   const [formData, setFormData] = useState(initialData);
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showSaveToast, setShowSaveToast] = useState(false);
+  const [toastFading, setToastFading] = useState(false);
+  const keepOpenRef = useRef(false);
+  const handleSubmitRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (isOpen) {
       setFormData(initialData);
       setErrorField(null);
       setErrorMessage(null);
+      setShowSaveToast(false);
+      setToastFading(false);
     }
-  }, [isOpen, initialData]);
+  }, [isOpen]);
+
+  // Ctrl+S / Cmd+S: save without closing
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        keepOpenRef.current = true;
+        handleSubmitRef.current();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isOpen]);
 
   // 如果是 Clone 模式进入，且 ID 未发生变更，则视为 Update 操作
   const isOriginalId = mode === 'clone' && formData.id === initialData.id;
@@ -167,6 +187,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
   };
 
   const handleSubmit = async () => {
+    if (isSaving) return;
     const id = formData.id.trim();
     const title = formData.title.trim();
     const description = formData.description.trim();
@@ -178,29 +199,43 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
       setErrorField("title");
       setErrorMessage("⚠️ Blueprint Name is required");
       scrollToError("field-title");
+      keepOpenRef.current = false;
       return;
     }
     if (!id) {
       setErrorField("id");
       setErrorMessage("⚠️ Blueprint ID is required");
       scrollToError("field-id");
+      keepOpenRef.current = false;
       return;
     }
     if (!description) {
       setErrorField("description");
       setErrorMessage("⚠️ Description is required");
       scrollToError("field-description");
+      keepOpenRef.current = false;
       return;
     }
 
     try {
       await onSave({ ...formData, id, title, description });
+      if (keepOpenRef.current) {
+        setShowSaveToast(true);
+        setToastFading(false);
+        setTimeout(() => setToastFading(true), 1500);
+        setTimeout(() => { setShowSaveToast(false); setToastFading(false); }, 2000);
+      } else {
+        onClose();
+      }
     } catch (e: any) {
       setErrorField("code");
       setErrorMessage(`⚠️ ${e.message || "Failed to save blueprint"}`);
       scrollToError("field-code");
+    } finally {
+      keepOpenRef.current = false;
     }
   };
+  handleSubmitRef.current = handleSubmit;
 
   const handleGetPayload = () => {
     return {
@@ -261,7 +296,13 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
         </>
       }
     >
-      <div className="flex flex-col min-h-full">
+      <div className="flex flex-col min-h-full relative">
+        {showSaveToast && (
+          <div className={`fixed top-[22px] left-1/2 -translate-x-1/2 z-[110] bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-5 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-2xl backdrop-blur-sm transition-opacity duration-500 ${toastFading ? 'opacity-0' : 'opacity-100'}`}>
+            <Check className="w-4 h-4" />
+            {t("blueprintEditor.saved")}
+          </div>
+        )}
         <div className="flex-1 space-y-8 pb-4">
           <div className="max-w-3xl mx-auto space-y-6">
             <h3 className="text-zinc-200 text-sm font-semibold flex items-center gap-2">
@@ -351,7 +392,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
           <div className="flex gap-3 w-full sm:w-auto">
             <button onClick={onClose} className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors">{t("common.cancel")}</button>
             <button
-                onClick={handleSubmit}
+                onClick={() => { keepOpenRef.current = false; handleSubmit(); }}
                 disabled={isSaving}
                 className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
             >

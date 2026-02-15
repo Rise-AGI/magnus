@@ -112,7 +112,6 @@ export default function BlueprintsPage() {
     setIsSaving(true);
     try {
       await client("/api/blueprints", { method: "POST", json: data });
-      setIsEditorOpen(false);
       const main = document.querySelector('main');
       if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
       fetchBlueprints();

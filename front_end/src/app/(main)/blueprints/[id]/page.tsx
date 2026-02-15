@@ -66,8 +66,8 @@ export default function BlueprintDetailsPage() {
   const currentHashRef = useRef<string>("");
 
   // 1. Fetch Blueprint Details
-  const fetchBlueprint = useCallback(async () => {
-    setLoading(true);
+  const fetchBlueprint = useCallback(async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const data = await client(`/api/blueprints/${blueprintId}`);
       
@@ -189,14 +189,13 @@ export default function BlueprintDetailsPage() {
     setIsSavingClone(true);
     try {
       await client("/api/blueprints", { method: "POST", json: data });
-      setEditorOpen(false);
 
       if (data.id === blueprint?.id) {
-         await fetchBlueprint();
+        await fetchBlueprint(true);
       } else {
-         sessionStorage.setItem('magnus_new_blueprint', 'true');
-         router.refresh();
-         router.push('/blueprints');
+        sessionStorage.setItem('magnus_new_blueprint', 'true');
+        router.refresh();
+        router.push('/blueprints');
       }
     } finally {
       setIsSavingClone(false);

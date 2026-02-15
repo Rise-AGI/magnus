@@ -281,6 +281,7 @@ const translations = {
   "blueprintEditor.implementation": { zh: "实现逻辑", en: "Implementation" },
   "blueprintEditor.pythonLogic": { zh: "Python 逻辑", en: "Python Logic" },
   "blueprintEditor.updating": { zh: "正在更新现有 Blueprint。", en: "Updating existing blueprint." },
+  "blueprintEditor.saved": { zh: "已保存", en: "Saved" },
   "blueprintEditor.creating": { zh: "正在创建新 Blueprint 定义。", en: "Creating new blueprint definition." },
   "blueprintEditor.updateBtn": { zh: "更新 Blueprint", en: "Update Blueprint" },
   "blueprintEditor.createBtn": { zh: "创建 Blueprint", en: "Create Blueprint" },
