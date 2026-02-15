@@ -51,7 +51,7 @@ class JobSubmission(BaseModel):
     commit_sha: str
     entry_command: str
     gpu_type: str
-    gpu_count: int = 1
+    gpu_count: int = 0
     job_type: JobType = JobType.A2
     container_image: Optional[str] = None
     cpu_count: Optional[int] = None
@@ -206,7 +206,7 @@ class ServiceCreate(BaseModel):
     branch: str
     commit_sha: str
     entry_command: str
-    gpu_count: int = 1
+    gpu_count: int = 0
     gpu_type: str
     job_type: JobType = JobType.A2
     cpu_count: Optional[int] = None

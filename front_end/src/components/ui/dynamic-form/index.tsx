@@ -415,7 +415,7 @@ function FormField({
       {renderContent()}
       {field.description && (
         <p className={cn(
-          "text-[11px] mt-1 ml-0.5 transition-colors",
+          "text-[11px] mt-1 ml-0.5 transition-colors whitespace-pre-line",
           isOptionalEnabled ? "text-zinc-500" : "text-zinc-600"
         )}>
           {field.description}

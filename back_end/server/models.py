@@ -142,7 +142,7 @@ class Service(Base):
     entry_command: Mapped[str] = mapped_column(Text)
     job_task_name: Mapped[str] = mapped_column(String, nullable=False)
     job_description: Mapped[str] = mapped_column(String, nullable=False)
-    gpu_count: Mapped[int] = mapped_column(Integer, default=1)
+    gpu_count: Mapped[int] = mapped_column(Integer, default=0)
     gpu_type: Mapped[str] = mapped_column(String)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.B2)
     cpu_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

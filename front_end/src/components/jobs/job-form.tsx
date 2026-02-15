@@ -71,10 +71,10 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   const [selectedCommit, setSelectedCommit] = useState(initialData?.commit_sha || "");
   const [command, setCommand] = useState(initialData?.entry_command || "");
   
-  const [gpuCount, setGpuCount] = useState(initialData?.gpu_count ?? 1);
+  const [gpuCount, setGpuCount] = useState(initialData?.gpu_count ?? 0);
   const [gpuType, setGpuType] = useState(
-    initialData?.gpu_type || (initialData?.gpu_count === 0 ? "cpu" : PHYSICAL_GPUS[0].value)
-  ); 
+    initialData?.gpu_type || (initialData?.gpu_count ? PHYSICAL_GPUS[0].value : "cpu")
+  );
   
   const [jobType, setJobType] = useState(initialData?.job_type || "A2");
 
