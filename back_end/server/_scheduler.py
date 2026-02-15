@@ -435,6 +435,8 @@ def main():
     magnus_address = {repr(magnus_address)}
     job_id = {repr(job_id)}
     ephemeral_storage = {repr(ephemeral_storage)}
+    apptainer_tmp_dir = os.path.join(work_dir, ".magnus_tmp")
+    apptainer_cache_dir = os.path.join(work_dir, ".magnus_cache")
 
     user_cmd_str = {repr(job.entry_command)}
     if "sudo" in user_cmd_str:
@@ -463,6 +465,8 @@ def main():
     try:
         size_mb = _parse_size_to_mb(ephemeral_storage)
         subprocess.check_call(["apptainer", "overlay", "create", "--size", str(size_mb), overlay_path])
+        os.makedirs(apptainer_tmp_dir, exist_ok=True)
+        os.makedirs(apptainer_cache_dir, exist_ok=True)
 
         shell_cmd = f"""set -e
 export APPTAINERENV_MAGNUS_TOKEN={{user_token}}
@@ -474,6 +478,8 @@ export APPTAINERENV_MAGNUS_ACTION=/magnus/workspace/.magnus_action
 
 {{system_entry_command}}
 
+export APPTAINER_TMPDIR={{apptainer_tmp_dir}}
+export APPTAINER_CACHEDIR={{apptainer_cache_dir}}
 export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:/magnus/workspace"
 apptainer exec --nv --containall --overlay {{overlay_path}} --pwd "/magnus/workspace/repository" "{{sif_path}}" bash "/magnus/workspace/.magnus_user_script.sh"
 """
@@ -585,6 +591,8 @@ if __name__ == "__main__":
             delete_file(os.path.join(job_working_table, ".magnus_success"))
             delete_file(os.path.join(job_working_table, ".magnus_user_script.sh"))
             delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
+            delete_file(os.path.join(job_working_table, ".magnus_tmp"))
+            delete_file(os.path.join(job_working_table, ".magnus_cache"))
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")
 
