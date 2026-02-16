@@ -497,7 +497,7 @@ done
 APPTAINER_CMD="apptainer exec --nv --containall --overlay {{overlay_path}} --pwd /magnus/workspace/repository {{sif_path}} bash /magnus/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
-    rootlesskit --net=slirp4netns --disable-host-loopback --port-driver=builtin --publish "$MAGNUS_PORT_MAP" $APPTAINER_CMD
+    rootlesskit --net=slirp4netns --disable-host-loopback --port-driver=builtin --publish "$MAGNUS_PORT_MAP" $APPTAINER_CMD 2> >(grep -v 'rootlesskit' >&2)
 else
     $APPTAINER_CMD
 fi
