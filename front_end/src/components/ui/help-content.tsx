@@ -217,6 +217,18 @@ export function JobFormHelp() {
           {t("help.jobForm.runtimeWritability")}
         </HelpParagraph>
       </HelpSection>
+
+      <HelpSection title={t("help.jobForm.networkIsolation")}>
+        <HelpParagraph>
+          {t("help.jobForm.networkIsolationDesc")}
+        </HelpParagraph>
+        <HelpCodeBlock>{`# 桥接模式 + 端口映射（由管理员配置）
+MAGNUS_NET_MODE=bridge
+MAGNUS_PORT_MAP=0.0.0.0:31000:8888/tcp`}</HelpCodeBlock>
+        <HelpParagraph>
+          {t("help.jobForm.proxyPassthrough")}
+        </HelpParagraph>
+      </HelpSection>
     </>
   );
 }

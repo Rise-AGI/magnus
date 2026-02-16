@@ -568,6 +568,15 @@ const translations = {
     zh: "workspace/ 下的写入会持久化到宿主机。容器其余路径通过 Ephemeral Storage（临时存储）提供可写层，任务结束后自动销毁。",
     en: "Writes under workspace/ persist to the host. Other container paths are writable via Ephemeral Storage overlay, automatically destroyed after task completion."
   },
+  "help.jobForm.networkIsolation": { zh: "网络与代理", en: "Network & Proxy" },
+  "help.jobForm.networkIsolationDesc": {
+    zh: "默认使用宿主机网络（host 模式）。可通过环境变量 MAGNUS_NET_MODE=bridge 切换为 rootlesskit 桥接模式，容器获得独立网络命名空间，通过 MAGNUS_PORT_MAP 声明端口映射。",
+    en: "Host network by default. Set MAGNUS_NET_MODE=bridge for rootlesskit bridge mode with isolated network namespace. Use MAGNUS_PORT_MAP for port forwarding."
+  },
+  "help.jobForm.proxyPassthrough": {
+    zh: "宿主机的代理环境变量（HTTP_PROXY / HTTPS_PROXY / ALL_PROXY 等）会自动传入容器。桥接模式下 127.0.0.1 自动转译为网关地址（默认 10.0.2.2）。",
+    en: "Host proxy env vars (HTTP_PROXY / HTTPS_PROXY / ALL_PROXY, etc.) are auto-forwarded into the container. In bridge mode, 127.0.0.1 is auto-translated to the gateway address (default 10.0.2.2)."
+  },
 
   // ===== Service Form Help =====
   "help.serviceForm.intro": {
