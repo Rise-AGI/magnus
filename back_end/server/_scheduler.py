@@ -485,10 +485,10 @@ export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_d
 
 MAGNUS_HOST_GATEWAY="${{MAGNUS_HOST_GATEWAY:-10.0.2.2}}"
 for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy; do
-    eval _val="\\$$_var"
+    eval _val="\\\\$$_var"
     if [ -n "$_val" ]; then
         if [ "${{MAGNUS_NET_MODE:-host}}" = "bridge" ]; then
-            _val=$(echo "$_val" | sed "s/127\\.0\\.0\\.1/$MAGNUS_HOST_GATEWAY/g; s/localhost/$MAGNUS_HOST_GATEWAY/g")
+            _val=$(echo "$_val" | sed "s/127\\\\.0\\\\.0\\\\.1/$MAGNUS_HOST_GATEWAY/g; s/localhost/$MAGNUS_HOST_GATEWAY/g")
         fi
         export "APPTAINERENV_$_var=$_val"
     fi
