@@ -180,22 +180,43 @@ class ResourceManager:
             logger.info(f"Pulling container image: {image}")
             start_time = time.time()
 
-            proc = await asyncio.create_subprocess_exec(
-                "apptainer", "pull", "--disable-cache", sif_path, image,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
+            # 非瞬态错误（镜像不存在、鉴权失败等）直接失败，不浪费时间重试
+            non_transient_patterns = ["unauthorized", "not found", "manifest unknown", "denied", "invalid reference"]
+            max_retries = 3
+            base_retry_delay = 10
 
-            if proc.returncode != 0:
-                error_msg = stderr.decode().strip()
-                logger.error(f"Failed to pull image {image}: {error_msg}")
+            for attempt in range(max_retries):
+                proc = await asyncio.create_subprocess_exec(
+                    "apptainer", "pull", "--disable-cache", sif_path, image,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+
+                if proc.returncode == 0:
+                    break
+
+                # 清理残留的不完整 SIF
                 if os.path.exists(sif_path):
                     try:
                         os.remove(sif_path)
                     except OSError:
                         pass
-                return False, error_msg
+
+                error_msg = stderr.decode().strip()
+                error_lower = error_msg.lower()
+
+                if any(p in error_lower for p in non_transient_patterns):
+                    logger.error(f"Failed to pull image {image} (non-transient): {error_msg}")
+                    return False, error_msg
+
+                if attempt < max_retries - 1:
+                    retry_delay = base_retry_delay * (2 ** attempt)
+                    logger.warning(f"Pull attempt {attempt + 1}/{max_retries} failed, retrying in {retry_delay}s: {error_msg}")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error(f"Failed to pull image {image} after {max_retries} attempts: {error_msg}")
+                    return False, error_msg
 
             elapsed = time.time() - start_time
             os.chmod(sif_path, 0o644)
@@ -213,11 +234,9 @@ class ResourceManager:
         job_working_dir: str,
     ) -> Tuple[bool, Optional[str]]:
         """
-        确保仓库可用。返回 (success, error_msg)
-        1. 检查/创建 cache（带锁防止重复 clone）
-        2. 复制 cache 到工作目录
-        3. fetch + checkout 到指定 commit
-        4. 设置 ACL
+        确保仓库可用。返回 (success, result)
+        - 成功：(True, resolved_sha)
+        - 失败：(False, "error message")
         """
         if os.path.exists(target_dir):
             return True, None
@@ -260,10 +279,11 @@ class ResourceManager:
             except OSError:
                 pass
 
-        # Phase 2: 复制 cache 到工作目录
+        # Phase 2: 复制 cache 到工作目录（放到线程池避免阻塞 event loop）
         start_time = time.time()
+        loop = asyncio.get_event_loop()
         try:
-            shutil.copytree(cache_path, target_dir)
+            await loop.run_in_executor(None, shutil.copytree, cache_path, target_dir)
         except Exception as e:
             logger.error(f"Failed to copy repo cache: {e}")
             return False, f"copy cache failed: {e}"
