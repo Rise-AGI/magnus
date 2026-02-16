@@ -45,4 +45,8 @@ RUN uv venv /tmp/_cache_warmup --python 3.14 \
         "torch>=2.9.1" "torchvision>=0.24.1" \
     && rm -rf /tmp/_cache_warmup
 
+# Symlink uv/uvx to standard PATH (apptainer --containall may not inherit ENV PATH)
+RUN ln -sf /root/.local/bin/uv /usr/local/bin/uv \
+    && ln -sf /root/.local/bin/uvx /usr/local/bin/uvx
+
 CMD ["/bin/bash"]

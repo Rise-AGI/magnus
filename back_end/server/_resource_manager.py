@@ -181,7 +181,7 @@ class ResourceManager:
             start_time = time.time()
 
             proc = await asyncio.create_subprocess_exec(
-                "apptainer", "pull", sif_path, image,
+                "apptainer", "pull", "--disable-cache", sif_path, image,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
