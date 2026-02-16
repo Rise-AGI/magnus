@@ -483,11 +483,11 @@ export APPTAINER_TMPDIR={{apptainer_tmp_dir}}
 export APPTAINER_CACHEDIR={{apptainer_cache_dir}}
 export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:/magnus/workspace"
 
-MAGNUS_HOST_GATEWAY="${{MAGNUS_HOST_GATEWAY:-10.0.2.2}}"
+MAGNUS_HOST_GATEWAY="${{{{MAGNUS_HOST_GATEWAY:-10.0.2.2}}}}"
 for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy; do
     eval _val="\\\\$$_var"
     if [ -n "$_val" ]; then
-        if [ "${{MAGNUS_NET_MODE:-host}}" = "bridge" ]; then
+        if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
             _val=$(echo "$_val" | sed "s/127\\\\.0\\\\.0\\\\.1/$MAGNUS_HOST_GATEWAY/g; s/localhost/$MAGNUS_HOST_GATEWAY/g")
         fi
         export "APPTAINERENV_$_var=$_val"
@@ -496,7 +496,7 @@ done
 
 APPTAINER_CMD="apptainer exec --nv --containall --overlay {{overlay_path}} --pwd /magnus/workspace/repository {{sif_path}} bash /magnus/workspace/.magnus_user_script.sh"
 
-if [ "${{MAGNUS_NET_MODE:-host}}" = "bridge" ]; then
+if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     rootlesskit --net=slirp4netns --disable-host-loopback --port-driver=builtin --publish "$MAGNUS_PORT_MAP" $APPTAINER_CMD
 else
     $APPTAINER_CMD
