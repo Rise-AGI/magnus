@@ -39,6 +39,7 @@ back_end/python_scripts/run*.py
 *__pycache__*
 !back_end/python_scripts/blueprints/magnus-slurm.py
 !back_end/python_scripts/magnus_slurm.py
+!scripts/setup_single_node_slurm.sh
 documents/
 *DS_Store*
 *vscode*

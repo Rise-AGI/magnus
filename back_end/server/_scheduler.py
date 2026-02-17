@@ -494,7 +494,14 @@ for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO
     fi
 done
 
-APPTAINER_CMD="apptainer exec --nv --containall --no-mount tmp --overlay {{overlay_path}} --pwd /magnus/workspace/repository {{sif_path}} bash /magnus/workspace/.magnus_user_script.sh"
+APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-containall}}}}"
+APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp --overlay {{overlay_path}}"
+
+if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
+    APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
+fi
+
+APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd /magnus/workspace/repository {{sif_path}} bash /magnus/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     rootlesskit --net=slirp4netns --disable-host-loopback --port-driver=builtin --publish "$MAGNUS_PORT_MAP" $APPTAINER_CMD
