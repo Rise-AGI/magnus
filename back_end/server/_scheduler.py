@@ -497,7 +497,10 @@ for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO
 done
 
 APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-containall}}}}"
-APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp --overlay {{overlay_path}}"
+APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
+if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ]; then
+    APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
+fi
 
 if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
