@@ -16,7 +16,7 @@ from .._magnus_config import magnus_config
 
 
 _node_name = magnus_config["cluster"]["name"]
-_gpu_model = magnus_config["cluster"]["gpus"][0]["label"]
+_gpu_model = magnus_config["cluster"]["gpus"][0]["label"] if magnus_config["cluster"]["gpus"] else "N/A"
 
 
 router = APIRouter()
