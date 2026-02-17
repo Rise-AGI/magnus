@@ -66,7 +66,7 @@ AccountingStorageType=accounting_storage/none
 JobAcctGatherType=jobacct_gather/none
 
 NodeName=localhost CPUs=$CPUS RealMemory=$MEMORY_MB State=UNKNOWN
-PartitionName=default Nodes=localhost Default=YES MaxTime=INFINITE State=UP
+PartitionName=batch Nodes=localhost Default=YES MaxTime=INFINITE State=UP
 EOF
 
 echo "[SLURM Setup] slurm.conf written ($(wc -l < "$SLURM_CONF") lines, $(wc -c < "$SLURM_CONF") bytes)"
