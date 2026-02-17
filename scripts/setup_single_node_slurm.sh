@@ -47,8 +47,7 @@ SlurmctldHost=$NODE_HOSTNAME(127.0.0.1)
 
 ProctrackType=proctrack/linuxproc
 TaskPlugin=task/none
-SelectType=select/cons_tres
-SelectTypeParameters=CR_Core_Memory
+SelectType=select/linear
 ReturnToService=2
 
 SlurmctldPidFile=/run/slurm/slurmctld.pid
@@ -96,30 +95,48 @@ fi
 
 # Controller
 echo "[SLURM Setup] Diagnostics before slurmctld:"
-echo "  SLURM env vars:"
-env | grep -i slurm 2>/dev/null | sed 's/^/    /' || echo "    (none)"
+echo "  slurmctld version: $(slurmctld -V 2>&1)"
+echo "  Plugin directories:"
+for pdir in /usr/lib/*/slurm-wlm /usr/lib/slurm-wlm /usr/lib64/slurm; do
+    if [ -d "$pdir" ]; then
+        echo "    $pdir ($(ls "$pdir"/*.so 2>/dev/null | wc -l) plugins)"
+        ls "$pdir"/ 2>/dev/null | grep -E 'select_|proctrack_|task_' | sed 's/^/      /' || true
+    fi
+done
 echo "  /etc/slurm/ contents:"
 ls -la /etc/slurm/ 2>&1 | sed 's/^/    /'
-echo "  Package version:"
-dpkg -l 'slurm*' 2>/dev/null | grep '^ii' | sed 's/^/    /' || echo "    (dpkg not available)"
-echo "  slurmctld binary:"
-which slurmctld 2>&1 | sed 's/^/    /'
-slurmctld -V 2>&1 | sed 's/^/    /'
 
-echo "[SLURM Setup] Starting slurmctld -f $SLURM_CONF ..."
-SLURM_CONF="$SLURM_CONF" slurmctld -f "$SLURM_CONF" || echo "[SLURM Setup] WARNING: slurmctld exited with code $?" >&2
-sleep 2
+# Run slurmctld in FOREGROUND (-D) to capture real errors instead of losing them to daemonization
+echo "[SLURM Setup] Starting slurmctld -D -f $SLURM_CONF (foreground, backgrounded)..."
+SLURM_CONF="$SLURM_CONF" slurmctld -D -f "$SLURM_CONF" > /var/log/slurm/slurmctld_stdout.log 2>&1 &
+SLURMCTLD_PID=$!
+sleep 3
 
-echo "[SLURM Setup] slurmctld.log after start:"
-cat /var/log/slurm/slurmctld.log 2>/dev/null || echo "(empty)"
+if kill -0 "$SLURMCTLD_PID" 2>/dev/null; then
+    echo "[SLURM Setup] slurmctld is running (PID=$SLURMCTLD_PID)"
+else
+    echo "[SLURM Setup] ERROR: slurmctld died! Foreground output:" >&2
+    cat /var/log/slurm/slurmctld_stdout.log 2>/dev/null >&2 || true
+    echo "[SLURM Setup] slurmctld.log:" >&2
+    cat /var/log/slurm/slurmctld.log 2>/dev/null >&2 || true
+    exit 1
+fi
 
 # Worker (use -N to tell slurmd its compute node name, decoupled from hostname)
-echo "[SLURM Setup] Starting slurmd -N $COMPUTE_NODE..."
-slurmd -N "$COMPUTE_NODE" || echo "[SLURM Setup] WARNING: slurmd exited with code $?" >&2
+echo "[SLURM Setup] Starting slurmd -D -N $COMPUTE_NODE (foreground, backgrounded)..."
+slurmd -D -N "$COMPUTE_NODE" > /var/log/slurm/slurmd_stdout.log 2>&1 &
+SLURMD_PID=$!
 sleep 2
 
-echo "[SLURM Setup] slurmd.log after start:"
-cat /var/log/slurm/slurmd.log 2>/dev/null || echo "(empty)"
+if kill -0 "$SLURMD_PID" 2>/dev/null; then
+    echo "[SLURM Setup] slurmd is running (PID=$SLURMD_PID)"
+else
+    echo "[SLURM Setup] ERROR: slurmd died! Foreground output:" >&2
+    cat /var/log/slurm/slurmd_stdout.log 2>/dev/null >&2 || true
+    echo "[SLURM Setup] slurmd.log:" >&2
+    cat /var/log/slurm/slurmd.log 2>/dev/null >&2 || true
+    exit 1
+fi
 
 # --- 5. Verify cluster ---
 echo "[SLURM Setup] Checking cluster status..."
