@@ -94,30 +94,56 @@ else
 fi
 
 # Controller
-echo "[SLURM Setup] Diagnostics before slurmctld:"
-echo "  slurmctld version: $(slurmctld -V 2>&1)"
-echo "  Plugin directories:"
-for pdir in /usr/lib/*/slurm-wlm /usr/lib/slurm-wlm /usr/lib64/slurm; do
-    if [ -d "$pdir" ]; then
-        echo "    $pdir ($(ls "$pdir"/*.so 2>/dev/null | wc -l) plugins)"
-        ls "$pdir"/ 2>/dev/null | grep -E 'select_|proctrack_|task_' | sed 's/^/      /' || true
-    fi
-done
-echo "  /etc/slurm/ contents:"
-ls -la /etc/slurm/ 2>&1 | sed 's/^/    /'
+echo "[SLURM Setup] slurmctld version: $(slurmctld -V 2>&1)"
 
-# Run slurmctld in FOREGROUND (-D) to capture real errors instead of losing them to daemonization
-echo "[SLURM Setup] Starting slurmctld -D -f $SLURM_CONF (foreground, backgrounded)..."
+# Sanity checks before slurmctld
+echo "[SLURM Setup] Pre-flight checks:"
+echo "  which slurmctld: $(which slurmctld 2>&1)"
+echo "  ldd (first 5):"
+ldd "$(which slurmctld)" 2>&1 | head -5 | sed 's/^/    /' || true
+echo "  ulimit -n (open files): $(ulimit -n 2>&1)"
+echo "  ulimit -u (max procs): $(ulimit -u 2>&1)"
+echo "  write test /var/log/slurm/:"
+echo "x" > /var/log/slurm/_test 2>&1 && echo "    OK" && rm -f /var/log/slurm/_test || echo "    FAILED: $?"
+echo "  write test /var/spool/slurmctld/:"
+echo "x" > /var/spool/slurmctld/_test 2>&1 && echo "    OK" && rm -f /var/spool/slurmctld/_test || echo "    FAILED: $?"
+echo "  env vars (SLURM/PATH):"
+echo "    PATH=$PATH"
+env | grep -iE 'slurm|munge' 2>/dev/null | sed 's/^/    /' || echo "    (no slurm/munge env)"
+
+# Quick foreground test: run slurmctld for up to 5s, capture exit code
+echo "[SLURM Setup] Foreground slurmctld test (timeout 5s)..."
+set +e
+timeout 5 slurmctld -D -f "$SLURM_CONF" > /var/log/slurm/slurmctld_stdout.log 2>&1
+SLURMCTLD_EXIT=$?
+set -e
+echo "[SLURM Setup] slurmctld exit code: $SLURMCTLD_EXIT (124=timeout/OK, 139=segfault, 137=killed)"
+echo "[SLURM Setup] slurmctld stdout/stderr:"
+cat /var/log/slurm/slurmctld_stdout.log 2>/dev/null | head -30 || echo "(empty)"
+echo "[SLURM Setup] slurmctld.log:"
+cat /var/log/slurm/slurmctld.log 2>/dev/null | head -30 || echo "(empty)"
+
+if [ "$SLURMCTLD_EXIT" != "124" ]; then
+    echo "[SLURM Setup] FATAL: slurmctld failed to stay alive (exit=$SLURMCTLD_EXIT)" >&2
+    echo "[SLURM Setup] Full stdout:" >&2
+    cat /var/log/slurm/slurmctld_stdout.log 2>/dev/null >&2 || true
+    echo "[SLURM Setup] Full log:" >&2
+    cat /var/log/slurm/slurmctld.log 2>/dev/null >&2 || true
+    exit 1
+fi
+
+# slurmctld survived 5s — now start it for real
+echo "[SLURM Setup] Starting slurmctld -D -f $SLURM_CONF (for real)..."
+rm -f /var/log/slurm/slurmctld.log /var/log/slurm/slurmctld_stdout.log
 SLURM_CONF="$SLURM_CONF" slurmctld -D -f "$SLURM_CONF" > /var/log/slurm/slurmctld_stdout.log 2>&1 &
 SLURMCTLD_PID=$!
-sleep 3
+sleep 2
 
 if kill -0 "$SLURMCTLD_PID" 2>/dev/null; then
     echo "[SLURM Setup] slurmctld is running (PID=$SLURMCTLD_PID)"
 else
-    echo "[SLURM Setup] ERROR: slurmctld died! Foreground output:" >&2
+    echo "[SLURM Setup] ERROR: slurmctld died on real start!" >&2
     cat /var/log/slurm/slurmctld_stdout.log 2>/dev/null >&2 || true
-    echo "[SLURM Setup] slurmctld.log:" >&2
     cat /var/log/slurm/slurmctld.log 2>/dev/null >&2 || true
     exit 1
 fi
