@@ -4,27 +4,37 @@
 # Bootstrap a single-node, CPU-only SLURM cluster inside a container.
 # Called from child Magnus blueprint entry_command before deploy.py.
 #
-# Usage: bash setup_single_node_slurm.sh --cpus N --memory-mb M
+# Usage: bash setup_single_node_slurm.sh --cpus N --memory-mb M [--hostname NAME]
 
 set -euo pipefail
 
 # --- Parse arguments ---
 CPUS=4
 MEMORY_MB=8192
+NODE_HOSTNAME=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --cpus)      CPUS="$2";      shift 2 ;;
-        --memory-mb) MEMORY_MB="$2"; shift 2 ;;
+        --cpus)      CPUS="$2";           shift 2 ;;
+        --memory-mb) MEMORY_MB="$2";      shift 2 ;;
+        --hostname)  NODE_HOSTNAME="$2";  shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
 
+if [[ -z "$NODE_HOSTNAME" ]]; then
+    NODE_HOSTNAME=$(hostname -s)
+fi
+
 echo "[SLURM Setup] CPUs=$CPUS, Memory=${MEMORY_MB}MB"
 
-# --- 1. Generate slurm.conf ---
-NODE_HOSTNAME=$(hostname -s)
+# --- 1. Ensure hostname resolves inside --containall container ---
+if ! getent hosts "$NODE_HOSTNAME" > /dev/null 2>&1; then
+    echo "127.0.0.1 $NODE_HOSTNAME" >> /etc/hosts
+    echo "[SLURM Setup] Added $NODE_HOSTNAME to /etc/hosts"
+fi
 
+# --- 2. Generate slurm.conf ---
 cat > /etc/slurm/slurm.conf <<EOF
 ClusterName=magnus-child
 SlurmctldHost=$NODE_HOSTNAME
@@ -55,7 +65,7 @@ EOF
 
 echo "[SLURM Setup] slurm.conf written"
 
-# --- 2. Generate munge key ---
+# --- 3. Generate munge key ---
 mkdir -p /etc/munge /run/munge /var/log/munge
 dd if=/dev/urandom bs=1 count=1024 > /etc/munge/munge.key 2>/dev/null
 # In rootless container we are UID 0; munge user may not exist
@@ -67,7 +77,7 @@ chmod 400 /etc/munge/munge.key
 
 echo "[SLURM Setup] munge key generated"
 
-# --- 3. Start daemons ---
+# --- 4. Start daemons ---
 # Munge — may need --force if running as root
 munged --force 2>/dev/null || munged
 sleep 1
@@ -87,7 +97,7 @@ sleep 1
 slurmd
 sleep 1
 
-# --- 4. Verify cluster ---
+# --- 5. Verify cluster ---
 if sinfo --noheader 2>/dev/null | grep -q .; then
     echo "[SLURM Setup] Cluster is UP:"
     sinfo
