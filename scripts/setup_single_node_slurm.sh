@@ -90,8 +90,21 @@ else
     echo "[SLURM Setup] WARNING: munge verification failed, continuing anyway" >&2
 fi
 
-# SLURM controller
-slurmctld
+# SLURM controller (verbose for diagnostics)
+echo "[SLURM Setup] Pre-flight checks:"
+echo "  hostname=$(hostname -s)"
+echo "  getent hosts $NODE_HOSTNAME: $(getent hosts $NODE_HOSTNAME 2>&1 || echo FAILED)"
+echo "  /etc/hosts:"
+cat /etc/hosts | sed 's/^/    /'
+echo "  spool dirs:"
+ls -ld /var/spool/slurmctld /var/spool/slurmd /run/slurm 2>&1 | sed 's/^/    /'
+echo "  select plugins:"
+find /usr/lib -name 'select_*' 2>/dev/null | sed 's/^/    /' || echo "    (none found)"
+echo "  slurm.conf path check:"
+ls -la /etc/slurm/slurm.conf 2>&1 | sed 's/^/    /'
+ls -la /etc/slurm-llnl/ 2>&1 | sed 's/^/    /'
+
+slurmctld -vvvv
 sleep 1
 
 # SLURM worker
