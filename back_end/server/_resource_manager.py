@@ -247,7 +247,11 @@ class ResourceManager:
         if os.path.exists(target_dir):
             return True, None
 
-        repo_url = f"git@github.com:{namespace}/{repo_name}.git"
+        repo_urls = []
+        if shutil.which("ssh"):
+            repo_urls.append(f"git@github.com:{namespace}/{repo_name}.git")
+        repo_urls.append(f"https://github.com/{namespace}/{repo_name}.git")
+
         cache_path = self._get_repo_cache_path(namespace, repo_name, branch)
         cache_key = f"{namespace}/{repo_name}/{branch}"
 
@@ -259,22 +263,28 @@ class ResourceManager:
             if not os.path.exists(cache_path):
                 self._evict_lru_repos()
 
-                logger.info(f"Cloning repo to cache: {repo_url} -> {cache_path}")
                 start_time = time.time()
+                last_error = ""
 
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "clone", "--branch", branch, "--single-branch", repo_url, cache_path,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, stderr = await proc.communicate()
+                for repo_url in repo_urls:
+                    logger.info(f"Cloning repo to cache: {repo_url} -> {cache_path}")
 
-                if proc.returncode != 0:
-                    error_msg = stderr.decode().strip()
-                    logger.error(f"Failed to clone repo {repo_url}: {error_msg}")
+                    proc = await asyncio.create_subprocess_exec(
+                        "git", "clone", "--branch", branch, "--single-branch", repo_url, cache_path,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, stderr = await proc.communicate()
+
+                    if proc.returncode == 0:
+                        break
+
+                    last_error = stderr.decode().strip()
+                    logger.warning(f"Clone failed ({repo_url}): {last_error}")
                     if os.path.exists(cache_path):
                         shutil.rmtree(cache_path, ignore_errors=True)
-                    return False, f"git clone failed: {error_msg}"
+                else:
+                    return False, f"git clone failed: {last_error}"
 
                 elapsed = time.time() - start_time
                 logger.info(f"Repo cached: {cache_path} ({elapsed:.1f}s)")
