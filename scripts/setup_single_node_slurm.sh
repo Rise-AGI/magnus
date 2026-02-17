@@ -28,11 +28,12 @@ fi
 
 echo "[SLURM Setup] CPUs=$CPUS, Memory=${MEMORY_MB}MB"
 
-# --- 1. Ensure hostname resolves inside --containall container ---
-if ! getent hosts "$NODE_HOSTNAME" > /dev/null 2>&1; then
-    echo "127.0.0.1 $NODE_HOSTNAME" >> /etc/hosts
-    echo "[SLURM Setup] Added $NODE_HOSTNAME to /etc/hosts"
-fi
+# --- 1. Force hostname to resolve to loopback inside container ---
+# Even if the hostname resolves via DNS (to the host's real IP), slurmctld
+# can't bind to that address inside the container. Override unconditionally.
+sed -i "/$NODE_HOSTNAME/d" /etc/hosts 2>/dev/null || true
+echo "127.0.0.1 $NODE_HOSTNAME" >> /etc/hosts
+echo "[SLURM Setup] Forced $NODE_HOSTNAME -> 127.0.0.1 in /etc/hosts"
 
 # --- 2. Generate slurm.conf ---
 cat > /etc/slurm/slurm.conf <<EOF
