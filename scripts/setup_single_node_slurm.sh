@@ -91,5 +91,13 @@ if sinfo --noheader 2>/dev/null | grep -q .; then
     sinfo
 else
     echo "[SLURM Setup] ERROR: sinfo returned no nodes" >&2
+    echo "--- slurmctld.log ---" >&2
+    cat /var/log/slurm/slurmctld.log 2>/dev/null || echo "(empty)" >&2
+    echo "--- slurmd.log ---" >&2
+    cat /var/log/slurm/slurmd.log 2>/dev/null || echo "(empty)" >&2
+    echo "--- ps aux | grep slurm ---" >&2
+    ps aux | grep -E 'slurm|munge' 2>/dev/null || true >&2
+    echo "--- slurm.conf ---" >&2
+    cat /etc/slurm/slurm.conf >&2
     exit 1
 fi
