@@ -95,8 +95,19 @@ else
 fi
 
 # Controller
-echo "[SLURM Setup] Starting slurmctld..."
-slurmctld || echo "[SLURM Setup] WARNING: slurmctld exited with code $?" >&2
+echo "[SLURM Setup] Diagnostics before slurmctld:"
+echo "  SLURM env vars:"
+env | grep -i slurm 2>/dev/null | sed 's/^/    /' || echo "    (none)"
+echo "  /etc/slurm/ contents:"
+ls -la /etc/slurm/ 2>&1 | sed 's/^/    /'
+echo "  Package version:"
+dpkg -l 'slurm*' 2>/dev/null | grep '^ii' | sed 's/^/    /' || echo "    (dpkg not available)"
+echo "  slurmctld binary:"
+which slurmctld 2>&1 | sed 's/^/    /'
+slurmctld -V 2>&1 | sed 's/^/    /'
+
+echo "[SLURM Setup] Starting slurmctld -f $SLURM_CONF ..."
+SLURM_CONF="$SLURM_CONF" slurmctld -f "$SLURM_CONF" || echo "[SLURM Setup] WARNING: slurmctld exited with code $?" >&2
 sleep 2
 
 echo "[SLURM Setup] slurmctld.log after start:"
