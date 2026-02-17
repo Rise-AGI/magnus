@@ -23,9 +23,11 @@ done
 echo "[SLURM Setup] CPUs=$CPUS, Memory=${MEMORY_MB}MB"
 
 # --- 1. Generate slurm.conf ---
+NODE_HOSTNAME=$(hostname -s)
+
 cat > /etc/slurm/slurm.conf <<EOF
 ClusterName=magnus-child
-SlurmctldHost=localhost
+SlurmctldHost=$NODE_HOSTNAME
 
 ProctrackType=proctrack/linuxproc
 TaskPlugin=task/none
@@ -47,8 +49,8 @@ AccountingStorageType=accounting_storage/none
 JobAcctGatherType=jobacct_gather/none
 
 # Single CPU-only node — no GRES
-NodeName=localhost CPUs=$CPUS RealMemory=$MEMORY_MB State=UNKNOWN
-PartitionName=default Nodes=localhost Default=YES MaxTime=INFINITE State=UP
+NodeName=$NODE_HOSTNAME CPUs=$CPUS RealMemory=$MEMORY_MB State=UNKNOWN
+PartitionName=default Nodes=$NODE_HOSTNAME Default=YES MaxTime=INFINITE State=UP
 EOF
 
 echo "[SLURM Setup] slurm.conf written"
