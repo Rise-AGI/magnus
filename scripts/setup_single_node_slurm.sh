@@ -52,6 +52,7 @@ SlurmctldPidFile=/run/slurm/slurmctld.pid
 SlurmdPidFile=/run/slurm/slurmd.pid
 SlurmctldLogFile=/var/log/slurm/slurmctld.log
 SlurmdLogFile=/var/log/slurm/slurmd.log
+SlurmctldDebug=debug5
 StateSaveLocation=/var/spool/slurmctld
 SlurmdSpoolDir=/var/spool/slurmd
 
@@ -106,11 +107,11 @@ echo "  slurm.conf path check:"
 ls -la /etc/slurm/slurm.conf 2>&1 | sed 's/^/    /'
 ls -la /etc/slurm-llnl/ 2>&1 | sed 's/^/    /'
 
-slurmctld -vvvv
+slurmctld || echo "[SLURM Setup] WARNING: slurmctld exited with code $?" >&2
 sleep 1
 
 # SLURM worker
-slurmd
+slurmd || echo "[SLURM Setup] WARNING: slurmd exited with code $?" >&2
 sleep 1
 
 # --- 5. Verify cluster ---
