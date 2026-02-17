@@ -28,17 +28,19 @@ fi
 
 echo "[SLURM Setup] CPUs=$CPUS, Memory=${MEMORY_MB}MB"
 
-# --- 1. Force hostname to resolve to loopback inside container ---
-# Even if the hostname resolves via DNS (to the host's real IP), slurmctld
-# can't bind to that address inside the container. Override unconditionally.
-sed -i "/$NODE_HOSTNAME/d" /etc/hosts 2>/dev/null || true
-echo "127.0.0.1 $NODE_HOSTNAME" >> /etc/hosts
-echo "[SLURM Setup] Forced $NODE_HOSTNAME -> 127.0.0.1 in /etc/hosts"
+# --- 1. Force hostname to resolve to IPv4 loopback inside container ---
+# sed -i may silently fail on overlayfs bind-mounts; overwrite entirely.
+# Remove ::1 hostname entries to prevent slurmctld from binding to IPv6.
+cat > /etc/hosts <<HOSTS
+127.0.0.1 localhost $NODE_HOSTNAME
+::1 localhost ip6-localhost ip6-loopback
+HOSTS
+echo "[SLURM Setup] Rewrote /etc/hosts ($NODE_HOSTNAME -> 127.0.0.1)"
 
 # --- 2. Generate slurm.conf ---
 cat > /etc/slurm/slurm.conf <<EOF
 ClusterName=magnus-child
-SlurmctldHost=$NODE_HOSTNAME
+SlurmctldHost=$NODE_HOSTNAME(127.0.0.1)
 
 ProctrackType=proctrack/linuxproc
 TaskPlugin=task/none
@@ -60,7 +62,7 @@ AccountingStorageType=accounting_storage/none
 JobAcctGatherType=jobacct_gather/none
 
 # Single CPU-only node — no GRES
-NodeName=$NODE_HOSTNAME CPUs=$CPUS RealMemory=$MEMORY_MB State=UNKNOWN
+NodeName=$NODE_HOSTNAME NodeAddr=127.0.0.1 CPUs=$CPUS RealMemory=$MEMORY_MB State=UNKNOWN
 PartitionName=default Nodes=$NODE_HOSTNAME Default=YES MaxTime=INFINITE State=UP
 EOF
 
