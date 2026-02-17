@@ -64,6 +64,7 @@ def _validate_magnus_config(config: Dict[str, Any]) -> None:
     _check_key(scheduler, "spy_gpu_interval", int)
     _check_key(scheduler, "heartbeat_interval", int)
     _check_key(scheduler, "snapshot_interval", int)
+    _check_key(scheduler, "allow_root", bool)
 
     # explorer 配置
     _check_key(server, "explorer", dict)
