@@ -30,6 +30,7 @@ server:
     spy_gpu_interval: 5
     heartbeat_interval: 2
     snapshot_interval: 300
+    allow_root: false
   resource_cache:
     container_cache_size: 80G
     repo_cache_size: 20G

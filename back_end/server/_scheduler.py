@@ -370,6 +370,7 @@ class MagnusScheduler:
                         pass
 
             spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
+            allow_root = magnus_config["server"]["scheduler"]["allow_root"]
             user_token = job.user.token or ""
             magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['front_end_port']}"
             job_id = str(job.id)
@@ -442,7 +443,8 @@ def main():
     if "sudo" in user_cmd_str:
         raise RuntimeError("Error: Not privileged.")
     effective_runner = {repr(effective_runner)}
-    if effective_runner == "root":
+    allow_root = {allow_root}
+    if effective_runner == "root" and not allow_root:
         raise RuntimeError("Error: Not privileged.")
 
     # Phase 1: Start GPU Spy
