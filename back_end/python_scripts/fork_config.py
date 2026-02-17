@@ -13,6 +13,7 @@
 #       server.host=0.0.0.0
 
 import argparse
+import json
 import sys
 from typing import Any, Dict
 
@@ -34,6 +35,12 @@ def parse_value(
 
     if target_type is type(None):
         raise TypeError("Cannot infer target type from a null value in source.")
+
+    if target_type is list or target_type is dict:
+        parsed = json.loads(raw_value)
+        if not isinstance(parsed, target_type):
+            raise TypeError(f"Expected {target_type.__name__}, got {type(parsed).__name__}")
+        return parsed
 
     return target_type(raw_value)
 
