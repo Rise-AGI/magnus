@@ -33,7 +33,7 @@ echo "[SLURM Setup] hostname=$NODE_HOSTNAME, compute_node=$COMPUTE_NODE, CPUs=$C
 
 # --- 1. Force hostname + compute node to resolve to IPv4 loopback ---
 cat > /etc/hosts <<HOSTS
-127.0.0.1 localhost $NODE_HOSTNAME $COMPUTE_NODE
+127.0.0.1 localhost $NODE_HOSTNAME
 ::1 localhost ip6-localhost ip6-loopback
 HOSTS
 echo "[SLURM Setup] /etc/hosts:"
@@ -43,7 +43,7 @@ cat /etc/hosts
 SLURM_CONF=/etc/slurm/slurm.conf
 cat > "$SLURM_CONF" <<EOF
 ClusterName=magnus-child
-SlurmctldHost=$NODE_HOSTNAME(127.0.0.1)
+SlurmctldHost=localhost
 
 ProctrackType=proctrack/linuxproc
 TaskPlugin=task/none
@@ -65,8 +65,8 @@ SlurmUser=root
 AccountingStorageType=accounting_storage/none
 JobAcctGatherType=jobacct_gather/none
 
-NodeName=$COMPUTE_NODE NodeAddr=127.0.0.1 CPUs=$CPUS RealMemory=$MEMORY_MB State=UNKNOWN
-PartitionName=default Nodes=$COMPUTE_NODE Default=YES MaxTime=INFINITE State=UP
+NodeName=localhost CPUs=$CPUS RealMemory=$MEMORY_MB State=UNKNOWN
+PartitionName=default Nodes=localhost Default=YES MaxTime=INFINITE State=UP
 EOF
 
 echo "[SLURM Setup] slurm.conf written ($(wc -l < "$SLURM_CONF") lines, $(wc -c < "$SLURM_CONF") bytes)"
@@ -148,9 +148,9 @@ else
     exit 1
 fi
 
-# Worker (use -N to tell slurmd its compute node name, decoupled from hostname)
-echo "[SLURM Setup] Starting slurmd -D -N $COMPUTE_NODE (foreground, backgrounded)..."
-slurmd -D -N "$COMPUTE_NODE" > /var/log/slurm/slurmd_stdout.log 2>&1 &
+# Worker
+echo "[SLURM Setup] Starting slurmd -D (foreground, backgrounded)..."
+slurmd -D > /var/log/slurm/slurmd_stdout.log 2>&1 &
 SLURMD_PID=$!
 sleep 2
 
@@ -169,7 +169,7 @@ echo "[SLURM Setup] Checking cluster status..."
 if sinfo --noheader 2>/dev/null | grep -q .; then
     echo "[SLURM Setup] Cluster is UP:"
     sinfo
-    scontrol show node "$COMPUTE_NODE"
+    scontrol show node localhost
 else
     echo "[SLURM Setup] ERROR: sinfo returned no nodes" >&2
     echo "--- ps aux | grep slurm ---" >&2
