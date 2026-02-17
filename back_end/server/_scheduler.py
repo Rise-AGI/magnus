@@ -504,7 +504,11 @@ fi
 APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd /magnus/workspace/repository {{sif_path}} bash /magnus/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
-    rootlesskit --net=slirp4netns --disable-host-loopback --port-driver=builtin --publish "$MAGNUS_PORT_MAP" $APPTAINER_CMD
+    ROOTLESSKIT_FLAGS="--net=slirp4netns --port-driver=builtin --publish $MAGNUS_PORT_MAP"
+    if [ "${{{{MAGNUS_HOST_LOOPBACK:-0}}}}" != "1" ]; then
+        ROOTLESSKIT_FLAGS="$ROOTLESSKIT_FLAGS --disable-host-loopback"
+    fi
+    rootlesskit $ROOTLESSKIT_FLAGS $APPTAINER_CMD
 else
     $APPTAINER_CMD
 fi
