@@ -38,7 +38,10 @@ HOSTS
 echo "[SLURM Setup] Rewrote /etc/hosts ($NODE_HOSTNAME -> 127.0.0.1)"
 
 # --- 2. Generate slurm.conf ---
-cat > /etc/slurm/slurm.conf <<EOF
+# Write to /tmp first (tmpfs) then copy — overlayfs may give slurmctld
+# an incomplete read if we write directly to /etc/slurm/.
+SLURM_CONF=/etc/slurm/slurm.conf
+cat > /tmp/slurm.conf <<EOF
 ClusterName=magnus-child
 SlurmctldHost=$NODE_HOSTNAME(127.0.0.1)
 
@@ -66,8 +69,10 @@ JobAcctGatherType=jobacct_gather/none
 NodeName=$NODE_HOSTNAME NodeAddr=127.0.0.1 CPUs=$CPUS RealMemory=$MEMORY_MB State=UNKNOWN
 PartitionName=default Nodes=$NODE_HOSTNAME Default=YES MaxTime=INFINITE State=UP
 EOF
-
-echo "[SLURM Setup] slurm.conf written"
+cp /tmp/slurm.conf "$SLURM_CONF"
+echo "[SLURM Setup] slurm.conf written ($(wc -l < "$SLURM_CONF") lines, $(wc -c < "$SLURM_CONF") bytes)"
+echo "[SLURM Setup] Last 3 lines:"
+tail -3 "$SLURM_CONF" >&2
 
 # --- 3. Generate munge key ---
 mkdir -p /etc/munge /run/munge /var/log/munge
@@ -111,8 +116,8 @@ else
     cat /var/log/slurm/slurmctld.log 2>/dev/null || echo "(empty)" >&2
     echo "--- slurmd.log ---" >&2
     cat /var/log/slurm/slurmd.log 2>/dev/null || echo "(empty)" >&2
-    echo "--- ps aux | grep slurm ---" >&2
-    ps aux | grep -E 'slurm|munge' 2>/dev/null || true >&2
+    echo "--- slurm.conf hex (last 200 bytes) ---" >&2
+    tail -c 200 /etc/slurm/slurm.conf | od -A x -t x1z -v 2>&1 >&2
     echo "--- slurm.conf ---" >&2
     cat /etc/slurm/slurm.conf >&2
     exit 1
