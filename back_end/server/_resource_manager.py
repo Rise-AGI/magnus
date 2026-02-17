@@ -190,6 +190,7 @@ class ResourceManager:
             for attempt in range(max_retries):
                 env = os.environ.copy()
                 env["APPTAINER_CACHEDIR"] = magnus_apptainer_cache_path
+                env["GODEBUG"] = "http2client=0"
                 proc = await asyncio.create_subprocess_exec(
                     "apptainer", "pull", sif_path, image,
                     stdout=asyncio.subprocess.PIPE,
