@@ -352,8 +352,8 @@ class ResourceManager:
                 "-d", "-m", f"u:{runner}:rwx",
                 job_working_dir,
             ], check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"setfacl failed: {e.stderr.decode()}")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.warning(f"setfacl failed: {e}")
 
         elapsed = time.time() - start_time
         logger.info(f"Repo ready: {target_dir} ({elapsed:.1f}s)")
