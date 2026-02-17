@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 magnus_root = magnus_config['server']['root']
 magnus_container_cache_path = f"{magnus_root}/container_cache"
 magnus_repo_cache_path = f"{magnus_root}/repo_cache"
+magnus_apptainer_cache_path = f"{magnus_root}/apptainer_cache"
 guarantee_file_exist(magnus_container_cache_path, is_directory=True)
 guarantee_file_exist(magnus_repo_cache_path, is_directory=True)
+guarantee_file_exist(magnus_apptainer_cache_path, is_directory=True)
 
 
 def _parse_size_string(size_str: str) -> int:
@@ -186,10 +188,13 @@ class ResourceManager:
             base_retry_delay = 10
 
             for attempt in range(max_retries):
+                env = os.environ.copy()
+                env["APPTAINER_CACHEDIR"] = magnus_apptainer_cache_path
                 proc = await asyncio.create_subprocess_exec(
-                    "apptainer", "pull", "--disable-cache", sif_path, image,
+                    "apptainer", "pull", sif_path, image,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    env=env,
                 )
                 _, stderr = await proc.communicate()
 
