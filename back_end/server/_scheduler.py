@@ -500,6 +500,8 @@ APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-containall}}}}"
 APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
 if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
+else
+    APPTAINER_FLAGS="$APPTAINER_FLAGS --writable-tmpfs"
 fi
 
 if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
