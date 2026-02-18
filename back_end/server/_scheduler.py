@@ -463,11 +463,9 @@ def main():
         f.write("\\n")
     os.chmod(user_script_path, 0o755)
 
-    # Phase 3: Create overlay + execute with --containall
+    # Phase 3: Execute with container
     overlay_path = os.path.join(work_dir, "ephemeral_overlay.img")
     try:
-        size_mb = _parse_size_to_mb(ephemeral_storage)
-        subprocess.check_call(["apptainer", "overlay", "create", "--size", str(size_mb), overlay_path])
         os.makedirs(apptainer_tmp_dir, exist_ok=True)
         os.makedirs(apptainer_cache_dir, exist_ok=True)
 
@@ -499,9 +497,8 @@ done
 APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-containall}}}}"
 APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
 if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ]; then
+    apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}
     APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
-else
-    APPTAINER_FLAGS="$APPTAINER_FLAGS --writable-tmpfs"
 fi
 
 if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
