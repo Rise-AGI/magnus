@@ -2,14 +2,14 @@
 import React from "react";
 
 // Single source of truth for blueprint implicit imports
-export const BLUEPRINT_IMPLICIT_IMPORTS = `from server import JobSubmission, JobType, FileSecret
+export const BLUEPRINT_IMPLICIT_IMPORTS = `from magnus import submit_job, JobType, FileSecret
 from typing import Annotated, Literal, Optional, List`;
 
 // Styled version for display
 export function BlueprintImplicitImports() {
   return (
     <>
-      <span className="text-purple-400">from</span> server <span className="text-purple-400">import</span> JobSubmission, JobType, FileSecret{"\n"}
+      <span className="text-purple-400">from</span> magnus <span className="text-purple-400">import</span> submit_job, JobType, FileSecret{"\n"}
       <span className="text-purple-400">from</span> typing <span className="text-purple-400">import</span> Annotated, Literal, Optional, List
     </>
   );
@@ -45,33 +45,18 @@ Runner = Annotated[Optional[str], {
 }]
 
 
-def generate_job(
+def blueprint(
     user_name: UserName,
     gpu_count: GpuCount = 1,
     priority: Priority = "A2",
     runner: Runner = None,
-) -> JobSubmission:
-
-    entry_command = """echo "Hello from Magnus!"
-sleep 60"""
-
-    description = f"""## My Blueprint Task
-- User: {user_name}
-- GPUs: {gpu_count}
-- Priority: {priority}
-"""
-
-    return JobSubmission(
-        task_name="My Task",
-        description=description,
-        namespace="YourOrg",
+):
+    submit_job(
+        task_name=f"hello-{user_name}",
+        entry_command=f"echo 'Hello, {user_name}!'",
         repo_name="your-repo",
-        branch="main",
-        commit_sha="HEAD",
-        entry_command=entry_command,
         gpu_count=gpu_count,
-        gpu_type="rtx5090",
-        job_type=JobType[priority],
+        job_type=getattr(JobType, priority),
         runner=runner,
     )
 `;

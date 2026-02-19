@@ -17,6 +17,7 @@
   - [服务调用](#服务调用)
   - [任务管理](#任务管理)
   - [集群与资源](#集群与资源)
+  - [直接提交任务](#直接提交任务)
   - [文件传输](#文件传输)
   - [文件代管](#文件代管)
   - [异步 API](#异步-api)
@@ -405,6 +406,93 @@ print(f"排队任务: {stats['total_pending']}")
 **返回值**：
 - `dict`: 包含 `resources`, `running_jobs`, `pending_jobs` 等字段
 
+### 直接提交任务
+
+除了通过蓝图提交任务，SDK 也支持直接提交任务（无需预先创建蓝图）。蓝图代码中的 `submit_job()` 与此处的 SDK `submit_job()` 语义一致——蓝图只是在沙箱中调用同一个函数。
+
+#### submit_job - 提交任务
+
+```python
+import magnus
+
+job_id = magnus.submit_job(
+    task_name="My Experiment",
+    entry_command="python train.py --lr 0.001",
+    repo_name="my-project",
+)
+print(f"Job submitted: {job_id}")
+```
+
+**参数说明**：
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `task_name` | str | 是 | - | 任务名称 |
+| `entry_command` | str | 是 | - | 入口命令 |
+| `repo_name` | str | 是 | - | 仓库名称 |
+| `branch` | str \| None | 否 | None | 分支名（None = 服务端自动检测默认分支） |
+| `commit_sha` | str \| None | 否 | None | Commit SHA（None = HEAD） |
+| `gpu_type` | str | 否 | "cpu" | GPU 型号（"cpu" 表示不使用 GPU） |
+| `gpu_count` | int | 否 | 0 | GPU 数量 |
+| `namespace` | str | 否 | "Rise-AGI" | 命名空间 |
+| `job_type` | str | 否 | "A2" | 优先级（A1/A2/B1/B2） |
+| `description` | str \| None | 否 | None | 任务描述（Markdown） |
+| `container_image` | str \| None | 否 | None | 容器镜像（None = 集群默认） |
+| `cpu_count` | int \| None | 否 | None | CPU 数量（None = 集群默认） |
+| `memory_demand` | str \| None | 否 | None | 内存需求（None = 集群默认） |
+| `runner` | str \| None | 否 | None | 运行人（None = 集群默认） |
+
+**返回值**：Job ID (str)
+
+#### execute_job - 提交并等待完成
+
+`submit_job` 的阻塞版本：提交任务后轮询等待完成，支持自动执行 action。
+
+```python
+import magnus
+
+result = magnus.execute_job(
+    task_name="Quick Test",
+    entry_command="echo 'hello world'",
+    repo_name="my-project",
+    timeout=120,
+)
+print(f"Result: {result}")
+```
+
+**额外参数**（在 `submit_job` 基础上）：
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `timeout` | float \| None | None | 等待超时（秒），None = 无限等待 |
+| `poll_interval` | float | 2.0 | 轮询间隔（秒） |
+| `execute_action` | bool | True | 完成后是否自动执行 action |
+
+**返回值**：任务结果 `Optional[str]`
+
+#### 蓝图代码与 SDK 的关系
+
+蓝图代码中的 `submit_job()` 与 SDK 的 `magnus.submit_job()` 参数一致。蓝图是"可真实运行的代码"——安装 SDK 后，蓝图代码可以直接在本地执行：
+
+```python
+# 这段代码既是蓝图，也能直接运行
+from magnus import submit_job, JobType
+from typing import Annotated
+
+UserName = Annotated[str, {"label": "User Name"}]
+
+def blueprint(user_name: UserName):
+    submit_job(
+        task_name=f"hello-{user_name}",
+        entry_command=f"echo 'Hello, {user_name}!'",
+        repo_name="my-project",
+        job_type=JobType.A2,
+    )
+
+# 本地直接调用
+blueprint("alice")
+```
+
 ### 文件传输
 
 蓝图中使用 `FileSecret` 类型声明文件参数，SDK 自动处理上传；蓝图代码中使用 `download_file` 接收。
@@ -596,6 +684,8 @@ asyncio.run(run_experiments())
 
 | 函数 | 说明 | 返回值 |
 |------|------|--------|
+| `submit_job(task_name, entry_command, repo_name, ...)` | 直接提交任务，立即返回 | Job ID |
+| `execute_job(task_name, entry_command, repo_name, ...)` | 直接提交并等待完成 | 任务结果 |
 | `launch_blueprint(id, args, ...)` | 提交蓝图任务，立即返回 | Job ID |
 | `run_blueprint(id, args, timeout, ...)` | 提交并等待完成，自动执行 action | 任务结果 |
 | `list_blueprints(limit, search)` | 列出蓝图 | `{total, items}` |

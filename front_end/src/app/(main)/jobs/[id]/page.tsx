@@ -400,20 +400,24 @@ export default function JobDetailsPage() {
                 {/* Branch */}
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <a
-                      href={`https://github.com/${job.namespace}/${job.repo_name}/tree/${job.branch}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer w-fit"
-                      title={t("jobDetail.viewBranchTree")}
-                    >
-                      {t("jobDetail.branch")}
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-                    </a>
+                    {job.branch ? (
+                      <a
+                        href={`https://github.com/${job.namespace}/${job.repo_name}/tree/${job.branch}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer w-fit"
+                        title={t("jobDetail.viewBranchTree")}
+                      >
+                        {t("jobDetail.branch")}
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                      </a>
+                    ) : (
+                      <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">{t("jobDetail.branch")}</span>
+                    )}
                   </div>
                   <div className="text-sm font-mono text-zinc-300 bg-zinc-950/50 px-2 py-1.5 rounded border border-zinc-800/50">
                     <CopyableText
-                      text={job.branch}
+                      text={job.branch ?? "TBD"}
                       variant="id"
                       className="text-zinc-300"
                     />
@@ -423,21 +427,25 @@ export default function JobDetailsPage() {
                 {/* Commit SHA */}
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <a
-                      href={`https://github.com/${job.namespace}/${job.repo_name}/commit/${job.commit_sha}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer w-fit"
-                      title={t("jobDetail.viewCommitDetails")}
-                    >
-                      {t("jobDetail.commitSha")}
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-                    </a>
+                    {job.commit_sha ? (
+                      <a
+                        href={`https://github.com/${job.namespace}/${job.repo_name}/commit/${job.commit_sha}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-medium uppercase tracking-wider text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer w-fit"
+                        title={t("jobDetail.viewCommitDetails")}
+                      >
+                        {t("jobDetail.commitSha")}
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                      </a>
+                    ) : (
+                      <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">{t("jobDetail.commitSha")}</span>
+                    )}
                   </div>
                   <div className="text-sm font-mono text-zinc-400 bg-zinc-950/50 px-2 py-1.5 rounded border border-zinc-800/50">
                     <CopyableText
-                      text={job.commit_sha}
-                      copyValue={job.commit_sha}
+                      text={job.commit_sha ?? "TBD"}
+                      copyValue={job.commit_sha ?? ""}
                       variant="id"
                     />
                   </div>

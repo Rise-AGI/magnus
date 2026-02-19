@@ -747,6 +747,7 @@ dependencies = [
     { name = "fastmcp" },
     { name = "httpx", extra = ["socks"] },
     { name = "magnus-sdk" },
+    { name = "openai" },
     { name = "pyjwt" },
     { name = "pypdf" },
     { name = "python-docx" },
@@ -765,7 +766,8 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.124.0" },
     { name = "fastmcp", specifier = ">=2.14.2" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
-    { name = "magnus-sdk", specifier = "==0.2.5" },
+    { name = "magnus-sdk", specifier = ">=0.4.7" },
+    { name = "openai", specifier = ">=1.0.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pypdf", specifier = ">=5.0.0" },
     { name = "python-docx", specifier = ">=1.1.0" },
@@ -780,7 +782,7 @@ requires-dist = [
 
 [[package]]
 name = "magnus-sdk"
-version = "0.2.5"
+version = "0.4.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["socks"] },
@@ -790,9 +792,9 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/68/fa/87e5ff996138caecfa71c9db7953f5949cd5c440073b4e1b47309e40894f/magnus_sdk-0.2.5.tar.gz", hash = "sha256:90e3c0961822fe75704e4a56856075adc10804a68d3f01e672bb4de5a738f6b0", size = 74948, upload-time = "2026-02-01T17:52:17.844Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cd/85/4bf02d674604c731355edd222d1bcc43ffde5e30b93b8bcc083487a942e9/magnus_sdk-0.4.7.tar.gz", hash = "sha256:6e7d1e09208a57386bb342c017d40889d4c0fc08f181bd81339e8ce265c18128", size = 37731, upload-time = "2026-02-19T13:09:58.142Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/96/ae294fc7cd9d2ca7e7460beabc5c93def5270d23b5459219361aa1847d59/magnus_sdk-0.2.5-py3-none-any.whl", hash = "sha256:99781039ef2d053a2849f1ceeec7c01db8c700363a7650641d172c5a22387a2e", size = 14465, upload-time = "2026-02-01T17:52:19.219Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/81/c1d84b55e6e7638cbb4c2aec8c0b0c31ef6b081bb5abf75024e18ab5ed37/magnus_sdk-0.4.7-py3-none-any.whl", hash = "sha256:3ba254f94e3a90886a68a99adca056ad97a6a2519c40bb5462f9a84a02052901", size = 24195, upload-time = "2026-02-19T13:09:56.02Z" },
 ]
 
 [[package]]

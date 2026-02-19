@@ -1,16 +1,31 @@
 # sdks/python/src/magnus/__init__.py
 from importlib.metadata import version as _pkg_version
 from typing import Optional, Dict, Any, Union, Literal, List
+from enum import Enum
 
 from .exceptions import MagnusError, AuthenticationError, ResourceNotFoundError, ExecutionError
 from .config import save_site, remove_site, set_current_site
 from .client import MagnusClient
 from .http_download import download_file, download_file_async
 
+
+class JobType(str, Enum):
+    A1 = "A1"
+    A2 = "A2"
+    B1 = "B1"
+    B2 = "B2"
+
+
+class FileSecret(str):
+    """文件传输凭证，SDK 端用于标记 file_secret 参数"""
+    MAGIC_PREFIX = "magnus-secret:"
+
 __version__ = _pkg_version("magnus-sdk")
 
 __all__ = [
     "MagnusClient",
+    "JobType",
+    "FileSecret",
     "configure",
     "launch_blueprint",
     "launch_blueprint_async",
@@ -71,17 +86,17 @@ def run_blueprint(blueprint_id: str, args: Optional[Dict[str, Any]] = None, use_
 async def run_blueprint_async(blueprint_id: str, args: Optional[Dict[str, Any]] = None, use_preference: bool = False, save_preference: bool = True, expire_minutes: int = 60, max_downloads: Optional[int] = 1, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
     return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout, poll_interval, execute_action)
 
-def submit_job(task_name: str, repo_name: str, branch: str, commit_sha: str, entry_command: str, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: float = 10.0) -> str:
-    return default_client.submit_job(task_name, repo_name, branch, commit_sha, entry_command, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout)
+def submit_job(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: float = 10.0) -> str:
+    return default_client.submit_job(task_name, entry_command, repo_name, branch, commit_sha, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout)
 
-async def submit_job_async(task_name: str, repo_name: str, branch: str, commit_sha: str, entry_command: str, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: float = 10.0) -> str:
-    return await default_client.submit_job_async(task_name, repo_name, branch, commit_sha, entry_command, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout)
+async def submit_job_async(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: float = 10.0) -> str:
+    return await default_client.submit_job_async(task_name, entry_command, repo_name, branch, commit_sha, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout)
 
-def execute_job(task_name: str, repo_name: str, branch: str, commit_sha: str, entry_command: str, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
-    return default_client.execute_job(task_name, repo_name, branch, commit_sha, entry_command, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout, poll_interval, execute_action)
+def execute_job(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
+    return default_client.execute_job(task_name, entry_command, repo_name, branch, commit_sha, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout, poll_interval, execute_action)
 
-async def execute_job_async(task_name: str, repo_name: str, branch: str, commit_sha: str, entry_command: str, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
-    return await default_client.execute_job_async(task_name, repo_name, branch, commit_sha, entry_command, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout, poll_interval, execute_action)
+async def execute_job_async(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
+    return await default_client.execute_job_async(task_name, entry_command, repo_name, branch, commit_sha, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout, poll_interval, execute_action)
 
 def call_service(service_id: str, payload: Union[Dict[str, Any], str, bytes, list], endpoint: Optional[str] = None, timeout: float = 60.0, protocol: Literal["http", "mcp"] = "http", **kwargs: Any) -> Any:
     return default_client.call_service(service_id, payload, endpoint, timeout, protocol, **kwargs)

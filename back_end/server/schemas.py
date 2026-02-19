@@ -44,13 +44,13 @@ class UserInfo(BaseModel):
 
 class JobSubmission(BaseModel):
     task_name: str
+    entry_command: str
+    repo_name: str
+    branch: Optional[str] = None            # None = fallback: main → master → default
+    commit_sha: Optional[str] = None        # None = HEAD
+    gpu_type: str = "cpu"
     description: Optional[str] = None
     namespace: str = "Rise-AGI"
-    repo_name: str
-    branch: str
-    commit_sha: str
-    entry_command: str
-    gpu_type: str
     gpu_count: int = 0
     job_type: JobType = JobType.A2
     container_image: Optional[str] = None

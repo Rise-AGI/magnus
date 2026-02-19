@@ -229,28 +229,58 @@ class ResourceManager:
             logger.info(f"Image ready: {sif_path} ({elapsed:.1f}s)")
             return True, None
 
+    async def _resolve_default_branch(self, repo_urls: List[str])-> Optional[str]:
+        """
+        通过 git ls-remote 解析仓库默认分支。
+        尝试顺序：解析 HEAD symref → fallback "main" → "master"
+        """
+        for url in repo_urls:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "ls-remote", "--symref", url, "HEAD",
+                stdout = asyncio.subprocess.PIPE,
+                stderr = asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                for line in stdout.decode().strip().splitlines():
+                    if line.startswith("ref:"):
+                        ref = line.split()[1]
+                        return ref.replace("refs/heads/", "")
+                return "main"
+        return None
+
     async def ensure_repo(
         self,
         namespace: str,
         repo_name: str,
-        branch: str,
-        commit_sha: str,
+        branch: Optional[str],
+        commit_sha: Optional[str],
         target_dir: str,
         runner: str,
         job_working_dir: str,
-    )-> Tuple[bool, Optional[str]]:
+    )-> Tuple[bool, Optional[str], Optional[str]]:
         """
-        确保仓库可用。返回 (success, result)
-        - 成功：(True, resolved_sha)
-        - 失败：(False, "error message")
+        确保仓库可用。返回 (success, resolved_sha_or_error, resolved_branch)
+        - 成功：(True, resolved_sha, resolved_branch)
+        - 失败：(False, "error message", None)
         """
         if os.path.exists(target_dir):
-            return True, None
+            return True, None, branch
+
+        # commit_sha=None 等同于 "HEAD"
+        if commit_sha is None:
+            commit_sha = "HEAD"
 
         repo_urls = []
         if shutil.which("ssh"):
             repo_urls.append(f"git@github.com:{namespace}/{repo_name}.git")
         repo_urls.append(f"https://github.com/{namespace}/{repo_name}.git")
+
+        # branch=None: 解析仓库默认分支
+        if branch is None:
+            branch = await self._resolve_default_branch(repo_urls)
+            if branch is None:
+                return False, "Failed to determine default branch", None
 
         cache_path = self._get_repo_cache_path(namespace, repo_name, branch)
         cache_key = f"{namespace}/{repo_name}/{branch}"
@@ -284,7 +314,7 @@ class ResourceManager:
                     if os.path.exists(cache_path):
                         shutil.rmtree(cache_path, ignore_errors=True)
                 else:
-                    return False, f"git clone failed: {last_error}"
+                    return False, f"git clone failed: {last_error}", None
 
                 elapsed = time.time() - start_time
                 logger.info(f"Repo cached: {cache_path} ({elapsed:.1f}s)")
@@ -302,7 +332,7 @@ class ResourceManager:
             await loop.run_in_executor(None, shutil.copytree, cache_path, target_dir)
         except Exception as e:
             logger.error(f"Failed to copy repo cache: {e}")
-            return False, f"copy cache failed: {e}"
+            return False, f"copy cache failed: {e}", None
 
         # Phase 3: fetch + checkout 到指定 commit
         proc = await asyncio.create_subprocess_exec(
@@ -319,6 +349,7 @@ class ResourceManager:
         # - "HEAD": checkout origin/<branch> 最新提交
         # - "msg:<regex>": 搜索最近的 commit message 匹配正则的提交
         # - 其他: 视为 40 位 SHA 或 tag 等 git ref
+        assert branch is not None
         if commit_sha == "HEAD":
             effective_sha = f"origin/{branch}"
         elif commit_sha.startswith("msg:"):
@@ -327,7 +358,7 @@ class ResourceManager:
                 pattern = re.compile(pattern_str)
             except re.error as e:
                 shutil.rmtree(target_dir, ignore_errors=True)
-                return False, f"Invalid commit message regex '{pattern_str}': {e}"
+                return False, f"Invalid commit message regex '{pattern_str}': {e}", None
 
             max_commit_search = 200
             proc = await asyncio.create_subprocess_exec(
@@ -339,7 +370,7 @@ class ResourceManager:
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
                 shutil.rmtree(target_dir, ignore_errors=True)
-                return False, "Failed to read git log for commit message search"
+                return False, "Failed to read git log for commit message search", None
 
             effective_sha = None
             for line in stdout.decode().strip().splitlines():
@@ -350,7 +381,7 @@ class ResourceManager:
 
             if effective_sha is None:
                 shutil.rmtree(target_dir, ignore_errors=True)
-                return False, f"No commit found matching pattern '{pattern_str}' in recent {max_commit_search} commits on {branch}"
+                return False, f"No commit found matching pattern '{pattern_str}' in recent {max_commit_search} commits on {branch}", None
 
             logger.info(f"Resolved msg:{pattern_str} -> {effective_sha[:12]}")
         else:
@@ -367,7 +398,7 @@ class ResourceManager:
             error_msg = stderr.decode().strip()
             logger.error(f"Failed to checkout {commit_sha}: {error_msg}")
             shutil.rmtree(target_dir, ignore_errors=True)
-            return False, f"git checkout failed: {error_msg}"
+            return False, f"git checkout failed: {error_msg}", None
 
         # 解析真实 SHA（将 HEAD / origin/branch 等符号引用固化为 40 位哈希）
         proc = await asyncio.create_subprocess_exec(
@@ -394,7 +425,7 @@ class ResourceManager:
 
         elapsed = time.time() - start_time
         logger.info(f"Repo ready: {target_dir} ({elapsed:.1f}s)")
-        return True, resolved_sha
+        return True, resolved_sha, branch
 
 
 resource_manager = ResourceManager()
