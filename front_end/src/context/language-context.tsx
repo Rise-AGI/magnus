@@ -665,6 +665,66 @@ const translations = {
     zh: "解析后的真实 SHA 会回写到数据库——原始的 msg: 值不会被永久存储。若最近 200 条 commit 中没有匹配项，任务将失败并返回描述性错误信息。",
     en: "The resolved SHA is written back to the database — the original msg: value is never stored permanently. If no match is found within the most recent 200 commits, the job will fail with a descriptive error.",
   },
+  "help.blueprintEditor.commitShaEx1": { zh: "分支最新提交", en: "latest on branch" },
+  "help.blueprintEditor.commitShaEx2": { zh: "正则匹配 commit message", en: "most recent commit matching regex" },
+  "help.blueprintEditor.commitShaEx3": { zh: "包含 \"release\" 的提交", en: "commit message containing \"release\"" },
+  "help.blueprintEditor.commitShaEx4": { zh: "转义点号", en: "literal dot (regex escaped)" },
+  "help.blueprintEditor.functionSpecCode": {
+    zh: `# 定义参数类型（带元数据）
+MyParam = Annotated[str, {
+    "label": "参数名称",
+    "description": "参数说明",
+    "placeholder": "输入提示",
+}]
+
+def generate_job(
+    required_param: MyParam,
+    optional_param: Optional[str] = None,
+) -> JobSubmission:
+    return JobSubmission(
+        task_name="my-task",           # 任务名称
+        description=None,              # 任务描述 (可选)
+        namespace="Rise-AGI",          # GitHub 组织名
+        repo_name="my-repo",           # 仓库名
+        branch="main",                 # 分支名
+        commit_sha="HEAD",             # 提交 SHA / HEAD / msg:正则
+        entry_command="python main.py",# 启动命令
+        gpu_type="A100",               # GPU 类型
+        gpu_count=1,                   # GPU 数量
+        job_type=JobType.A2,           # 优先级
+        cpu_count=None,                # CPU 核心数 (可选)
+        memory_demand=None,            # 内存需求 (可选)
+        ephemeral_storage=None,        # 临时存储大小 (可选, 如 "10G")
+        runner=None,                   # 指定运行用户 (可选)
+    )`,
+    en: `# Define parameter types (with metadata)
+MyParam = Annotated[str, {
+    "label": "Parameter Name",
+    "description": "Parameter description",
+    "placeholder": "Input hint",
+}]
+
+def generate_job(
+    required_param: MyParam,
+    optional_param: Optional[str] = None,
+) -> JobSubmission:
+    return JobSubmission(
+        task_name="my-task",           # task name
+        description=None,              # description (optional)
+        namespace="Rise-AGI",          # GitHub org
+        repo_name="my-repo",           # repository name
+        branch="main",                 # branch name
+        commit_sha="HEAD",             # SHA / HEAD / msg:regex
+        entry_command="python main.py",# entry command
+        gpu_type="A100",               # GPU type
+        gpu_count=1,                   # GPU count
+        job_type=JobType.A2,           # priority
+        cpu_count=None,                # CPU cores (optional)
+        memory_demand=None,            # memory demand (optional)
+        ephemeral_storage=None,        # ephemeral storage (optional, e.g. "10G")
+        runner=None,                   # run-as user (optional)
+    )`,
+  },
   "help.blueprintEditor.paramTypes": { zh: "支持的参数类型", en: "Supported Parameter Types" },
   "help.blueprintEditor.pythonType": { zh: "Python 类型", en: "Python Type" },
   "help.blueprintEditor.formControl": { zh: "表单控件", en: "Form Control" },

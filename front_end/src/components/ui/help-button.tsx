@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { HelpCircle, X } from "lucide-react";
+import { useLanguage } from "@/context/language-context";
 
 interface HelpButtonProps {
   title: string;
@@ -11,6 +12,7 @@ interface HelpButtonProps {
 }
 
 export function HelpButton({ title, children }: HelpButtonProps) {
+  const { t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -78,7 +80,7 @@ export function HelpButton({ title, children }: HelpButtonProps) {
                 onClick={() => setIsOpen(false)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-blue-900/20 active:scale-[0.98]"
               >
-                Got it
+                {t("common.gotIt")}
               </button>
             </div>
           </div>

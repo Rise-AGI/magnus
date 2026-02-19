@@ -332,33 +332,7 @@ export function BlueprintEditorHelp() {
           <HelpInlineCode>JobSubmission</HelpInlineCode>
           {t("help.blueprintEditor.functionSpecDesc").split("JobSubmission")[1] || ""}
         </HelpParagraph>
-        <HelpCodeBlock>{`# 定义参数类型（带元数据）
-MyParam = Annotated[str, {
-    "label": "参数名称",
-    "description": "参数说明",
-    "placeholder": "输入提示",
-}]
-
-def generate_job(
-    required_param: MyParam,
-    optional_param: Optional[str] = None,
-) -> JobSubmission:
-    return JobSubmission(
-        task_name="my-task",           # 任务名称
-        description=None,              # 任务描述 (可选)
-        namespace="Rise-AGI",          # GitHub 组织名
-        repo_name="my-repo",           # 仓库名
-        branch="main",                 # 分支名
-        commit_sha="HEAD",             # 提交 SHA / HEAD / msg:正则
-        entry_command="python main.py",# 启动命令
-        gpu_type="A100",               # GPU 类型
-        gpu_count=1,                   # GPU 数量
-        job_type=JobType.A2,           # 优先级
-        cpu_count=None,                # CPU 核心数 (可选)
-        memory_demand=None,            # 内存需求 (可选)
-        ephemeral_storage=None,        # 临时存储大小 (可选, 如 "10G")
-        runner=None,                   # 指定运行用户 (可选)
-    )`}</HelpCodeBlock>
+        <HelpCodeBlock>{t("help.blueprintEditor.functionSpecCode")}</HelpCodeBlock>
       </HelpSection>
 
       <HelpSection title={t("help.blueprintEditor.commitSha")}>
@@ -377,10 +351,10 @@ def generate_job(
           </HelpField>
         </HelpFieldList>
         <HelpCodeBlock>{`# Examples
-commit_sha="HEAD"                   # latest on branch
-commit_sha="msg:fix.*scheduler"     # most recent commit matching regex
-commit_sha="msg:release"            # commit message containing "release"
-commit_sha="msg:v2\\.0"             # literal dot (regex escaped)`}</HelpCodeBlock>
+commit_sha="HEAD"                   # ${t("help.blueprintEditor.commitShaEx1")}
+commit_sha="msg:fix.*scheduler"     # ${t("help.blueprintEditor.commitShaEx2")}
+commit_sha="msg:release"            # ${t("help.blueprintEditor.commitShaEx3")}
+commit_sha="msg:v2\\.0"             # ${t("help.blueprintEditor.commitShaEx4")}`}</HelpCodeBlock>
         <HelpParagraph>
           {t("help.blueprintEditor.commitShaNote")}
         </HelpParagraph>
