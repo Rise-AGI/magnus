@@ -3,7 +3,7 @@ import secrets
 import enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import Integer, String, DateTime, Text, ForeignKey, Enum as SQLEnum, Boolean, text
-from datetime import datetime
+from datetime import datetime, timezone
 from .database import Base
 
 
@@ -52,7 +52,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String)
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     token: Mapped[str | None] = mapped_column(String, nullable=True)
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
     services: Mapped[list["Service"]] = relationship(back_populates="owner")
@@ -81,7 +81,7 @@ class Job(Base):
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.A2)
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     runner: Mapped[str | None] = mapped_column(String, nullable=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -95,7 +95,7 @@ class JobMetric(Base):
     __tablename__ = "job_metrics"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), index=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     status_json: Mapped[str] = mapped_column(Text)
     job: Mapped["Job"] = relationship(back_populates="metrics")
 
@@ -103,7 +103,7 @@ class JobMetric(Base):
 class ClusterSnapshot(Base):
     __tablename__ = "cluster_snapshots"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     total_gpus: Mapped[int] = mapped_column(Integer)
     slurm_used_gpus: Mapped[int] = mapped_column(Integer)
     magnus_used_gpus: Mapped[int] = mapped_column(Integer)
@@ -117,8 +117,8 @@ class Blueprint(Base):
     code: Mapped[str] = mapped_column(Text)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     user: Mapped["User"] = relationship("User")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class Service(Base):
@@ -129,7 +129,7 @@ class Service(Base):
     name: Mapped[str] = mapped_column(String)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_activity_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_activity_time: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     current_job_id: Mapped[str | None] = mapped_column(String, ForeignKey("jobs.id"), nullable=True)
     current_job: Mapped["Job"] = relationship()
     assigned_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -152,7 +152,7 @@ class Service(Base):
     runner: Mapped[str | None] = mapped_column(String, nullable=True)
     container_image: Mapped[str | None] = mapped_column(String, nullable=True)
     system_entry_command: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class BlueprintUserPreference(Base):
@@ -162,7 +162,7 @@ class BlueprintUserPreference(Base):
     blueprint_id: Mapped[str] = mapped_column(String, ForeignKey("blueprints.id"), index=True)
     blueprint_hash: Mapped[str] = mapped_column(String)
     cached_params: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class ExplorerSession(Base):
