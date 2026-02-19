@@ -436,6 +436,36 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
             <div className="h-px bg-zinc-800 flex-grow ml-2"></div>
         </h3>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          {/* CPU Count */}
+          <div>
+            <NumberStepper
+              label={t("jobForm.cpuCores")}
+              value={cpuCount}
+              onChange={setCpuCount}
+              min={0}
+              max={MAX_CPU_COUNT}
+            />
+            <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">
+              {t("jobForm.cpuCoresHint", { value: DEFAULT_CPU_COUNT.toString() })}
+            </p>
+          </div>
+
+          {/* Memory */}
+          <div>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+              {t("jobForm.memory")}
+            </label>
+            <input
+              type="text"
+              className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+              value={memoryDemand}
+              placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
+              onChange={e => setMemoryDemand(e.target.value)}
+            />
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-4">
             <SearchableSelect
                 label={t("jobForm.gpuAccelerator")}
@@ -471,34 +501,6 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
 
           {showAdvanced && (
             <div className="mt-3 pl-1 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in slide-in-from-top-1 duration-200">
-
-              {/* CPU Count Override */}
-              <div>
-                <NumberStepper
-                  label={t("jobForm.cpuCores")}
-                  value={cpuCount}
-                  onChange={setCpuCount}
-                  min={0}
-                  max={MAX_CPU_COUNT}
-                />
-                <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">
-                  {t("jobForm.cpuCoresHint", { value: DEFAULT_CPU_COUNT.toString() })}
-                </p>
-              </div>
-
-              {/* Memory Override */}
-              <div>
-                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
-                  {t("jobForm.memory")}
-                </label>
-                <input
-                  type="text"
-                  className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
-                  value={memoryDemand}
-                  placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
-                  onChange={e => setMemoryDemand(e.target.value)}
-                />
-              </div>
 
               {/* Ephemeral Storage */}
               <div className="sm:col-span-2">

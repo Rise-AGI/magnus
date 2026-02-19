@@ -644,6 +644,27 @@ const translations = {
     zh: "蓝图代码必须定义一个名为 generate_job 的函数，返回类型为 JobSubmission：",
     en: "Blueprint code must define a function named generate_job with return type JobSubmission:"
   },
+  "help.blueprintEditor.commitSha": { zh: "commit_sha 智能解析", en: "commit_sha Smart Resolution" },
+  "help.blueprintEditor.commitShaModes": {
+    zh: "commit_sha 支持三种模式：",
+    en: "commit_sha supports three modes:",
+  },
+  "help.blueprintEditor.commitShaHead": {
+    zh: "使用指定分支的最新提交",
+    en: "Latest commit on the specified branch",
+  },
+  "help.blueprintEditor.commitShaExact": {
+    zh: "精确的 40 位 SHA 或任何有效的 git ref",
+    en: "Exact 40-char SHA or any valid git ref",
+  },
+  "help.blueprintEditor.commitShaMsg": {
+    zh: "搜索最近的 commit message 匹配该 Python 正则表达式的提交",
+    en: "Search for the most recent commit whose message matches the Python regex",
+  },
+  "help.blueprintEditor.commitShaNote": {
+    zh: "解析后的真实 SHA 会回写到数据库——原始的 msg: 值不会被永久存储。若最近 200 条 commit 中没有匹配项，任务将失败并返回描述性错误信息。",
+    en: "The resolved SHA is written back to the database — the original msg: value is never stored permanently. If no match is found within the most recent 200 commits, the job will fail with a descriptive error.",
+  },
   "help.blueprintEditor.paramTypes": { zh: "支持的参数类型", en: "Supported Parameter Types" },
   "help.blueprintEditor.pythonType": { zh: "Python 类型", en: "Python Type" },
   "help.blueprintEditor.formControl": { zh: "表单控件", en: "Form Control" },

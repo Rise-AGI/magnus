@@ -291,9 +291,20 @@ def run_blueprint(
         job_submission = blueprint_manager.execute(bp.code, final_params)
         job_dict = job_submission.model_dump()
 
-        # 如果未提供 container_image，使用配置中的默认值
+        # 所有 Optional 字段填入集群默认值，确保 DB 完整记录实验配置
+        cluster = magnus_config["cluster"]
+        if job_dict.get("cpu_count") is None or job_dict["cpu_count"] == 0:
+            job_dict["cpu_count"] = cluster["default_cpu_count"]
+        if job_dict.get("memory_demand") is None:
+            job_dict["memory_demand"] = cluster["default_memory_demand"]
+        if job_dict.get("ephemeral_storage") is None:
+            job_dict["ephemeral_storage"] = cluster["default_ephemeral_storage"]
+        if job_dict.get("runner") is None:
+            job_dict["runner"] = cluster["default_runner"]
         if job_dict.get("container_image") is None:
-            job_dict["container_image"] = magnus_config["cluster"]["default_container_image"]
+            job_dict["container_image"] = cluster["default_container_image"]
+        if job_dict.get("system_entry_command") is None:
+            job_dict["system_entry_command"] = cluster["default_system_entry_command"]
 
         db_job = models.Job(
             **job_dict,
