@@ -570,16 +570,27 @@ for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO
     fi
 done
 
-APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-containall}}}}"
+# Detect setuid apptainer: check binary setuid bit (zero I/O, instant)
+if [ -u "$(command -v apptainer)" ]; then
+    _setuid_apptainer=1
+else
+    _setuid_apptainer=
+fi
+
+# setuid apptainer: overlay root-owned (unreadable) + userns blocked → degrade to --contain
+if [ -z "$_setuid_apptainer" ]; then
+    APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-containall}}}}"
+else
+    APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-contain}}}}"
+fi
+
 APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
-if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ]; then
+if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]; then
     apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}
-    if [ -r {{overlay_path}} ]; then
-        APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
-    else
-        echo "[Magnus] WARNING: overlay not readable (setuid apptainer?), ephemeral_storage={{ephemeral_storage}} not enforced, falling back to writable-tmpfs" >&2
-        rm -f {{overlay_path}} 2>/dev/null || true
-    fi
+    APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
+else
+    APPTAINER_FLAGS="$APPTAINER_FLAGS --writable-tmpfs"
+    echo "[Magnus] WARNING: overlay skipped (${{{{_setuid_apptainer:+setuid apptainer}}}}${{{{MAGNUS_NO_OVERLAY:+MAGNUS_NO_OVERLAY=1}}}}), ephemeral_storage={{ephemeral_storage}} not enforced, using writable-tmpfs (RAM)" >&2
 fi
 
 if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
