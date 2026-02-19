@@ -315,9 +315,46 @@ class ResourceManager:
         if proc.returncode != 0:
             logger.warning(f"git fetch failed (may be ok): {stderr.decode().strip()}")
 
-        # HEAD 是符号引用，git checkout HEAD 只会 checkout 本地（陈旧的）HEAD；
-        # 需要 checkout origin/<branch> 才能拿到 fetch 后的最新提交
-        effective_sha = f"origin/{branch}" if commit_sha == "HEAD" else commit_sha
+        # 解析 commit_sha 语义：
+        # - "HEAD": checkout origin/<branch> 最新提交
+        # - "msg:<regex>": 搜索最近的 commit message 匹配正则的提交
+        # - 其他: 视为 40 位 SHA 或 tag 等 git ref
+        if commit_sha == "HEAD":
+            effective_sha = f"origin/{branch}"
+        elif commit_sha.startswith("msg:"):
+            pattern_str = commit_sha[4:].strip()
+            try:
+                pattern = re.compile(pattern_str)
+            except re.error as e:
+                shutil.rmtree(target_dir, ignore_errors=True)
+                return False, f"Invalid commit message regex '{pattern_str}': {e}"
+
+            max_commit_search = 200
+            proc = await asyncio.create_subprocess_exec(
+                "git", "log", f"origin/{branch}", "--format=%H %s", "-n", str(max_commit_search),
+                cwd = target_dir,
+                stdout = asyncio.subprocess.PIPE,
+                stderr = asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                shutil.rmtree(target_dir, ignore_errors=True)
+                return False, "Failed to read git log for commit message search"
+
+            effective_sha = None
+            for line in stdout.decode().strip().splitlines():
+                sha, _, message = line.partition(" ")
+                if pattern.search(message):
+                    effective_sha = sha
+                    break
+
+            if effective_sha is None:
+                shutil.rmtree(target_dir, ignore_errors=True)
+                return False, f"No commit found matching pattern '{pattern_str}' in recent {max_commit_search} commits on {branch}"
+
+            logger.info(f"Resolved msg:{pattern_str} -> {effective_sha[:12]}")
+        else:
+            effective_sha = commit_sha
         proc = await asyncio.create_subprocess_exec(
             "git", "checkout", effective_sha,
             cwd = target_dir,
