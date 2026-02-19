@@ -131,11 +131,26 @@ export function JobTable({
                   </td>
 
                   <td className="px-6 py-4 align-top text-center">
-                    <span className="text-zinc-300 text-sm font-medium">
-                      {job.gpu_type === "cpu"
-                        ? t("jobs.cpuOnly")
-                        : `${job.gpu_type.replace(/_/g, " ")} × ${job.gpu_count}`}
-                    </span>
+                    <div className="flex flex-col items-center gap-1">
+                      {job.cpu_count != null && (
+                        <span className="text-zinc-300 text-xs font-medium">
+                          CPU × {job.cpu_count}
+                        </span>
+                      )}
+                      {job.memory_demand != null && (
+                        <span className="text-zinc-300 text-xs font-medium">
+                          RAM {job.memory_demand}
+                        </span>
+                      )}
+                      {job.gpu_count > 0 && job.gpu_type !== "cpu" && (
+                        <span className="text-zinc-300 text-xs font-medium">
+                          {job.gpu_type.replace(/_/g, " ")} × {job.gpu_count}
+                        </span>
+                      )}
+                      {!(job.gpu_count > 0 && job.gpu_type !== "cpu") && job.cpu_count == null && job.memory_demand == null && (
+                        <span className="text-zinc-300 text-xs font-medium">{t("jobs.cpuOnly")}</span>
+                      )}
+                    </div>
                   </td>
 
                   <td className="px-6 py-4 align-top">

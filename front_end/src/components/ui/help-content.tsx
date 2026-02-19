@@ -361,29 +361,28 @@ def generate_job(
     )`}</HelpCodeBlock>
       </HelpSection>
 
-      <HelpSection title="commit_sha Smart Resolution">
+      <HelpSection title={t("help.blueprintEditor.commitSha")}>
         <HelpParagraph>
-          <HelpInlineCode>commit_sha</HelpInlineCode> supports three modes:
+          <HelpInlineCode>commit_sha</HelpInlineCode> {t("help.blueprintEditor.commitShaModes")}
         </HelpParagraph>
         <HelpFieldList>
           <HelpField name={<HelpInlineCode>&quot;HEAD&quot;</HelpInlineCode>}>
-            Latest commit on the specified branch
+            {t("help.blueprintEditor.commitShaHead")}
           </HelpField>
           <HelpField name={<HelpInlineCode>&quot;abc123...&quot;</HelpInlineCode>}>
-            Exact 40-char SHA or any valid git ref
+            {t("help.blueprintEditor.commitShaExact")}
           </HelpField>
           <HelpField name={<HelpInlineCode>&quot;msg:&lt;regex&gt;&quot;</HelpInlineCode>}>
-            Search for the most recent commit whose message matches the Python regex
+            {t("help.blueprintEditor.commitShaMsg")}
           </HelpField>
         </HelpFieldList>
         <HelpCodeBlock>{`# Examples
 commit_sha="HEAD"                   # latest on branch
 commit_sha="msg:fix.*scheduler"     # most recent commit matching regex
-commit_sha="msg:release"              # commit message containing "release"
-commit_sha="msg:v2\\.0"              # literal dot (regex escaped)`}</HelpCodeBlock>
+commit_sha="msg:release"            # commit message containing "release"
+commit_sha="msg:v2\\.0"             # literal dot (regex escaped)`}</HelpCodeBlock>
         <HelpParagraph>
-          The resolved SHA is written back to the database — the original <HelpInlineCode>msg:</HelpInlineCode> value is never stored permanently.
-          If no match is found within the most recent 200 commits, the job will fail with a descriptive error.
+          {t("help.blueprintEditor.commitShaNote")}
         </HelpParagraph>
       </HelpSection>
 
