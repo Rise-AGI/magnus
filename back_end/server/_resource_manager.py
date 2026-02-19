@@ -356,7 +356,7 @@ class ResourceManager:
         else:
             effective_sha = commit_sha
         proc = await asyncio.create_subprocess_exec(
-            "git", "checkout", effective_sha,
+            "git", "checkout", "-f", effective_sha,
             cwd = target_dir,
             stdout = asyncio.subprocess.DEVNULL,
             stderr = asyncio.subprocess.PIPE,
