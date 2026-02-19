@@ -62,7 +62,7 @@ def generate_job(
     output_path: OutputPath = "",
 )-> JobSubmission:
     
-    def safe_quote(s: str) -> str:
+    def safe_quote(s: str)->str:
         return f"'{str(s).replace("'", "'\\''")}'"
     
     entry_command = f"""cd back_end/python_scripts

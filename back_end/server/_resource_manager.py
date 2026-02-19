@@ -26,7 +26,7 @@ guarantee_file_exist(magnus_repo_cache_path, is_directory=True)
 guarantee_file_exist(magnus_apptainer_cache_path, is_directory=True)
 
 
-def _parse_size_string(size_str: str) -> int:
+def _parse_size_string(size_str: str)-> int:
     """解析大小字符串，如 '200G', '1024M'，返回字节数"""
     size_str = size_str.strip().upper()
     units = {'B': 1, 'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4}
@@ -36,7 +36,7 @@ def _parse_size_string(size_str: str) -> int:
     return int(size_str)
 
 
-def _get_dir_size(path: str) -> int:
+def _get_dir_size(path: str)-> int:
     """递归计算目录大小"""
     total = 0
     for dirpath, _, filenames in os.walk(path):
@@ -53,7 +53,7 @@ CONTAINER_CACHE_SIZE = _parse_size_string(magnus_config['server']['resource_cach
 REPO_CACHE_SIZE = _parse_size_string(magnus_config['server']['resource_cache']['repo_cache_size'])
 
 
-def _image_to_sif_filename(image: str) -> str:
+def _image_to_sif_filename(image: str)-> str:
     """docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime -> pytorch_pytorch_2.5.1-cuda12.4-cudnn9-runtime.sif"""
     name = re.sub(r'^[a-z]+://', '', image)
     name = re.sub(r'[/:@]', '_', name)
@@ -61,7 +61,7 @@ def _image_to_sif_filename(image: str) -> str:
     return f"{name}.sif"
 
 
-def _repo_to_cache_dirname(namespace: str, repo_name: str, branch: str) -> str:
+def _repo_to_cache_dirname(namespace: str, repo_name: str, branch: str)-> str:
     """namespace/repo_name/branch -> namespace_repo_name_branch"""
     name = f"{namespace}_{repo_name}_{branch}"
     name = re.sub(r'[/:@]', '_', name)
@@ -80,13 +80,13 @@ class ResourceManager:
         self.image_locks: Dict[str, asyncio.Lock] = {}
         self.repo_locks: Dict[str, asyncio.Lock] = {}
 
-    def get_sif_path(self, image: str) -> str:
+    def get_sif_path(self, image: str)-> str:
         return os.path.join(magnus_container_cache_path, _image_to_sif_filename(image))
 
-    def _get_repo_cache_path(self, namespace: str, repo_name: str, branch: str) -> str:
+    def _get_repo_cache_path(self, namespace: str, repo_name: str, branch: str)-> str:
         return os.path.join(magnus_repo_cache_path, _repo_to_cache_dirname(namespace, repo_name, branch))
 
-    def _get_cached_images(self) -> List[Tuple[str, int, float]]:
+    def _get_cached_images(self)-> List[Tuple[str, int, float]]:
         """获取缓存的镜像列表，返回 [(path, size_bytes, atime), ...]"""
         images = []
         for filename in os.listdir(magnus_container_cache_path):
@@ -100,7 +100,7 @@ class ResourceManager:
                 continue
         return images
 
-    def _get_cached_repos(self) -> List[Tuple[str, int, float]]:
+    def _get_cached_repos(self)-> List[Tuple[str, int, float]]:
         """获取缓存的仓库列表，返回 [(path, size_bytes, atime), ...]"""
         repos = []
         for dirname in os.listdir(magnus_repo_cache_path):
@@ -151,7 +151,7 @@ class ResourceManager:
             except OSError as e:
                 logger.warning(f"Failed to evict repo {path}: {e}")
 
-    async def ensure_image(self, image: str) -> Tuple[bool, Optional[str]]:
+    async def ensure_image(self, image: str)-> Tuple[bool, Optional[str]]:
         """
         确保镜像可用。返回 (success, error_msg)
         - 成功：(True, None)
@@ -193,9 +193,9 @@ class ResourceManager:
                 env["GODEBUG"] = "http2client=0"
                 proc = await asyncio.create_subprocess_exec(
                     "apptainer", "pull", sif_path, image,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=env,
+                    stdout = asyncio.subprocess.PIPE,
+                    stderr = asyncio.subprocess.PIPE,
+                    env = env,
                 )
                 _, stderr = await proc.communicate()
 
@@ -238,7 +238,7 @@ class ResourceManager:
         target_dir: str,
         runner: str,
         job_working_dir: str,
-    ) -> Tuple[bool, Optional[str]]:
+    )-> Tuple[bool, Optional[str]]:
         """
         确保仓库可用。返回 (success, result)
         - 成功：(True, resolved_sha)
@@ -271,8 +271,8 @@ class ResourceManager:
 
                     proc = await asyncio.create_subprocess_exec(
                         "git", "clone", "--branch", branch, "--single-branch", repo_url, cache_path,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.PIPE,
+                        stdout = asyncio.subprocess.DEVNULL,
+                        stderr = asyncio.subprocess.PIPE,
                     )
                     _, stderr = await proc.communicate()
 
@@ -307,9 +307,9 @@ class ResourceManager:
         # Phase 3: fetch + checkout 到指定 commit
         proc = await asyncio.create_subprocess_exec(
             "git", "fetch", "origin",
-            cwd=target_dir,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+            cwd = target_dir,
+            stdout = asyncio.subprocess.DEVNULL,
+            stderr = asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
@@ -320,9 +320,9 @@ class ResourceManager:
         effective_sha = f"origin/{branch}" if commit_sha == "HEAD" else commit_sha
         proc = await asyncio.create_subprocess_exec(
             "git", "checkout", effective_sha,
-            cwd=target_dir,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+            cwd = target_dir,
+            stdout = asyncio.subprocess.DEVNULL,
+            stderr = asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
 
@@ -335,9 +335,9 @@ class ResourceManager:
         # 解析真实 SHA（将 HEAD / origin/branch 等符号引用固化为 40 位哈希）
         proc = await asyncio.create_subprocess_exec(
             "git", "rev-parse", "HEAD",
-            cwd=target_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            cwd = target_dir,
+            stdout = asyncio.subprocess.PIPE,
+            stderr = asyncio.subprocess.DEVNULL,
         )
         stdout, _ = await proc.communicate()
         resolved_sha = stdout.decode().strip() if proc.returncode == 0 else commit_sha

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _read_marker_file(path: str, max_size: int) -> str:
+def _read_marker_file(path: str, max_size: int)-> str:
     """Read a marker file (.magnus_result / .magnus_action), return content or empty string."""
     if not os.path.exists(path):
         return ""
@@ -37,7 +37,7 @@ def _read_marker_file(path: str, max_size: int) -> str:
 
 @router.post(
     "/jobs/submit",
-    response_model=JobResponse,
+    response_model =JobResponse,
 )
 def submit_job(
     job_data: JobSubmission,
@@ -68,8 +68,8 @@ def submit_job(
 
     db_job = models.Job(
         **job_dict,
-        user_id=current_user.id,
-        status=JobStatus.PREPARING,
+        user_id = current_user.id,
+        status = JobStatus.PREPARING,
     )
 
     db.add(db_job)
@@ -81,7 +81,7 @@ def submit_job(
 
 @router.get(
     "/jobs",
-    response_model=PagedJobResponse,
+    response_model =PagedJobResponse,
 )
 def get_jobs(
     skip: int = 0,
@@ -115,7 +115,7 @@ def get_jobs(
 
 @router.get(
     "/jobs/{job_id}",
-    response_model=JobResponse,
+    response_model =JobResponse,
 )
 def get_job_detail(
     job_id: str,
@@ -149,7 +149,7 @@ def get_job_result(
     job_id: str,
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
-) -> Optional[str]:
+)-> Optional[str]:
     """文件不存在返回 null，文件存在但为空返回空字符串。"""
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
@@ -170,7 +170,7 @@ def get_job_action(
     job_id: str,
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
-) -> Optional[str]:
+)-> Optional[str]:
     """文件不存在返回 null，文件存在但为空返回空字符串。"""
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
@@ -186,7 +186,7 @@ def get_job_action(
     return job.action
 
 
-def _safe_utf8_truncate(data: bytes) -> bytes:
+def _safe_utf8_truncate(data: bytes)-> bytes:
     """截断字节流时避免切断 UTF-8 多字节字符"""
     length = len(data)
     if length == 0:
@@ -207,7 +207,7 @@ def get_job_logs_paginated(
     page: int = Query(default=-1, description="Page number, -1 for last page"),
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
-) -> Dict[str, Any]:
+)-> Dict[str, Any]:
     PAGE_SIZE = 200 * 1024
     OVERLAP = 0.3
 
@@ -266,7 +266,7 @@ def get_job_metrics(
     job_id: str,
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
-) -> List[Dict[str, Any]]:
+)-> List[Dict[str, Any]]:
     latest_metric: Optional[models.JobMetric] = db.query(models.JobMetric)\
         .filter(models.JobMetric.job_id == job_id)\
         .order_by(models.JobMetric.timestamp.desc())\

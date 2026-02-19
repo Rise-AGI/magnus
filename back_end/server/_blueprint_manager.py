@@ -31,24 +31,24 @@ class FileSecret(str):
         cls,
         _source_type: Any,
         _handler: GetCoreSchemaHandler,
-    ) -> CoreSchema:
+    )-> CoreSchema:
         return core_schema.no_info_after_validator_function(
             cls._validate,
             core_schema.str_schema(),
         )
 
     @classmethod
-    def _validate(cls, v: str) -> "FileSecret":
+    def _validate(cls, v: str)-> "FileSecret":
         if not v.startswith(cls.MAGIC_PREFIX):
             raise ValueError(f"FileSecret must start with '{cls.MAGIC_PREFIX}'")
         return cls(v)
 
     @property
-    def token(self) -> str:
+    def token(self)-> str:
         return self[len(self.MAGIC_PREFIX):]
 
 
-def _is_optional_type(tp) -> bool:
+def _is_optional_type(tp)-> bool:
     """检查类型是否是 Optional[X]，即 Union[X, None]"""
     if get_origin(tp) is Union:
         args = get_args(tp)
@@ -66,7 +66,7 @@ def _unwrap_optional(tp):
     return tp
 
 
-def _is_list_type(tp) -> bool:
+def _is_list_type(tp)-> bool:
     """检查类型是否是 List[X]"""
     return get_origin(tp) is list
 
@@ -104,7 +104,7 @@ class BlueprintManager:
         self,
         code: str,
         extra_globals: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    )-> Dict[str, Any]:
         # 允许导入的模块白名单
         allowed_modules = {
             "typing": __import__("typing"),
@@ -116,7 +116,7 @@ class BlueprintManager:
             _locals: Optional[Dict[str, Any]] = None,
             _fromlist: tuple = (),
             _level: int = 0,
-        ) -> Any:
+        )-> Any:
             if name in allowed_modules:
                 return allowed_modules[name]
             raise ImportError(f"Import of '{name}' is not allowed in Blueprint")
@@ -196,7 +196,7 @@ class BlueprintManager:
 
         return scope
 
-    def analyze_signature(self, code: str) -> List[BlueprintParamSchema]:
+    def analyze_signature(self, code: str)-> List[BlueprintParamSchema]:
         """
         静态分析 generate_job 函数签名，提取参数元数据（包括 Annotated 中的 UI 配置）。
         支持类型：T, Optional[T], List[T], Optional[List[T]]
@@ -210,10 +210,10 @@ class BlueprintManager:
         for name, param in sig.parameters.items():
             default_label = name.replace("_", " ").title()
             schema = BlueprintParamSchema(
-                key=name,
-                label=default_label,
-                type="text",
-                default=param.default if param.default != inspect.Parameter.empty else None,
+                key = name,
+                label = default_label,
+                type = "text",
+                default = param.default if param.default != inspect.Parameter.empty else None,
             )
 
             # 解析 Annotated 元数据 (e.g., Annotated[int, {"min": 1}])
@@ -302,9 +302,9 @@ class BlueprintManager:
                             opt_label = info
 
                     schema_options.append(BlueprintParamOption(
-                        label=opt_label,
-                        value=val,
-                        description=opt_desc
+                        label = opt_label,
+                        value = val,
+                        description = opt_desc,
                     ))
                 schema.options = schema_options
 
@@ -312,7 +312,7 @@ class BlueprintManager:
 
         return params_schema
 
-    def execute(self, code: str, inputs: Dict[str, Any]) -> JobSubmission:
+    def execute(self, code: str, inputs: Dict[str, Any])-> JobSubmission:
         """
         执行蓝图代码。
         关键逻辑：利用 Pydantic 动态模型进行运行时类型转换 (Runtime Type Coercion)，
@@ -352,7 +352,7 @@ class BlueprintManager:
         DynamicModel = create_model(
             "DynamicBlueprintModel",
             **field_definitions,
-            __config__=ConfigDict(extra='ignore')
+            __config__ = ConfigDict(extra='ignore'),
         )
 
         try:

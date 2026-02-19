@@ -22,7 +22,7 @@ __all__ = [
 ]
 
 
-def generate_hex_id() -> str:
+def generate_hex_id()-> str:
     return secrets.token_hex(8)
 
 
@@ -86,8 +86,8 @@ class Job(Base):
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
     metrics: Mapped[list["JobMetric"]] = relationship(
-        back_populates="job", 
-        cascade="all, delete-orphan",
+        back_populates = "job",
+        cascade = "all, delete-orphan",
     )
 
 
@@ -175,9 +175,9 @@ class ExplorerSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     messages: Mapped[list["ExplorerMessage"]] = relationship(
-        back_populates="session",
-        cascade="all, delete-orphan",
-        order_by="ExplorerMessage.created_at",
+        back_populates = "session",
+        cascade = "all, delete-orphan",
+        order_by = "ExplorerMessage.created_at",
     )
 
 

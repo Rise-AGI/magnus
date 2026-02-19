@@ -33,25 +33,25 @@ _auth_cache: TTLCache[str, str] = TTLCache(maxsize=AUTH_CACHE_MAX_SIZE, ttl=AUTH
 
 def _get_from_cache(
     token: str
-) -> Optional[str]:
+)-> Optional[str]:
     return _auth_cache.get(token)
 
 
 def _add_to_cache(
     token: str,
     user: models.User,
-) -> None:
+)-> None:
     _auth_cache[token] = user.id
 
 
-def generate_trust_token() -> str:
+def generate_trust_token()-> str:
     return f"sk-{secrets.token_urlsafe(24)}"
 
 
 def _upsert_feishu_user_sync(
     db: Session, 
     feishu_user: Dict[str, Any]
-) -> models.User:
+)-> models.User:
     open_id = feishu_user.get("open_id") or feishu_user.get("union_id")
     if not open_id:
         raise HTTPException(status_code=400, detail="Missing OpenID")
@@ -84,7 +84,7 @@ def get_current_user(
     request: Request,
     token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(database.get_db)
-) -> models.User:
+)-> models.User:
     final_token = token
 
     # Manual header check for Proxy scenarios where Depends logic is bypassed (token passed as None)
@@ -166,7 +166,7 @@ def get_current_user(
 async def feishu_login(
     req: FeishuLoginRequest,
     db: Session = Depends(database.get_db)
-) -> Dict[str, Any]:
+)-> Dict[str, Any]:
     try:
         feishu_user = await feishu_client.get_feishu_user(req.code)
     except Exception as e:
@@ -190,7 +190,7 @@ async def feishu_login(
 def refresh_trust_token(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
-) -> Dict[str, Any]:
+)-> Dict[str, Any]:
     new_token = generate_trust_token()
     current_user.token = new_token
 
@@ -213,12 +213,12 @@ def set_custom_token(
     payload: Dict[str, Any],
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-) -> Dict[str, Any]:
+)-> Dict[str, Any]:
     token = payload.get("token", "")
     if not token.startswith("sk-") or len(token) != MAGNUS_TOKEN_LENGTH:
         raise HTTPException(
-            status_code=400,
-            detail=f"Token must start with 'sk-' and be exactly {MAGNUS_TOKEN_LENGTH} characters.",
+            status_code = 400,
+            detail = f"Token must start with 'sk-' and be exactly {MAGNUS_TOKEN_LENGTH} characters.",
         )
 
     current_user.token = token
@@ -236,7 +236,7 @@ def set_custom_token(
 )
 def get_my_token(
     current_user: models.User = Depends(get_current_user),
-) -> Dict[str, Any]:
+)-> Dict[str, Any]:
     return {"magnus_token": current_user.token or ""}
 
 
@@ -247,6 +247,6 @@ def get_my_token(
 def get_users(
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
-) -> List[models.User]:
+)-> List[models.User]:
     users = db.query(models.User).order_by(models.User.name).all()
     return users

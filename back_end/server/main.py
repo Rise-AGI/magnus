@@ -20,7 +20,7 @@ from ._file_custody_manager import file_custody_manager
 
 
 class EndpointFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
+    def filter(self, record: logging.LogRecord)-> bool:
         msg = record.getMessage()
         # 屏蔽高频噪音
         return not any(x in msg for x in [
@@ -43,7 +43,7 @@ models.Base.metadata.create_all(
 )
 
 
-def run_migrations() -> None:
+def run_migrations()-> None:
     from sqlalchemy import inspect, text
     inspector = inspect(engine)
     columns = [col["name"] for col in inspector.get_columns("explorer_sessions")]
@@ -120,9 +120,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins = ["*"],
+    allow_methods = ["*"],
+    allow_headers = ["*"],
 )
 
 

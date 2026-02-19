@@ -39,7 +39,7 @@ def _scheduler_sort_key(job):
 
 @router.get(
     "/cluster/stats",
-    response_model=ClusterStatsResponse,
+    response_model =ClusterStatsResponse,
 )
 def get_cluster_stats(
     running_skip: int = 0,
@@ -81,10 +81,10 @@ def get_cluster_stats(
         else:
             # Case B: External 任务
             mock_user = UserInfo(
-                id=f"slurm_{task['user']}",
-                name=f"{task['user']} (slurm)",
-                avatar_url="/images/slurm_avatar.png",
-                email=None,
+                id = f"slurm_{task['user']}",
+                name = f"{task['user']} (slurm)",
+                avatar_url = "/images/slurm_avatar.png",
+                email = None,
             )
 
             try:
@@ -93,24 +93,24 @@ def get_cluster_stats(
                 start_dt = datetime.now()
 
             mock_job = JobResponse(
-                task_name=task["name"],
-                description="External slurm task",
-                namespace="External",
-                repo_name="N/A",
-                branch="N/A",
-                commit_sha="N/A",
-                entry_command="N/A",
-                container_image="N/A",
-                gpu_type=task["gpu_type"].lower().replace(" ", ""),
-                gpu_count=task["gpu_count"],
-                job_type=JobType.EXTERNAL,
-                id=f"{slurm_id} (slurm)",
-                user_id=mock_user.id,
-                status=JobStatus.RUNNING,
-                slurm_job_id=slurm_id,
-                start_time=start_dt,
-                created_at=start_dt,
-                user=mock_user,
+                task_name = task["name"],
+                description = "External slurm task",
+                namespace = "External",
+                repo_name = "N/A",
+                branch = "N/A",
+                commit_sha = "N/A",
+                entry_command = "N/A",
+                container_image = "N/A",
+                gpu_type = task["gpu_type"].lower().replace(" ", ""),
+                gpu_count = task["gpu_count"],
+                job_type = JobType.EXTERNAL,
+                id = f"{slurm_id} (slurm)",
+                user_id = mock_user.id,
+                status = JobStatus.RUNNING,
+                slurm_job_id = slurm_id,
+                start_time = start_dt,
+                created_at = start_dt,
+                user = mock_user,
             )
             all_running_jobs.append(mock_job)
 
@@ -172,7 +172,7 @@ def get_cluster_stats(
 
 @router.get(
     "/dashboard/my-active-jobs",
-    response_model=DashboardJobsResponse,
+    response_model =DashboardJobsResponse,
 )
 def get_my_active_jobs(
     skip: int = 0,
@@ -230,7 +230,7 @@ def get_dashboard_stats(
     now = datetime.now(timezone.utc)
 
     # --- 逻辑 A: 计算真实的 Occupancy (Allocation) ---
-    def get_real_occupancy(hours: int) -> float:
+    def get_real_occupancy(hours: int)-> float:
         start_time = now - timedelta(hours=hours)
         snapshots = db.query(models.ClusterSnapshot).filter(
             models.ClusterSnapshot.timestamp >= start_time

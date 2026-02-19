@@ -19,7 +19,7 @@ FILE_SECRET_PREFIX = "magnus-secret:"
 _COPY_CHUNK_SIZE = 64 * 1024
 
 
-def _format_size(size_bytes: int) -> str:
+def _format_size(size_bytes: int)-> str:
     value = float(size_bytes)
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if value < 1024:
@@ -37,7 +37,7 @@ class FileTooLargeError(Exception):
 
 # === Human-friendly token generation ===
 
-def _sieve_primes(lo: int, hi: int) -> List[int]:
+def _sieve_primes(lo: int, hi: int)-> List[int]:
     sieve = bytearray(b'\x01') * (hi + 1)
     sieve[0] = sieve[1] = 0
     for i in range(2, int(hi**0.5) + 1):
@@ -292,7 +292,7 @@ class FileCustodyManager:
         self._lock = threading.Lock()
         self._rng = random.SystemRandom()
 
-    def _generate_token(self) -> str:
+    def _generate_token(self)-> str:
         for _ in range(64):
             prime = self._rng.choice(_PRIMES)
             words = self._rng.sample(_WORDS, 3)
@@ -301,7 +301,7 @@ class FileCustodyManager:
                 return token
         raise RuntimeError("Failed to generate unique token after 64 attempts")
 
-    def _get_storage_size(self) -> int:
+    def _get_storage_size(self)-> int:
         total = 0
         for dirpath, _, filenames in os.walk(self._storage_root):
             for f in filenames:
@@ -315,7 +315,7 @@ class FileCustodyManager:
         expire_minutes: Optional[int] = None,
         is_directory: bool = False,
         max_downloads: Optional[int] = None,
-    ) -> str:
+    )-> str:
         if expire_minutes is None:
             expire_minutes = self._default_ttl_minutes
         expire_minutes = min(expire_minutes, self._max_ttl_minutes)
@@ -329,12 +329,12 @@ class FileCustodyManager:
                 )
             entry_id = self._generate_token()
             placeholder = CustodyEntry(
-                entry_id=entry_id,
-                file_dir=self._storage_root / entry_id,
-                original_filename=filename,
-                is_directory=is_directory,
-                expires_at=0.0,
-                max_downloads=max_downloads,
+                entry_id = entry_id,
+                file_dir = self._storage_root / entry_id,
+                original_filename = filename,
+                is_directory = is_directory,
+                expires_at = 0.0,
+                max_downloads = max_downloads,
             )
             self._entries[entry_id] = placeholder
 
@@ -378,7 +378,7 @@ class FileCustodyManager:
         logger.info(f"File custody stored: {entry_id}, filename={filename}, expire_minutes={expire_minutes}")
         return entry_id
 
-    def get_entry(self, token: str) -> Optional[CustodyEntry]:
+    def get_entry(self, token: str)-> Optional[CustodyEntry]:
         with self._lock:
             entry = self._entries.get(token)
         if entry is None:
@@ -387,7 +387,7 @@ class FileCustodyManager:
             return None
         return entry
 
-    def get_file_path(self, token: str) -> Optional[Tuple[Path, str, bool, bool]]:
+    def get_file_path(self, token: str)-> Optional[Tuple[Path, str, bool, bool]]:
         with self._lock:
             entry = self._entries.get(token)
             if entry is None:
@@ -403,14 +403,14 @@ class FileCustodyManager:
             exhausted = entry.max_downloads is not None and entry.download_count >= entry.max_downloads
         return (file_path, entry.original_filename, entry.is_directory, exhausted)
 
-    def delete_entry(self, token: str) -> None:
+    def delete_entry(self, token: str)-> None:
         with self._lock:
             entry = self._entries.pop(token, None)
         if entry is not None and entry.file_dir.exists():
             shutil.rmtree(entry.file_dir, ignore_errors=True)
             logger.info(f"File custody purged (download limit): {token}")
 
-    async def cleanup_loop(self) -> None:
+    async def cleanup_loop(self)-> None:
         logger.info("File custody cleanup loop started.")
         while True:
             await asyncio.sleep(30)
@@ -431,7 +431,7 @@ class FileCustodyManager:
                     await asyncio.to_thread(shutil.rmtree, entry.file_dir, True)
                 logger.info(f"File custody expired: {eid}")
 
-    def shutdown(self) -> None:
+    def shutdown(self)-> None:
         with self._lock:
             entries = list(self._entries.values())
             self._entries.clear()

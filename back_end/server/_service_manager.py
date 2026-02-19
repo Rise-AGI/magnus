@@ -80,7 +80,7 @@ class ServiceManager:
         self,
         db: Session,
         service: Service,
-    ) -> int:
+    )-> int:
         """
         为 Service 分配一个可用端口并立即写入数据库。
         使用 SELECT FOR UPDATE 锁定所有已分配端口的行，防止竞态条件。

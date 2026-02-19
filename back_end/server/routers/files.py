@@ -26,17 +26,17 @@ async def upload_file(
     max_downloads: Optional[int] = Form(default=None),
     is_directory: bool = Form(default=False),
     user: models.User = Depends(get_current_user),
-) -> FileCustodyResponse:
+)-> FileCustodyResponse:
     max_ttl = magnus_config["server"]["file_custody"]["max_ttl_minutes"]
     if expire_minutes is not None and expire_minutes > max_ttl:
         raise HTTPException(
-            status_code=400,
-            detail=f"expire_minutes exceeds maximum allowed ({max_ttl} min)",
+            status_code = 400,
+            detail = f"expire_minutes exceeds maximum allowed ({max_ttl} min)",
         )
     if max_downloads is not None and max_downloads < 1:
         raise HTTPException(
-            status_code=400,
-            detail="max_downloads must be at least 1",
+            status_code = 400,
+            detail = "max_downloads must be at least 1",
         )
 
     filename = file.filename or "upload"
@@ -71,7 +71,7 @@ async def download_file(token: str, background_tasks: BackgroundTasks):
         background_tasks.add_task(file_custody_manager.delete_entry, token)
 
     return FileResponse(
-        path=str(file_path),
-        filename=filename,
-        headers=headers,
+        path = str(file_path),
+        filename = filename,
+        headers = headers,
     )

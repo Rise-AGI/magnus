@@ -62,7 +62,7 @@ class JobSubmission(BaseModel):
 
     @field_validator("description", "entry_command", "system_entry_command", mode="before")
     @classmethod
-    def _strip_whitespace(cls, v: Optional[str]) -> Optional[str]:
+    def _strip_whitespace(cls, v: Optional[str])-> Optional[str]:
         return v.strip() if isinstance(v, str) else v
 
 

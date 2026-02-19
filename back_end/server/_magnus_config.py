@@ -9,7 +9,7 @@ __all__ = [
 ]
 
 
-def _check_key(config: dict, key: str, expected_type: Type, nullable: bool = False) -> None:
+def _check_key(config: dict, key: str, expected_type: Type, nullable: bool = False)-> None:
     if key not in config:
         raise KeyError(f"❌ 配置缺少必需的键: '{key}'")
 
@@ -23,7 +23,7 @@ def _check_key(config: dict, key: str, expected_type: Type, nullable: bool = Fal
         )
 
 
-def _validate_magnus_config(config: Dict[str, Any]) -> None:
+def _validate_magnus_config(config: Dict[str, Any])-> None:
     """
     验证 magnus_config 的完整性和类型正确性。
     在服务器启动时调用，快速失败。
@@ -97,7 +97,7 @@ def _validate_magnus_config(config: Dict[str, Any]) -> None:
     _check_key(cluster, "default_system_entry_command", str)
 
 
-def _load_magnus_config() -> Dict[str, Any]:
+def _load_magnus_config()-> Dict[str, Any]:
 
     magnus_project_root = Path(__file__).resolve().parent.parent.parent
     magnus_config_path = magnus_project_root / "configs" / "magnus_config.yaml"

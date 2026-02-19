@@ -7,7 +7,7 @@ import logging
 import traceback
 import subprocess
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 __all__ = [
@@ -32,7 +32,7 @@ class SlurmManager:
 
     def __init__(
         self
-    ) -> None:
+    )-> None:
         
         # Fast Fail 检查：Magnus 强依赖 Slurm 环境
         # 若缺失核心命令，直接抛出运行时异常阻止服务启动
@@ -48,7 +48,7 @@ class SlurmManager:
             raise RuntimeError(error_msg)
 
 
-    def _get_capacity_and_usage(self) -> tuple[int, int]:
+    def _get_capacity_and_usage(self)-> Tuple[int, int]:
         """
         [Internal] 复用逻辑：获取 (总容量, 当前总占用)
         """
@@ -110,12 +110,12 @@ class SlurmManager:
 
     def get_resource_snapshot(
         self,
-    )-> dict:
+    )-> Dict:
 
         cap, alloc = self._get_capacity_and_usage()
         return {
             "total_gpus": cap,
-            "slurm_used_gpus": alloc
+            "slurm_used_gpus": alloc,
         }
 
 
@@ -131,7 +131,7 @@ class SlurmManager:
         overwrite_output: bool = True,
         cpu_count: Optional[int] = None,
         memory_demand: Optional[str] = None,
-    ) -> str:
+    )-> str:
         """
         简单提交任务（不含 sleep 和状态检查）
         让 SLURM 自己管理队列和调度
@@ -172,11 +172,11 @@ class SlurmManager:
 
         result = subprocess.run(
             command,
-            input=script_content,
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
+            input = script_content,
+            capture_output = True,
+            text = True,
+            check = True,
+            env = env,
         )
 
         job_id = result.stdout.strip()
@@ -275,9 +275,9 @@ class SlurmManager:
                         "--format=%r|%P"
                     ]
                     output = subprocess.check_output(
-                        info_cmd, 
-                        text=True, 
-                        stderr=subprocess.DEVNULL
+                        info_cmd,
+                        text = True,
+                        stderr = subprocess.DEVNULL,
                     ).strip()
                     
                     if output:
@@ -322,7 +322,7 @@ class SlurmManager:
     def check_job_status(
         self, 
         slurm_job_id: str,
-    ) -> str:
+    )-> str:
         
         """
         查询 Slurm 任务状态
@@ -335,8 +335,8 @@ class SlurmManager:
         try:
             result = subprocess.run(
                 command, 
-                capture_output = True, 
-                text = True
+                capture_output = True,
+                text = True,
             )
             state = result.stdout.strip()
             
@@ -365,7 +365,7 @@ class SlurmManager:
         slurm_job_id: str,
         runner: str,
         token: str,
-    ) -> None:
+    )-> None:
         
         command = [
             "scancel",
@@ -388,7 +388,7 @@ class SlurmManager:
 
     def get_all_running_tasks(
         self,
-    ) -> list[dict]:
+    )-> List[Dict]:
         
         """
         获取所有正在运行的 Slurm 任务详情
@@ -405,8 +405,8 @@ class SlurmManager:
             result = subprocess.run(
                 command, 
                 capture_output = True, 
-                text = True, 
-                check = True
+                text = True,
+                check = True,
             )
             data = json.loads(result.stdout)
             
@@ -450,7 +450,7 @@ class SlurmManager:
                         parts = item.split(':')
                         
                         try:
-                            # 提取数量: 1(IDX:0) -> 1
+                            # 提取数量: 1(IDX:0)->1
                             count_str = parts[-1].split('(')[0]
                             count = int(count_str)
                             gpu_count += count
@@ -481,7 +481,7 @@ class SlurmManager:
                         "name": name,
                         "start_time": start_time_str,
                         "gpu_count": gpu_count,
-                        "gpu_type": gpu_type
+                        "gpu_type": gpu_type,
                     })
                     
                 except Exception as e:

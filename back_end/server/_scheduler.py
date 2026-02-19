@@ -72,7 +72,7 @@ class MagnusScheduler:
                 total_gpus = slurm_stats["total_gpus"],
                 slurm_used_gpus = slurm_stats["slurm_used_gpus"],
                 magnus_used_gpus = magnus_usage,
-                timestamp = now
+                timestamp = now,
             )
             db.add(snapshot)
             db.commit()
@@ -157,7 +157,7 @@ class MagnusScheduler:
             db.commit()
 
 
-    def _harvest_job_metrics(self, db: Session, job: Job) -> None:
+    def _harvest_job_metrics(self, db: Session, job: Job)-> None:
         status_path = f"{magnus_workspace_path}/jobs/{job.id}/gpu_status.json"
         if not os.path.exists(status_path):
             return
@@ -178,9 +178,9 @@ class MagnusScheduler:
                     })
 
             db.add(JobMetric(
-                job_id=job.id,
-                timestamp=datetime.now(timezone.utc),
-                status_json=json.dumps(processed_status),
+                job_id = job.id,
+                timestamp = datetime.now(timezone.utc),
+                status_json = json.dumps(processed_status),
             ))
         except Exception as e:
             logger.error(f"Failed to harvest metrics for job {job.id}: {e}")
@@ -231,8 +231,8 @@ class MagnusScheduler:
 
         # 按优先级排序
         schedulable_jobs.sort(
-            key=lambda x: (priority_map.get(x.job_type, 0), -x.created_at.timestamp()),
-            reverse=True,
+            key = lambda x: (priority_map.get(x.job_type, 0), -x.created_at.timestamp()),
+            reverse = True,
         )
 
         head_job = schedulable_jobs[0]
@@ -264,13 +264,13 @@ class MagnusScheduler:
             # 并行准备镜像和仓库
             image_task = resource_manager.ensure_image(job.container_image)
             repo_task = resource_manager.ensure_repo(
-                namespace=job.namespace,
-                repo_name=job.repo_name,
-                branch=job.branch,
-                commit_sha=job.commit_sha,
-                target_dir=repo_dir,
-                runner=effective_runner,
-                job_working_dir=job_working_table,
+                namespace = job.namespace,
+                repo_name = job.repo_name,
+                branch = job.branch,
+                commit_sha = job.commit_sha,
+                target_dir = repo_dir,
+                runner = effective_runner,
+                job_working_dir = job_working_table,
             )
 
             (image_ok, image_err), (repo_ok, repo_result) = await asyncio.gather(image_task, repo_task)
@@ -318,11 +318,11 @@ class MagnusScheduler:
         # 优先杀 B2，同优先级先杀晚启动的 (LIFO)
         kill_priority = {JobType.B2: 1, JobType.B1: 0}
         running_b_jobs.sort(
-            key=lambda x: (
+            key = lambda x: (
                 kill_priority.get(x.job_type, 0),
                 x.start_time.timestamp() if x.start_time else 0
             ),
-            reverse=True,
+            reverse = True,
         )
 
         victims, recovered = [], 0
@@ -337,7 +337,7 @@ class MagnusScheduler:
             for v in victims:
                 self._kill_and_pause(db, v)
 
-    def _submit_to_slurm(self, db: Session, job: Job) -> bool:
+    def _submit_to_slurm(self, db: Session, job: Job)-> bool:
         """
         提交任务到 SLURM 队列
         资源（镜像、仓库）已在 Preparing 阶段准备好
@@ -349,25 +349,8 @@ class MagnusScheduler:
 
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             repo_dir = f"{job_working_table}/repository"
-            guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
 
-            gpu_status_path = f"{job_working_table}/gpu_status.json"
-            try:
-                with open(gpu_status_path, "w", encoding="utf-8") as f:
-                    f.write("[]")
-                os.chmod(gpu_status_path, 0o666)
-            except Exception as e:
-                logger.error(f"Failed to initialize gpu_status.json: {e}.\nTraceback:\n{traceback.format_exc()}")
-
-            success_marker_path = f"{job_working_table}/.magnus_success"
-            result_marker_path = f"{job_working_table}/.magnus_result"
-            action_marker_path = f"{job_working_table}/.magnus_action"
-            for marker in [success_marker_path, result_marker_path, action_marker_path]:
-                if os.path.exists(marker):
-                    try:
-                        os.remove(marker)
-                    except OSError:
-                        pass
+            self._init_job_working_dir(job_working_table)
 
             spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
             allow_root = magnus_config["server"]["scheduler"]["allow_root"]
@@ -389,7 +372,96 @@ class MagnusScheduler:
         default_ephemeral_storage = magnus_config["cluster"]["default_ephemeral_storage"]
         ephemeral_storage = job.ephemeral_storage if job.ephemeral_storage else default_ephemeral_storage
 
-        wrapper_content = f'''import os
+        wrapper_content = self._build_wrapper_content(
+            job_working_table = job_working_table,
+            repo_dir = repo_dir,
+            sif_path = sif_path,
+            system_entry_command = system_entry_command,
+            user_token = user_token,
+            magnus_address = magnus_address,
+            job_id = job_id,
+            ephemeral_storage = ephemeral_storage,
+            spy_gpu_interval = spy_gpu_interval,
+            allow_root = allow_root,
+            entry_command = job.entry_command,
+            effective_runner = effective_runner,
+        )
+
+        wrapper_path = f"{job_working_table}/wrapper.py"
+        try:
+            with open(wrapper_path, "w", encoding="utf-8") as f:
+                f.write(wrapper_content)
+        except IOError as e:
+            logger.error(f"Failed to write wrapper script for Job {job.id}: {e}")
+            return False
+
+        try:
+            slurm_id = self.slurm_manager.submit_job_simple(
+                entry_command = f"python3 {wrapper_path}",
+                gpus = job.gpu_count,
+                job_name = job.task_name,
+                gpu_type = job.gpu_type,
+                output_path = f"{job_working_table}/slurm/output.txt",
+                overwrite_output = False,
+                runner = effective_runner,
+                cpu_count = job.cpu_count,
+                memory_demand = job.memory_demand,
+                token = job.user.token if job.user.token is not None else "",
+            )
+
+            job.status = JobStatus.QUEUED
+            job.slurm_job_id = slurm_id
+            db.commit()
+
+            logger.info(f"Job {job.id} submitted to SLURM (ID: {slurm_id}, Branch: {job.branch})")
+            return True
+
+        except Exception as error:
+            logger.error(f"Job {job.id} submission error: {error}")
+            job.status = JobStatus.FAILED
+            db.commit()
+            return False
+
+
+    def _init_job_working_dir(self, job_working_table: str)-> None:
+        guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
+
+        gpu_status_path = f"{job_working_table}/gpu_status.json"
+        try:
+            with open(gpu_status_path, "w", encoding="utf-8") as f:
+                f.write("[]")
+            os.chmod(gpu_status_path, 0o666)
+        except Exception as e:
+            logger.error(f"Failed to initialize gpu_status.json: {e}.\nTraceback:\n{traceback.format_exc()}")
+
+        for marker_name in [".magnus_success", ".magnus_result", ".magnus_action"]:
+            marker_path = f"{job_working_table}/{marker_name}"
+            if os.path.exists(marker_path):
+                try:
+                    os.remove(marker_path)
+                except OSError:
+                    pass
+
+
+    def _build_wrapper_content(
+        self,
+        job_working_table: str,
+        repo_dir: str,
+        sif_path: str,
+        system_entry_command: str,
+        user_token: str,
+        magnus_address: str,
+        job_id: str,
+        ephemeral_storage: str,
+        spy_gpu_interval: int,
+        allow_root: bool,
+        entry_command: str,
+        effective_runner: str,
+    )-> str:
+        success_marker_path = f"{job_working_table}/.magnus_success"
+        gpu_status_path = f"{job_working_table}/gpu_status.json"
+
+        return f'''import os
 import sys
 import traceback
 import subprocess
@@ -439,7 +511,7 @@ def main():
     apptainer_tmp_dir = os.path.join(work_dir, ".magnus_tmp")
     apptainer_cache_dir = os.path.join(work_dir, ".magnus_cache")
 
-    user_cmd_str = {repr(job.entry_command)}
+    user_cmd_str = {repr(entry_command)}
     if "sudo" in user_cmd_str:
         raise RuntimeError("Error: Not privileged.")
     effective_runner = {repr(effective_runner)}
@@ -540,41 +612,6 @@ if __name__ == "__main__":
     main()
 '''
 
-        wrapper_path = f"{job_working_table}/wrapper.py"
-        try:
-            with open(wrapper_path, "w", encoding="utf-8") as f:
-                f.write(wrapper_content)
-        except IOError as e:
-            logger.error(f"Failed to write wrapper script for Job {job.id}: {e}")
-            return False
-
-        try:
-            slurm_id = self.slurm_manager.submit_job_simple(
-                entry_command=f"python3 {wrapper_path}",
-                gpus=job.gpu_count,
-                job_name=job.task_name,
-                gpu_type=job.gpu_type,
-                output_path=f"{job_working_table}/slurm/output.txt",
-                overwrite_output=False,
-                runner=effective_runner,
-                cpu_count=job.cpu_count,
-                memory_demand=job.memory_demand,
-                token=job.user.token if job.user.token is not None else "",
-            )
-
-            job.status = JobStatus.QUEUED
-            job.slurm_job_id = slurm_id
-            db.commit()
-
-            logger.info(f"Job {job.id} submitted to SLURM (ID: {slurm_id}, Branch: {job.branch})")
-            return True
-
-        except Exception as error:
-            logger.error(f"Job {job.id} submission error: {error}")
-            job.status = JobStatus.FAILED
-            db.commit()
-            return False
-
 
     def _kill_and_pause(self, db: Session, job: Job):
         """Kill SLURM job and mark as PAUSED for preemption"""
@@ -582,8 +619,8 @@ if __name__ == "__main__":
             logger.info(f"Killing victim job {job.id} (SLURM: {job.slurm_job_id})")
             self.slurm_manager.kill_job(
                 job.slurm_job_id,
-                runner=job.runner if job.runner is not None else "magnus",
-                token=job.user.token if job.user.token is not None else "",
+                runner = job.runner if job.runner is not None else "magnus",
+                token = job.user.token if job.user.token is not None else "",
             )
 
         self._clean_up_working_table(job.id)
@@ -592,7 +629,7 @@ if __name__ == "__main__":
         job.start_time = None
         db.commit()
 
-    def terminate_job(self, db: Session, job: Job) -> None:
+    def terminate_job(self, db: Session, job: Job)-> None:
         """API endpoint for user-initiated job termination"""
         if not self.enabled:
             logger.warning("Scheduler disabled, skipping termination logic.")
@@ -607,8 +644,8 @@ if __name__ == "__main__":
             logger.info(f"Terminating job {job.id} (SLURM: {job.slurm_job_id}) by user request.")
             self.slurm_manager.kill_job(
                 job.slurm_job_id,
-                runner=job.runner if job.runner is not None else "magnus",
-                token=job.user.token if job.user.token is not None else "",
+                runner = job.runner if job.runner is not None else "magnus",
+                token = job.user.token if job.user.token is not None else "",
             )
 
         self._clean_up_working_table(job.id)
@@ -617,7 +654,7 @@ if __name__ == "__main__":
         job.start_time = None
         db.commit()
 
-    def _clean_up_working_table(self, job_id: str) -> None:
+    def _clean_up_working_table(self, job_id: str)-> None:
         job_working_table = f"{magnus_workspace_path}/jobs/{job_id}"
         try:
             delete_file(os.path.join(job_working_table, "repository"))

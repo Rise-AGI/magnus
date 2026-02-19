@@ -18,8 +18,8 @@ async def get_branches(
     branches = await github_client.fetch_branches(ns, repo)
     if not branches:
         raise HTTPException(
-            status_code=404,
-            detail="Repo not found or empty",
+            status_code = 404,
+            detail = "Repo not found or empty",
         )
     return branches
 

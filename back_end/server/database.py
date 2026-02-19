@@ -14,7 +14,7 @@ sqlalchemy_database_url = f"sqlite:///{magnus_database_path}/magnus.db"
 engine = create_engine(
     url = sqlalchemy_database_url,
     connect_args = {
-        "check_same_thread": False
+        "check_same_thread": False,
     },
 )
 

@@ -80,7 +80,7 @@ async def _safe_db_call(func, *args, **kwargs):
         return await asyncio.to_thread(func, *args, **kwargs)
 
 
-def _get_service_snapshot_standalone(service_id: str) -> ServiceSnapshot:
+def _get_service_snapshot_standalone(service_id: str)-> ServiceSnapshot:
     with SessionLocal() as db:
         service = db.query(Service).filter(Service.id == service_id).first()
         if not service:
@@ -91,7 +91,7 @@ def _get_service_snapshot_standalone(service_id: str) -> ServiceSnapshot:
         return ServiceSnapshot.model_validate(service)
 
 
-def _check_active_status_standalone(service_id: str) -> bool:
+def _check_active_status_standalone(service_id: str)-> bool:
     with SessionLocal() as db:
         service = db.query(Service.is_active).filter(Service.id == service_id).first()
         return service.is_active if service else False
@@ -121,7 +121,7 @@ def _shutdown_service_resources_sync(service_id: str, db: Session):
     db.flush()
 
 
-def _try_revive_service_standalone(service_id: str) -> Tuple[str, int]:
+def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
     with SessionLocal() as db:
         service = db.query(Service).filter(Service.id == service_id).first()
         if not service:
@@ -188,7 +188,7 @@ def _try_revive_service_standalone(service_id: str) -> Tuple[str, int]:
             raise HTTPException(status_code=500, detail=f"Service spawn failed: {e}")
 
 
-def _check_socket_sync(host: str, port: int, timeout: float = 0.5) -> bool:
+def _check_socket_sync(host: str, port: int, timeout: float = 0.5)-> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -196,7 +196,7 @@ def _check_socket_sync(host: str, port: int, timeout: float = 0.5) -> bool:
         return False
     
     
-async def _check_http_readiness(port: int) -> bool:
+async def _check_http_readiness(port: int)-> bool:
     url = f"http://127.0.0.1:{port}/health"
     short_time = 1.0
     try:
@@ -210,7 +210,7 @@ async def _check_http_readiness(port: int) -> bool:
         return False
 
 
-def _refresh_status_standalone(job_id: str, _: str) -> str:
+def _refresh_status_standalone(job_id: str, _: str)-> str:
     with SessionLocal() as db:
         job = db.query(models.Job).filter(models.Job.id == job_id).first()
         if not job:
@@ -232,8 +232,8 @@ def _update_activity_standalone(service_id: str):
 def create_service(
     service_data: ServiceCreate,
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user)
-) -> models.Service:
+    current_user: models.User = Depends(get_current_user),
+)-> models.Service:
     # ... (Same as original code) ...
     existing = db.query(Service).filter(Service.id == service_data.id).first()
     data = service_data.model_dump()
@@ -281,9 +281,9 @@ def create_service(
     data["is_active"] = False
     new_service = Service(
         **data,
-        owner_id=current_user.id,
-        last_activity_time=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        owner_id = current_user.id,
+        last_activity_time = datetime.now(timezone.utc),
+        updated_at = datetime.now(timezone.utc),
     )
     db.add(new_service)
     db.commit()
@@ -325,7 +325,7 @@ def list_services(
     sort_by: str = Query("activity", regex="^(activity|updated)$"),
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
-) -> Dict[str, Any]:
+)-> Dict[str, Any]:
     query = db.query(models.Service)
 
     if search:
@@ -358,7 +358,7 @@ def get_service(
     service_id: str,
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
-) -> models.Service:
+)-> models.Service:
     service = db.query(models.Service).filter(models.Service.id == service_id).first()
 
     if not service:
@@ -392,20 +392,20 @@ def _authenticate_adapter(request: Request):
 
 @router.api_route(
     "/services/{service_id}/{path:path}",
-    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+    methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
 )
 async def proxy_service_request(
     service_id: str,
     path: str,
     request: Request,
-    # REMOVED: db: Session = Depends(database.get_db) -> Fixes Connection Holding
-) -> StreamingResponse:
+    # REMOVED: db: Session = Depends(database.get_db)->Fixes Connection Holding
+)-> StreamingResponse:
     
     # === 1. Start SLA Timer ===
     start_time = datetime.now(timezone.utc)
     total_budget: Optional[float] = None 
 
-    def get_remaining_time() -> float:
+    def get_remaining_time()-> float:
         # Before snapshot, allow a generous fallback
         if total_budget is None: return 30.0 
         elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -433,13 +433,13 @@ async def proxy_service_request(
     try:
         # Wait for a global slot using the remaining budget
         await asyncio.wait_for(
-            _proxy_global_semaphore.acquire(), 
-            timeout=get_remaining_time()
+            _proxy_global_semaphore.acquire(),
+            timeout = get_remaining_time(),
         )
     except asyncio.TimeoutError:
         raise HTTPException(
-            status_code=503, 
-            detail=f"System Busy: Global proxy limit ({PROXY_GLOBAL_LIMIT}) reached. Timeout after {total_budget}s."
+            status_code = 503,
+            detail = f"System Busy: Global proxy limit ({PROXY_GLOBAL_LIMIT}) reached. Timeout after {total_budget}s."
         )
 
     try:
@@ -453,8 +453,8 @@ async def proxy_service_request(
             await asyncio.wait_for(service_sem.acquire(), timeout=get_remaining_time())
         except asyncio.TimeoutError:
             raise HTTPException(
-                status_code=429,
-                detail=f"Service Busy: Max concurrency {service_snap.max_concurrency} reached."
+                status_code = 429,
+                detail = f"Service Busy: Max concurrency {service_snap.max_concurrency} reached."
             )
 
         try:
@@ -504,16 +504,16 @@ async def proxy_service_request(
             # 7. Forward Request
             service_config = magnus_config.get("server", {}).get("services", {})
             proxy_timeout = httpx.Timeout(
-                connect=service_config.get("proxy_connect_timeout", 2.0),
-                read=get_remaining_time(), # Dynamic Read Timeout based on remaining budget
-                write=service_config.get("proxy_write_timeout", 30.0),
-                pool=service_config.get("proxy_pool_timeout", 5.0),
+                connect = service_config.get("proxy_connect_timeout", 2.0),
+                read = get_remaining_time(), # Dynamic Read Timeout based on remaining budget
+                write = service_config.get("proxy_write_timeout", 30.0),
+                pool = service_config.get("proxy_pool_timeout", 5.0),
             )
 
             client = httpx.AsyncClient(
-                base_url=f"http://127.0.0.1:{service_snap.assigned_port}",
-                timeout=proxy_timeout,
-                follow_redirects=True,
+                base_url = f"http://127.0.0.1:{service_snap.assigned_port}",
+                timeout = proxy_timeout,
+                follow_redirects = True,
             )
 
             try:
@@ -529,9 +529,9 @@ async def proxy_service_request(
                 rp_req = client.build_request(
                     request.method,
                     f"/{path}",
-                    content=body,
-                    headers=filtered_headers,
-                    params=request.query_params,
+                    content = body,
+                    headers = filtered_headers,
+                    params = request.query_params,
                 )
 
                 await _safe_db_call(_update_activity_standalone, service_id)
@@ -540,9 +540,9 @@ async def proxy_service_request(
 
                 return StreamingResponse(
                     r.aiter_raw(),
-                    status_code=r.status_code,
-                    headers=r.headers,
-                    background=BackgroundTask(client.aclose),
+                    status_code = r.status_code,
+                    headers = r.headers,
+                    background = BackgroundTask(client.aclose),
                 )
 
             except httpx.ConnectError:

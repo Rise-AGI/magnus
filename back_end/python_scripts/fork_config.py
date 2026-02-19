@@ -25,7 +25,7 @@ from library.fundamental.externals import ruamel_yaml
 def parse_value(
     raw_value: str,
     target_type: type,
-) -> Any:
+)-> Any:
     if target_type is bool:
         if raw_value.lower() in ("true", "1", "yes", "on"):
             return True
@@ -49,7 +49,7 @@ def set_nested_value(
     config: Dict[str, Any],
     path: str,
     raw_value: str,
-) -> None:
+)-> None:
     keys = path.split(".")
     cursor = config
 
@@ -72,7 +72,7 @@ def set_nested_value(
     cursor[final_key] = parse_value(raw_value, target_type)
 
 
-def main() -> None:
+def main()-> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--source",

@@ -94,7 +94,7 @@ router = APIRouter()
 
 @router.post(
     "/blueprints",
-    response_model=BlueprintResponse,
+    response_model =BlueprintResponse,
 )
 def create_blueprint(
     bp: BlueprintCreate,
@@ -114,8 +114,8 @@ def create_blueprint(
     if existing:
         if existing.user_id != current_user.id:
             raise HTTPException(
-                status_code=403,
-                detail="You cannot modify a blueprint created by another user. Please verify the Blueprint ID.",
+                status_code = 403,
+                detail = "You cannot modify a blueprint created by another user. Please verify the Blueprint ID.",
             )
 
         # Update existing
@@ -130,7 +130,7 @@ def create_blueprint(
     # Create new
     db_bp = models.Blueprint(
         **bp.model_dump(),
-        user_id=current_user.id,
+        user_id = current_user.id,
     )
     db.add(db_bp)
     db.commit()
@@ -163,7 +163,7 @@ def delete_blueprint(
 
 @router.get(
     "/blueprints",
-    response_model=PagedBlueprintResponse,
+    response_model =PagedBlueprintResponse,
 )
 def list_blueprints(
     skip: int = 0,
@@ -208,7 +208,7 @@ def list_blueprints(
 
 @router.get(
     "/blueprints/{blueprint_id}",
-    response_model=BlueprintResponse,
+    response_model =BlueprintResponse,
 )
 def get_blueprint(
     blueprint_id: str,
@@ -228,7 +228,7 @@ def get_blueprint(
 
 @router.get(
     "/blueprints/{blueprint_id}/schema",
-    response_model=List[BlueprintParamSchema],
+    response_model =List[BlueprintParamSchema],
 )
 def get_blueprint_schema(
     blueprint_id: str,
@@ -297,8 +297,8 @@ def run_blueprint(
 
         db_job = models.Job(
             **job_dict,
-            user_id=current_user.id,
-            status=models.JobStatus.PREPARING,
+            user_id = current_user.id,
+            status = models.JobStatus.PREPARING,
         )
         db.add(db_job)
 
@@ -319,10 +319,10 @@ def run_blueprint(
                 pref.updated_at = datetime.now(timezone.utc)
             else:
                 new_pref = models.BlueprintUserPreference(
-                    user_id=current_user.id,
-                    blueprint_id=blueprint_id,
-                    blueprint_hash=current_hash,
-                    cached_params=serialized_params,
+                    user_id = current_user.id,
+                    blueprint_id = blueprint_id,
+                    blueprint_hash = current_hash,
+                    cached_params = serialized_params,
                 )
                 db.add(new_pref)
 
@@ -340,7 +340,7 @@ def run_blueprint(
     
 @router.get(
     "/blueprints/{blueprint_id}/preference",
-    response_model=BlueprintPreferenceResponse,
+    response_model =BlueprintPreferenceResponse,
 )
 def get_blueprint_preference(
     blueprint_id: str,
@@ -356,16 +356,16 @@ def get_blueprint_preference(
         raise HTTPException(status_code=404, detail="No preference found")
         
     return BlueprintPreferenceResponse(
-        blueprint_id=pref.blueprint_id,
-        blueprint_hash=pref.blueprint_hash,
-        cached_params=deserialize_json(pref.cached_params),
-        updated_at=pref.updated_at,
+        blueprint_id = pref.blueprint_id,
+        blueprint_hash = pref.blueprint_hash,
+        cached_params = deserialize_json(pref.cached_params),
+        updated_at = pref.updated_at,
     )
 
 
 @router.put(
     "/blueprints/{blueprint_id}/preference",
-    response_model=BlueprintPreferenceResponse,
+    response_model =BlueprintPreferenceResponse,
 )
 def save_blueprint_preference(
     blueprint_id: str,
@@ -395,10 +395,10 @@ def save_blueprint_preference(
         pref.updated_at = datetime.now(timezone.utc)
     else: # Create
         pref = models.BlueprintUserPreference(
-            user_id=current_user.id,
-            blueprint_id=blueprint_id,
-            blueprint_hash=current_hash,
-            cached_params=serialized_params,
+            user_id = current_user.id,
+            blueprint_id = blueprint_id,
+            blueprint_hash = current_hash,
+            cached_params = serialized_params,
         )
         db.add(pref)
     
@@ -406,8 +406,8 @@ def save_blueprint_preference(
     db.refresh(pref)
     
     return BlueprintPreferenceResponse(
-        blueprint_id=pref.blueprint_id,
-        blueprint_hash=pref.blueprint_hash,
-        cached_params=deserialize_json(pref.cached_params),
-        updated_at=pref.updated_at,
+        blueprint_id = pref.blueprint_id,
+        blueprint_hash = pref.blueprint_hash,
+        cached_params = deserialize_json(pref.cached_params),
+        updated_at = pref.updated_at,
     )
