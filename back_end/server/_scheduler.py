@@ -570,7 +570,7 @@ for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO
     fi
 done
 
-APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-containall}}}}"
+APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-contain}}}}"
 APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
 if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ]; then
     truncate -s {{_parse_size_to_mb(ephemeral_storage)}}M {{overlay_path}}
