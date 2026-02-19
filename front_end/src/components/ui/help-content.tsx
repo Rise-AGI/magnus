@@ -452,16 +452,16 @@ commit_sha="msg:v2\\.0"             # ${t("help.blueprintEditor.commitShaEx4")}`
         <HelpParagraph>
           {t("help.blueprintEditor.sdkCallDesc")}
         </HelpParagraph>
-        <HelpCodeBlock>{`from magnus import submit_blueprint, run_blueprint
+        <HelpCodeBlock>{`from magnus import launch_blueprint, run_blueprint
 
 # Fire & Forget
-job_id = submit_blueprint("blueprint-id", args={"param": "value"})
+job_id = launch_blueprint("blueprint-id", args={"param": "value"})
 
 # Submit & Wait
 result = run_blueprint("blueprint-id", args={"param": "value"})
 
 # FileSecret: SDK 传文件路径，自动上传
-job_id = submit_blueprint("bp-id", args={"data": "my_table.csv"})
+job_id = launch_blueprint("bp-id", args={"data": "my_table.csv"})
 
 # 蓝图内接收文件
 from magnus import download_file
@@ -518,19 +518,19 @@ export function BlueprintRunnerHelp() {
           {t("help.blueprintRunner.sdkCallDesc")}
         </HelpParagraph>
         <HelpCodeBlock>{`# Python SDK
-from magnus import submit_blueprint, run_blueprint
+from magnus import launch_blueprint, run_blueprint
 
 # 提交后立即返回 job_id (Fire & Forget)
-job_id = submit_blueprint("blueprint-id", args={"param": "value"})
+job_id = launch_blueprint("blueprint-id", args={"param": "value"})
 
 # 提交并等待完成 (Submit & Wait)
 result = run_blueprint("blueprint-id", args={"param": "value"})
 
 # FileSecret 参数：SDK 直接传文件路径
-job_id = submit_blueprint("bp-id", args={"data": "/path/to/file"})
+job_id = launch_blueprint("bp-id", args={"data": "/path/to/file"})
 
 # CLI
-magnus submit <blueprint-id> --param value
+magnus launch <blueprint-id> --param value
 magnus run <blueprint-id> --data /path/to/file`}</HelpCodeBlock>
       </HelpSection>
 

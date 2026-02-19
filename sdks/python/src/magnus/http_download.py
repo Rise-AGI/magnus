@@ -9,7 +9,7 @@ from .file_transfer import normalize_secret
 
 
 def _magnus_error(msg: str) -> Exception:
-    from . import MagnusError
+    from .exceptions import MagnusError
     return MagnusError(msg)
 
 

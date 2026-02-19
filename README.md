@@ -357,8 +357,8 @@ def generate_job(data: InputData) -> JobSubmission:
 
 **SDK 端**：直接传文件路径，SDK 自动上传到服务器
 ```python
-from magnus import submit_blueprint
-submit_blueprint("my-bp", args={"data": "/local/path/to/file.csv"})
+from magnus import launch_blueprint
+launch_blueprint("my-bp", args={"data": "/local/path/to/file.csv"})
 ```
 
 **蓝图内接收文件**：
@@ -684,7 +684,7 @@ export MAGNUS_ADDRESS="http://your-server:8017"
 import magnus
 
 # 方式1: 提交蓝图任务 (Fire & Forget)
-job_id = magnus.submit_blueprint("quadre-simulation", args={"Te": "2.0", "B": "1.5"})
+job_id = magnus.launch_blueprint("quadre-simulation", args={"Te": "2.0", "B": "1.5"})
 print(f"Job submitted: {job_id}")
 
 # 方式2: 提交并等待完成 (Submit & Wait)
@@ -707,7 +707,7 @@ import magnus
 import asyncio
 
 async def main():
-    job_id = await magnus.submit_blueprint_async("my-blueprint")
+    job_id = await magnus.launch_blueprint_async("my-blueprint")
     result = await magnus.run_blueprint_async("my-blueprint", timeout=300)
     response = await magnus.call_service_async("my-service", payload={"x": 1})
 
@@ -718,7 +718,7 @@ asyncio.run(main())
 
 | 函数 | 说明 |
 |------|------|
-| `submit_blueprint(id, args)` | 提交蓝图任务，立即返回 Job ID |
+| `launch_blueprint(id, args)` | 提交蓝图任务，立即返回 Job ID |
 | `run_blueprint(id, args, timeout)` | 提交并轮询等待完成 |
 | `call_service(id, payload)` | 调用托管服务 |
 | `list_jobs(limit, search)` | 列出任务 |
@@ -739,7 +739,7 @@ Magnus SDK 内置强大的 CLI 工具。详细用法参见 [SDK 指南](docs/Mag
 
 ```bash
 # 提交蓝图任务 (Fire & Forget)
-magnus submit quadre-simulation --Te 2.0 --B 1.5
+magnus launch quadre-simulation --Te 2.0 --B 1.5
 
 # 提交并等待完成 (Submit & Wait)
 magnus run my-blueprint --param value

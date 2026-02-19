@@ -19,11 +19,16 @@ from ruamel.yaml import YAML
 
 __version__ = version("magnus-sdk")
 
+from ..exceptions import MagnusError, ExecutionError
+from ..actions import execute_action as run_action
 from .. import (
-    MagnusError,
-    save_config_file,
-    submit_blueprint,
+    save_site,
+    remove_site,
+    set_current_site,
+    launch_blueprint,
     run_blueprint,
+    submit_job as api_submit_job,
+    execute_job as api_execute_job,
     call_service,
     custody_file as api_custody_file,
     list_jobs as api_list_jobs,
@@ -322,41 +327,79 @@ def main_callback(
 @app.command(name="config")
 def show_config():
     """
-    Show current SDK configuration (address and token).
-    Resolution order: environment variable > ~/.magnus/config.json > default.
+    Show current SDK configuration and all configured sites.
     """
-    from .. import _load_config_file, CONFIG_FILE, DEFAULT_ADDRESS, DEFAULT_TOKEN
-    file_config = _load_config_file()
+    from ..config import _load_config, DEFAULT_ADDRESS, RESERVED_SITE_NAME
+
+    config = _load_config()
+    current = config.get("current")
+    sites = config.get("sites", {})
 
     env_address = os.getenv("MAGNUS_ADDRESS")
     env_token = os.getenv("MAGNUS_TOKEN")
 
-    address = env_address or file_config.get("address") or DEFAULT_ADDRESS
-    token = env_token or file_config.get("token") or DEFAULT_TOKEN
-
-    address_source = "env" if env_address else ("file" if "address" in file_config else "default")
-    token_source = "env" if env_token else ("file" if "token" in file_config else "default")
-
-    console.print()
-    console.print(f"  [bold]MAGNUS_ADDRESS[/bold]  {address}  [dim]({address_source})[/dim]")
-
-    if len(token) > 12:
-        masked = f"{token[:4]}{'*' * 16}{token[-4:]}"
+    if env_address:
+        effective_address = env_address
+        source = "env"
+    elif current and current in sites:
+        effective_address = sites[current]["address"]
+        source = current
     else:
-        masked = "*" * len(token)
-    console.print(f"  [bold]MAGNUS_TOKEN[/bold]    {masked}  [dim]({token_source})[/dim]")
-
-    if CONFIG_FILE.is_file():
-        console.print(f"  [bold]Config file[/bold]    {CONFIG_FILE}")
+        effective_address = DEFAULT_ADDRESS
+        source = RESERVED_SITE_NAME
 
     console.print()
+    console.print(f"  [bold]Current:[/bold]  {current or RESERVED_SITE_NAME}  [dim]({source})[/dim]")
+    console.print(f"  [bold]Address:[/bold]  {effective_address}")
+
+    if env_address or env_token:
+        overrides = [k for k, v in [("MAGNUS_ADDRESS", env_address), ("MAGNUS_TOKEN", env_token)] if v]
+        console.print(f"  [yellow]⚠ {', '.join(overrides)} set via env — overrides config file[/yellow]")
+
+    if sites:
+        console.print()
+        console.print("  [bold]Sites:[/bold]")
+        for name in sorted(sites):
+            marker = " [cyan]←[/cyan]" if name == current else ""
+            console.print(f"    {name}  {sites[name]['address']}{marker}")
+
+    console.print(f"\n  [dim]Default:  {DEFAULT_ADDRESS}[/dim]")
+    console.print()
+
+
+@app.command(name="print")
+def print_cmd(
+    message: Optional[str] = typer.Argument(None, help="Message to print. Reads from stdin if omitted."),
+    no_newline: bool = typer.Option(False, "--no-newline", "-n", help="Do not append a trailing newline"),
+    as_json: bool = typer.Option(False, "--json", help="Pretty-print the message as JSON"),
+):
+    """
+    Cross-platform print. Guarantees consistent UTF-8 output on Linux/macOS/Windows.
+    Serves as the standard I/O primitive inside Magnus Action scripts.
+
+    Examples:
+      magnus print "Hello World"
+      magnus print --no-newline "progress: "
+      magnus print --json '{"status": "ok", "count": 42}'
+      echo '{"a":1}' | magnus print --json
+    """
+    text = message if message is not None else sys.stdin.read()
+
+    if as_json:
+        try:
+            obj = json.loads(text)
+            console.print_json(data=obj)
+        except json.JSONDecodeError:
+            print_error(f"Invalid JSON: {text[:120]}")
+            raise typer.Exit(code=1)
+        return
+
+    end = "" if no_newline else "\n"
+    sys.stdout.write(text + end)
+    sys.stdout.flush()
+
 
 # === Login ===
-
-def _mask_token(token: str) -> str:
-    if len(token) > 12:
-        return f"{token[:4]}{'*' * 4}{token[-4:]}"
-    return "*" * len(token)
 
 
 def _verify_connection(address: str, token: str) -> bool:
@@ -372,44 +415,84 @@ def _verify_connection(address: str, token: str) -> bool:
         return False
 
 
+def _warn_env_overrides():
+    """Warn if environment variables override config file settings."""
+    overrides = [k for k in ["MAGNUS_ADDRESS", "MAGNUS_TOKEN"] if os.getenv(k)]
+    if overrides:
+        names = ", ".join(overrides)
+        print_msg(
+            f"[yellow]⚠ {names} is set via environment variable, which takes "
+            f"precedence over config file. Consider removing it from your "
+            f"shell profile to use site switching.[/yellow]"
+        )
+
+
 @app.command(name="login")
-def login_cmd():
+def login_cmd(
+    site: Optional[str] = typer.Argument(None, help="Site name to login/switch to"),
+):
     """
-    Interactive login: configure MAGNUS_ADDRESS and MAGNUS_TOKEN.
-    Saves to ~/.magnus/config.json (takes effect immediately, no restart needed).
-    Environment variables always override the config file.
+    Login to a Magnus site.
+
+    Interactive mode (no argument): prompts for site name, address, and token.
+    Quick switch (with argument): switch to an existing site, or create it interactively.
+    Special: 'magnus login default' switches to the hardcoded default site.
 
     Examples:
-      magnus login
+      magnus login              # interactive
+      magnus login prod         # switch to existing 'prod', or create it
+      magnus login default      # switch to hardcoded default
     """
-    from .. import DEFAULT_ADDRESS, DEFAULT_TOKEN
-    current_address = os.getenv("MAGNUS_ADDRESS", DEFAULT_ADDRESS)
-    current_token = os.getenv("MAGNUS_TOKEN", DEFAULT_TOKEN)
+    from ..config import _load_config, DEFAULT_ADDRESS, DEFAULT_TOKEN, RESERVED_SITE_NAME
 
-    # Fall back to config file for display if env vars are not set
-    if not os.getenv("MAGNUS_TOKEN") or not os.getenv("MAGNUS_ADDRESS"):
-        from .. import _load_config_file
-        file_config = _load_config_file()
-        if not os.getenv("MAGNUS_ADDRESS"):
-            current_address = file_config.get("address", current_address)
-        if not os.getenv("MAGNUS_TOKEN"):
-            current_token = file_config.get("token", current_token)
+    # --- Handle 'magnus login default' ---
+    if site == RESERVED_SITE_NAME:
+        set_current_site(None)
+        print_msg(f"Switched to [cyan]{RESERVED_SITE_NAME}[/cyan] ({DEFAULT_ADDRESS})")
+        _warn_env_overrides()
+        return
 
+    config = _load_config()
+    sites = config.get("sites", {})
+
+    # --- Quick switch for existing site ---
+    if site and site in sites:
+        existing = sites[site]
+        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Verifying {site}..."):
+            ok = _verify_connection(existing["address"], existing["token"])
+        if ok:
+            set_current_site(site)
+            print_msg(f"[green]Switched to [bold]{site}[/bold][/green] ({existing['address']})")
+        else:
+            print_msg(f"[yellow]Warning:[/yellow] Could not verify {site}. Switched anyway.")
+            set_current_site(site)
+        _warn_env_overrides()
+        return
+
+    # --- Interactive login ---
     console.print()
 
-    token_display = _mask_token(current_token) if current_token else "(not set)"
+    # Site name
+    if site:
+        name = site
+        print_msg(f"Creating new site [bold]{name}[/bold]...")
+    else:
+        print_msg("Site name: ", end="")
+        name = input().strip()
+        if not name:
+            print_error("Site name is required.")
+            raise typer.Exit(code=1)
 
-    print_msg(f"Magnus Address (current: {current_address}): ", end="")
-    address = input().strip()
-    if not address:
-        address = current_address
+    if name == RESERVED_SITE_NAME:
+        print_error(f"'{RESERVED_SITE_NAME}' is reserved. It refers to the hardcoded default site.")
+        raise typer.Exit(code=1)
+
+    print_msg(f"Address [{DEFAULT_ADDRESS}]: ", end="")
+    address = input().strip() or DEFAULT_ADDRESS
     address = address.rstrip("/")
 
-    print_msg(f"Magnus Token (current: {token_display}): ", end="")
+    print_msg("Token: ", end="")
     token = input().strip()
-    if not token:
-        token = current_token
-
     if not token:
         print_error("Token is required.")
         raise typer.Exit(code=1)
@@ -423,34 +506,53 @@ def login_cmd():
     else:
         print_msg("[yellow]Warning:[/yellow] Could not verify connection. Saving anyway.")
 
-    try:
-        config_path = save_config_file(address, token)
-        print_msg(f"Saved to [cyan]{config_path}[/cyan]")
-    except OSError as e:
-        print_error(f"Failed to save configuration: {e}")
+    config_path = save_site(name, address, token, set_current=True)
+    print_msg(f"Saved [bold]{name}[/bold] to [cyan]{config_path}[/cyan]")
+    _warn_env_overrides()
+    console.print()
+
+
+@app.command(name="logout")
+def logout_cmd(
+    site: str = typer.Argument(..., help="Site name to remove"),
+):
+    """
+    Remove a configured site.
+
+    If the removed site is the current one, falls back to the alphabetically
+    first remaining site, or 'default' if none remain.
+
+    Examples:
+      magnus logout dev
+    """
+    from ..config import _load_config, RESERVED_SITE_NAME
+
+    if site == RESERVED_SITE_NAME:
+        print_error(f"Cannot remove '{RESERVED_SITE_NAME}'. It is the hardcoded fallback.")
         raise typer.Exit(code=1)
 
-    env_overrides = []
-    if os.getenv("MAGNUS_ADDRESS"):
-        env_overrides.append("MAGNUS_ADDRESS")
-    if os.getenv("MAGNUS_TOKEN"):
-        env_overrides.append("MAGNUS_TOKEN")
-    if env_overrides:
-        names = ", ".join(env_overrides)
-        print_msg(f"[dim]Note: {names} environment variable(s) will take priority over this file.[/dim]")
+    config = _load_config()
+    if site not in config.get("sites", {}):
+        print_error(f"Site '{site}' not found.")
+        raise typer.Exit(code=1)
 
+    was_current = config.get("current") == site
+    new_current = remove_site(site)
+    print_msg(f"Removed site [bold]{site}[/bold].")
+    if was_current:
+        print_msg(f"Switched to [cyan]{new_current}[/cyan].")
     console.print()
 
 
 @app.command(
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
-def submit(
+def launch(
     ctx: typer.Context,
     blueprint_id: str = typer.Argument(..., help="ID of the blueprint"),
 ):
     """
-    Submit a blueprint job (Fire & Forget).
+    Launch a blueprint job (Fire & Forget).
     All unrecognized arguments are passed to the blueprint as strings.
     """
     try:
@@ -463,9 +565,9 @@ def submit(
             console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
             console.rule()
 
-        print_msg(f"Submitting blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
+        print_msg(f"Launching blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
 
-        job_id = submit_blueprint(
+        job_id = launch_blueprint(
             blueprint_id=blueprint_id,
             use_preference=cli_config["preference"],
             expire_minutes=cli_config["expire_minutes"],
@@ -507,7 +609,6 @@ def run(
 
         print_msg(f"Running blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
 
-        # SDK handles action execution internally; CLI disables it to control display
         with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
             result = run_blueprint(
                 blueprint_id=blueprint_id,
@@ -516,57 +617,15 @@ def run(
                 max_downloads=cli_config["max_downloads"],
                 timeout=cli_config["timeout"],
                 poll_interval=cli_config["poll_interval"],
-                execute_action=False,  # CLI handles action display + execution itself
+                execute_action=False,
                 args=bp_args,
             )
 
         console.print("")
         print_msg("Job finished.")
 
-        has_result = result is not None
-        has_action = False
-        action_text: Optional[str] = None
-
-        # Fetch action via the job_id stashed by run_blueprint
         from .. import default_client
-        if default_client.last_job_id:
-            try:
-                action_raw = api_get_job_action(default_client.last_job_id)
-                if action_raw:
-                    action_text = action_raw.strip()
-                    has_action = bool(action_text)
-            except Exception:
-                pass
-
-        if not has_result and not has_action:
-            print_msg("[dim]No result or action returned.[/dim]")
-        else:
-            if has_result:
-                console.rule("[bold green]MAGNUS RESULT[/bold green]")
-                try:
-                    assert isinstance(result, str)
-                    json_obj = json.loads(result)
-                    console.print_json(data=json_obj)
-                except Exception:
-                    console.print(result)
-                console.rule()
-
-            if has_action:
-                assert action_text is not None
-                if cli_config["execute_action"]:
-                    print_msg("Executing action...")
-                    for line in action_text.splitlines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        ret = subprocess.call(line, shell=True)
-                        if ret != 0:
-                            print_error(f"Action command failed (exit {ret}): {line}")
-                            raise typer.Exit(code=1)
-                else:
-                    console.rule("[bold yellow]MAGNUS ACTION[/bold yellow]")
-                    console.print(action_text)
-                    console.rule()
+        _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
 
     except MagnusError as e:
         print_error(str(e))
@@ -580,6 +639,105 @@ def run(
 
 
 CLI_RESERVED_KEYS = {"timeout", "verbose", "execute_action"}
+
+# Job submission parameter keys (used by submit/execute commands)
+_JOB_PARAM_KEYS: Dict[str, type] = {
+    "task_name": str,
+    "repo_name": str,
+    "branch": str,
+    "commit_sha": str,
+    "entry_command": str,
+    "gpu_type": str,
+    "gpu_count": int,
+    "namespace": str,
+    "job_type": str,
+    "description": str,
+    "container_image": str,
+    "cpu_count": int,
+    "memory_demand": str,
+    "ephemeral_storage": str,
+    "runner": str,
+    "system_entry_command": str,
+}
+
+
+def _parse_job_args(args: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Parse job CLI args into (cli_config, job_params)."""
+    cli_config: Dict[str, Any] = {}
+    job_params: Dict[str, Any] = {}
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--"):
+            key = arg[2:].replace("-", "_")
+
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                value = args[i + 1]
+                i += 2
+            else:
+                value = "true"
+                i += 1
+
+            if key in _CLI_KEY_TYPES:
+                cli_config[key] = _coerce_cli_value(key, value)
+            elif key in _JOB_PARAM_KEYS:
+                expected_type = _JOB_PARAM_KEYS[key]
+                job_params[key] = expected_type(value) if expected_type is not str else value
+            else:
+                job_params[key] = value
+        else:
+            i += 1
+
+    return cli_config, job_params
+
+
+def _display_job_result(
+    result: Optional[str],
+    job_id: Optional[str],
+    execute_action: bool,
+):
+    """Shared result/action display for run (blueprint) and execute (job)."""
+    has_result = result is not None
+    has_action = False
+    action_text: Optional[str] = None
+
+    if job_id:
+        try:
+            action_raw = api_get_job_action(job_id)
+            if action_raw:
+                action_text = action_raw.strip()
+                has_action = bool(action_text)
+        except Exception:
+            pass
+
+    if not has_result and not has_action:
+        print_msg("[dim]No result or action returned.[/dim]")
+        return
+
+    if has_result:
+        console.rule("[bold green]MAGNUS RESULT[/bold green]")
+        try:
+            assert isinstance(result, str)
+            json_obj = json.loads(result)
+            console.print_json(data=json_obj)
+        except Exception:
+            console.print(result)
+        console.rule()
+
+    if has_action:
+        assert action_text is not None
+        if execute_action:
+            print_msg("Executing action...")
+            try:
+                run_action(action_text)
+            except ExecutionError as e:
+                print_error(str(e))
+                raise typer.Exit(code=1)
+        else:
+            console.rule("[bold yellow]MAGNUS ACTION[/bold yellow]")
+            console.print(action_text)
+            console.rule()
 
 
 def parse_call_args(args: List[str]) -> Tuple[Dict[str, Any], Dict[str, str]]:
@@ -686,6 +844,97 @@ def call(
     except json.JSONDecodeError as e:
         print_error(f"Invalid JSON: {e}")
         raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+# === Direct Job Submission Commands ===
+
+_REQUIRED_JOB_KEYS = ["task_name", "repo_name", "branch", "commit_sha", "entry_command"]
+
+
+def _validate_job_params(params: Dict[str, Any]) -> None:
+    missing = [k for k in _REQUIRED_JOB_KEYS if k not in params]
+    if missing:
+        raise MagnusError(
+            f"Missing required parameters: {', '.join('--' + k.replace('_', '-') for k in missing)}"
+        )
+
+
+@app.command(
+    name="submit",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def submit_job_cmd(ctx: typer.Context):
+    """
+    Submit a job directly (Fire & Forget).
+
+    Examples:
+      magnus submit --task-name "Train" --repo-name my_repo --branch main \\
+        --commit-sha HEAD --entry-command "python train.py" --gpu-type A100 --gpu-count 4
+    """
+    try:
+        cli_config, job_params = _parse_job_args(ctx.args)
+        cli_config = apply_cli_defaults(cli_config, command_type="submit")
+        _validate_job_params(job_params)
+
+        print_msg(f"Submitting job [bold cyan]{job_params['task_name']}[/bold cyan]...")
+
+        job_id = api_submit_job(
+            timeout=cli_config["timeout"],
+            **job_params,
+        )
+
+        print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command(
+    name="execute",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def execute_job_cmd(ctx: typer.Context):
+    """
+    Submit a job and wait for completion.
+
+    Examples:
+      magnus execute --task-name "Train" --repo-name my_repo --branch main \\
+        --commit-sha HEAD --entry-command "python train.py"
+    """
+    try:
+        cli_config, job_params = _parse_job_args(ctx.args)
+        cli_config = apply_cli_defaults(cli_config, command_type="run")
+        _validate_job_params(job_params)
+
+        print_msg(f"Executing job [bold cyan]{job_params['task_name']}[/bold cyan]...")
+
+        with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
+            result = api_execute_job(
+                timeout=cli_config["timeout"],
+                poll_interval=cli_config["poll_interval"],
+                execute_action=False,
+                **job_params,
+            )
+
+        console.print("")
+        print_msg("Job finished.")
+
+        from .. import default_client
+        _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        print_msg("Interrupted by user.")
+        raise typer.Exit(code=130)
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
