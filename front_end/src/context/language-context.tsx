@@ -75,7 +75,7 @@ const translations = {
   "cluster.loadingStatus": { zh: "正在加载集群状态...", en: "Loading cluster status..." },
   "cluster.subtitle": { zh: "实时资源监控与队列状态。", en: "Real-time resource monitoring and queue status." },
   "cluster.availableGpus": { zh: "可用 GPU", en: "Available GPUs" },
-  "cluster.availableCpuMem": { zh: "可用 CPU / 内存", en: "Available CPUs / Memory" },
+  "cluster.availableCpuMem": { zh: "CPU / 内存", en: "CPUs / Memory" },
   "cluster.cores": { zh: "核心", en: "cores" },
   "cluster.activeJobs": { zh: "活跃任务", en: "Active Jobs" },
   "cluster.activeJobsDesc": { zh: "正在集群上执行", en: "Currently executing on cluster" },
@@ -643,8 +643,8 @@ const translations = {
   "help.blueprintEditor.autoImported": { zh: "已自动导入", en: "auto-imported" },
   "help.blueprintEditor.functionSpec": { zh: "函数规范", en: "Function Specification" },
   "help.blueprintEditor.functionSpecDesc": {
-    zh: "蓝图代码必须定义一个名为 generate_job 的函数，返回类型为 JobSubmission：",
-    en: "Blueprint code must define a function named generate_job with return type JobSubmission:"
+    zh: "蓝图代码必须定义一个名为 blueprint 的函数，在函数体内调用 submit_job 提交任务：",
+    en: "Blueprint code must define a function named blueprint that calls submit_job to submit a job:"
   },
   "help.blueprintEditor.commitSha": { zh: "commit_sha 智能解析", en: "commit_sha Smart Resolution" },
   "help.blueprintEditor.commitShaModes": {
@@ -679,25 +679,21 @@ MyParam = Annotated[str, {
     "placeholder": "输入提示",
 }]
 
-def generate_job(
+def blueprint(
     required_param: MyParam,
     optional_param: Optional[str] = None,
-) -> JobSubmission:
-    return JobSubmission(
+):
+    submit_job(
         task_name="my-task",           # 任务名称
+        entry_command="python main.py",# 启动命令
+        repo_name="my-repo",           # 仓库名
         description=None,              # 任务描述 (可选)
         namespace="Rise-AGI",          # GitHub 组织名
-        repo_name="my-repo",           # 仓库名
-        branch="main",                 # 分支名
-        commit_sha="HEAD",             # 提交 SHA / HEAD / msg:正则
-        entry_command="python main.py",# 启动命令
-        gpu_type="A100",               # GPU 类型
-        gpu_count=1,                   # GPU 数量
+        branch=None,                   # 分支名 (None=自动检测)
+        commit_sha=None,               # 提交 SHA (None=HEAD)
+        gpu_type="cpu",                # GPU 类型
+        gpu_count=0,                   # GPU 数量
         job_type=JobType.A2,           # 优先级
-        cpu_count=None,                # CPU 核心数 (可选)
-        memory_demand=None,            # 内存需求 (可选)
-        ephemeral_storage=None,        # 临时存储大小 (可选, 如 "10G")
-        runner=None,                   # 指定运行用户 (可选)
     )`,
     en: `# Define parameter types (with metadata)
 MyParam = Annotated[str, {
@@ -706,25 +702,21 @@ MyParam = Annotated[str, {
     "placeholder": "Input hint",
 }]
 
-def generate_job(
+def blueprint(
     required_param: MyParam,
     optional_param: Optional[str] = None,
-) -> JobSubmission:
-    return JobSubmission(
+):
+    submit_job(
         task_name="my-task",           # task name
+        entry_command="python main.py",# entry command
+        repo_name="my-repo",           # repository name
         description=None,              # description (optional)
         namespace="Rise-AGI",          # GitHub org
-        repo_name="my-repo",           # repository name
-        branch="main",                 # branch name
-        commit_sha="HEAD",             # SHA / HEAD / msg:regex
-        entry_command="python main.py",# entry command
-        gpu_type="A100",               # GPU type
-        gpu_count=1,                   # GPU count
+        branch=None,                   # branch (None=auto-detect)
+        commit_sha=None,               # SHA (None=HEAD)
+        gpu_type="cpu",                # GPU type
+        gpu_count=0,                   # GPU count
         job_type=JobType.A2,           # priority
-        cpu_count=None,                # CPU cores (optional)
-        memory_demand=None,            # memory demand (optional)
-        ephemeral_storage=None,        # ephemeral storage (optional, e.g. "10G")
-        runner=None,                   # run-as user (optional)
     )`,
   },
   "help.blueprintEditor.paramTypes": { zh: "支持的参数类型", en: "Supported Parameter Types" },
@@ -818,8 +810,8 @@ def generate_job(
   },
   "help.blueprintRunner.flow2": { zh: "点击 Launch 按钮提交", en: "Click Launch button to submit" },
   "help.blueprintRunner.flow3": {
-    zh: "系统验证参数合法性，调用蓝图函数生成 JobSubmission",
-    en: "System validates parameters, calls blueprint function to generate JobSubmission"
+    zh: "系统验证参数合法性，调用蓝图函数执行 submit_job",
+    en: "System validates parameters, calls blueprint function to execute submit_job"
   },
   "help.blueprintRunner.flow4": {
     zh: "任务提交成功后自动跳转到 Jobs 页面",

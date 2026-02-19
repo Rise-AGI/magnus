@@ -265,6 +265,7 @@ Magnus 的蓝图系统提供了一种革命性的开发体验：**编写一个 P
 
 #### 示例蓝图代码：
 ```python
+from magnus import submit_job, JobType
 from typing import Annotated, Optional, Literal
 
 DataDir = Annotated[str, {
@@ -298,22 +299,19 @@ Te = Annotated[Optional[float], {
     "placeholder": "e.g. 1.5",
 }]
 
-def generate_job(
+def blueprint(
     data_dir: DataDir,
     base_config: BaseConfig = "default",
     Te: Te = None,
-) -> JobSubmission:
+):
     cli_args = [f"--data_dir {data_dir}"]
     if Te is not None:
         cli_args.append(f"--Te {Te}")
 
-    return JobSubmission(
+    submit_job(
         task_name=f"Simulation-{base_config}",
         repo_name="my-project",
-        branch="main",
         entry_command=f"python main.py {' '.join(cli_args)}",
-        gpu_type="cpu",
-        gpu_count=0,
         job_type=JobType.A2,
     )
 ```
@@ -349,7 +347,7 @@ InputData = Annotated[FileSecret, {
     "placeholder": "file secret code",
 }]
 
-def generate_job(data: InputData) -> JobSubmission:
+def blueprint(data: InputData):
     ...
 ```
 
@@ -718,6 +716,8 @@ asyncio.run(main())
 
 | 函数 | 说明 |
 |------|------|
+| `submit_job(task_name, entry_command, repo_name, ...)` | 直接提交任务，立即返回 Job ID |
+| `execute_job(task_name, entry_command, repo_name, ...)` | 直接提交并轮询等待完成 |
 | `launch_blueprint(id, args)` | 提交蓝图任务，立即返回 Job ID |
 | `run_blueprint(id, args, timeout)` | 提交并轮询等待完成 |
 | `call_service(id, payload)` | 调用托管服务 |

@@ -1,5 +1,5 @@
 # ============ 复制进 web 端时省略这些导入 ============
-from server import JobSubmission, JobType
+from magnus import submit_job, JobType
 from typing import Annotated, Literal, Optional, List
 # =====================================================
 UserName = Annotated[str, {
@@ -51,7 +51,7 @@ OutputPath = Annotated[str, {
     "description": "stderr also goes here",
 }]
 
-def generate_job(
+def blueprint(
     user_name: UserName,
     working_directory: WorkingDirectory,
     slurm_script: SlurmScript,
@@ -60,11 +60,11 @@ def generate_job(
     gpu_count: GpuCount = 0,
     conda_environment: CondaEnvironment = "magnus_shared",
     output_path: OutputPath = "",
-)-> JobSubmission:
-    
+):
+
     def safe_quote(s: str)->str:
         return f"'{str(s).replace("'", "'\\''")}'"
-    
+
     entry_command = f"""cd back_end/python_scripts
 python magnus_slurm.py \\
     --working-directory {safe_quote(working_directory)} \\
@@ -72,25 +72,22 @@ python magnus_slurm.py \\
     --conda-environment {safe_quote(conda_environment)} \\
     --output-path {safe_quote(output_path)}"""
 
-    description = f"""## 🚀 Magnus 代交 Slurm 任务
+    description = f"""## Magnus 代交 Slurm 任务
 - **使用人**：{user_name}
 - **使用资源**：{cpu_count} CPU / {memory_demand} Mem / {gpu_count} GPU
 - **工作路径**：{working_directory}
 - **Conda 环境**：{conda_environment}
 
-### 📜 Slurm 脚本内容
+### Slurm 脚本内容
 ```bash
 {slurm_script}
 ```
 """
 
-    return JobSubmission(
+    submit_job(
         task_name = "Magnus Slurm",
         description = description,
-        namespace = "Rise-AGI",
         repo_name = "magnus",
-        branch = "main",
-        commit_sha = "HEAD",
         entry_command = entry_command,
         gpu_count = gpu_count,
         gpu_type = "rtx5090",

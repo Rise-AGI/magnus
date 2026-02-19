@@ -12,6 +12,12 @@ from .schemas import JobSubmission, BlueprintParamSchema, BlueprintParamOption
 logger = logging.getLogger(__name__)
 
 
+class _BlueprintCapture(Exception):
+    """submit_job 劫持用内部异常，捕获用户传入的 payload"""
+    def __init__(self, payload: Dict[str, Any]):
+        self.payload = payload
+
+
 class FileSecret(str):
     """
     文件传输凭证类型。
@@ -88,8 +94,11 @@ class BlueprintManager:
     """
 
     def __init__(self):
+        def _hijacked_submit_job(**kwargs: Any)-> None:
+            raise _BlueprintCapture(kwargs)
+
         self.execution_globals = {
-            "JobSubmission": JobSubmission,
+            "submit_job": _hijacked_submit_job,
             "JobType": JobType,
             "FileSecret": FileSecret,
             "Annotated": Annotated,
@@ -191,19 +200,19 @@ class BlueprintManager:
         except Exception as e:
             raise ValueError(f"Runtime Error in Blueprint: {e}")
 
-        if "generate_job" not in scope:
-            raise ValueError("Blueprint must define a function named 'generate_job'")
+        if "blueprint" not in scope:
+            raise ValueError("Blueprint must define a function named 'blueprint'")
 
         return scope
 
     def analyze_signature(self, code: str)-> List[BlueprintParamSchema]:
         """
-        静态分析 generate_job 函数签名，提取参数元数据（包括 Annotated 中的 UI 配置）。
+        静态分析 blueprint 函数签名，提取参数元数据（包括 Annotated 中的 UI 配置）。
         支持类型：T, Optional[T], List[T], Optional[List[T]]
         其中 T 为基础类型：int, float, bool, str, Literal[...]
         """
         local_scope = self._compile_code(code, extra_globals={})
-        func = local_scope["generate_job"]
+        func = local_scope["blueprint"]
         sig = inspect.signature(func)
         params_schema = []
 
@@ -315,16 +324,16 @@ class BlueprintManager:
     def execute(self, code: str, inputs: Dict[str, Any])-> JobSubmission:
         """
         执行蓝图代码。
-        关键逻辑：利用 Pydantic 动态模型进行运行时类型转换 (Runtime Type Coercion)，
-        解决 CLI/API 传入全字符串参数与 Blueprint 强类型定义之间的 Gap。
+        劫持机制：blueprint() 内调用 submit_job() 时抛出 _BlueprintCapture，
+        捕获传入的 kwargs，构造 JobSubmission 返回。
         """
         local_scope = self._compile_code(code, extra_globals={})
-        func = local_scope.get("generate_job")
+        func = local_scope.get("blueprint")
 
         if not func or not callable(func):
-            raise ValueError("Blueprint must define a 'generate_job' function.")
+            raise ValueError("Blueprint must define a 'blueprint' function.")
 
-        # 动态构建 Pydantic 模型
+        # 动态构建 Pydantic 模型做运行时类型转换
         sig = inspect.signature(func)
         field_definitions = {}
 
@@ -333,8 +342,7 @@ class BlueprintManager:
             default = param.default if param.default != inspect.Parameter.empty else ...
             field_definitions[param_name] = (annotation, default)
 
-        # CLI 对 List[T] 参数可能发送标量字符串，Pydantic v2 不会自动包装为列表。
-        # 在构建动态模型前，检查函数签名中的 List[T] 参数，标量则包装为列表。
+        # CLI 对 List[T] 参数可能发送标量字符串，预处理
         processed_inputs = dict(inputs)
         for param_name, param in sig.parameters.items():
             if param_name not in processed_inputs:
@@ -356,26 +364,23 @@ class BlueprintManager:
         )
 
         try:
-            # 这里的 **processed_inputs 包含了 CLI 传来的原始字符串（标量已包装为列表）
-            # DynamicModel 初始化时会自动执行类型转换 (如 "10" -> 10, "true" -> True)
             validated_data_obj = DynamicModel(**processed_inputs)
             validated_args = validated_data_obj.model_dump()
-
         except ValidationError as e:
             raise ValueError(f"Invalid parameters for blueprint: {e}")
 
         try:
-            result = func(**validated_args)
-            
-            if isinstance(result, dict):
-                return JobSubmission(**result)
-            elif isinstance(result, JobSubmission):
-                return result
-            else:
-                raise ValueError(f"Blueprint returned {type(result)}, expected dict or JobSubmission")
-
+            func(**validated_args)
+            raise ValueError("Blueprint function must call submit_job()")
+        except _BlueprintCapture as capture:
+            # 将 JobType enum 值转为字符串以通过 Pydantic 验证
+            payload = capture.payload
+            if "job_type" in payload and isinstance(payload["job_type"], JobType):
+                payload["job_type"] = payload["job_type"].value
+            return JobSubmission(**payload)
+        except ValueError:
+            raise
         except TypeError as e:
-            # 捕获蓝图内部的逻辑错误，而非传参错误
             raise ValueError(f"Blueprint logic error: {e}")
         except Exception as e:
             raise ValueError(f"Runtime Error in Blueprint: {e}")

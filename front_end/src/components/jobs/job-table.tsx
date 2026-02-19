@@ -118,13 +118,13 @@ export function JobTable({
                         <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 flex-shrink-0"></div>
                         <span
                           className="truncate max-w-[80px] sm:max-w-[140px] xl:max-w-[200px]"
-                          title={job.branch}
+                          title={job.branch ?? "TBD"}
                         >
-                          {job.branch}
+                          {job.branch ?? "TBD"}
                         </span>
                         <span className="text-zinc-700 flex-shrink-0">|</span>
                         <span className="bg-zinc-800 px-1.5 rounded text-zinc-400 flex-shrink-0">
-                          {job.commit_sha.substring(0, 7)}
+                          {job.commit_sha ? job.commit_sha.substring(0, 7) : "TBD"}
                         </span>
                       </div>
                     </div>

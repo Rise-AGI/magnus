@@ -102,29 +102,61 @@ export default function ClusterPage() {
       </div>
 
       {/* Resource Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-[1fr_1fr_1fr_1fr] gap-4 mb-10">
-        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-cyan-400 mb-2"><Cpu className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableCpuMem")}</span></div>
-          <div className="flex items-baseline gap-1.5"><span className="text-2xl font-bold text-white">{stats.resources.cpu_free}</span><span className="text-zinc-500 text-sm">/ {stats.resources.cpu_total} {t("cluster.cores")}</span></div>
-          <div className="flex items-baseline gap-1.5 mt-1"><span className="text-2xl font-bold text-white">{formatMem(stats.resources.mem_free_mb)}</span><span className="text-zinc-500 text-sm">/ {formatMem(stats.resources.mem_total_mb)}</span></div>
-        </div>
-        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Cpu className="w-24 h-24 text-emerald-500" /></div>
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 text-emerald-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableGpus")}</span></div>
-            <div className="flex items-baseline gap-2"><span className="text-3xl font-bold text-white">{stats.resources.free}</span><span className="text-zinc-500 text-sm">/ {stats.resources.total}</span></div>
-            <div className="mt-3 flex items-center gap-2 text-xs text-zinc-400 font-mono bg-zinc-800/50 w-fit px-2 py-1 rounded"><Server className="w-3 h-3" />{stats.resources.gpu_model}</div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+        {/* Card 1: CPU / Mem */}
+        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
+          <div className="flex items-center gap-2 text-cyan-400 mb-2">
+            <Cpu className="w-4 h-4" />
+            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableCpuMem")}</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 mb-2">
+            <span className="text-3xl font-bold text-white">{stats.resources.cpu_free}</span>
+            <span className="text-zinc-500 text-sm">/ {stats.resources.cpu_total} {t("cluster.cores")}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-zinc-400 text-xs">
+            <span className="font-mono">RAM:</span>
+            <span>{formatMem(stats.resources.mem_free_mb)} / {formatMem(stats.resources.mem_total_mb)}</span>
           </div>
         </div>
-        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-blue-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.activeJobs")}</span></div>
-          <div className="text-3xl font-bold text-white">{stats.total_running}</div>
-          <p className="text-zinc-500 text-xs mt-2">{t("cluster.activeJobsDesc")}</p>
+
+        {/* Card 2: GPU */}
+        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
+          <div className="flex items-center gap-2 text-emerald-400 mb-2">
+            <Activity className="w-4 h-4" />
+            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableGpus")}</span>
+          </div>
+          <div className="flex items-baseline gap-2 mb-2">
+            <span className="text-3xl font-bold text-white">{stats.resources.free}</span>
+            <span className="text-zinc-500 text-sm">/ {stats.resources.total}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-zinc-400 text-xs font-mono">
+            <Server className="w-3 h-3" />
+            {stats.resources.gpu_model}
+          </div>
         </div>
-        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-amber-400 mb-2"><Clock className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.queueDepth")}</span></div>
-          <div className="text-3xl font-bold text-white">{stats.total_pending}</div>
-          <p className="text-zinc-500 text-xs mt-2">{t("cluster.queueDepthDesc")}</p>
+
+        {/* Card 3: Active Jobs */}
+        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
+          <div className="flex items-center gap-2 text-blue-400 mb-2">
+            <Activity className="w-4 h-4" />
+            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.activeJobs")}</span>
+          </div>
+          <div className="text-3xl font-bold text-white mb-2">{stats.total_running}</div>
+          <div className="text-zinc-400 text-xs">
+            {t("cluster.activeJobsDesc")}
+          </div>
+        </div>
+
+        {/* Card 4: Queue Depth */}
+        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
+          <div className="flex items-center gap-2 text-amber-400 mb-2">
+            <Clock className="w-4 h-4" />
+            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.queueDepth")}</span>
+          </div>
+          <div className="text-3xl font-bold text-white mb-2">{stats.total_pending}</div>
+          <div className="text-zinc-400 text-xs">
+            {t("cluster.queueDepthDesc")}
+          </div>
         </div>
       </div>
 

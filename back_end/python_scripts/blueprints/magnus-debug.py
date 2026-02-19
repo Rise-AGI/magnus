@@ -1,5 +1,5 @@
 # ============ 复制进 web 端时省略这些导入 ============
-from server import JobSubmission, JobType
+from magnus import submit_job, JobType
 from typing import Annotated, Literal, Optional, List
 # =====================================================
 UserName = Annotated[str, {
@@ -21,23 +21,23 @@ Timeout = Annotated[str, {
     "allow_empty": False,
 }]
 
-def generate_job(
+def blueprint(
     user_name: UserName,
     gpu_count: GpuCount = 1,
     timeout: Timeout = "infinity",
-)-> JobSubmission:
-    
+):
+
     timeout_value = timeout.strip().lower()
-    
+
     command_suffix = ""
     if timeout_value != "infinity":
         command_suffix = f" {int(timeout_value)}"
-        
+
     entry_command = f"""cd back_end/python_scripts
 python magnus_debug.py{command_suffix}"""
 
     time_display = "无限" if timeout_value == "infinity" else f"{int(timeout_value)}分钟"
-    
+
     description = f"""## Magnus 占卡调试任务
 - 使用人：{user_name}
 - GPU数量：{gpu_count}
@@ -48,13 +48,10 @@ python magnus_debug.py{command_suffix}"""
 magnus-connect
 ```"""
 
-    return JobSubmission(
+    submit_job(
         task_name = "Magnus Debug",
         description = description,
-        namespace = "Rise-AGI",
         repo_name = "magnus",
-        branch = "main",
-        commit_sha = "HEAD",
         entry_command = entry_command,
         gpu_count = gpu_count,
         gpu_type = "rtx5090",

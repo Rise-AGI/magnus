@@ -1,5 +1,5 @@
 # ============ 复制进 web 端时省略这些导入 ============
-from server import JobSubmission, JobType
+from magnus import submit_job, JobType
 from typing import Annotated, Literal, Optional, List
 # =====================================================
 MathematicaCode = Annotated[str, {
@@ -25,11 +25,11 @@ MagnusAddress = Annotated[str, {
 }]
 
 
-def generate_job(
+def blueprint(
     code: MathematicaCode,
     timeout: Timeout = 300.0,
     address: MagnusAddress = "http://127.0.0.1:3011",
-)-> JobSubmission:
+):
 
     description = f"""## Mathematica 代码运行任务
 
@@ -48,16 +48,11 @@ def generate_job(
     ]
     entry_command = "\n".join(entry_commands)
 
-    return JobSubmission(
+    submit_job(
         task_name = "[Blueprint] Execute Mathematica",
         description = description,
-        namespace = "Rise-AGI",
         repo_name = "magnus",
-        branch = "main",
-        commit_sha = "HEAD",
         entry_command=entry_command,
-        gpu_count = 0,
-        gpu_type = "cpu",
         job_type = JobType.A2,
         memory_demand = "100M",
     )

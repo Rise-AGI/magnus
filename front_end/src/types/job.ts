@@ -14,8 +14,8 @@ export interface Job {
   status: string;
   namespace: string;
   repo_name: string;
-  branch: string;
-  commit_sha: string;
+  branch: string | null;
+  commit_sha: string | null;
   gpu_count: number;
   gpu_type: string;
   entry_command: string;

@@ -395,10 +395,10 @@ class MagnusClient:
     @staticmethod
     def _build_job_payload(
         task_name: str,
-        repo_name: str,
-        branch: str,
-        commit_sha: str,
         entry_command: str,
+        repo_name: str,
+        branch: Optional[str],
+        commit_sha: Optional[str],
         gpu_type: str,
         gpu_count: int,
         namespace: str,
@@ -413,16 +413,16 @@ class MagnusClient:
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "task_name": task_name,
-            "repo_name": repo_name,
-            "branch": branch,
-            "commit_sha": commit_sha,
             "entry_command": entry_command,
+            "repo_name": repo_name,
             "gpu_type": gpu_type,
             "gpu_count": gpu_count,
             "namespace": namespace,
             "job_type": job_type,
         }
         for key, val in [
+            ("branch", branch),
+            ("commit_sha", commit_sha),
             ("description", description),
             ("container_image", container_image),
             ("cpu_count", cpu_count),
@@ -438,10 +438,10 @@ class MagnusClient:
     def submit_job(
         self,
         task_name: str,
-        repo_name: str,
-        branch: str,
-        commit_sha: str,
         entry_command: str,
+        repo_name: str,
+        branch: Optional[str] = None,
+        commit_sha: Optional[str] = None,
         gpu_type: str = "cpu",
         gpu_count: int = 0,
         namespace: str = "Rise-AGI",
@@ -456,7 +456,7 @@ class MagnusClient:
         timeout: float = 10.0,
     ) -> str:
         payload = self._build_job_payload(
-            task_name, repo_name, branch, commit_sha, entry_command,
+            task_name, entry_command, repo_name, branch, commit_sha,
             gpu_type, gpu_count, namespace, job_type, description,
             container_image, cpu_count, memory_demand, ephemeral_storage,
             runner, system_entry_command,
@@ -471,10 +471,10 @@ class MagnusClient:
     async def submit_job_async(
         self,
         task_name: str,
-        repo_name: str,
-        branch: str,
-        commit_sha: str,
         entry_command: str,
+        repo_name: str,
+        branch: Optional[str] = None,
+        commit_sha: Optional[str] = None,
         gpu_type: str = "cpu",
         gpu_count: int = 0,
         namespace: str = "Rise-AGI",
@@ -490,7 +490,7 @@ class MagnusClient:
     ) -> str:
         return await asyncio.to_thread(
             self.submit_job,
-            task_name, repo_name, branch, commit_sha, entry_command,
+            task_name, entry_command, repo_name, branch, commit_sha,
             gpu_type, gpu_count, namespace, job_type, description,
             container_image, cpu_count, memory_demand, ephemeral_storage,
             runner, system_entry_command, timeout,
@@ -499,10 +499,10 @@ class MagnusClient:
     def execute_job(
         self,
         task_name: str,
-        repo_name: str,
-        branch: str,
-        commit_sha: str,
         entry_command: str,
+        repo_name: str,
+        branch: Optional[str] = None,
+        commit_sha: Optional[str] = None,
         gpu_type: str = "cpu",
         gpu_count: int = 0,
         namespace: str = "Rise-AGI",
@@ -519,8 +519,9 @@ class MagnusClient:
         execute_action: bool = True,
     ) -> Optional[str]:
         job_id = self.submit_job(
-            task_name=task_name, repo_name=repo_name, branch=branch,
-            commit_sha=commit_sha, entry_command=entry_command,
+            task_name=task_name, entry_command=entry_command,
+            repo_name=repo_name, branch=branch,
+            commit_sha=commit_sha,
             gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace,
             job_type=job_type, description=description,
             container_image=container_image, cpu_count=cpu_count,
@@ -532,10 +533,10 @@ class MagnusClient:
     async def execute_job_async(
         self,
         task_name: str,
-        repo_name: str,
-        branch: str,
-        commit_sha: str,
         entry_command: str,
+        repo_name: str,
+        branch: Optional[str] = None,
+        commit_sha: Optional[str] = None,
         gpu_type: str = "cpu",
         gpu_count: int = 0,
         namespace: str = "Rise-AGI",
@@ -552,8 +553,9 @@ class MagnusClient:
         execute_action: bool = True,
     ) -> Optional[str]:
         job_id = await self.submit_job_async(
-            task_name=task_name, repo_name=repo_name, branch=branch,
-            commit_sha=commit_sha, entry_command=entry_command,
+            task_name=task_name, entry_command=entry_command,
+            repo_name=repo_name, branch=branch,
+            commit_sha=commit_sha,
             gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace,
             job_type=job_type, description=description,
             container_image=container_image, cpu_count=cpu_count,

@@ -21,6 +21,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def create_job(
+    job_dict: Dict[str, Any],
+    user_id: str,
+    db: Session,
+)-> models.Job:
+    """
+    共享的 Job 创建逻辑。
+    SDK /jobs/submit 和 Blueprint /run 都收敛到这里。
+    负责：填充集群默认值、创建 ORM 对象、写入数据库。
+    """
+    cluster = magnus_config["cluster"]
+    if job_dict.get("cpu_count") is None or job_dict["cpu_count"] == 0:
+        job_dict["cpu_count"] = cluster["default_cpu_count"]
+    if job_dict.get("memory_demand") is None:
+        job_dict["memory_demand"] = cluster["default_memory_demand"]
+    if job_dict.get("ephemeral_storage") is None:
+        job_dict["ephemeral_storage"] = cluster["default_ephemeral_storage"]
+    if job_dict.get("runner") is None:
+        job_dict["runner"] = cluster["default_runner"]
+    if job_dict.get("container_image") is None:
+        job_dict["container_image"] = cluster["default_container_image"]
+    if job_dict.get("system_entry_command") is None:
+        job_dict["system_entry_command"] = cluster["default_system_entry_command"]
+
+    db_job = models.Job(
+        **job_dict,
+        user_id = user_id,
+        status = JobStatus.PREPARING,
+    )
+
+    db.add(db_job)
+    db.commit()
+    db.refresh(db_job)
+
+    return db_job
+
+
 def _read_marker_file(path: str, max_size: int)-> str:
     """Read a marker file (.magnus_result / .magnus_action), return content or empty string."""
     if not os.path.exists(path):
@@ -49,33 +86,7 @@ def submit_job(
     注意：此接口只负责将任务写入数据库并标记为 PREPARING。
     后续的资源准备、调度决策和 sbatch 提交由后台 _scheduler.py 负责。
     """
-    job_dict = job_data.model_dump()
-
-    # 所有 Optional 字段填入集群默认值，确保 DB 完整记录实验配置
-    cluster = magnus_config["cluster"]
-    if job_dict.get("cpu_count") is None or job_dict["cpu_count"] == 0:
-        job_dict["cpu_count"] = cluster["default_cpu_count"]
-    if job_dict.get("memory_demand") is None:
-        job_dict["memory_demand"] = cluster["default_memory_demand"]
-    if job_dict.get("ephemeral_storage") is None:
-        job_dict["ephemeral_storage"] = cluster["default_ephemeral_storage"]
-    if job_dict.get("runner") is None:
-        job_dict["runner"] = cluster["default_runner"]
-    if job_dict.get("container_image") is None:
-        job_dict["container_image"] = cluster["default_container_image"]
-    if job_dict.get("system_entry_command") is None:
-        job_dict["system_entry_command"] = cluster["default_system_entry_command"]
-
-    db_job = models.Job(
-        **job_dict,
-        user_id = current_user.id,
-        status = JobStatus.PREPARING,
-    )
-
-    db.add(db_job)
-    db.commit()
-    db.refresh(db_job)
-
+    db_job = create_job(job_data.model_dump(), current_user.id, db)
     return db_job
 
 

@@ -54,7 +54,7 @@ def create_job(
     task_name: str,
     gpu_count: int,
     priority: JobType,
-) -> JobSubmission:
+) -> models.Job:
     ...
 
 # 多行容器：最后元素也加逗号

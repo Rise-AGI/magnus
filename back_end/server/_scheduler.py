@@ -273,7 +273,7 @@ class MagnusScheduler:
                 job_working_dir = job_working_table,
             )
 
-            (image_ok, image_err), (repo_ok, repo_result) = await asyncio.gather(image_task, repo_task)
+            (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(image_task, repo_task)
 
             if not image_ok:
                 job.status = JobStatus.FAILED
@@ -292,6 +292,10 @@ class MagnusScheduler:
             # 回写解析后的真实 commit SHA（将 HEAD 等符号引用固化）
             assert repo_result is not None
             job.commit_sha = repo_result
+
+            # 回写解析后的 branch（将 None fallback 固化）
+            if resolved_branch is not None:
+                job.branch = resolved_branch
 
             # 资源就绪，进入待调度队列
             job.status = JobStatus.PENDING

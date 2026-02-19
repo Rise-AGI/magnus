@@ -320,17 +320,17 @@ export function BlueprintEditorHelp() {
           {t("help.blueprintEditor.runtimeDesc").split(t("help.blueprintEditor.autoImported"))[1] || ""}
         </HelpParagraph>
         <div className="bg-black/50 p-4 rounded-lg text-[11px] text-zinc-300 font-mono">
-          <span className="text-purple-400">JobSubmission</span>, <span className="text-purple-400">JobType</span>, <span className="text-purple-400">FileSecret</span>, <span className="text-blue-400">Annotated</span>, <span className="text-blue-400">Literal</span>, <span className="text-blue-400">Optional</span>, <span className="text-blue-400">List</span>, <span className="text-blue-400">Dict</span>, <span className="text-blue-400">Any</span>
+          <span className="text-purple-400">submit_job</span>, <span className="text-purple-400">JobType</span>, <span className="text-purple-400">FileSecret</span>, <span className="text-blue-400">Annotated</span>, <span className="text-blue-400">Literal</span>, <span className="text-blue-400">Optional</span>, <span className="text-blue-400">List</span>, <span className="text-blue-400">Dict</span>, <span className="text-blue-400">Any</span>
         </div>
       </HelpSection>
 
       <HelpSection title={t("help.blueprintEditor.functionSpec")}>
         <HelpParagraph>
-          {t("help.blueprintEditor.functionSpecDesc").split("generate_job")[0]}
-          <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-green-400 text-[11px]">generate_job</code>
-          {t("help.blueprintEditor.functionSpecDesc").split("generate_job")[1]?.split("JobSubmission")[0]}
-          <HelpInlineCode>JobSubmission</HelpInlineCode>
-          {t("help.blueprintEditor.functionSpecDesc").split("JobSubmission")[1] || ""}
+          {t("help.blueprintEditor.functionSpecDesc").split("blueprint")[0]}
+          <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-green-400 text-[11px]">blueprint</code>
+          {t("help.blueprintEditor.functionSpecDesc").split("blueprint")[1]?.split("submit_job")[0]}
+          <HelpInlineCode>submit_job</HelpInlineCode>
+          {t("help.blueprintEditor.functionSpecDesc").split("submit_job")[1] || ""}
         </HelpParagraph>
         <HelpCodeBlock>{t("help.blueprintEditor.functionSpecCode")}</HelpCodeBlock>
       </HelpSection>
