@@ -128,6 +128,8 @@ def get_cluster_stats(
     n2_used = sum(job.gpu_count for job in sorted_all_running)
     display_total = n1_free + n2_used
 
+    cpu_mem = slurm_manager.get_cpu_and_memory()
+
     # --- 5. Running 列表分页切片 ---
     total_running = len(sorted_all_running)
     paginated_running = sorted_all_running[running_skip : running_skip + running_limit]
@@ -162,6 +164,10 @@ def get_cluster_stats(
             "total": display_total,
             "free": n1_free,
             "used": n2_used,
+            "cpu_total": cpu_mem["cpu_total"],
+            "cpu_free": cpu_mem["cpu_total"] - cpu_mem["cpu_alloc"],
+            "mem_total_mb": cpu_mem["mem_total_mb"],
+            "mem_free_mb": cpu_mem["mem_total_mb"] - cpu_mem["mem_alloc_mb"],
         },
         "running_jobs": paginated_running,
         "total_running": total_running,

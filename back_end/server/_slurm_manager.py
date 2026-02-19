@@ -58,7 +58,7 @@ class SlurmManager:
             res_capacity = subprocess.run(
                 cmd_capacity, capture_output=True, text=True, check=True
             )
-            
+
             total_capacity = 0
             for line in res_capacity.stdout.split('\n'):
                 line = line.strip()
@@ -75,13 +75,13 @@ class SlurmManager:
             res_usage = subprocess.run(
                 cmd_usage, capture_output=True, text=True, check=True
             )
-            
+
             total_allocated = 0
             for line in res_usage.stdout.strip().split('\n'):
                 if not line.strip(): continue
                 parts = line.split(maxsplit=1)
                 if len(parts) < 2: continue
-                
+
                 num_nodes_str, gres_req = parts[0], parts[1]
                 if "gpu" not in gres_req: continue
 
@@ -92,12 +92,56 @@ class SlurmManager:
                     total_allocated += (num_nodes * gpu_per_node)
                 except (ValueError, IndexError):
                     pass
-            
+
             return total_capacity, total_allocated
 
         except Exception as e:
             logger.error(f"Error querying cluster resources: {e}")
             return 0, 0
+
+
+    def get_cpu_and_memory(self) -> Dict[str, int]:
+        """
+        从 scontrol show node 解析 CPU 和内存的总量与已分配量。
+        返回 {"cpu_total", "cpu_alloc", "mem_total_mb", "mem_alloc_mb"}
+        """
+        try:
+            res = subprocess.run(
+                ["scontrol", "show", "node", "--future"],
+                capture_output=True, text=True, check=True,
+            )
+
+            cpu_total = 0
+            cpu_alloc = 0
+            mem_total = 0
+            mem_alloc = 0
+
+            for line in res.stdout.split('\n'):
+                line = line.strip()
+                if "CPUTot=" in line:
+                    # CPUAlloc=34 CPUEfctv=192 CPUTot=192 CPULoad=...
+                    for part in line.split():
+                        if part.startswith("CPUTot="):
+                            cpu_total += int(part.split("=")[1])
+                        elif part.startswith("CPUAlloc="):
+                            cpu_alloc += int(part.split("=")[1])
+                elif line.startswith("RealMemory="):
+                    # RealMemory=515000 AllocMem=102400 ...
+                    for part in line.split():
+                        if part.startswith("RealMemory="):
+                            mem_total += int(part.split("=")[1])
+                        elif part.startswith("AllocMem="):
+                            mem_alloc += int(part.split("=")[1])
+
+            return {
+                "cpu_total": cpu_total,
+                "cpu_alloc": cpu_alloc,
+                "mem_total_mb": mem_total,
+                "mem_alloc_mb": mem_alloc,
+            }
+        except Exception as e:
+            logger.error(f"Error querying CPU/memory: {e}")
+            return {"cpu_total": 0, "cpu_alloc": 0, "mem_total_mb": 0, "mem_alloc_mb": 0}
 
 
     def get_cluster_free_gpus(

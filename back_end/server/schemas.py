@@ -113,6 +113,10 @@ class ClusterResources(BaseModel):
     total: int
     free: int
     used: int
+    cpu_total: int
+    cpu_free: int
+    mem_total_mb: int
+    mem_free_mb: int
     class Config: from_attributes = True
 
 

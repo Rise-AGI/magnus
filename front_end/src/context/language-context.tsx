@@ -75,6 +75,8 @@ const translations = {
   "cluster.loadingStatus": { zh: "正在加载集群状态...", en: "Loading cluster status..." },
   "cluster.subtitle": { zh: "实时资源监控与队列状态。", en: "Real-time resource monitoring and queue status." },
   "cluster.availableGpus": { zh: "可用 GPU", en: "Available GPUs" },
+  "cluster.availableCpuMem": { zh: "可用 CPU / 内存", en: "Available CPUs / Memory" },
+  "cluster.cores": { zh: "核心", en: "cores" },
   "cluster.activeJobs": { zh: "活跃任务", en: "Active Jobs" },
   "cluster.activeJobsDesc": { zh: "正在集群上执行", en: "Currently executing on cluster" },
   "cluster.queueDepth": { zh: "队列深度", en: "Queue Depth" },

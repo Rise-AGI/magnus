@@ -20,6 +20,10 @@ interface ClusterStats {
     total: number;
     free: number;
     used: number;
+    cpu_total: number;
+    cpu_free: number;
+    mem_total_mb: number;
+    mem_free_mb: number;
   };
   running_jobs: Job[];
   total_running: number;
@@ -83,6 +87,8 @@ export default function ClusterPage() {
   // 安全检查，防止 stats 为空时渲染
   if (!stats) return null;
 
+  const formatMem = (mb: number) => mb >= 1024 ? `${(mb / 1024).toFixed(0)} GB` : `${mb} MB`;
+
   return (
     <div className="pb-20 relative">
       <style jsx global>{`
@@ -96,25 +102,28 @@ export default function ClusterPage() {
       </div>
 
       {/* Resource Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
+      <div className="grid grid-cols-2 md:grid-cols-[1fr_1fr_1fr_1fr] gap-4 mb-10">
+        <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
+          <div className="flex items-center gap-2 text-cyan-400 mb-2"><Cpu className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableCpuMem")}</span></div>
+          <div className="flex items-baseline gap-1.5"><span className="text-2xl font-bold text-white">{stats.resources.cpu_free}</span><span className="text-zinc-500 text-sm">/ {stats.resources.cpu_total} {t("cluster.cores")}</span></div>
+          <div className="flex items-baseline gap-1.5 mt-1"><span className="text-2xl font-bold text-white">{formatMem(stats.resources.mem_free_mb)}</span><span className="text-zinc-500 text-sm">/ {formatMem(stats.resources.mem_total_mb)}</span></div>
+        </div>
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Cpu className="w-24 h-24 text-emerald-500" /></div>
           <div className="relative z-10">
             <div className="flex items-center gap-2 text-emerald-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableGpus")}</span></div>
-            <div className="flex items-baseline gap-2"><span className="text-4xl font-bold text-white">{stats.resources.free}</span><span className="text-zinc-500 text-sm">/ {stats.resources.total}</span></div>
-            <div className="mt-3 flex items-center gap-2 text-xs text-zinc-400 font-mono bg-zinc-800/50 w-fit px-2 py-1 rounded"><Server className="w-3 h-3" />{stats.resources.node} · {stats.resources.gpu_model}</div>
+            <div className="flex items-baseline gap-2"><span className="text-3xl font-bold text-white">{stats.resources.free}</span><span className="text-zinc-500 text-sm">/ {stats.resources.total}</span></div>
+            <div className="mt-3 flex items-center gap-2 text-xs text-zinc-400 font-mono bg-zinc-800/50 w-fit px-2 py-1 rounded"><Server className="w-3 h-3" />{stats.resources.gpu_model}</div>
           </div>
         </div>
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
           <div className="flex items-center gap-2 text-blue-400 mb-2"><Activity className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.activeJobs")}</span></div>
-          {/* 这里显示 Total Running 而不是当前页的长度 */}
-          <div className="text-4xl font-bold text-white">{stats.total_running}</div>
+          <div className="text-3xl font-bold text-white">{stats.total_running}</div>
           <p className="text-zinc-500 text-xs mt-2">{t("cluster.activeJobsDesc")}</p>
         </div>
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm">
           <div className="flex items-center gap-2 text-amber-400 mb-2"><Clock className="w-4 h-4" /><span className="text-sm font-bold uppercase tracking-wider">{t("cluster.queueDepth")}</span></div>
-          {/* 这里显示 Total Pending */}
-          <div className="text-4xl font-bold text-white">{stats.total_pending}</div>
+          <div className="text-3xl font-bold text-white">{stats.total_pending}</div>
           <p className="text-zinc-500 text-xs mt-2">{t("cluster.queueDepthDesc")}</p>
         </div>
       </div>
