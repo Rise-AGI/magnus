@@ -573,7 +573,8 @@ done
 APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-containall}}}}"
 APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
 if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ]; then
-    apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}
+    truncate -s {{_parse_size_to_mb(ephemeral_storage)}}M {{overlay_path}}
+    mkfs.ext3 -F -q {{overlay_path}}
     APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
 fi
 
