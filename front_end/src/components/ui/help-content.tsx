@@ -349,7 +349,7 @@ def generate_job(
         namespace="Rise-AGI",          # GitHub 组织名
         repo_name="my-repo",           # 仓库名
         branch="main",                 # 分支名
-        commit_sha="HEAD",             # 提交 SHA 或 HEAD
+        commit_sha="HEAD",             # 提交 SHA / HEAD / msg:正则
         entry_command="python main.py",# 启动命令
         gpu_type="A100",               # GPU 类型
         gpu_count=1,                   # GPU 数量
@@ -359,6 +359,32 @@ def generate_job(
         ephemeral_storage=None,        # 临时存储大小 (可选, 如 "10G")
         runner=None,                   # 指定运行用户 (可选)
     )`}</HelpCodeBlock>
+      </HelpSection>
+
+      <HelpSection title="commit_sha Smart Resolution">
+        <HelpParagraph>
+          <HelpInlineCode>commit_sha</HelpInlineCode> supports three modes:
+        </HelpParagraph>
+        <HelpFieldList>
+          <HelpField name={<HelpInlineCode>&quot;HEAD&quot;</HelpInlineCode>}>
+            Latest commit on the specified branch
+          </HelpField>
+          <HelpField name={<HelpInlineCode>&quot;abc123...&quot;</HelpInlineCode>}>
+            Exact 40-char SHA or any valid git ref
+          </HelpField>
+          <HelpField name={<HelpInlineCode>&quot;msg:&lt;regex&gt;&quot;</HelpInlineCode>}>
+            Search for the most recent commit whose message matches the Python regex
+          </HelpField>
+        </HelpFieldList>
+        <HelpCodeBlock>{`# Examples
+commit_sha="HEAD"                   # latest on branch
+commit_sha="msg:fix.*scheduler"     # most recent commit matching regex
+commit_sha="msg:release"              # commit message containing "release"
+commit_sha="msg:v2\\.0"              # literal dot (regex escaped)`}</HelpCodeBlock>
+        <HelpParagraph>
+          The resolved SHA is written back to the database — the original <HelpInlineCode>msg:</HelpInlineCode> value is never stored permanently.
+          If no match is found within the most recent 200 commits, the job will fail with a descriptive error.
+        </HelpParagraph>
       </HelpSection>
 
       <HelpSection title={t("help.blueprintEditor.paramTypes")}>
