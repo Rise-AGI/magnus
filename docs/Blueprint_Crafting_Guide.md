@@ -218,12 +218,23 @@ FileSecret 的 `allow_empty` 始终为 `False`（必填）。
 
 `FileSecret` 用于将本地文件传输到远程执行环境，通过 Magnus 服务器中转。
 
-### 格式
+### Token 格式规范
 
-值必须以 `magnus-secret:` 开头，后跟服务器返回的文件凭证：
+完整格式为 `magnus-secret:` 前缀 + token 本体：
+
 ```
-magnus-secret:7453-calm-boat-fire
+magnus-secret:{prime}-{word}-{word}-{word}
 ```
+
+| 部分 | 规则 | 示例 |
+|------|------|------|
+| `magnus-secret:` | 固定前缀（SDK 构造时可省略，会自动补全） | |
+| `{prime}` | 4–5 位质数（1000–99999 范围） | `7919` |
+| `{word}` | 3 个英文单词，每个 4–5 个小写字母 | `calm-boat-fire` |
+
+完整示例：`magnus-secret:7919-calm-boat-fire`
+
+Token 由服务端 `_file_custody_manager` 生成，SDK 端 `FileSecret()` 构造时会校验格式合法性。
 
 ### 蓝图中定义
 
@@ -235,7 +246,7 @@ InputData = Annotated[FileSecret, {
 }]
 
 def blueprint(data: InputData):
-    # data 的值形如 "magnus-secret:7453-calm-boat-fire"
+    # data 的值形如 "magnus-secret:7919-calm-boat-fire"
     # 在容器内用 magnus SDK 接收文件：
     #   from magnus import download_file
     #   download_file(data, "my_data.csv")

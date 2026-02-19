@@ -20,6 +20,29 @@ class FileSecret(str):
     """文件传输凭证，SDK 端用于标记 file_secret 参数"""
     MAGIC_PREFIX = "magnus-secret:"
 
+    def __new__(cls, value: str) -> "FileSecret":
+        if value.startswith(cls.MAGIC_PREFIX):
+            token = value[len(cls.MAGIC_PREFIX):]
+        else:
+            token = value
+        cls._validate_token(token)
+        return super().__new__(cls, cls.MAGIC_PREFIX + token)
+
+    @staticmethod
+    def _validate_token(token: str) -> None:
+        parts = token.split("-")
+        if len(parts) != 4:
+            raise ValueError(f"FileSecret token must have 4 parts (prime-word-word-word), got {len(parts)}: '{token}'")
+        num_str, w1, w2, w3 = parts
+        if not num_str.isdigit() or not (1000 <= int(num_str) <= 99999):
+            raise ValueError(f"FileSecret prime part must be a 4-5 digit number, got '{num_str}'")
+        n = int(num_str)
+        if n < 2 or any(n % i == 0 for i in range(2, int(n**0.5) + 1)):
+            raise ValueError(f"FileSecret prime part must be a prime number, got {n}")
+        for w in (w1, w2, w3):
+            if not w.isalpha() or not w.islower() or not (4 <= len(w) <= 5):
+                raise ValueError(f"FileSecret word must be 4-5 lowercase letters, got '{w}'")
+
 __version__ = _pkg_version("magnus-sdk")
 
 __all__ = [
