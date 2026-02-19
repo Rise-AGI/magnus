@@ -583,14 +583,21 @@ if [ -z "$_setuid_apptainer" ]; then
 else
     APPTAINER_CONTAIN="${{{{MAGNUS_CONTAIN_LEVEL:-contain}}}}"
 fi
+# MAGNUS_CONTAIN_LEVEL=none → disable containment entirely (bare apptainer, like pre-overlay era)
+[ "$APPTAINER_CONTAIN" = "none" ] && APPTAINER_CONTAIN=""
 
-APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
-if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]; then
-    apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}
-    APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
+if [ -n "$APPTAINER_CONTAIN" ]; then
+    APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
+    if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]; then
+        apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}
+        APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
+    else
+        APPTAINER_FLAGS="$APPTAINER_FLAGS --writable-tmpfs"
+        echo "[Magnus] WARNING: overlay skipped (${{{{_setuid_apptainer:+setuid apptainer}}}}${{{{MAGNUS_NO_OVERLAY:+MAGNUS_NO_OVERLAY=1}}}}), ephemeral_storage={{ephemeral_storage}} not enforced, using writable-tmpfs (RAM)" >&2
+    fi
 else
-    APPTAINER_FLAGS="$APPTAINER_FLAGS --writable-tmpfs"
-    echo "[Magnus] WARNING: overlay skipped (${{{{_setuid_apptainer:+setuid apptainer}}}}${{{{MAGNUS_NO_OVERLAY:+MAGNUS_NO_OVERLAY=1}}}}), ephemeral_storage={{ephemeral_storage}} not enforced, using writable-tmpfs (RAM)" >&2
+    APPTAINER_FLAGS="--nv"
+    echo "[Magnus] WARNING: containment disabled (MAGNUS_CONTAIN_LEVEL=none), host filesystem visible, no write isolation" >&2
 fi
 
 if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
