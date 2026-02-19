@@ -338,18 +338,19 @@ def show_config():
     env_address = os.getenv("MAGNUS_ADDRESS")
     env_token = os.getenv("MAGNUS_TOKEN")
 
+    # Resolution: env → config file current site → default
     if env_address:
+        effective_name = "env"
         effective_address = env_address
-        source = "env"
     elif current and current in sites:
+        effective_name = current
         effective_address = sites[current]["address"]
-        source = current
     else:
+        effective_name = RESERVED_SITE_NAME
         effective_address = DEFAULT_ADDRESS
-        source = RESERVED_SITE_NAME
 
     console.print()
-    console.print(f"  [bold]Current:[/bold]  {current or RESERVED_SITE_NAME}  [dim]({source})[/dim]")
+    console.print(f"  [bold]Current:[/bold]  {effective_name}")
     console.print(f"  [bold]Address:[/bold]  {effective_address}")
 
     if env_address or env_token:
@@ -357,10 +358,14 @@ def show_config():
         console.print(f"  [yellow]⚠ {', '.join(overrides)} set via env — overrides config file[/yellow]")
 
     if sites:
+        is_env_override = bool(env_address)
         console.print()
         console.print("  [bold]Sites:[/bold]")
         for name in sorted(sites):
-            marker = " [cyan]←[/cyan]" if name == current else ""
+            if name == current:
+                marker = " [dim cyan]← fallback[/dim cyan]" if is_env_override else " [cyan]←[/cyan]"
+            else:
+                marker = ""
             console.print(f"    {name}  {sites[name]['address']}{marker}")
 
     console.print(f"\n  [dim]Default:  {DEFAULT_ADDRESS}[/dim]")
