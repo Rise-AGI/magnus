@@ -553,6 +553,7 @@ export APPTAINERENV_MAGNUS_JOB_ID={{job_id}}
 {{system_entry_command}}
 
 export APPTAINERENV_MAGNUS_HOME=${{{{MAGNUS_HOME:-/magnus}}}}
+export APPTAINERENV_HOME=${{{{MAGNUS_HOME:-/magnus}}}}
 export APPTAINERENV_MAGNUS_RESULT=${{{{MAGNUS_HOME:-/magnus}}}}/workspace/.magnus_result
 export APPTAINERENV_MAGNUS_ACTION=${{{{MAGNUS_HOME:-/magnus}}}}/workspace/.magnus_action
 export APPTAINER_TMPDIR={{apptainer_tmp_dir}}
