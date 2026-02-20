@@ -137,11 +137,15 @@ def get_cluster_stats(
     # --- 6. Pending Jobs 处理与分页 ---
     # QUEUED 在前端显示为 Pending，PREPARING 单独显示
     # 排序：Pending/Queued/Paused 按调度优先级，Preparing 在最后
+    # 排除已在 SLURM 中运行的 job，避免因状态延迟导致同一 job 同时出现在两列
+    running_job_ids = {job.slurm_job_id for job in magnus_jobs_orm}
     pending_jobs_orm = db.query(models.Job).filter(
-        models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED])
+        models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
+        ~models.Job.slurm_job_id.in_(running_job_ids) if running_job_ids else True,
     ).all()
     preparing_jobs_orm = db.query(models.Job).filter(
-        models.Job.status == JobStatus.PREPARING
+        models.Job.status == JobStatus.PREPARING,
+        ~models.Job.slurm_job_id.in_(running_job_ids) if running_job_ids else True,
     ).all()
 
     # Pending/Queued/Paused 按调度器排序
