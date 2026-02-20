@@ -1,6 +1,6 @@
 # Magnus Job Runtime
 
-> 2026-02-19, by Claude (with zycai)
+> 2026-02-20, by Zeyu Cai
 
 本文档描述 Magnus job 从提交到容器内执行的完整运行时链路，以及宿主机与容器之间的文件系统协议和环境变量协议。
 
@@ -53,7 +53,7 @@ wrapper.py (Python, SLURM 直接运行)
 
 ### Phase 2: 用户脚本
 
-将 `job.entry_command` 写入 `.magnus_user_script.sh`，前面加 `set -e` 和 `export HOME=$MAGNUS_HOME`。
+将 `job.entry_command` 写入 `.magnus_user_script.sh`，前面加 `set -e`。
 
 ### Phase 3: Shell 引导层
 
@@ -61,11 +61,15 @@ wrapper.py (Python, SLURM 直接运行)
 
 1. **注入容器环境变量** — 通过 `APPTAINERENV_` 前缀（apptainer 会自动去前缀注入容器）
 2. **执行 `system_entry_command`** — 宿主机侧的 per-job 可配置 shell 脚本
-3. **设置 apptainer 运行时目录** — `APPTAINER_TMPDIR`, `APPTAINER_CACHEDIR`
-4. **追加 bind mount** — workspace 挂到 `${MAGNUS_HOME}/workspace`
-5. **代理穿透** — bridge 模式下将 `127.0.0.1`/`localhost` 替换为 `$MAGNUS_HOST_GATEWAY`
-6. **创建 overlay** — `apptainer overlay create --size {MB}`（可被 `MAGNUS_NO_OVERLAY=1` 跳过）
-7. **执行 apptainer** — host 模式直接 exec，bridge 模式走 `rootlesskit`
+3. **兜底 `MAGNUS_HOME`** — `export MAGNUS_HOME=${MAGNUS_HOME:-/magnus}`，此后所有路径引用 `$MAGNUS_HOME`
+4. **设置 apptainer 运行时目录** — `APPTAINER_TMPDIR`, `APPTAINER_CACHEDIR`
+5. **追加 bind mount** — workspace 挂到 `$MAGNUS_HOME/workspace`
+6. **代理穿透** — bridge 模式下将 `127.0.0.1`/`localhost` 替换为 `$MAGNUS_HOST_GATEWAY`
+7. **检测 setuid apptainer** — `[ -u "$(command -v apptainer)" ]`，零 I/O，结果决定后续分支
+8. **确定隔离级别** — rootless 默认 `containall`，setuid 默认 `contain`（避免 userns 冲突），`MAGNUS_CONTAIN_LEVEL=none` 回退到裸跑
+9. **创建 overlay 或降级** — 有隔离 + rootless 时创建 overlay；有隔离 + setuid 或 `MAGNUS_NO_OVERLAY=1` 时降级到 `--writable-tmpfs`；无隔离（none）时裸跑
+10. **注入 HOME** — `--env HOME=$MAGNUS_HOME`（`APPTAINERENV_HOME` 被 apptainer 禁止，用 `--env` 绕过）
+11. **执行 apptainer** — host 模式直接 exec，bridge 模式走 `rootlesskit`
 
 ### Phase 4: Epilogue
 
@@ -104,7 +108,13 @@ ${MAGNUS_HOME}/workspace/.magnus_result      $MAGNUS_RESULT
 ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
 ```
 
-容器文件系统是只读 squashfs (SIF)。所有非 bind-mount 路径的写入落到 ephemeral overlay，受 `ephemeral_storage` 大小约束（默认 10G），job 结束后销毁。
+容器文件系统是只读 squashfs (SIF)。可写层取决于隔离模式：
+
+| 模式 | 可写层 | 容量限制 | 说明 |
+|------|--------|----------|------|
+| containall + overlay | ephemeral overlay (ext3 image) | `ephemeral_storage` | 默认路径（rootless apptainer） |
+| containall/contain + writable-tmpfs | RAM tmpfs | 与 `memory_demand` 共享 | setuid apptainer 或 `MAGNUS_NO_OVERLAY=1` |
+| none（裸跑） | host 文件系统穿透 | 无限制 | `MAGNUS_CONTAIN_LEVEL=none`，等效 overlay 出现之前的行为 |
 
 ## 环境变量协议
 
@@ -118,8 +128,9 @@ ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
 | `MAGNUS_ADDRESS` | `{server.address}:{server.front_end_port}` | Magnus 后端地址 |
 | `MAGNUS_JOB_ID` | `job.id` | 当前 job ID |
 | `MAGNUS_HOME` | `${MAGNUS_HOME:-/magnus}` | 容器内根目录，子 Magnus 可覆盖 |
-| `MAGNUS_RESULT` | `${MAGNUS_HOME}/workspace/.magnus_result` | 结果文件路径 |
-| `MAGNUS_ACTION` | `${MAGNUS_HOME}/workspace/.magnus_action` | 动作文件路径 |
+| `MAGNUS_RESULT` | `$MAGNUS_HOME/workspace/.magnus_result` | 结果文件路径 |
+| `MAGNUS_ACTION` | `$MAGNUS_HOME/workspace/.magnus_action` | 动作文件路径 |
+| `HOME` | `$MAGNUS_HOME`（通过 `--env` 注入） | 容器内 HOME，用户 entry_command 可覆盖 |
 | `HTTP_PROXY` 等 | 宿主机继承 | bridge 模式下自动替换 localhost → gateway |
 
 ### shell 引导层的环境变量旋钮
@@ -128,9 +139,9 @@ ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
 
 | 变量 | 默认值 | 作用 |
 |------|--------|------|
-| `MAGNUS_HOME` | `/magnus` | 容器内根路径，影响 bind mount 目标和所有内部路径 |
-| `MAGNUS_NO_OVERLAY` | `0` | 设为 `1` 跳过 ephemeral overlay 创建 |
-| `MAGNUS_CONTAIN_LEVEL` | `containall` | apptainer 隔离级别 (`containall` / `contain`) |
+| `MAGNUS_HOME` | `/magnus` | 容器内根路径，影响 bind mount 目标和所有内部路径。system_entry_command 后兜底赋值，后续全部引用 `$MAGNUS_HOME` |
+| `MAGNUS_NO_OVERLAY` | `0` | 设为 `1` 跳过 ephemeral overlay，降级到 `--writable-tmpfs`（RAM） |
+| `MAGNUS_CONTAIN_LEVEL` | `containall`(rootless) / `contain`(setuid) | apptainer 隔离级别，设为 `none` 完全禁用隔离（裸跑，host /tmp 穿透） |
 | `MAGNUS_FAKEROOT` | `0` | 设为 `1` 添加 `--fakeroot` |
 | `MAGNUS_NET_MODE` | `host` | 设为 `bridge` 启用 rootlesskit 网络隔离 |
 | `MAGNUS_PORT_MAP` | (无) | bridge 模式下 rootlesskit 的端口映射 |
@@ -142,16 +153,53 @@ ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
 
 ## apptainer 执行参数
 
+### setuid 检测与自适应决策树
+
+apptainer 有两种安装方式，行为差异巨大：
+
+| | rootless (`-rwxr-xr-x`) | setuid (`-rwsr-xr-x`) |
+|---|---|---|
+| 检测 | `[ -u apptainer ]` 为 false | `[ -u apptainer ]` 为 true |
+| overlay 创建 | 文件属主为调用用户 ✓ | 文件属主为 root:0600 ✗ |
+| `--containall` | 正常 (`--userns` 可用) | **报错** (setuid + userns 冲突) |
+
+决策树：
+
+```
+[ -u apptainer ]?
+├── no (rootless)
+│   └── MAGNUS_CONTAIN_LEVEL=none?
+│       ├── yes → 裸跑 --nv
+│       └── no  → --containall + overlay
+└── yes (setuid)
+    └── MAGNUS_CONTAIN_LEVEL=none?
+        ├── yes → 裸跑 --nv
+        └── no  → --contain + --writable-tmpfs (WARNING)
+```
+
+### 命令模板
+
 ```bash
+# 隔离模式 (默认)
 apptainer exec \
   --nv \                                  # GPU 驱动透传
-  --${MAGNUS_CONTAIN_LEVEL} \             # containall (默认) 或 contain
-  --no-mount tmp \                        # 禁止 /tmp 上的 64MB tmpfs，写入走 overlay
-  [--overlay ephemeral_overlay.img] \     # 可写层 (MAGNUS_NO_OVERLAY!=1 时)
+  --${APPTAINER_CONTAIN} \               # containall 或 contain
+  --no-mount tmp \                        # 禁止 /tmp 上的 64MB tmpfs
+  [--overlay ephemeral_overlay.img] \     # rootless + overlay 时
+  [--writable-tmpfs] \                    # setuid 或 MAGNUS_NO_OVERLAY=1 时
+  --env HOME=$MAGNUS_HOME \              # 容器内 HOME
   [--fakeroot] \                          # MAGNUS_FAKEROOT=1 时
-  --pwd ${MAGNUS_HOME}/workspace/repository \
+  --pwd $MAGNUS_HOME/workspace/repository \
   {sif_path} \
-  bash ${MAGNUS_HOME}/workspace/.magnus_user_script.sh
+  bash $MAGNUS_HOME/workspace/.magnus_user_script.sh
+
+# 裸跑模式 (MAGNUS_CONTAIN_LEVEL=none)
+apptainer exec \
+  --nv \
+  --env HOME=$MAGNUS_HOME \
+  --pwd $MAGNUS_HOME/workspace/repository \
+  {sif_path} \
+  bash $MAGNUS_HOME/workspace/.magnus_user_script.sh
 ```
 
 bridge 模式下整个 apptainer 命令被 rootlesskit 包裹：
@@ -247,7 +295,18 @@ export MAGNUS_HOST_LOOPBACK=1     # 允许访问宿主机代理
 
 ### 嵌套容器的已知限制
 
-Ephemeral overlay (fuse-overlayfs) 在嵌套容器中不工作 — FUSE-on-FUSE 的 mount propagation 跨 namespace 出问题。当前通过 `MAGNUS_NO_OVERLAY=1` 绕过。详见 `docs/apptainer_inside_apptainer_claude_report.md`。
+**Ephemeral overlay (fuse-overlayfs) 在嵌套容器中不工作**。第一层 apptainer 已经使用 squashfuse (SIF 挂载) + fuse-overlayfs (可写层)，第二层再叠 fuse-overlayfs 形成 FUSE-on-FUSE，Linux 内核的 mount namespace 隔离导致内层 FUSE 进程无法正确 unmount——mount 状态在不同 namespace 之间不一致。这不是 apptainer 的 bug，而是 Linux 内核不支持无限嵌套隔离（`CAP_SYS_ADMIN` 在第一层就被剥掉，FUSE 是无 capabilities 时的妥协方案，嵌套 FUSE 的 mount propagation 跨 namespace 会出问题）。当前通过 `MAGNUS_NO_OVERLAY=1` 绕过。
+
+其他已踩过的嵌套陷阱：
+
+| 问题 | 根因 | 解法 |
+|------|------|------|
+| `/dev/fuse` 不可用 | `--containall` 隔离了设备 | bind mount `/dev/fuse:/dev/fuse` |
+| 代理 `10.0.2.2` 不可达 | rootlesskit `--disable-host-loopback` | `MAGNUS_HOST_LOOPBACK=1` |
+| `setfacl` 不存在 | 容器镜像未装 `acl` 包 | resource_manager 降级为 warning |
+| root 用户被拒 | wrapper.py 硬编码禁止 root | `server.scheduler.allow_root=true` |
+| git clone SSH 失败 | 容器内无 SSH 客户端 | resource_manager HTTPS fallback |
+| SLURM `PartitionName=default` | SLURM 保留字 | 改为 `PartitionName=batch` |
 
 ## 配置参考
 
