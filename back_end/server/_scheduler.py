@@ -552,13 +552,13 @@ export APPTAINERENV_MAGNUS_JOB_ID={{job_id}}
 
 {{system_entry_command}}
 
-export APPTAINERENV_MAGNUS_HOME=${{{{MAGNUS_HOME:-/magnus}}}}
-export APPTAINERENV_HOME=${{{{MAGNUS_HOME:-/magnus}}}}
-export APPTAINERENV_MAGNUS_RESULT=${{{{MAGNUS_HOME:-/magnus}}}}/workspace/.magnus_result
-export APPTAINERENV_MAGNUS_ACTION=${{{{MAGNUS_HOME:-/magnus}}}}/workspace/.magnus_action
+export MAGNUS_HOME=${{{{MAGNUS_HOME:-/magnus}}}}
+export APPTAINERENV_MAGNUS_HOME=$MAGNUS_HOME
+export APPTAINERENV_MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
+export APPTAINERENV_MAGNUS_ACTION=$MAGNUS_HOME/workspace/.magnus_action
 export APPTAINER_TMPDIR={{apptainer_tmp_dir}}
 export APPTAINER_CACHEDIR={{apptainer_cache_dir}}
-export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:${{{{MAGNUS_HOME:-/magnus}}}}/workspace"
+export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:$MAGNUS_HOME/workspace"
 
 MAGNUS_HOST_GATEWAY="${{{{MAGNUS_HOST_GATEWAY:-10.0.2.2}}}}"
 for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy; do
@@ -601,11 +601,13 @@ else
     echo "[Magnus] WARNING: containment disabled (MAGNUS_CONTAIN_LEVEL=none), host filesystem visible, no write isolation" >&2
 fi
 
+APPTAINER_FLAGS="$APPTAINER_FLAGS --env HOME=$MAGNUS_HOME"
+
 if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
 fi
 
-APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd ${{{{MAGNUS_HOME:-/magnus}}}}/workspace/repository {{sif_path}} bash ${{{{MAGNUS_HOME:-/magnus}}}}/workspace/.magnus_user_script.sh"
+APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     ROOTLESSKIT_FLAGS="--net=slirp4netns --port-driver=builtin --publish $MAGNUS_PORT_MAP"
