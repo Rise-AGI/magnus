@@ -417,7 +417,7 @@ function FormField({
         {field.is_optional && !isOptionalEnabled && (
           <div
             onClick={handleToggleOptional}
-            className="absolute inset-0 cursor-pointer"
+            className="absolute inset-0 cursor-not-allowed"
           />
         )}
       </div>
