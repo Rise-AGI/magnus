@@ -17,6 +17,7 @@ export interface FieldSchema {
   scope?: string | null;
   is_optional?: boolean;
   is_list?: boolean;
+  is_item_optional?: boolean;
 
   // Int specific
   min?: number;
@@ -32,6 +33,14 @@ export interface FieldSchema {
 
   // Select/Literal specific
   options?: FieldOption[];
+}
+
+
+function getScalarDefault(field: FieldSchema): any {
+  if (field.type === "number") return field.min ?? 0;
+  if (field.type === "boolean") return false;
+  if (field.type === "select" && field.options?.length) return field.options[0].value;
+  return "";
 }
 
 
@@ -51,10 +60,8 @@ export function getFieldInitialValue(field: FieldSchema, cached?: any): any {
     return field.default;
   }
 
-  if (field.is_list) return [];
-  if (field.type === "number") return field.min ?? 0;
-  if (field.type === "boolean") return false;
-  return "";
+  if (field.is_list) return [getScalarDefault(field)];
+  return getScalarDefault(field);
 }
 
 
@@ -84,6 +91,7 @@ export function validateFieldValue(field: FieldSchema, value: any): string | nul
   // List 类型：逐项校验
   if (field.is_list && Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
+      if (field.is_item_optional && value[i] === null) continue;
       const itemErr = validateSingleValue(field, value[i], `${label}[${i}]`);
       if (itemErr) return itemErr;
     }

@@ -271,19 +271,46 @@ function ListField({
     onChange(newItems);
   };
 
+  const handleToggleItem = (index: number) => {
+    const newItems = [...items];
+    newItems[index] = newItems[index] === null ? getDefaultValue() : null;
+    onChange(newItems);
+  };
+
   return (
     <div className={cn("space-y-2", disabled && "opacity-40")}>
       {items.map((item, index) => (
         <div key={index} className="flex items-start gap-2">
-          <div className="flex-1">
+          {field.is_item_optional && !disabled && (
+            <button
+              type="button"
+              onClick={() => handleToggleItem(index)}
+              className={cn(
+                "relative w-8 h-4 rounded-full transition-colors mt-3 shrink-0",
+                item !== null ? "bg-blue-600" : "bg-zinc-700"
+              )}
+            >
+              <span className={cn(
+                "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform",
+                item !== null ? "left-[18px]" : "left-0.5"
+              )} />
+            </button>
+          )}
+          <div className="flex-1 relative">
             <SingleFieldInput
               field={field}
-              value={item}
+              value={item === null ? "" : item}
               onChange={(val) => handleItemChange(index, val)}
               hasError={isError}
-              disabled={disabled}
+              disabled={disabled || item === null}
               isVisible={isVisible}
             />
+            {field.is_item_optional && item === null && !disabled && (
+              <div
+                onClick={() => handleToggleItem(index)}
+                className="absolute inset-0 cursor-not-allowed"
+              />
+            )}
           </div>
           {!disabled && (
             <button
@@ -335,13 +362,11 @@ function FormField({
       if (isOptionalEnabled) {
         onChange(field.key, null);
       } else {
-        // 启用时给一个默认值
         let defaultVal: any = field.default ?? "";
-        if (field.is_list) defaultVal = [];
-        else if (field.type === "number") defaultVal = field.default ?? field.min ?? 0;
+        if (field.type === "number") defaultVal = field.default ?? field.min ?? 0;
         else if (field.type === "boolean") defaultVal = field.default ?? false;
         else if (field.type === "select" && field.options?.length) defaultVal = field.default ?? field.options[0].value;
-        onChange(field.key, defaultVal);
+        onChange(field.key, field.is_list ? [defaultVal] : defaultVal);
       }
     }
   };

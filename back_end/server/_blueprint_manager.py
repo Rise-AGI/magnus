@@ -248,7 +248,7 @@ class BlueprintManager:
                         meta_dict.update(arg)
 
             # 解包 Optional 和 List 包装
-            # 支持：T, Optional[T], List[T], Optional[List[T]]
+            # 支持：T, Optional[T], List[T], Optional[List[T]], List[Optional[T]]
             is_optional = _is_optional_type(base_type)
             if is_optional:
                 base_type = _unwrap_optional(base_type)
@@ -258,6 +258,10 @@ class BlueprintManager:
             if is_list:
                 base_type = _unwrap_list(base_type)
                 schema.is_list = True
+
+            if is_list and _is_optional_type(base_type):
+                base_type = _unwrap_optional(base_type)
+                schema.is_item_optional = True
 
             # 应用元数据到 Schema
             if "label" in meta_dict:

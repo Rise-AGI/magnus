@@ -173,6 +173,7 @@ class BlueprintParamSchema(BaseModel):
     allow_empty: bool = True
     is_optional: bool = False
     is_list: bool = False
+    is_item_optional: bool = False
     min: Optional[float] = None
     max: Optional[float] = None
     placeholder: Optional[str] = None
