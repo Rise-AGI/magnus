@@ -462,16 +462,6 @@ export default function JobDetailsPage() {
             </div>
             <div className="p-4 grid grid-cols-2 gap-x-4 gap-y-3">
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.accelerator")}</label>
-                <span className="text-sm text-white font-medium block">
-                  {job.gpu_type === "CPU" ? t("jobDetail.cpuOnly") : job.gpu_type}
-                </span>
-              </div>
-              <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.gpuCount")}</label>
-                <span className="text-sm text-white font-medium block">{job.gpu_count} {job.gpu_count === 1 ? "GPU" : "GPUs"}</span>
-              </div>
-              <div>
                 <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.cpuCores")}</label>
                 <span className="text-sm text-white font-medium block">
                   {job.cpu_count ? job.cpu_count : <span className="text-zinc-500 text-xs">{t("jobDetail.stationDefault")}</span>}
@@ -482,6 +472,16 @@ export default function JobDetailsPage() {
                 <span className="text-sm text-white font-medium block">
                   {job.memory_demand ? job.memory_demand : <span className="text-zinc-500 text-xs">{t("jobDetail.stationDefault")}</span>}
                 </span>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.accelerator")}</label>
+                <span className="text-sm text-white font-medium block">
+                  {job.gpu_type === "CPU" ? t("jobDetail.cpuOnly") : job.gpu_type}
+                </span>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.gpuCount")}</label>
+                <span className="text-sm text-white font-medium block">{job.gpu_count} {job.gpu_count === 1 ? "GPU" : "GPUs"}</span>
               </div>
             </div>
           </div>
