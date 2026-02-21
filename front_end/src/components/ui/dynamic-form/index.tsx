@@ -412,7 +412,15 @@ function FormField({
   return (
     <div className="space-y-1.5" id={`field-${field.key}`}>
       {labelContent}
-      {renderContent()}
+      <div className="relative">
+        {renderContent()}
+        {field.is_optional && !isOptionalEnabled && (
+          <div
+            onClick={handleToggleOptional}
+            className="absolute inset-0 cursor-pointer"
+          />
+        )}
+      </div>
       {field.description && (
         <p className={cn(
           "text-[11px] mt-1 ml-0.5 transition-colors whitespace-pre-line",

@@ -85,6 +85,16 @@ def _unwrap_list(tp):
     return tp
 
 
+def _type_display_name(tp) -> str:
+    if get_origin(tp) is Annotated:
+        tp = get_args(tp)[0]
+    if _is_optional_type(tp):
+        return f"Optional[{_type_display_name(_unwrap_optional(tp))}]"
+    if _is_list_type(tp):
+        return f"List[{_type_display_name(_unwrap_list(tp))}]"
+    return getattr(tp, "__name__", str(tp))
+
+
 class BlueprintManager:
     """
     负责解析用户编写的 Python Blueprint 代码。
@@ -357,6 +367,19 @@ class BlueprintManager:
                 if value is not None and not isinstance(value, list):
                     processed_inputs[param_name] = [value]
 
+        # 参数名校验：检查是否传入了签名中不存在的参数
+        expected_params = set(sig.parameters.keys())
+        unknown_params = set(processed_inputs.keys()) - expected_params
+        if unknown_params:
+            sig_str = ", ".join(
+                f"{name}: {_type_display_name(param.annotation)}"
+                for name, param in sig.parameters.items()
+            )
+            raise ValueError(
+                f"Unknown parameter(s): {', '.join(sorted(unknown_params))}\n"
+                f"Expected signature: blueprint({sig_str})"
+            )
+
         DynamicModel = create_model(
             "DynamicBlueprintModel",
             **field_definitions,
@@ -367,7 +390,13 @@ class BlueprintManager:
             validated_data_obj = DynamicModel(**processed_inputs)
             validated_args = validated_data_obj.model_dump()
         except ValidationError as e:
-            raise ValueError(f"Invalid parameters for blueprint: {e}")
+            messages = []
+            for err in e.errors():
+                field = ".".join(str(x) for x in err["loc"])
+                expected_type = field_definitions.get(field, (None,))[0]
+                type_hint = _type_display_name(expected_type) if expected_type else "unknown"
+                messages.append(f"Parameter '{field}': expected {type_hint}, {err['msg']}")
+            raise ValueError("\n".join(messages))
 
         try:
             func(**validated_args)
