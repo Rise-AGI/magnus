@@ -601,7 +601,11 @@ else
     echo "[Magnus] WARNING: containment disabled (MAGNUS_CONTAIN_LEVEL=none), host filesystem visible, no write isolation" >&2
 fi
 
-APPTAINER_FLAGS="$APPTAINER_FLAGS --env HOME=$MAGNUS_HOME"
+# --containall / --contain isolates HOME, so --env HOME=... works cleanly.
+# Without containment, Apptainer forbids overriding HOME via --env, so skip it.
+if [ -n "$APPTAINER_CONTAIN" ]; then
+    APPTAINER_FLAGS="$APPTAINER_FLAGS --env HOME=$MAGNUS_HOME"
+fi
 
 if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
