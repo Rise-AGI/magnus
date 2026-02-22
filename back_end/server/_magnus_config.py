@@ -89,6 +89,7 @@ def _validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(cluster, "name", str)
     _check_key(cluster, "gpus", list)
     _check_key(cluster, "max_cpu_count", int)
+    _check_key(cluster, "max_memory_demand", str)
     _check_key(cluster, "default_cpu_count", int)
     _check_key(cluster, "default_memory_demand", str)
     _check_key(cluster, "default_runner", str)
