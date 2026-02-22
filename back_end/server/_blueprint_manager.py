@@ -92,6 +92,9 @@ def _type_display_name(tp) -> str:
         return f"Optional[{_type_display_name(_unwrap_optional(tp))}]"
     if _is_list_type(tp):
         return f"List[{_type_display_name(_unwrap_list(tp))}]"
+    if get_origin(tp) is Literal:
+        values = get_args(tp)
+        return " | ".join(repr(v) for v in values)
     return getattr(tp, "__name__", str(tp))
 
 

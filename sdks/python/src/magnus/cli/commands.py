@@ -1308,41 +1308,13 @@ def blueprint_get_cmd(
 @blueprint_app.command(name="schema")
 def blueprint_schema_cmd(
     blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
-    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
 ):
     """Show blueprint parameter schema."""
     try:
         schema = api_get_blueprint_schema(blueprint_id)
-
-        fmt: OutputFormat = format if format in ("yaml", "json") else _auto_format()
-
-        if fmt in ("yaml", "json"):
-            _output_data(schema, fmt)
-            return
-
-        if not schema:
-            print_msg("No parameters defined for this blueprint.")
-            return
-
-        table = Table(title=f"Schema: {blueprint_id}", show_header=True, header_style="bold")
-        table.add_column("Key")
-        table.add_column("Type", width=12)
-        table.add_column("Required", width=8)
-        table.add_column("Default", max_width=20)
-        table.add_column("Description", max_width=40)
-
-        for param in schema:
-            required = "yes" if param.get("required") else ""
-            default = str(param.get("default", "")) if param.get("default") is not None else ""
-            table.add_row(
-                param.get("key", "?"),
-                param.get("type", "?"),
-                required,
-                default,
-                param.get("description", ""),
-            )
-
-        console.print(table)
+        fmt: OutputFormat = format if format in ("yaml", "json") else "json"
+        _output_data(schema, fmt)
 
     except MagnusError as e:
         print_error(str(e))

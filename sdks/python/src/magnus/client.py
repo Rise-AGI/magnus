@@ -33,25 +33,45 @@ def _format_schema_hint(schema: List[Dict[str, Any]]) -> str:
         ptype = param.get("type", "unknown")
         default = param.get("default")
         desc = param.get("description", "")
+        is_optional = param.get("is_optional", False)
+        is_list = param.get("is_list", False)
+
+        # 构建类型标签：select 展示合法值，其余展示原始类型
+        options = param.get("options") or []
+        if ptype == "select" and options:
+            values = [str(o["value"]) for o in options]
+            type_label = " | ".join(f'"{v}"' for v in values)
+        else:
+            type_label = ptype
+
+        if is_list:
+            type_label = f"List[{type_label}]"
+        if is_optional:
+            type_label = f"Optional[{type_label}]"
 
         if default is not None:
-            header = f"  {key} ({ptype}, default={default})"
-        elif param.get("required"):
-            header = f"  {key} ({ptype}, required)"
+            header = f"  {key} ({type_label}, default={default!r})"
         else:
-            header = f"  {key} ({ptype})"
+            header = f"  {key} ({type_label})"
 
         extras: List[str] = []
-        if param.get("placeholder"):
-            extras.append(f'placeholder: "{param["placeholder"]}"')
         if param.get("min") is not None:
             extras.append(f"min={param['min']}")
         if param.get("max") is not None:
             extras.append(f"max={param['max']}")
 
+        # select 选项带 description 时逐行列出
+        option_lines: List[str] = []
+        if ptype == "select" and options:
+            for o in options:
+                opt_desc = o.get("description")
+                if opt_desc:
+                    option_lines.append(f"      {o['value']}: {opt_desc}")
+
         suffix = f" [{', '.join(extras)}]" if extras else ""
         line = f"{header}: {desc}{suffix}" if desc else f"{header}{suffix}"
         lines.append(line)
+        lines.extend(option_lines)
     return "\n".join(lines)
 
 
