@@ -170,7 +170,7 @@ class MagnusClient:
             data["is_directory"] = "true"
             with _tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir) / f"{p.name}.tar.gz"
-                with _tarfile.open(str(tmp_path), "w:gz") as tar:
+                with _tarfile.open(str(tmp_path), "w:gz", dereference=True) as tar:
                     tar.add(str(p), arcname=p.name)
                 with open(tmp_path, "rb") as f:
                     resp = self.http.post(
