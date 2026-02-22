@@ -21,6 +21,35 @@ from .file_transfer import is_file_secret
 logger = logging.getLogger("magnus")
 
 
+def _format_schema_hint(schema: List[Dict[str, Any]]) -> str:
+    lines = ["Blueprint parameters:"]
+    for param in schema:
+        key = param.get("key", "?")
+        ptype = param.get("type", "unknown")
+        default = param.get("default")
+        desc = param.get("description", "")
+
+        if default is not None:
+            header = f"  {key} ({ptype}, default={default})"
+        elif param.get("required"):
+            header = f"  {key} ({ptype}, required)"
+        else:
+            header = f"  {key} ({ptype})"
+
+        extras: List[str] = []
+        if param.get("placeholder"):
+            extras.append(f'placeholder: "{param["placeholder"]}"')
+        if param.get("min") is not None:
+            extras.append(f"min={param['min']}")
+        if param.get("max") is not None:
+            extras.append(f"max={param['max']}")
+
+        suffix = f" [{', '.join(extras)}]" if extras else ""
+        line = f"{header}: {desc}{suffix}" if desc else f"{header}{suffix}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 class MagnusClient:
 
     def __init__(self, token: Optional[str] = None, address: Optional[str] = None):
@@ -258,6 +287,15 @@ class MagnusClient:
             )
             self._handle_error(resp)
             return resp.json()["job_id"]
+        except MagnusError as e:
+            try:
+                schema = self.get_blueprint_schema(blueprint_id)
+                hint = _format_schema_hint(schema)
+                raise MagnusError(f"{e}\n\n{hint}") from e
+            except MagnusError as schema_err:
+                if schema_err.__cause__ is e:
+                    raise
+                raise e from None
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while launching blueprint.")
 
