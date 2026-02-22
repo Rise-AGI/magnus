@@ -21,6 +21,11 @@ from .file_transfer import is_file_secret
 logger = logging.getLogger("magnus")
 
 
+class _ServerError(Exception):
+    """5xx response during job polling — transient, worth retrying."""
+    pass
+
+
 def _format_schema_hint(schema: List[Dict[str, Any]]) -> str:
     lines = ["Blueprint parameters:"]
     for param in schema:
@@ -317,6 +322,15 @@ class MagnusClient:
 
     # === Job Polling ===
 
+    # Transient errors retried during polling.
+    # httpx.TransportError covers: TimeoutException, NetworkError (ConnectError,
+    # ReadError, ...), ProtocolError (RemoteProtocolError, ...), DecodingError, etc.
+    # _ServerError handles 5xx from reverse proxies during restarts.
+    # Auth/404 errors propagate immediately via _handle_error — NOT retried.
+    _TRANSIENT_ERRORS = (httpx.TransportError, _ServerError)
+    _MAX_CONSECUTIVE_FAILURES = 30
+    _MAX_BACKOFF = 30.0
+
     def _process_completed_job(
         self,
         data: Dict[str, Any],
@@ -327,6 +341,20 @@ class MagnusClient:
         if should_execute_action and action:
             execute_action(action)
         return result
+
+    def _poll_once(self, job_id: str) -> Dict[str, Any]:
+        resp = self.http.get(f"/jobs/{job_id}")
+        if resp.status_code >= 500:
+            raise _ServerError(f"Server error {resp.status_code}")
+        self._handle_error(resp)
+        return resp.json()
+
+    async def _poll_once_async(self, job_id: str) -> Dict[str, Any]:
+        resp = await self.ahttp.get(f"/jobs/{job_id}")
+        if resp.status_code >= 500:
+            raise _ServerError(f"Server error {resp.status_code}")
+        self._handle_error(resp)
+        return resp.json()
 
     def _poll_job_completion(
         self,
@@ -339,15 +367,28 @@ class MagnusClient:
         logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
         start_time = time.time()
+        consecutive_failures = 0
         while True:
             if timeout and (time.time() - start_time > timeout):
                 raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
 
-            resp = self.http.get(f"/jobs/{job_id}")
-            self._handle_error(resp)
-            data = resp.json()
-            status = data["status"]
+            try:
+                data = self._poll_once(job_id)
+                consecutive_failures = 0
+            except self._TRANSIENT_ERRORS as e:
+                consecutive_failures += 1
+                if consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES:
+                    raise MagnusError(
+                        f"Lost connection to server after {consecutive_failures} consecutive failures "
+                        f"(last: {e}). Job {job_id} may still be running — "
+                        f"check with: magnus job status {job_id}"
+                    ) from e
+                backoff = min(poll_interval * (2 ** (consecutive_failures - 1)), self._MAX_BACKOFF)
+                logger.warning(f"Poll attempt failed ({consecutive_failures}x): {e}. Retrying in {backoff:.0f}s...")
+                time.sleep(backoff)
+                continue
 
+            status = data["status"]
             if status == "Success":
                 return self._process_completed_job(data, execute_action_flag)
             elif status in ["Failed", "Terminated"]:
@@ -366,15 +407,28 @@ class MagnusClient:
         logger.info(f"Job {job_id} submitted. Waiting for completion...")
 
         start_time = time.time()
+        consecutive_failures = 0
         while True:
             if timeout and (time.time() - start_time > timeout):
                 raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
 
-            resp = await self.ahttp.get(f"/jobs/{job_id}")
-            self._handle_error(resp)
-            data = resp.json()
-            status = data["status"]
+            try:
+                data = await self._poll_once_async(job_id)
+                consecutive_failures = 0
+            except self._TRANSIENT_ERRORS as e:
+                consecutive_failures += 1
+                if consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES:
+                    raise MagnusError(
+                        f"Lost connection to server after {consecutive_failures} consecutive failures "
+                        f"(last: {e}). Job {job_id} may still be running — "
+                        f"check with: magnus job status {job_id}"
+                    ) from e
+                backoff = min(poll_interval * (2 ** (consecutive_failures - 1)), self._MAX_BACKOFF)
+                logger.warning(f"Poll attempt failed ({consecutive_failures}x): {e}. Retrying in {backoff:.0f}s...")
+                await asyncio.sleep(backoff)
+                continue
 
+            status = data["status"]
             if status == "Success":
                 return self._process_completed_job(data, execute_action_flag)
             elif status in ["Failed", "Terminated"]:
@@ -744,6 +798,51 @@ class MagnusClient:
             return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting blueprint schema.")
+
+    def get_blueprint(
+        self,
+        blueprint_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = self.http.get(f"/blueprints/{blueprint_id}", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting blueprint.")
+
+    def save_blueprint(
+        self,
+        blueprint_id: str,
+        title: str,
+        description: str,
+        code: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        payload = {
+            "id": blueprint_id,
+            "title": title,
+            "description": description,
+            "code": code,
+        }
+        try:
+            resp = self.http.post("/blueprints", json=payload, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while saving blueprint.")
+
+    def delete_blueprint(
+        self,
+        blueprint_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = self.http.delete(f"/blueprints/{blueprint_id}", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while deleting blueprint.")
 
     def list_services(
         self,

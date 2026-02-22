@@ -72,6 +72,9 @@ __all__ = [
     "get_cluster_stats",
     "list_blueprints",
     "list_services",
+    "get_blueprint",
+    "save_blueprint",
+    "delete_blueprint",
     "get_blueprint_schema",
     "download_file",
     "download_file_async",
@@ -165,6 +168,15 @@ def get_cluster_stats(timeout: float = 10.0) -> Dict[str, Any]:
 
 def list_blueprints(limit: int = 20, skip: int = 0, search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_blueprints(limit, skip, search, timeout)
+
+def get_blueprint(blueprint_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.get_blueprint(blueprint_id, timeout)
+
+def save_blueprint(blueprint_id: str, title: str, description: str, code: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.save_blueprint(blueprint_id, title, description, code, timeout)
+
+def delete_blueprint(blueprint_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.delete_blueprint(blueprint_id, timeout)
 
 def list_services(limit: int = 20, skip: int = 0, search: Optional[str] = None, active_only: bool = False, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_services(limit, skip, search, active_only, timeout)

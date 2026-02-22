@@ -746,6 +746,12 @@ magnus run my-blueprint --param value
 
 # 带超时限制
 magnus run my-blueprint --timeout 300 -- --param value
+
+# 蓝图 CRUD（宾动结构）
+magnus blueprint list              # 列出蓝图
+magnus blueprint get my-bp         # 查看详情（含代码）
+magnus blueprint save my-bp --title "My BP" --code-file bp.py
+magnus blueprint delete my-bp
 ```
 
 ### 服务调用
@@ -764,23 +770,19 @@ echo '{"x": 1}' | magnus call my-service -
 ### 任务管理
 
 ```bash
-# 列出最近任务
-magnus jobs
-magnus jobs -l 20          # 显示 20 条
-magnus jobs -n "quadre"    # 按名称搜索
-magnus jobs -f yaml        # YAML 格式输出
+# 高频操作（顶层短命令）
+magnus jobs                        # 列出最近任务
+magnus status -1                   # 最新任务详情
+magnus logs -1                     # 最新任务日志
+magnus kill -1 -f                  # 终止最新任务
 
-# 查看任务详情 (支持负数索引: -1 = 最新, -2 = 第二新)
-magnus status -1           # 最新任务
-magnus status abc123       # 按 Job ID
-
-# 查看任务日志
-magnus logs -1             # 最新任务的日志
-magnus logs -1 --page 0    # 第一页日志
-
-# 终止任务
-magnus kill -1             # 终止最新任务
-magnus kill -1 -f          # 跳过确认
+# 宾动结构（完整形式，等价于上面的短命令）
+magnus job list -l 20              # 显示 20 条
+magnus job list -n "quadre"        # 按名称搜索
+magnus job status abc123           # 按 Job ID 查看
+magnus job logs -1 --page 0        # 第一页日志
+magnus job result -1               # 单独查看结果
+magnus job action -1               # 单独查看 action
 ```
 
 ### 集群与资源
@@ -788,15 +790,11 @@ magnus kill -1 -f          # 跳过确认
 ```bash
 # 查看集群状态
 magnus cluster
-magnus cluster -f yaml     # YAML 格式
-
-# 列出蓝图
-magnus blueprints
-magnus blueprints -s "sim" # 搜索蓝图
+magnus cluster -f yaml         # YAML 格式
 
 # 列出服务
 magnus services
-magnus services -a         # 仅活跃服务
+magnus services -a             # 仅活跃服务
 ```
 
 ### 配置查看

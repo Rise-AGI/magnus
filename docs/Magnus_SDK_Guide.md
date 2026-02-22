@@ -24,17 +24,28 @@
   - [API 参考](#api-参考)
 - [命令行工具 (CLI)](#命令行工具-cli)
   - [全局选项](#全局选项)
+  - [命令结构](#命令结构)
   - [magnus config](#magnus-config)
   - [magnus login](#magnus-login)
-  - [magnus launch](#magnus-launch)
-  - [magnus run](#magnus-run)
+  - [magnus blueprint](#magnus-blueprint)
+    - [magnus blueprint list](#magnus-blueprint-list)
+    - [magnus blueprint get](#magnus-blueprint-get)
+    - [magnus blueprint schema](#magnus-blueprint-schema)
+    - [magnus blueprint save](#magnus-blueprint-save)
+    - [magnus blueprint delete](#magnus-blueprint-delete)
+    - [magnus blueprint launch](#magnus-blueprint-launch)
+    - [magnus blueprint run](#magnus-blueprint-run)
+  - [magnus job](#magnus-job)
+    - [magnus job list](#magnus-job-list)
+    - [magnus job status](#magnus-job-status)
+    - [magnus job logs](#magnus-job-logs)
+    - [magnus job result](#magnus-job-result)
+    - [magnus job action](#magnus-job-action)
+    - [magnus job kill](#magnus-job-kill)
+    - [magnus job submit](#magnus-job-submit)
+    - [magnus job execute](#magnus-job-execute)
   - [magnus call](#magnus-call)
-  - [magnus jobs](#magnus-jobs)
-  - [magnus status](#magnus-status)
-  - [magnus logs](#magnus-logs)
-  - [magnus kill](#magnus-kill)
   - [magnus cluster](#magnus-cluster)
-  - [magnus blueprints](#magnus-blueprints)
   - [magnus services](#magnus-services)
   - [magnus send](#magnus-send)
   - [magnus receive](#magnus-receive)
@@ -177,6 +188,8 @@ print(f"任务已提交: {job_id}")
 
 提交任务并轮询等待完成，返回任务结果。如果任务写入了 `MAGNUS_ACTION`，默认会在客户端自动执行。
 
+轮询期间具有网络鲁棒性：瞬时网络波动和服务器重启（5xx）会自动重试（指数退避，最多 30 次连续失败），不会丢失等待状态。
+
 ```python
 import magnus
 
@@ -234,6 +247,74 @@ for bp in blueprints["items"]:
 
 **返回值**：
 - `dict`: `{"total": int, "items": list}`
+
+#### get_blueprint - 获取蓝图详情
+
+获取蓝图的完整信息，包括代码。
+
+```python
+import magnus
+
+bp = magnus.get_blueprint("quadre-simulation")
+
+print(f"标题: {bp['title']}")
+print(f"描述: {bp['description']}")
+print(f"代码:\n{bp['code']}")
+```
+
+**参数说明**：
+- `blueprint_id` (str): 蓝图 ID
+
+**返回值**：
+- `dict`: 蓝图详细信息，包含 `id`, `title`, `description`, `code`, `user_id`, `updated_at`, `user` 等字段
+
+#### save_blueprint - 创建或更新蓝图
+
+后端为 upsert 语义：同 ID 同 owner 更新，新 ID 创建。
+
+```python
+import magnus
+
+# 创建新蓝图
+bp = magnus.save_blueprint(
+    blueprint_id="my-new-blueprint",
+    title="My Blueprint",
+    description="A test blueprint",
+    code=open("blueprint.py").read(),
+)
+print(f"蓝图已保存: {bp['id']}")
+
+# 更新已有蓝图
+bp = magnus.save_blueprint(
+    blueprint_id="my-new-blueprint",
+    title="My Blueprint v2",
+    description="Updated",
+    code=open("blueprint_v2.py").read(),
+)
+```
+
+**参数说明**：
+- `blueprint_id` (str): 蓝图 ID
+- `title` (str): 蓝图标题
+- `description` (str): 蓝图描述
+- `code` (str): 蓝图 Python 代码
+
+**返回值**：
+- `dict`: 保存后的蓝图信息
+
+#### delete_blueprint - 删除蓝图
+
+```python
+import magnus
+
+magnus.delete_blueprint("my-old-blueprint")
+```
+
+**参数说明**：
+- `blueprint_id` (str): 要删除的蓝图 ID
+
+**返回值**：
+- `dict`: `{"message": "Blueprint deleted successfully"}`
 
 ### 服务调用
 
@@ -689,6 +770,9 @@ asyncio.run(run_experiments())
 | `launch_blueprint(id, args, ...)` | 提交蓝图任务，立即返回 | Job ID |
 | `run_blueprint(id, args, timeout, ...)` | 提交并等待完成，自动执行 action | 任务结果 |
 | `list_blueprints(limit, search)` | 列出蓝图 | `{total, items}` |
+| `get_blueprint(id)` | 获取蓝图详情（含代码） | 蓝图信息 |
+| `save_blueprint(id, title, description, code)` | 创建或更新蓝图 (upsert) | 蓝图信息 |
+| `delete_blueprint(id)` | 删除蓝图 | 确认消息 |
 | `get_blueprint_schema(id)` | 获取蓝图参数 Schema | 参数列表 |
 | `call_service(id, payload, timeout)` | 调用弹性服务 | 服务响应 |
 | `list_services(limit, search, active_only)` | 列出服务 | `{total, items}` |
@@ -710,6 +794,49 @@ asyncio.run(run_experiments())
 ## 命令行工具 (CLI)
 
 Magnus CLI 基于 Typer 构建，提供完整的命令行操作支持。
+
+### 命令结构
+
+CLI 有两层命令结构：
+
+**顶层快捷命令** — 高频操作的简写，永久保留：
+
+```bash
+magnus launch <id>       # 提交蓝图 (Fire & Forget)
+magnus run <id>          # 提交蓝图并等待完成
+magnus jobs              # 列出任务
+magnus status <ref>      # 查看任务详情
+magnus logs <ref>        # 查看任务日志
+magnus kill <ref>        # 终止任务
+magnus blueprints        # 列出蓝图
+magnus submit ...        # 直接提交任务
+magnus execute ...       # 直接提交并等待完成
+```
+
+**宾动结构子命令** — 完整的 CRUD 操作，类似 `git remote add`：
+
+```bash
+magnus blueprint list              # = magnus blueprints
+magnus blueprint get <id>          # 查看蓝图详情（含代码）
+magnus blueprint schema <id>       # 查看参数 Schema
+magnus blueprint save <id> ...     # 创建/更新蓝图
+magnus blueprint delete <id>       # 删除蓝图
+magnus blueprint launch <id>       # = magnus launch <id>
+magnus blueprint run <id>          # = magnus run <id>
+
+magnus job list                    # = magnus jobs
+magnus job status <ref>            # = magnus status <ref>
+magnus job logs <ref>              # = magnus logs <ref>
+magnus job result <ref>            # 单独查看任务结果
+magnus job action <ref>            # 单独查看任务动作
+magnus job kill <ref>              # = magnus kill <ref>
+magnus job submit ...              # = magnus submit ...
+magnus job execute ...             # = magnus execute ...
+```
+
+顶层快捷命令与宾动子命令完全等价，选哪个纯粹看个人偏好。`blueprint get/save/delete`、`job result/action` 等 CRUD 操作只在宾动结构下提供。
+
+不变的顶层命令：`config`, `login`, `logout`, `call`, `cluster`, `services`, `send`, `receive`, `custody`, `connect`, `disconnect`
 
 ### 全局选项
 
@@ -761,22 +888,114 @@ magnus login
 - 保存到 `~/.magnus/config.json`，即时生效，无需重启终端
 - 配置优先级：环境变量 > 配置文件 > 默认值
 
-### magnus launch
+### magnus blueprint
+
+蓝图操作子命令组。
+
+```bash
+magnus blueprint --help        # 查看所有子命令
+```
+
+#### magnus blueprint list
+
+列出可用蓝图。
+
+```bash
+magnus blueprint list                    # 列出蓝图
+magnus blueprint list -l 20              # 列出 20 个
+magnus blueprint list -s "sim"           # 搜索
+magnus blueprint list -f yaml            # YAML 输出
+```
+
+**选项**：
+- `-l, --limit`: 显示数量，默认 10
+- `-s, --search`: 按标题或 ID 搜索
+- `-f, --format`: 输出格式 (table/yaml/json)，默认 table
+
+#### magnus blueprint get
+
+查看蓝图详情，包括完整代码。
+
+```bash
+magnus blueprint get <blueprint-id>
+magnus blueprint get my-blueprint -f yaml
+```
+
+**选项**：
+- `-f, --format`: 输出格式 (yaml/json)，默认人类可读
+
+**输出**：
+```
+════════════════ Blueprint: my-blueprint ════════════════
+  Title:       My Blueprint
+  Description: A simulation blueprint
+  Creator:     zhangsan
+  Updated:     01-15 10:30
+
+═══════════════════════ Code ═══════════════════════════
+from magnus import submit_job
+def blueprint(param: str):
+    submit_job(...)
+════════════════════════════════════════════════════════
+```
+
+#### magnus blueprint schema
+
+查看蓝图参数 Schema。
+
+```bash
+magnus blueprint schema <blueprint-id>
+magnus blueprint schema my-blueprint -f json
+```
+
+**选项**：
+- `-f, --format`: 输出格式 (table/yaml/json)，默认 table
+
+#### magnus blueprint save
+
+创建或更新蓝图（upsert 语义）。
+
+```bash
+magnus blueprint save <id> --title "标题" --code-file blueprint.py
+magnus blueprint save my-bp -t "My BP" -d "描述" -c ./src/bp.py
+```
+
+**参数**：
+- `<id>`: 蓝图 ID (必填)
+
+**选项**：
+- `-t, --title`: 蓝图标题 (必填)
+- `-d, --description, --desc`: 蓝图描述，默认空
+- `-c, --code-file`: Python 源文件路径 (必填)
+
+#### magnus blueprint delete
+
+删除蓝图。
+
+```bash
+magnus blueprint delete <id>             # 交互确认
+magnus blueprint delete my-blueprint -f  # 跳过确认
+```
+
+**选项**：
+- `-f, --force`: 跳过确认
+
+#### magnus blueprint launch
 
 提交蓝图任务，立即返回 Job ID (Fire & Forget)。
 
 ```bash
 # 基本用法
-magnus launch <blueprint-id> [OPTIONS] [-- ARGS...]
+magnus blueprint launch <blueprint-id> [OPTIONS] [-- ARGS...]
 
 # 示例
-magnus launch quadre-simulation
-magnus launch quadre-simulation --Te 2.0 --B 1.5
-magnus launch my-blueprint -- --param value --flag
-magnus launch my-blueprint --expire-minutes 120 --max-downloads 3 -- --data /path/to/file
+magnus blueprint launch quadre-simulation
+magnus blueprint launch quadre-simulation --Te 2.0 --B 1.5
+magnus blueprint launch my-blueprint -- --param value --flag
+magnus blueprint launch my-blueprint --expire-minutes 120 -- --data /path/to/file
 
 # 多文件参数 (List[FileSecret])：重复 flag 自动收集为列表
-magnus launch batch-process -- --files a.csv --files b.csv
+magnus blueprint launch batch-process -- --files a.csv --files b.csv
 ```
 
 **参数说明**：
@@ -789,33 +1008,26 @@ magnus launch batch-process -- --files a.csv --files b.csv
 - `--preference`: 是否合并用户缓存的偏好参数，默认 false
 - `--timeout`: HTTP 请求超时时间（秒），默认 10
 
-**输出**：
-```
-[Magnus] Launching blueprint quadre-simulation...
-[Magnus] Job launched. ID: abc123 (use -1 to reference)
-```
-
-### magnus run
+#### magnus blueprint run
 
 提交蓝图任务并等待完成 (Submit & Wait)。任务完成后，如果蓝图写入了 `MAGNUS_ACTION`，CLI 会自动在客户端执行。
 
+轮询期间具有网络鲁棒性：瞬时网络波动和服务器重启（5xx）会自动重试（指数退避，最多 30 次），不会丢失等待状态。
+
 ```bash
 # 基本用法
-magnus run <blueprint-id> [OPTIONS] [-- ARGS...]
+magnus blueprint run <blueprint-id> [OPTIONS] [-- ARGS...]
 
 # 示例
-magnus run my-blueprint --timeout 300 -- --param value
-magnus run long-task --timeout 3600 --poll-interval 30
-magnus run my-blueprint --expire-minutes 120 --max-downloads 3 -- --data /path/to/file
-
-# 多文件参数：重复 flag 自动收集为列表
-magnus run batch-process -- --files a.csv --files b.csv
+magnus blueprint run my-blueprint --timeout 300 -- --param value
+magnus blueprint run long-task --timeout 3600 --poll-interval 30
+magnus blueprint run my-blueprint --expire-minutes 120 -- --data /path/to/file
 
 # 一键处理文件（蓝图内部写 MAGNUS_ACTION 实现自动下载）
-magnus run scan-pdf-to-vector --file original.pdf --output processed.pdf
+magnus blueprint run scan-pdf-to-vector --file original.pdf --output processed.pdf
 
 # 禁用自动执行 action
-magnus run my-blueprint --execute-action false -- --param value
+magnus blueprint run my-blueprint --execute-action false -- --param value
 ```
 
 **选项**（防波堤 `--` 左侧）：
@@ -826,14 +1038,124 @@ magnus run my-blueprint --execute-action false -- --param value
 - `--max-downloads`: FileSecret 自动上传的最大下载次数，默认 1
 - `--preference`: 是否合并用户缓存的偏好参数，默认 false
 
+### magnus job
+
+任务操作子命令组。
+
+```bash
+magnus job --help              # 查看所有子命令
+```
+
+#### magnus job list
+
+列出任务。
+
+```bash
+magnus job list                          # 列出最近 10 个任务
+magnus job list -l 20                    # 列出 20 个
+magnus job list -n "quadre"              # 按名称搜索
+magnus job list --format yaml            # YAML 格式输出
+magnus job list | head -20               # 管道时自动切换为 YAML
+```
+
+**选项**：
+- `-l, --limit`: 显示数量，默认 10
+- `-n, --name, -s, --search`: 按任务名称搜索
+- `-f, --format`: 输出格式 (table/yaml/json)，默认 table
+
 **输出**：
 ```
-[Magnus] Running blueprint my-blueprint...
-[Magnus] Waiting for job completion...
-[Magnus] Job finished.
-═══════════════════ MAGNUS RESULT ═══════════════════
-{...}
-═════════════════════════════════════════════════════
+        Jobs (10/42)
+┏━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━┳━━━━━━━━━━━━┓
+┃ Idx ┃ Job ID    ┃ Task            ┃ Status   ┃ GPU ┃ Created    ┃
+┡━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━╇━━━━━━━━━━━━┩
+│ -1  │ abc123    │ quadre-sim-exp1 │ Running  │ 4   │ 01-15 10:30│
+│ -2  │ def456    │ training-resnet │ Success  │ 8   │ 01-15 09:15│
+└─────┴───────────┴─────────────────┴──────────┴─────┴────────────┘
+[Magnus] Use: magnus job status -1, magnus job kill -2 -f, ...
+```
+
+#### magnus job status
+
+查看任务详情。支持负数索引快速引用最近的任务。
+
+```bash
+magnus job status abc123         # 按 Job ID 查看
+magnus job status -1             # 查看最新任务
+magnus job status -2             # 查看第二新的任务
+```
+
+**负数索引说明**：
+- `-1`: 最新提交的任务
+- `-2`: 第二新的任务
+- `-n`: 第 n 新的任务
+
+#### magnus job logs
+
+查看任务日志。
+
+```bash
+magnus job logs -1               # 最新任务的日志
+magnus job logs -1 --page 0      # 第一页
+magnus job logs abc123           # 指定任务
+```
+
+**选项**：
+- `-p, --page`: 页码，-1 表示最新页，默认 -1
+
+#### magnus job result
+
+单独查看任务结果。
+
+```bash
+magnus job result -1             # 最新任务的结果
+magnus job result abc123         # 指定任务
+```
+
+结果为 JSON 时自动格式化输出，否则原样显示。
+
+#### magnus job action
+
+单独查看任务动作脚本。
+
+```bash
+magnus job action -1             # 查看最新任务的 action
+magnus job action -1 -e          # 查看并执行
+magnus job action abc123         # 指定任务
+```
+
+**选项**：
+- `-e, --execute`: 执行 action 脚本
+
+#### magnus job kill
+
+终止任务。
+
+```bash
+magnus job kill abc123           # 终止指定任务 (需确认)
+magnus job kill -1               # 终止最新任务
+magnus job kill -1 -f            # 跳过确认直接终止
+```
+
+**选项**：
+- `-f, --force`: 跳过确认提示，直接终止
+
+#### magnus job submit
+
+直接提交任务 (Fire & Forget)，无需预先创建蓝图。
+
+```bash
+magnus job submit --task-name "Train" --repo-name my_repo --branch main \
+  --commit-sha HEAD --entry-command "python train.py" --gpu-type A100 --gpu-count 4
+```
+
+#### magnus job execute
+
+直接提交任务并等待完成。与 `magnus blueprint run` 类似，轮询期间具有网络鲁棒性。
+
+```bash
+magnus job execute --task-name "Quick Test" --repo-name my_repo --branch main \
+  --commit-sha HEAD --entry-command "echo hello"
 ```
 
 ### magnus call
@@ -866,113 +1188,6 @@ magnus call slow-service --timeout 120 -- --param value
 **选项**：
 - `--timeout, -t`: 请求超时时间 (秒)，默认 60
 
-### magnus jobs
-
-列出任务。
-
-```bash
-# 基本用法
-magnus jobs [OPTIONS]
-
-# 示例
-magnus jobs                  # 列出最近 10 个任务
-magnus jobs -l 20            # 列出 20 个
-magnus jobs -n "quadre"      # 按名称搜索
-magnus jobs --format yaml    # YAML 格式输出
-magnus jobs | head -20       # 管道时自动切换为 YAML
-```
-
-**选项**：
-- `-l, --limit`: 显示数量，默认 10
-- `-n, --name, -s, --search`: 按任务名称搜索
-- `-f, --format`: 输出格式 (table/yaml/json)，默认 table
-
-**输出**：
-```
-        Jobs (10/42)
-┏━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━┳━━━━━━━━━━━━┓
-┃ Idx ┃ Job ID    ┃ Task            ┃ Status   ┃ GPU ┃ Created    ┃
-┡━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━╇━━━━━━━━━━━━┩
-│ -1  │ abc123    │ quadre-sim-exp1 │ Running  │ 4   │ 01-15 10:30│
-│ -2  │ def456    │ training-resnet │ Success  │ 8   │ 01-15 09:15│
-└─────┴───────────┴─────────────────┴──────────┴─────┴────────────┘
-[Magnus] Use: magnus status -1, magnus kill -2 -f, ...
-```
-
-### magnus status
-
-查看任务详情。支持负数索引快速引用最近的任务。
-
-```bash
-# 基本用法
-magnus status <job-id | index>
-
-# 示例
-magnus status abc123         # 按 Job ID 查看
-magnus status -1             # 查看最新任务
-magnus status -2             # 查看第二新的任务
-```
-
-**负数索引说明**：
-- `-1`: 最新提交的任务
-- `-2`: 第二新的任务
-- `-n`: 第 n 新的任务
-
-**输出**：
-```
-═══════════════════ Job: abc123 ═══════════════════
-  Task:    quadre-simulation-exp1
-  Status:  Running
-  GPU:     4
-  Type:    A2
-  Created: 01-15 10:30
-  Started: 01-15 10:30
-═══════════════════════════════════════════════════
-```
-
-### magnus logs
-
-查看任务日志。
-
-```bash
-# 基本用法
-magnus logs <job-id | index> [OPTIONS]
-
-# 示例
-magnus logs -1               # 最新任务的日志
-magnus logs -1 --page 0      # 第一页
-magnus logs abc123           # 指定任务
-```
-
-**选项**：
-- `-p, --page`: 页码，-1 表示最新页，默认 -1
-
-**输出**：
-```
-════════════ Job Logs: abc123 (Page 3/3) ════════════
-[2024-01-15 10:30:05] Starting simulation...
-[2024-01-15 10:30:10] Loading data...
-[2024-01-15 10:31:00] Processing complete.
-═════════════════════════════════════════════════════
-```
-
-### magnus kill
-
-终止任务。
-
-```bash
-# 基本用法
-magnus kill <job-id | index> [OPTIONS]
-
-# 示例
-magnus kill abc123           # 终止指定任务 (需确认)
-magnus kill -1               # 终止最新任务
-magnus kill -1 -f            # 跳过确认直接终止
-```
-
-**选项**：
-- `-f, --force`: 跳过确认提示，直接终止
-
 ### magnus cluster
 
 查看集群资源状态。
@@ -1000,37 +1215,6 @@ magnus cluster --format yaml # YAML 输出
   Running Jobs: 5
   Pending Jobs: 3
 ═══════════════════════════════════════════════════════════
-```
-
-### magnus blueprints
-
-列出可用蓝图。
-
-```bash
-# 基本用法
-magnus blueprints [OPTIONS]
-
-# 示例
-magnus blueprints            # 列出蓝图
-magnus blueprints -l 20      # 列出 20 个
-magnus blueprints -s "sim"   # 搜索
-magnus blueprints -f yaml    # YAML 输出
-```
-
-**选项**：
-- `-l, --limit`: 显示数量，默认 10
-- `-s, --search`: 按标题或 ID 搜索
-- `-f, --format`: 输出格式 (table/yaml/json)，默认 table
-
-**输出**：
-```
-      Blueprints (10/25)
-┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┓
-┃ ID                  ┃ Title              ┃ Creator    ┃ Updated    ┃
-┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━┩
-│ quadre-simulation   │ Quadre Simulation  │ zhangsan   │ 01-15 10:30│
-│ magnus-debug        │ Magnus Debug       │ lisi       │ 01-14 15:00│
-└─────────────────────┴────────────────────┴────────────┴────────────┘
 ```
 
 ### magnus services
@@ -1170,7 +1354,7 @@ magnus disconnect
 
 ### 输出格式
 
-列表类命令 (`jobs`, `blueprints`, `services`, `cluster`) 支持三种输出格式：
+列表类命令 (`job list`, `blueprint list`, `services`, `cluster`) 支持三种输出格式：
 
 | 格式 | 说明 | 适用场景 |
 |------|------|----------|
@@ -1184,13 +1368,13 @@ magnus disconnect
 
 ```bash
 # 交互式 - 表格输出
-magnus jobs
+magnus job list
 
 # 管道 - 自动 YAML
-magnus jobs | grep Running
+magnus job list | grep Running
 
 # 强制 JSON
-magnus jobs --format json | jq '.items[0]'
+magnus job list --format json | jq '.items[0]'
 ```
 
 ### 错误代码
@@ -1222,7 +1406,7 @@ A: 异步 API 适用于需要并发执行多个操作的场景，可以显著提
 
 **Q: 负数索引支持哪些命令？**
 
-A: `magnus status`, `magnus logs` 和 `magnus kill` 支持负数索引。`-1` 表示最新任务，`-2` 表示第二新，以此类推。
+A: `magnus job status`, `magnus job logs` 和 `magnus job kill` 支持负数索引。`-1` 表示最新任务，`-2` 表示第二新，以此类推。新增的 `magnus job result` 和 `magnus job action` 也支持。
 
 **Q: call_service 超时后服务还在运行吗？**
 
@@ -1243,3 +1427,11 @@ A: 管道自动切换是智能检测：当输出不是终端时自动使用 YAML
 **Q: FileSecret 文件传输需要什么依赖？**
 
 A: 无额外依赖。安装 Magnus SDK（`pip install magnus-sdk`）后即可使用 `magnus send/receive/custody` 以及 `download_file()`。文件通过 Magnus 服务器中转，只需配置好 `MAGNUS_ADDRESS` 和 `MAGNUS_TOKEN`。
+
+**Q: 顶层快捷命令和宾动子命令有什么关系？**
+
+A: 完全等价。`magnus run <id>` 和 `magnus blueprint run <id>` 执行的是同一段代码。高频操作用顶层快捷命令更简洁，CRUD 管理操作（`blueprint get/save/delete`、`job result/action`）只在宾动结构下提供。
+
+**Q: `run` / `execute` 这类阻塞命令断网了怎么办？**
+
+A: 轮询期间遇到瞬时网络波动（DNS 抖动、连接重置、服务器重启导致的 5xx 等）会自动指数退避重试（2s → 4s → 8s → ... → 最大 30s），最多容忍 30 次连续失败（约 13 分钟）。超过后报错并提示 `magnus job status <id>` 检查任务状态——任务不会因为客户端断线而终止。

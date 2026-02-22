@@ -39,6 +39,10 @@ from .. import (
     terminate_job as api_terminate_job,
     get_cluster_stats as api_get_cluster_stats,
     list_blueprints as api_list_blueprints,
+    get_blueprint as api_get_blueprint,
+    get_blueprint_schema as api_get_blueprint_schema,
+    save_blueprint as api_save_blueprint,
+    delete_blueprint as api_delete_blueprint,
     list_services as api_list_services,
 )
 
@@ -324,6 +328,14 @@ def main_callback(
     pass
 
 
+# === Sub-command groups ===
+
+blueprint_app = typer.Typer(name="blueprint", help="Blueprint operations")
+job_app = typer.Typer(name="job", help="Job operations")
+app.add_typer(blueprint_app)
+app.add_typer(job_app)
+
+
 @app.command(name="config")
 def show_config():
     """
@@ -550,97 +562,25 @@ def logout_cmd(
 
 
 @app.command(
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def launch(
     ctx: typer.Context,
     blueprint_id: str = typer.Argument(..., help="ID of the blueprint"),
 ):
-    """
-    Launch a blueprint job (Fire & Forget).
-    All unrecognized arguments are passed to the blueprint as strings.
-    """
-    try:
-        cli_args, bp_args = partition_args(ctx.args)
-        cli_config = apply_cli_defaults(cli_args, command_type="submit")
-
-        if cli_config["verbose"]:
-            console.rule("[dim]DEBUG: Argument Partition[/dim]")
-            console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
-            console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
-            console.rule()
-
-        print_msg(f"Launching blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
-
-        job_id = launch_blueprint(
-            blueprint_id=blueprint_id,
-            use_preference=cli_config["preference"],
-            expire_minutes=cli_config["expire_minutes"],
-            max_downloads=cli_config["max_downloads"],
-            timeout=cli_config["timeout"],
-            args=bp_args,
-        )
-
-        print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """Launch a blueprint job (Fire & Forget)."""
+    blueprint_launch_cmd(ctx, blueprint_id)
 
 
 @app.command(
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def run(
     ctx: typer.Context,
     blueprint_id: str = typer.Argument(..., help="ID of the blueprint"),
 ):
-    """
-    Execute a blueprint and wait for completion.
-    Use --execute-action false to skip automatic action execution.
-    """
-    try:
-        cli_args, bp_args = partition_args(ctx.args)
-        cli_config = apply_cli_defaults(cli_args, command_type="run")
-
-        if cli_config["verbose"]:
-            console.rule("[dim]DEBUG: Argument Partition[/dim]")
-            console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
-            console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
-            console.rule()
-
-        print_msg(f"Running blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
-
-        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
-            result = run_blueprint(
-                blueprint_id=blueprint_id,
-                use_preference=cli_config["preference"],
-                expire_minutes=cli_config["expire_minutes"],
-                max_downloads=cli_config["max_downloads"],
-                timeout=cli_config["timeout"],
-                poll_interval=cli_config["poll_interval"],
-                execute_action=False,
-                args=bp_args,
-            )
-
-        console.print("")
-        print_msg("Job finished.")
-
-        from .. import default_client
-        _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except KeyboardInterrupt:
-        print_msg("Interrupted by user.")
-        raise typer.Exit(code=130)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """Execute a blueprint and wait for completion."""
+    blueprint_run_cmd(ctx, blueprint_id)
 
 
 CLI_RESERVED_KEYS = {"timeout", "verbose", "execute_action"}
@@ -727,7 +667,7 @@ def _display_job_result(
             json_obj = json.loads(result)
             console.print_json(data=json_obj)
         except Exception:
-            console.print(result)
+            console.print(result, markup=False, highlight=False)
         console.rule()
 
     if has_action:
@@ -741,7 +681,7 @@ def _display_job_result(
                 raise typer.Exit(code=1)
         else:
             console.rule("[bold yellow]MAGNUS ACTION[/bold yellow]")
-            console.print(action_text)
+            console.print(action_text, markup=False, highlight=False)
             console.rule()
 
 
@@ -872,33 +812,8 @@ def _validate_job_params(params: Dict[str, Any]) -> None:
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def submit_job_cmd(ctx: typer.Context):
-    """
-    Submit a job directly (Fire & Forget).
-
-    Examples:
-      magnus submit --task-name "Train" --repo-name my_repo --branch main \\
-        --commit-sha HEAD --entry-command "python train.py" --gpu-type A100 --gpu-count 4
-    """
-    try:
-        cli_config, job_params = _parse_job_args(ctx.args)
-        cli_config = apply_cli_defaults(cli_config, command_type="submit")
-        _validate_job_params(job_params)
-
-        print_msg(f"Submitting job [bold cyan]{job_params['task_name']}[/bold cyan]...")
-
-        job_id = api_submit_job(
-            timeout=cli_config["timeout"],
-            **job_params,
-        )
-
-        print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """Submit a job directly (Fire & Forget)."""
+    job_submit_subcmd(ctx)
 
 
 @app.command(
@@ -906,43 +821,8 @@ def submit_job_cmd(ctx: typer.Context):
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def execute_job_cmd(ctx: typer.Context):
-    """
-    Submit a job and wait for completion.
-
-    Examples:
-      magnus execute --task-name "Train" --repo-name my_repo --branch main \\
-        --commit-sha HEAD --entry-command "python train.py"
-    """
-    try:
-        cli_config, job_params = _parse_job_args(ctx.args)
-        cli_config = apply_cli_defaults(cli_config, command_type="run")
-        _validate_job_params(job_params)
-
-        print_msg(f"Executing job [bold cyan]{job_params['task_name']}[/bold cyan]...")
-
-        with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
-            result = api_execute_job(
-                timeout=cli_config["timeout"],
-                poll_interval=cli_config["poll_interval"],
-                execute_action=False,
-                **job_params,
-            )
-
-        console.print("")
-        print_msg("Job finished.")
-
-        from .. import default_client
-        _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except KeyboardInterrupt:
-        print_msg("Interrupted by user.")
-        raise typer.Exit(code=130)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """Submit a job and wait for completion."""
+    job_execute_subcmd(ctx)
 
 
 # === Job Management Commands ===
@@ -972,107 +852,16 @@ def list_jobs_cmd(
     name: Optional[str] = typer.Option(None, "--name", "-n", "--search", "-s", help="Search by task name or job ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
 ):
-    """
-    List recent jobs. Index -1 = newest, -2 = second newest, ...
-    """
-    try:
-        result = api_list_jobs(limit=limit, search=name)
-        items = result.get("items", [])
-        total = result.get("total", 0)
-
-        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
-
-        if fmt in ("yaml", "json"):
-            _output_data({"total": total, "items": items}, fmt)
-            return
-
-        if not items:
-            print_msg("No jobs found.")
-            return
-
-        table = Table(title=f"Jobs ({len(items)}/{total})", show_header=True, header_style="bold")
-        table.add_column("Idx", style="dim", width=4)
-        table.add_column("Job ID")
-        table.add_column("Task", max_width=30)
-        table.add_column("Status", width=10)
-        table.add_column("GPU", width=4)
-        table.add_column("Created", width=12)
-
-        for idx, job in enumerate(items):
-            status = job.get("status", "Unknown")
-            status_color = STATUS_COLORS.get(status, "white")
-
-            table.add_row(
-                str(-(idx + 1)),
-                job.get("id", ""),
-                (job.get("task_name") or "-")[:30],
-                f"[{status_color}]{status}[/{status_color}]",
-                str(job.get("gpu_count", 0)),
-                _format_time(job.get("created_at")),
-            )
-
-        console.print(table)
-        print_msg("[dim]Use: magnus status -1, magnus kill -2 -f, ...[/dim]")
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """List recent jobs."""
+    job_list_cmd(limit=limit, name=name, format=format)
 
 
 @app.command(name="status")
 def job_status_cmd(
     job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
 ):
-    """
-    Show detailed status of a job.
-
-    Examples:
-      magnus status -1          # newest job
-      magnus status -2          # second newest
-      magnus status abc123      # by job ID
-    """
-    try:
-        resolved_id = _resolve_job_ref(job_ref)
-        job = api_get_job(resolved_id)
-
-        status = job.get("status", "Unknown")
-        status_color = STATUS_COLORS.get(status, "white")
-
-        console.print()
-        console.rule(f"[bold]Job: {job.get('id', 'N/A')}[/bold]")
-        console.print(f"  [bold]Task:[/bold]    {job.get('task_name', '-')}")
-        console.print(f"  [bold]Status:[/bold]  [{status_color}]{status}[/{status_color}]")
-        console.print(f"  [bold]GPU:[/bold]     {job.get('gpu_count', 0)}")
-        console.print(f"  [bold]Type:[/bold]    {job.get('job_type', '-')}")
-        console.print(f"  [bold]Created:[/bold] {_format_time(job.get('created_at'))}")
-        console.print(f"  [bold]Started:[/bold] {_format_time(job.get('start_time'))}")
-
-        result = job.get("result")
-        if result and result != ".magnus_result":
-            console.print()
-            console.rule("[bold green]Result[/bold green]")
-            try:
-                console.print_json(data=json.loads(result))
-            except Exception:
-                console.print(result)
-
-        action = job.get("action")
-        if action and action != ".magnus_action":
-            console.print()
-            console.rule("[bold yellow]Action[/bold yellow]")
-            console.print(action)
-
-        console.rule()
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """Show detailed status of a job."""
+    job_status_subcmd(job_ref=job_ref)
 
 
 @app.command(name="kill")
@@ -1080,33 +869,8 @@ def kill_job_cmd(
     job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ):
-    """
-    Terminate a running job.
-
-    Examples:
-      magnus kill -1            # kill newest job
-      magnus kill -1 -f         # skip confirmation
-      magnus kill abc123        # by job ID
-    """
-    try:
-        resolved_id = _resolve_job_ref(job_ref)
-
-        if not force:
-            confirm = typer.confirm(f"Terminate job {resolved_id}?")
-            if not confirm:
-                print_msg("Cancelled.")
-                return
-
-        result = api_terminate_job(resolved_id)
-        new_status = result.get("status", "Unknown")
-        print_msg(f"Job [bold]{resolved_id}[/bold] terminated. Status: [magenta]{new_status}[/magenta]")
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """Terminate a running job."""
+    job_kill_subcmd(job_ref=job_ref, force=force)
 
 
 # === Session Management Commands ===
@@ -1241,32 +1005,8 @@ def job_logs_cmd(
     job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
     page: int = typer.Option(-1, "--page", "-p", help="Log page number (-1 for last)"),
 ):
-    """
-    Show logs for a job.
-
-    Examples:
-      magnus logs -1              # logs of newest job
-      magnus logs -1 --page 0     # first page
-      magnus logs abc123          # by job ID
-    """
-    try:
-        resolved_id = _resolve_job_ref(job_ref)
-        result = api_get_job_logs(resolved_id, page=page)
-
-        logs = result.get("logs", "")
-        current_page = result.get("page", 0)
-        total_pages = result.get("total_pages", 1)
-
-        console.rule(f"[bold]Job Logs: {resolved_id}[/bold] (Page {current_page + 1}/{total_pages})")
-        console.print(logs, end="")
-        console.rule()
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """Show logs for a job."""
+    job_logs_subcmd(job_ref=job_ref, page=page)
 
 
 @app.command(name="cluster")
@@ -1315,47 +1055,8 @@ def list_blueprints_cmd(
     search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by title or ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
 ):
-    """
-    List available blueprints.
-    """
-    try:
-        result = api_list_blueprints(limit=limit, search=search)
-        items = result.get("items", [])
-        total = result.get("total", 0)
-
-        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
-
-        if fmt in ("yaml", "json"):
-            _output_data({"total": total, "items": items}, fmt)
-            return
-
-        if not items:
-            print_msg("No blueprints found.")
-            return
-
-        table = Table(title=f"Blueprints ({len(items)}/{total})", show_header=True, header_style="bold")
-        table.add_column("ID", max_width=25)
-        table.add_column("Title", max_width=30)
-        table.add_column("Creator", width=15)
-        table.add_column("Updated", width=12)
-
-        for bp in items:
-            user = bp.get("user") or {}
-            table.add_row(
-                bp.get("id", "")[:25],
-                (bp.get("title") or "-")[:30],
-                (user.get("name") or "-")[:15],
-                _format_time(bp.get("updated_at")),
-            )
-
-        console.print(table)
-
-    except MagnusError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
-        raise typer.Exit(code=1)
+    """List available blueprints."""
+    blueprint_list_cmd(limit=limit, search=search, format=format)
 
 
 @app.command(name="services")
@@ -1513,6 +1214,569 @@ def custody_cmd(
     except MagnusError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+# =============================================================================
+# Blueprint sub-commands: magnus blueprint <verb>
+# =============================================================================
+
+@blueprint_app.command(name="list")
+def blueprint_list_cmd(
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of blueprints to fetch"),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by title or ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """List available blueprints."""
+    try:
+        result = api_list_blueprints(limit=limit, search=search)
+        items = result.get("items", [])
+        total = result.get("total", 0)
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data({"total": total, "items": items}, fmt)
+            return
+
+        if not items:
+            print_msg("No blueprints found.")
+            return
+
+        table = Table(title=f"Blueprints ({len(items)}/{total})", show_header=True, header_style="bold")
+        table.add_column("ID", max_width=25)
+        table.add_column("Title", max_width=30)
+        table.add_column("Creator", width=15)
+        table.add_column("Updated", width=12)
+
+        for bp in items:
+            user = bp.get("user") or {}
+            table.add_row(
+                bp.get("id", "")[:25],
+                (bp.get("title") or "-")[:30],
+                (user.get("name") or "-")[:15],
+                _format_time(bp.get("updated_at")),
+            )
+
+        console.print(table)
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@blueprint_app.command(name="get")
+def blueprint_get_cmd(
+    blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
+):
+    """Show blueprint details including code."""
+    try:
+        bp = api_get_blueprint(blueprint_id)
+
+        fmt: OutputFormat = format if format in ("yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data(bp, fmt)
+            return
+
+        user = bp.get("user") or {}
+        console.print()
+        console.rule(f"[bold]Blueprint: {bp.get('id', 'N/A')}[/bold]")
+        console.print(f"  [bold]Title:[/bold]       {bp.get('title', '-')}")
+        console.print(f"  [bold]Description:[/bold] {bp.get('description', '-')}")
+        console.print(f"  [bold]Creator:[/bold]     {user.get('name', '-')}")
+        console.print(f"  [bold]Updated:[/bold]     {_format_time(bp.get('updated_at'))}")
+        console.print()
+        console.rule("[bold cyan]Code[/bold cyan]")
+        console.print(bp.get("code", ""), markup=False, highlight=False)
+        console.rule()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@blueprint_app.command(name="schema")
+def blueprint_schema_cmd(
+    blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """Show blueprint parameter schema."""
+    try:
+        schema = api_get_blueprint_schema(blueprint_id)
+
+        fmt: OutputFormat = format if format in ("yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data(schema, fmt)
+            return
+
+        if not schema:
+            print_msg("No parameters defined for this blueprint.")
+            return
+
+        table = Table(title=f"Schema: {blueprint_id}", show_header=True, header_style="bold")
+        table.add_column("Key")
+        table.add_column("Type", width=12)
+        table.add_column("Required", width=8)
+        table.add_column("Default", max_width=20)
+        table.add_column("Description", max_width=40)
+
+        for param in schema:
+            required = "yes" if param.get("required") else ""
+            default = str(param.get("default", "")) if param.get("default") is not None else ""
+            table.add_row(
+                param.get("key", "?"),
+                param.get("type", "?"),
+                required,
+                default,
+                param.get("description", ""),
+            )
+
+        console.print(table)
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@blueprint_app.command(name="save")
+def blueprint_save_cmd(
+    blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
+    title: str = typer.Option(..., "--title", "-t", help="Blueprint title"),
+    description: str = typer.Option("", "--description", "--desc", "-d", help="Blueprint description"),
+    code_file: Path = typer.Option(..., "--code-file", "-c", help="Path to Python source file"),
+):
+    """Create or update a blueprint (upsert)."""
+    if not code_file.exists():
+        print_error(f"Code file not found: {code_file}")
+        raise typer.Exit(code=1)
+
+    try:
+        code = code_file.read_text(encoding="utf-8")
+        result = api_save_blueprint(
+            blueprint_id=blueprint_id,
+            title=title,
+            description=description,
+            code=code,
+        )
+        print_msg(f"Blueprint [bold cyan]{result.get('id', blueprint_id)}[/bold cyan] saved.")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@blueprint_app.command(name="delete")
+def blueprint_delete_cmd(
+    blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a blueprint."""
+    try:
+        if not force:
+            confirm = typer.confirm(f"Delete blueprint {blueprint_id}?")
+            if not confirm:
+                print_msg("Cancelled.")
+                return
+
+        api_delete_blueprint(blueprint_id)
+        print_msg(f"Blueprint [bold]{blueprint_id}[/bold] deleted.")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@blueprint_app.command(
+    name="launch",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def blueprint_launch_cmd(
+    ctx: typer.Context,
+    blueprint_id: str = typer.Argument(..., help="ID of the blueprint"),
+):
+    """Launch a blueprint job (fire & forget)."""
+    try:
+        cli_args, bp_args = partition_args(ctx.args)
+        cli_config = apply_cli_defaults(cli_args, command_type="submit")
+
+        if cli_config["verbose"]:
+            console.rule("[dim]DEBUG: Argument Partition[/dim]")
+            console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
+            console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
+            console.rule()
+
+        print_msg(f"Launching blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
+
+        job_id = launch_blueprint(
+            blueprint_id=blueprint_id,
+            use_preference=cli_config["preference"],
+            expire_minutes=cli_config["expire_minutes"],
+            max_downloads=cli_config["max_downloads"],
+            timeout=cli_config["timeout"],
+            args=bp_args,
+        )
+
+        print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@blueprint_app.command(
+    name="run",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def blueprint_run_cmd(
+    ctx: typer.Context,
+    blueprint_id: str = typer.Argument(..., help="ID of the blueprint"),
+):
+    """Execute a blueprint and wait for completion."""
+    try:
+        cli_args, bp_args = partition_args(ctx.args)
+        cli_config = apply_cli_defaults(cli_args, command_type="run")
+
+        if cli_config["verbose"]:
+            console.rule("[dim]DEBUG: Argument Partition[/dim]")
+            console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
+            console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
+            console.rule()
+
+        print_msg(f"Running blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
+
+        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
+            result = run_blueprint(
+                blueprint_id=blueprint_id,
+                use_preference=cli_config["preference"],
+                expire_minutes=cli_config["expire_minutes"],
+                max_downloads=cli_config["max_downloads"],
+                timeout=cli_config["timeout"],
+                poll_interval=cli_config["poll_interval"],
+                execute_action=False,
+                args=bp_args,
+            )
+
+        console.print("")
+        print_msg("Job finished.")
+
+        from .. import default_client
+        _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        print_msg("Interrupted by user.")
+        raise typer.Exit(code=130)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+# =============================================================================
+# Job sub-commands: magnus job <verb>
+# =============================================================================
+
+@job_app.command(name="list")
+def job_list_cmd(
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of jobs to fetch"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", "--search", "-s", help="Search by task name or job ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """List recent jobs. Index -1 = newest, -2 = second newest, ..."""
+    try:
+        result = api_list_jobs(limit=limit, search=name)
+        items = result.get("items", [])
+        total = result.get("total", 0)
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data({"total": total, "items": items}, fmt)
+            return
+
+        if not items:
+            print_msg("No jobs found.")
+            return
+
+        table = Table(title=f"Jobs ({len(items)}/{total})", show_header=True, header_style="bold")
+        table.add_column("Idx", style="dim", width=4)
+        table.add_column("Job ID")
+        table.add_column("Task", max_width=30)
+        table.add_column("Status", width=10)
+        table.add_column("GPU", width=4)
+        table.add_column("Created", width=12)
+
+        for idx, job in enumerate(items):
+            status = job.get("status", "Unknown")
+            status_color = STATUS_COLORS.get(status, "white")
+
+            table.add_row(
+                str(-(idx + 1)),
+                job.get("id", ""),
+                (job.get("task_name") or "-")[:30],
+                f"[{status_color}]{status}[/{status_color}]",
+                str(job.get("gpu_count", 0)),
+                _format_time(job.get("created_at")),
+            )
+
+        console.print(table)
+        print_msg("[dim]Use: magnus job status -1, magnus job kill -2 -f, ...[/dim]")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@job_app.command(name="status")
+def job_status_subcmd(
+    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+):
+    """Show detailed status of a job."""
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+        job = api_get_job(resolved_id)
+
+        status = job.get("status", "Unknown")
+        status_color = STATUS_COLORS.get(status, "white")
+
+        console.print()
+        console.rule(f"[bold]Job: {job.get('id', 'N/A')}[/bold]")
+        console.print(f"  [bold]Task:[/bold]    {job.get('task_name', '-')}")
+        console.print(f"  [bold]Status:[/bold]  [{status_color}]{status}[/{status_color}]")
+        console.print(f"  [bold]GPU:[/bold]     {job.get('gpu_count', 0)}")
+        console.print(f"  [bold]Type:[/bold]    {job.get('job_type', '-')}")
+        console.print(f"  [bold]Created:[/bold] {_format_time(job.get('created_at'))}")
+        console.print(f"  [bold]Started:[/bold] {_format_time(job.get('start_time'))}")
+
+        result = job.get("result")
+        if result and result != ".magnus_result":
+            console.print()
+            console.rule("[bold green]Result[/bold green]")
+            try:
+                console.print_json(data=json.loads(result))
+            except Exception:
+                console.print(result, markup=False, highlight=False)
+
+        action = job.get("action")
+        if action and action != ".magnus_action":
+            console.print()
+            console.rule("[bold yellow]Action[/bold yellow]")
+            console.print(action, markup=False, highlight=False)
+
+        console.rule()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@job_app.command(name="logs")
+def job_logs_subcmd(
+    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+    page: int = typer.Option(-1, "--page", "-p", help="Log page number (-1 for last)"),
+):
+    """Show logs for a job."""
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+        result = api_get_job_logs(resolved_id, page=page)
+
+        logs = result.get("logs", "")
+        current_page = result.get("page", 0)
+        total_pages = result.get("total_pages", 1)
+
+        console.rule(f"[bold]Job Logs: {resolved_id}[/bold] (Page {current_page + 1}/{total_pages})")
+        console.print(logs, end="", markup=False, highlight=False)
+        console.rule()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@job_app.command(name="result")
+def job_result_cmd(
+    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+):
+    """Show result of a completed job."""
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+        result = api_get_job_result(resolved_id)
+
+        if result is None:
+            print_msg("[dim]No result available.[/dim]")
+            return
+
+        console.rule(f"[bold green]Result: {resolved_id}[/bold green]")
+        try:
+            console.print_json(data=json.loads(result))
+        except Exception:
+            console.print(result, markup=False, highlight=False)
+        console.rule()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@job_app.command(name="action")
+def job_action_cmd(
+    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+    execute: bool = typer.Option(False, "--execute", "-e", help="Execute the action script"),
+):
+    """Show action of a completed job."""
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+        action = api_get_job_action(resolved_id)
+
+        if not action:
+            print_msg("[dim]No action available.[/dim]")
+            return
+
+        action_text = action.strip()
+        if execute:
+            print_msg("Executing action...")
+            try:
+                run_action(action_text)
+            except ExecutionError as e:
+                print_error(str(e))
+                raise typer.Exit(code=1)
+        else:
+            console.rule(f"[bold yellow]Action: {resolved_id}[/bold yellow]")
+            console.print(action_text, markup=False, highlight=False)
+            console.rule()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@job_app.command(name="kill")
+def job_kill_subcmd(
+    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Terminate a running job."""
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+
+        if not force:
+            confirm = typer.confirm(f"Terminate job {resolved_id}?")
+            if not confirm:
+                print_msg("Cancelled.")
+                return
+
+        result = api_terminate_job(resolved_id)
+        new_status = result.get("status", "Unknown")
+        print_msg(f"Job [bold]{resolved_id}[/bold] terminated. Status: [magenta]{new_status}[/magenta]")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@job_app.command(
+    name="submit",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def job_submit_subcmd(ctx: typer.Context):
+    """Submit a job directly (fire & forget)."""
+    try:
+        cli_config, job_params = _parse_job_args(ctx.args)
+        cli_config = apply_cli_defaults(cli_config, command_type="submit")
+        _validate_job_params(job_params)
+
+        print_msg(f"Submitting job [bold cyan]{job_params['task_name']}[/bold cyan]...")
+
+        job_id = api_submit_job(
+            timeout=cli_config["timeout"],
+            **job_params,
+        )
+
+        print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@job_app.command(
+    name="execute",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def job_execute_subcmd(ctx: typer.Context):
+    """Submit a job and wait for completion."""
+    try:
+        cli_config, job_params = _parse_job_args(ctx.args)
+        cli_config = apply_cli_defaults(cli_config, command_type="run")
+        _validate_job_params(job_params)
+
+        print_msg(f"Executing job [bold cyan]{job_params['task_name']}[/bold cyan]...")
+
+        with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
+            result = api_execute_job(
+                timeout=cli_config["timeout"],
+                poll_interval=cli_config["poll_interval"],
+                execute_action=False,
+                **job_params,
+            )
+
+        console.print("")
+        print_msg("Job finished.")
+
+        from .. import default_client
+        _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        print_msg("Interrupted by user.")
+        raise typer.Exit(code=130)
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
