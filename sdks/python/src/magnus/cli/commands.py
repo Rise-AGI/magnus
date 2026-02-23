@@ -288,7 +288,7 @@ DEFAULT_CLI_CONFIG = {
 
 def apply_cli_defaults(parsed_cli_args: Dict[str, Any], command_type: str = "submit") -> Dict[str, Any]:
     config = DEFAULT_CLI_CONFIG.copy()
-    
+
     # 特殊逻辑：Run 模式下若未指定 timeout，默认应为无限等待 (None)，而非 submit 的 10s
     if command_type == "run" and "timeout" not in parsed_cli_args:
         config["timeout"] = None
@@ -296,6 +296,38 @@ def apply_cli_defaults(parsed_cli_args: Dict[str, Any], command_type: str = "sub
     config.update(parsed_cli_args)
     return config
 
+
+# === CLI Options Epilog (for --help) ===
+# Commands using allow_extra_args bypass Typer's option registration,
+# so we document the options manually in the docstring.
+
+_LAUNCH_OPTIONS_EPILOG = """
+CLI Options (before --):
+  --timeout FLOAT          HTTP timeout in seconds (default: 10)
+  --expire-minutes INT     FileSecret TTL in minutes (default: 60)
+  --max-downloads INT      FileSecret max download count (default: 1)
+  --preference BOOL        Merge user preference params (default: false)
+  --verbose                Print argument routing debug info
+
+Blueprint arguments (after --) are passed to the blueprint function.
+Without --, all arguments are routed to the blueprint; CLI options
+use default values.
+""".strip()
+
+_RUN_OPTIONS_EPILOG = """
+CLI Options (before --):
+  --timeout FLOAT          Max wait time in seconds (default: infinite)
+  --poll-interval FLOAT    Poll interval in seconds (default: 2)
+  --execute-action BOOL    Auto-execute MAGNUS_ACTION (default: true)
+  --expire-minutes INT     FileSecret TTL in minutes (default: 60)
+  --max-downloads INT      FileSecret max download count (default: 1)
+  --preference BOOL        Merge user preference params (default: false)
+  --verbose                Print argument routing debug info
+
+Blueprint arguments (after --) are passed to the blueprint function.
+Without --, all arguments are routed to the blueprint; CLI options
+use default values.
+""".strip()
 
 
 # === CLI App Definition ===
@@ -330,8 +362,22 @@ def main_callback(
 
 # === Sub-command groups ===
 
-blueprint_app = typer.Typer(name="blueprint", help="Blueprint operations")
-job_app = typer.Typer(name="job", help="Job operations")
+blueprint_app = typer.Typer(
+    name="blueprint",
+    help=(
+        "Blueprint operations.\n\n"
+        "Typical workflow: list → schema → run.\n"
+        "Shortcuts: magnus launch, magnus run, magnus list."
+    ),
+)
+job_app = typer.Typer(
+    name="job",
+    help=(
+        "Job operations.\n\n"
+        "Jobs can be referenced by negative index: -1 = newest, -2 = second newest.\n"
+        "Shortcuts: magnus jobs, magnus status, magnus logs, magnus kill."
+    ),
+)
 app.add_typer(blueprint_app)
 app.add_typer(job_app)
 
@@ -571,6 +617,8 @@ def launch(
     """Launch a blueprint job (Fire & Forget)."""
     blueprint_launch_cmd(ctx, blueprint_id)
 
+launch.__doc__ = f"Launch a blueprint job (Fire & Forget).\n\n{_LAUNCH_OPTIONS_EPILOG}"
+
 
 @app.command(
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
@@ -581,6 +629,8 @@ def run(
 ):
     """Execute a blueprint and wait for completion."""
     blueprint_run_cmd(ctx, blueprint_id)
+
+run.__doc__ = f"Execute a blueprint and wait for completion.\n\n{_RUN_OPTIONS_EPILOG}"
 
 
 CLI_RESERVED_KEYS = {"timeout", "verbose", "execute_action"}
@@ -798,6 +848,42 @@ def call(
 
 _REQUIRED_JOB_KEYS = ["task_name", "repo_name", "branch", "commit_sha", "entry_command"]
 
+_JOB_PARAMS_DOC = """
+Required parameters:
+  --task-name TEXT          Job display name
+  --repo-name TEXT          Repository name
+  --branch TEXT             Git branch
+  --commit-sha TEXT         Git commit SHA
+  --entry-command TEXT      Command to execute
+
+Optional parameters:
+  --gpu-type TEXT           GPU model (e.g. a100, rtx5090)
+  --gpu-count INT           Number of GPUs
+  --cpu-count INT           Number of CPUs
+  --memory-demand TEXT      Memory limit (e.g. 16G)
+  --ephemeral-storage TEXT  Disk limit (e.g. 10G)
+  --container-image TEXT    Container image URI
+  --runner TEXT             Runner name
+  --namespace TEXT          Repository namespace
+  --job-type TEXT           Job type (A1/A2/B1/B2)
+  --description TEXT        Job description
+  --system-entry-command TEXT  System-level setup script
+""".strip()
+
+_SUBMIT_OPTIONS_EPILOG = f"""{_JOB_PARAMS_DOC}
+
+CLI options:
+  --timeout FLOAT           HTTP timeout in seconds (default: 10)
+  --verbose                 Print debug info"""
+
+_EXECUTE_OPTIONS_EPILOG = f"""{_JOB_PARAMS_DOC}
+
+CLI options:
+  --timeout FLOAT           Max wait time in seconds (default: infinite)
+  --poll-interval FLOAT     Poll interval in seconds (default: 2)
+  --execute-action BOOL     Auto-execute MAGNUS_ACTION (default: true)
+  --verbose                 Print debug info"""
+
 
 def _validate_job_params(params: Dict[str, Any]) -> None:
     missing = [k for k in _REQUIRED_JOB_KEYS if k not in params]
@@ -815,6 +901,8 @@ def submit_job_cmd(ctx: typer.Context):
     """Submit a job directly (Fire & Forget)."""
     job_submit_subcmd(ctx)
 
+submit_job_cmd.__doc__ = f"Submit a job directly (Fire & Forget).\n\n{_SUBMIT_OPTIONS_EPILOG}"
+
 
 @app.command(
     name="execute",
@@ -823,6 +911,8 @@ def submit_job_cmd(ctx: typer.Context):
 def execute_job_cmd(ctx: typer.Context):
     """Submit a job and wait for completion."""
     job_execute_subcmd(ctx)
+
+execute_job_cmd.__doc__ = f"Submit a job and wait for completion.\n\n{_EXECUTE_OPTIONS_EPILOG}"
 
 
 # === Job Management Commands ===
@@ -1049,7 +1139,7 @@ def cluster_status_cmd(
         raise typer.Exit(code=1)
 
 
-@app.command(name="blueprints")
+@app.command(name="list")
 def list_blueprints_cmd(
     limit: int = typer.Option(10, "--limit", "-l", help="Number of blueprints to fetch"),
     search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by title or ID"),
@@ -1274,10 +1364,17 @@ def blueprint_list_cmd(
 def blueprint_get_cmd(
     blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
+    code_file: Optional[Path] = typer.Option(None, "--code-file", "-c", help="Export code to a .py file"),
 ):
     """Show blueprint details including code."""
     try:
         bp = api_get_blueprint(blueprint_id)
+
+        if code_file is not None:
+            code = bp.get("code", "")
+            code_file.write_text(code, encoding="utf-8")
+            print_msg(f"Code exported to [cyan]{code_file}[/cyan]")
+            return
 
         fmt: OutputFormat = format if format in ("yaml", "json") else _auto_format()
 
@@ -1417,6 +1514,8 @@ def blueprint_launch_cmd(
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
 
+blueprint_launch_cmd.__doc__ = f"Launch a blueprint job (fire & forget).\n\n{_LAUNCH_OPTIONS_EPILOG}"
+
 
 @blueprint_app.command(
     name="run",
@@ -1466,6 +1565,8 @@ def blueprint_run_cmd(
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
+
+blueprint_run_cmd.__doc__ = f"Execute a blueprint and wait for completion.\n\n{_RUN_OPTIONS_EPILOG}"
 
 
 # =============================================================================
@@ -1715,6 +1816,8 @@ def job_submit_subcmd(ctx: typer.Context):
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
 
+job_submit_subcmd.__doc__ = f"Submit a job directly (fire & forget).\n\n{_SUBMIT_OPTIONS_EPILOG}"
+
 
 @job_app.command(
     name="execute",
@@ -1752,6 +1855,8 @@ def job_execute_subcmd(ctx: typer.Context):
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
+
+job_execute_subcmd.__doc__ = f"Submit a job and wait for completion.\n\n{_EXECUTE_OPTIONS_EPILOG}"
 
 
 if __name__ == "__main__":

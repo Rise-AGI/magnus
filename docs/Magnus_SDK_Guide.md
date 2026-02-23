@@ -800,7 +800,7 @@ magnus logs <ref>        # 查看任务日志
 magnus kill <ref>        # 终止任务
 magnus launch <id>       # 提交蓝图 (Fire & Forget)
 magnus run <id>          # 提交蓝图并等待完成
-magnus blueprints        # 列出蓝图
+magnus list              # 列出蓝图
 ```
 
 **宾动结构子命令** — 完整操作，类似 `git remote add`：
@@ -815,8 +815,9 @@ magnus job result <ref>           # 查看任务结果
 magnus job action <ref>           # 查看任务动作
 magnus job kill <ref>             # = magnus kill
 
-magnus blueprint list             # = magnus blueprints
+magnus blueprint list             # = magnus list
 magnus blueprint get <id>         # 查看蓝图详情（含代码）
+magnus blueprint get <id> -c bp.py  # 导出代码到文件
 magnus blueprint schema <id>      # 查看参数 Schema
 magnus blueprint save <id> ...    # 创建/更新蓝图
 magnus blueprint delete <id>      # 删除蓝图
@@ -995,10 +996,20 @@ magnus blueprint list -f yaml            # YAML 输出
 ```bash
 magnus blueprint get <blueprint-id>
 magnus blueprint get my-blueprint -f yaml
+magnus blueprint get my-blueprint -c bp.py   # 导出代码到文件
 ```
 
 **选项**：
 - `-f, --format`: 输出格式 (yaml/json)，默认人类可读
+- `-c, --code-file`: 导出代码到指定 .py 文件
+
+`--code-file` 与 `save --code-file` 对称，形成完整的 inspect → edit → save 闭环：
+
+```bash
+magnus blueprint get my-bp -c bp.py   # 导出
+$EDITOR bp.py                          # 编辑
+magnus blueprint save my-bp -t "My BP" -c bp.py  # 上传
+```
 
 #### magnus blueprint schema
 

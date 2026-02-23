@@ -816,8 +816,9 @@ magnus run my-blueprint --param value
 magnus run my-blueprint --timeout 300 -- --param value
 
 # 蓝图 CRUD（宾动结构）
-magnus blueprint list              # 列出蓝图
+magnus blueprint list              # 列出蓝图（快捷：magnus list）
 magnus blueprint get my-bp         # 查看详情（含代码）
+magnus blueprint get my-bp -c bp.py  # 导出代码到文件
 magnus blueprint save my-bp --title "My BP" --code-file bp.py
 magnus blueprint delete my-bp
 ```
