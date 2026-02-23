@@ -35,6 +35,7 @@ export interface ClusterConfig {
   name: string;
   gpus: GpuConfig[];
   max_cpu_count: number;
+  max_memory_demand: string;
   default_cpu_count: number;
   default_memory_demand: string;
   default_runner: string;

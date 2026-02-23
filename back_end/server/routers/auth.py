@@ -127,8 +127,8 @@ def get_current_user(
         try:
             payload = jwt.decode(
                 final_token,
-                magnus_config["server"]["jwt_signer"]["secret_key"],
-                algorithms = [magnus_config["server"]["jwt_signer"]["algorithm"]],
+                magnus_config["server"]["auth"]["jwt_signer"]["secret_key"],
+                algorithms = [magnus_config["server"]["auth"]["jwt_signer"]["algorithm"]],
             )
             user_id = payload.get("sub")
             if user_id:

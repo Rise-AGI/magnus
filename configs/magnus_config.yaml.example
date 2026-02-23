@@ -17,23 +17,20 @@ server:
   # job_wrapper_path = f"{job_working_table}/wrapper.py"
   # magnus_uv_cache = f"{server_root}/uv_cache/{user}"
   # file_custody_path = f"{server_root}/file_custody"
-  jwt_signer:
-    secret_key: your-secret-key
-    algorithm: HS256
-    expire_minutes: 10080  # 7 days
+  auth:
+    provider: feishu                     # feishu | none
+    jwt_signer:
+      secret_key: your-secret-key
+      algorithm: HS256
+      expire_minutes: 10080  # 7 days
+    feishu_client:
+      app_id: cli_xxxxxxxxxxxxxxxx
+      app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   github_client:
     token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  feishu_client:
-    app_id: cli_xxxxxxxxxxxxxxxx
-    app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   scheduler:
-    spy_gpu_interval: 5
     heartbeat_interval: 2
     snapshot_interval: 300
-    allow_root: false
-  resource_cache:
-    container_cache_size: 80G
-    repo_cache_size: 20G
   service_proxy:
     max_concurrency: 1024
     pool_size: 1024
@@ -49,6 +46,15 @@ server:
     visual_model_name: qwen-vl-max
     small_fast_model_name: qwen-turbo
     api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+execution:
+  backend: slurm                         # slurm | docker
+  container_runtime: apptainer           # apptainer | docker
+  spy_gpu_interval: 5
+  allow_root: false
+  resource_cache:
+    container_cache_size: 80G
+    repo_cache_size: 20G
 
 cluster:
   name: Your Cluster Name

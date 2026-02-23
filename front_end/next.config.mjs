@@ -32,7 +32,7 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_FRONT_END_PORT: magnusConfig.server.front_end_port.toString(),
     NEXT_PUBLIC_BACK_END_PORT: magnusConfig.server.back_end_port.toString(),
-    NEXT_PUBLIC_FEISHU_APP_ID: magnusConfig.server.feishu_client.app_id,
+    NEXT_PUBLIC_FEISHU_APP_ID: magnusConfig.server.auth.feishu_client.app_id,
     NEXT_PUBLIC_POLL_INTERVAL: magnusConfig.client.jobs.poll_interval.toString(),
     NEXT_PUBLIC_SERVER_ADDRESS: serverAddress,
     NEXT_PUBLIC_CLUSTER_CONFIG: JSON.stringify(magnusConfig.cluster),

@@ -9,7 +9,7 @@ __all__ = [
 
 
 jwt_signer = JwtSigner(
-    secret_key = magnus_config["server"]["jwt_signer"]["secret_key"],
-    algorithm = magnus_config["server"]["jwt_signer"]["algorithm"],
-    expire_minutes = magnus_config["server"]["jwt_signer"]["expire_minutes"],
+    secret_key = magnus_config["server"]["auth"]["jwt_signer"]["secret_key"],
+    algorithm = magnus_config["server"]["auth"]["jwt_signer"]["algorithm"],
+    expire_minutes = magnus_config["server"]["auth"]["jwt_signer"]["expire_minutes"],
 )

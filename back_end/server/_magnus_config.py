@@ -30,41 +30,43 @@ def _validate_magnus_config(config: Dict[str, Any])-> None:
     """
     # 顶层键
     _check_key(config, "server", dict)
+    _check_key(config, "execution", dict)
     _check_key(config, "cluster", dict)
 
     # server 配置
     server = config["server"]
+    _check_key(server, "address", str)
     _check_key(server, "front_end_port", int)
     _check_key(server, "back_end_port", int)
     _check_key(server, "root", str)
-    _check_key(server, "resource_cache", dict)
-    _check_key(server["resource_cache"], "container_cache_size", str)
-    _check_key(server["resource_cache"], "repo_cache_size", str)
 
-    # jwt_signer 配置
-    _check_key(server, "jwt_signer", dict)
-    jwt_signer = server["jwt_signer"]
+    # auth 配置
+    _check_key(server, "auth", dict)
+    auth = server["auth"]
+    _check_key(auth, "provider", str)
+    if auth["provider"] != "feishu":
+        raise NotImplementedError(f"❌ auth.provider '{auth['provider']}' 尚未实现，当前仅支持 'feishu'")
+
+    _check_key(auth, "jwt_signer", dict)
+    jwt_signer = auth["jwt_signer"]
     _check_key(jwt_signer, "secret_key", str)
     _check_key(jwt_signer, "algorithm", str)
     _check_key(jwt_signer, "expire_minutes", int)
+
+    _check_key(auth, "feishu_client", dict)
+    feishu_client = auth["feishu_client"]
+    _check_key(feishu_client, "app_id", str)
+    _check_key(feishu_client, "app_secret", str)
 
     # github_client 配置
     _check_key(server, "github_client", dict)
     _check_key(server["github_client"], "token", str)
 
-    # feishu_client 配置
-    _check_key(server, "feishu_client", dict)
-    feishu_client = server["feishu_client"]
-    _check_key(feishu_client, "app_id", str)
-    _check_key(feishu_client, "app_secret", str)
-
     # scheduler 配置
     _check_key(server, "scheduler", dict)
     scheduler = server["scheduler"]
-    _check_key(scheduler, "spy_gpu_interval", int)
     _check_key(scheduler, "heartbeat_interval", int)
     _check_key(scheduler, "snapshot_interval", int)
-    _check_key(scheduler, "allow_root", bool)
 
     # explorer 配置
     _check_key(server, "explorer", dict)
@@ -83,6 +85,20 @@ def _validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(file_custody, "max_processes", int)
     _check_key(file_custody, "default_ttl_minutes", int)
     _check_key(file_custody, "max_ttl_minutes", int)
+
+    # execution 配置
+    execution = config["execution"]
+    _check_key(execution, "backend", str)
+    if execution["backend"] != "slurm":
+        raise NotImplementedError(f"❌ execution.backend '{execution['backend']}' 尚未实现，当前仅支持 'slurm'")
+    _check_key(execution, "container_runtime", str)
+    if execution["container_runtime"] != "apptainer":
+        raise NotImplementedError(f"❌ execution.container_runtime '{execution['container_runtime']}' 尚未实现，当前仅支持 'apptainer'")
+    _check_key(execution, "spy_gpu_interval", int)
+    _check_key(execution, "allow_root", bool)
+    _check_key(execution, "resource_cache", dict)
+    _check_key(execution["resource_cache"], "container_cache_size", str)
+    _check_key(execution["resource_cache"], "repo_cache_size", str)
 
     # cluster 配置
     cluster = config["cluster"]

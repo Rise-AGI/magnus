@@ -49,8 +49,8 @@ def _get_dir_size(path: str)-> int:
     return total
 
 
-CONTAINER_CACHE_SIZE = _parse_size_string(magnus_config['server']['resource_cache']['container_cache_size'])
-REPO_CACHE_SIZE = _parse_size_string(magnus_config['server']['resource_cache']['repo_cache_size'])
+CONTAINER_CACHE_SIZE = _parse_size_string(magnus_config['execution']['resource_cache']['container_cache_size'])
+REPO_CACHE_SIZE = _parse_size_string(magnus_config['execution']['resource_cache']['repo_cache_size'])
 
 
 def _image_to_sif_filename(image: str)-> str:

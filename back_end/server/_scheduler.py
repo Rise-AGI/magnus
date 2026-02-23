@@ -356,8 +356,8 @@ class MagnusScheduler:
 
             self._init_job_working_dir(job_working_table)
 
-            spy_gpu_interval = magnus_config["server"]["scheduler"]["spy_gpu_interval"]
-            allow_root = magnus_config["server"]["scheduler"]["allow_root"]
+            spy_gpu_interval = magnus_config["execution"]["spy_gpu_interval"]
+            allow_root = magnus_config["execution"]["allow_root"]
             user_token = job.user.token or ""
             magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['front_end_port']}"
             job_id = str(job.id)
