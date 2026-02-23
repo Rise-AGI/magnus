@@ -871,7 +871,7 @@ magnus job --help
 
 #### magnus job submit
 
-提交任务 (Fire & Forget)。
+提交任务 (Fire & Forget)。不需要防波堤 `--`，参数按名称自动路由：`task-name`、`repo-name`、`gpu-type` 等归 Job 层，`timeout`、`verbose` 等归 CLI 层。
 
 ```bash
 magnus job submit --task-name "Train" --repo-name my_repo --branch main \
@@ -880,7 +880,7 @@ magnus job submit --task-name "Train" --repo-name my_repo --branch main \
 
 #### magnus job execute
 
-提交任务并等待完成。轮询期间遇到瞬时网络错误或 5xx 自动重试（指数退避，最多 30 次连续失败）。
+提交任务并等待完成。轮询期间遇到瞬时网络错误或 5xx 自动重试（指数退避，最多 30 次连续失败）。参数路由规则同 `submit`。
 
 ```bash
 magnus job execute --task-name "Quick Test" --repo-name my_repo --branch main \
@@ -1057,11 +1057,14 @@ magnus blueprint launch my-blueprint --expire-minutes 120 -- --data /path/to/fil
 magnus blueprint launch batch-process -- --files a.csv --files b.csv
 ```
 
-**选项**（防波堤 `--` 左侧）：
+防波堤 `--` 将参数分为两侧：左侧是 CLI 控制参数（类型强转），右侧是蓝图业务参数（**保持为原始字符串**，类型转换由后端负责）。没有 `--` 时，所有参数归蓝图，CLI 控制参数使用默认值。
+
+**选项**（`--` 左侧）：
 - `--expire-minutes`: FileSecret 过期时间（分钟），默认 60
 - `--max-downloads`: FileSecret 最大下载次数，默认 1
 - `--preference`: 合并偏好参数，默认 false
 - `--timeout`: HTTP 超时（秒），默认 10
+- `--verbose`: 打印参数分区详情，默认 false
 
 #### magnus blueprint run
 
@@ -1080,23 +1083,29 @@ magnus blueprint run scan-pdf-to-vector --file original.pdf --output processed.p
 magnus blueprint run my-blueprint --execute-action false -- --param value
 ```
 
-**选项**（防波堤 `--` 左侧）：
+防波堤规则同 `launch`。
+
+**选项**（`--` 左侧）：
 - `--timeout`: 超时（秒），默认无限等待
 - `--poll-interval`: 轮询间隔（秒），默认 2
 - `--execute-action`: 执行 action，默认 true
 - `--expire-minutes`: FileSecret 过期时间（分钟），默认 60
 - `--max-downloads`: FileSecret 最大下载次数，默认 1
 - `--preference`: 合并偏好参数，默认 false
+- `--verbose`: 打印参数分区详情，默认 false
 
 ### magnus call
 
-调用弹性服务。
+调用弹性服务。支持可选防波堤 `--`：有 `--` 时左侧归 CLI、右侧归 payload；没有 `--` 时按保留关键字自动路由——`timeout`、`verbose`、`execute-action` 归 CLI，其余归 payload。
 
 ```bash
 magnus call <service-id> [OPTIONS] [ARGS...]
 
-# 直接传参
-magnus call llm-inference --prompt "Hello!" --max_tokens 100
+# 直接传参（timeout 自动识别为 CLI 参数）
+magnus call llm-inference --prompt "Hello!" --max_tokens 100 --timeout 120
+
+# 显式防波堤，效果相同
+magnus call slow-service --timeout 120 -- --param value
 
 # 从 JSON 文件
 magnus call my-service @payload.json
@@ -1104,9 +1113,6 @@ magnus call my-service @payload.json
 # 从 stdin
 echo '{"x": 1, "y": 2}' | magnus call my-service -
 cat input.json | magnus call my-service -
-
-# 设置超时
-magnus call slow-service --timeout 120 -- --param value
 ```
 
 **参数格式**：
@@ -1114,8 +1120,10 @@ magnus call slow-service --timeout 120 -- --param value
 - `@file.json`: JSON 文件
 - `-`: stdin
 
-**选项**：
+**选项**（CLI 保留关键字）：
 - `--timeout, -t`: 超时（秒），默认 60
+- `--verbose`: 打印参数分区详情
+- `--execute-action`: 执行 action
 
 ### magnus cluster
 
