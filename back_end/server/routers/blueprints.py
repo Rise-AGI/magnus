@@ -22,6 +22,7 @@ from ..schemas import (
 from .._blueprint_manager import blueprint_manager
 from .auth import get_current_user
 from .jobs import create_job
+from .._magnus_config import admin_open_ids
 from library import *
 
 
@@ -112,7 +113,7 @@ def create_blueprint(
     existing = db.query(models.Blueprint).filter(models.Blueprint.id == bp.id).first()
 
     if existing:
-        if existing.user_id != current_user.id:
+        if existing.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
             raise HTTPException(
                 status_code = 403,
                 detail = "You cannot modify a blueprint created by another user. Please verify the Blueprint ID.",
@@ -152,7 +153,7 @@ def delete_blueprint(
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    if bp.user_id != current_user.id:
+    if bp.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
         raise HTTPException(status_code=403, detail="You do not have permission to delete this blueprint")
 
     db.delete(bp)

@@ -65,6 +65,7 @@ export function BlueprintTable({
           <tbody className="divide-y divide-zinc-800/50">
             {data.map((bp) => {
               const isOwner = currentUser?.id === bp.user_id;
+              const canManage = isOwner || currentUser?.is_admin;
               
               const displayUser = bp.user || { 
                 id: bp.user_id, 
@@ -116,7 +117,7 @@ export function BlueprintTable({
                       <button onClick={(e) => { e.stopPropagation(); onRun(bp); }} className="p-2 bg-blue-900/20 hover:bg-blue-600 hover:text-white text-blue-500 rounded-lg transition-colors border border-blue-500/20 shadow-sm" title={t("blueprints.run")}>
                         <Play className="w-4 h-4 fill-current" />
                       </button>
-                      {isOwner && (
+                      {canManage && (
                         <button onClick={(e) => { e.stopPropagation(); onDelete(bp); }} className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30" title={t("common.delete")}>
                           <Trash2 className="w-4 h-4" />
                         </button>

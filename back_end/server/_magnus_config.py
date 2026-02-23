@@ -7,6 +7,7 @@ from library import *
 
 __all__ = [
     "magnus_config",
+    "admin_open_ids",
 ]
 
 
@@ -79,7 +80,8 @@ def _validate_magnus_config(config: Dict[str, Any])-> None:
     feishu_client = auth["feishu_client"]
     _check_key(feishu_client, "app_id", str)
     _check_key(feishu_client, "app_secret", str)
-    _warn_extra_keys(feishu_client, {"app_id", "app_secret"}, "server.auth.feishu_client")
+    _check_key(feishu_client, "admins", list)
+    _warn_extra_keys(feishu_client, {"app_id", "app_secret", "admins"}, "server.auth.feishu_client")
 
     # github_client 配置
     _check_key(server["github_client"], "token", str)
@@ -181,3 +183,4 @@ def _load_magnus_config()-> Dict[str, Any]:
 
 
 magnus_config = _load_magnus_config()
+admin_open_ids: Set[str] = set(magnus_config["server"]["auth"]["feishu_client"]["admins"])

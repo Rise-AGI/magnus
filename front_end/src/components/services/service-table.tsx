@@ -68,6 +68,7 @@ export function ServiceTable({
           <tbody className="divide-y divide-zinc-800/50">
             {services.map((svc) => {
               const isOwner = currentUser?.id === svc.owner_id;
+              const canManage = isOwner || currentUser?.is_admin;
 
               const displayUser = svc.owner || {
                 id: svc.owner_id,
@@ -196,7 +197,7 @@ export function ServiceTable({
                         <RefreshCw className="w-4 h-4" />
                       </button>
 
-                      {isOwner && (
+                      {canManage && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -212,7 +213,7 @@ export function ServiceTable({
                         </button>
                       )}
 
-                      {isOwner && (
+                      {canManage && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

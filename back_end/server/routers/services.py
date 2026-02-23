@@ -20,7 +20,7 @@ from .. import models
 from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse
 from .._service_manager import service_manager
-from .._magnus_config import magnus_config
+from .._magnus_config import magnus_config, admin_open_ids
 from .._scheduler import scheduler
 from .auth import get_current_user
 
@@ -254,7 +254,7 @@ def create_service(
         data["system_entry_command"] = cluster["default_system_entry_command"]
 
     if existing:
-        if existing.owner_id != current_user.id:
+        if existing.owner_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
             raise HTTPException(status_code=403, detail="You cannot modify a service created by another user.")
 
         was_active = existing.is_active
@@ -301,7 +301,7 @@ def delete_service(
     svc = db.query(Service).filter(Service.id == service_id).first()
     if not svc:
         raise HTTPException(status_code=404, detail="Service not found")
-    if svc.owner_id != current_user.id:
+    if svc.owner_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
         raise HTTPException(status_code=403, detail="You do not have permission to delete this service")
 
     _shutdown_service_resources_sync(service_id, db)

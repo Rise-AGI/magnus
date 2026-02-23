@@ -58,6 +58,23 @@ def run_migrations()-> None:
 run_migrations()
 
 
+def _log_admin_status()-> None:
+    if not admin_open_ids:
+        logger.info("🔑 Admin: 未配置管理员")
+        return
+    with SessionLocal() as db:
+        found = db.query(models.User).filter(models.User.feishu_open_id.in_(admin_open_ids)).all()
+        found_map = {u.feishu_open_id: u.name for u in found}
+        for open_id in admin_open_ids:
+            if open_id in found_map:
+                logger.info(f"🔑 Admin: {found_map[open_id]} ({open_id})")
+            else:
+                logger.warning(f"⚠️ Admin open_id {open_id} 在数据库中未找到对应用户，该用户首次飞书登录后生效")
+
+
+_log_admin_status()
+
+
 async def run_scheduler_loop(
 )-> None:
     

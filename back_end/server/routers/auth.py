@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .. import database
 from .. import models
 from ..schemas import UserInfo, LoginResponse, FeishuLoginRequest, TokenResponse
-from .._magnus_config import magnus_config
+from .._magnus_config import magnus_config, admin_open_ids
 from .._jwt_signer import jwt_signer
 from .._feishu_client import feishu_client
 
@@ -179,7 +179,13 @@ async def feishu_login(
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": db_user,
+        "user": {
+            "id": db_user.id,
+            "name": db_user.name,
+            "avatar_url": db_user.avatar_url,
+            "email": db_user.email,
+            "is_admin": db_user.feishu_open_id in admin_open_ids,
+        },
     }
 
 

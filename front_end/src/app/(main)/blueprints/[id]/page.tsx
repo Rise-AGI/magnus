@@ -238,6 +238,7 @@ export default function BlueprintDetailsPage() {
   }
 
   const isOwner = currentUser?.id === blueprint.user_id;
+  const canManage = isOwner || currentUser?.is_admin;
   const displayUser = blueprint.user || { 
       id: blueprint.user_id, 
       name: "Unknown", 
@@ -325,7 +326,7 @@ export default function BlueprintDetailsPage() {
                     {isRunning ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
                 </button>
 
-                {isOwner && (
+                {canManage && (
                     <button
                         onClick={() => setShowDeleteConfirm(true)}
                         className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"

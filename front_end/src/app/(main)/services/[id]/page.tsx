@@ -180,6 +180,7 @@ export default function ServiceDetailsPage() {
   }
 
   const isOwner = currentUser?.id === service.owner_id;
+  const canManage = isOwner || currentUser?.is_admin;
   const displayUser = service.owner || {
     id: service.owner_id,
     name: "Unknown",
@@ -313,7 +314,7 @@ export default function ServiceDetailsPage() {
               </button>
 
               {/* Toggle Button */}
-              {isOwner && (
+              {canManage && (
                 <button
                   onClick={handleToggleClick}
                   className={`p-2 rounded-lg transition-colors border shadow-sm ${service.is_active
@@ -327,7 +328,7 @@ export default function ServiceDetailsPage() {
               )}
 
               {/* Delete Button */}
-              {isOwner && (
+              {canManage && (
                 <button
                   onClick={handleDeleteClick}
                   className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"

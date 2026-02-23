@@ -305,6 +305,8 @@ magnus.terminate_job("abc123")
 **参数**：
 - `job_id` (str): Job ID
 
+> **Admin 特权**：管理员（`feishu_client.admins` 中配置的用户）可以终止任何人的任务，非管理员只能终止自己的任务。
+
 #### 典型工作流
 
 提交 → 轮询 → 查日志 → 取结果，完整闭环：
@@ -536,6 +538,8 @@ bp = magnus.save_blueprint(
 
 **返回值**：dict，保存后的蓝图信息
 
+> **Admin 特权**：管理员可以覆盖更新任何人的蓝图，非管理员只能更新自己的蓝图。
+
 #### delete_blueprint - 删除蓝图
 
 ```python
@@ -548,6 +552,8 @@ magnus.delete_blueprint("my-old-blueprint")
 - `blueprint_id` (str): 蓝图 ID
 
 **返回值**：`{"message": "Blueprint deleted successfully"}`
+
+> **Admin 特权**：管理员可以删除任何人的蓝图，非管理员只能删除自己的蓝图。
 
 ### 服务调用
 

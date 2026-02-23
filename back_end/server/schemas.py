@@ -39,6 +39,7 @@ class UserInfo(BaseModel):
     name: str
     avatar_url: Optional[str] = None
     email: Optional[str] = None
+    is_admin: bool = False
     class Config: from_attributes = True
 
 

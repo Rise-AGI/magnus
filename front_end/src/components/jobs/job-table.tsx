@@ -73,7 +73,7 @@ export function JobTable({
             {jobs.map((job) => {
               const isActive = ["Pending", "Preparing", "Queued", "Running", "Paused"].includes(job.status);
               const isOwner = currentUser?.id === job.user?.id;
-              const canTerminate = isOwner && isActive;
+              const canTerminate = (isOwner || currentUser?.is_admin) && isActive;
 
               return (
                 <tr

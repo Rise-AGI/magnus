@@ -26,7 +26,7 @@ from ..schemas import (
     ExplorerMessageResponse,
     PagedExplorerSessionResponse,
 )
-from .._magnus_config import magnus_config
+from .._magnus_config import magnus_config, admin_open_ids
 from .auth import get_current_user
 
 
@@ -196,11 +196,13 @@ async def upload_file(
 ) -> Dict[str, Any]:
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
-        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     content = await file.read()
     filename = file.filename or "unknown"
@@ -266,7 +268,8 @@ async def get_file(
         raise HTTPException(status_code=404, detail="Session not found")
 
     is_owner = session.user_id == current_user.id
-    if not is_owner and not session.is_shared:
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    if not is_owner and not is_admin and not session.is_shared:
         raise HTTPException(status_code=403, detail="Access denied")
 
     file_path = Path(sessions_workspace) / session_id / "files" / file_name
@@ -321,7 +324,8 @@ def get_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     is_owner = session.user_id == current_user.id
-    if not is_owner and not session.is_shared:
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    if not is_owner and not is_admin and not session.is_shared:
         raise HTTPException(status_code=403, detail="Access denied")
 
     return session
@@ -335,11 +339,13 @@ def share_session(
 ) -> models.ExplorerSession:
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
-        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     session.is_shared = True
     db.commit()
@@ -355,11 +361,13 @@ def unshare_session(
 ) -> models.ExplorerSession:
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
-        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     session.is_shared = False
     db.commit()
@@ -375,11 +383,13 @@ def delete_session(
 ) -> Dict[str, str]:
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
-        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     db.delete(session)
     db.commit()
@@ -401,11 +411,13 @@ def update_session(
 ) -> models.ExplorerSession:
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
-        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     if data.title:
         session.title = data.title
@@ -426,11 +438,13 @@ async def chat(
 ) -> StreamingResponse:
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
-        models.ExplorerSession.user_id == current_user.id,
     ).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     if data.truncate_before is not None:
         messages_to_delete = session.messages[data.truncate_before:]
