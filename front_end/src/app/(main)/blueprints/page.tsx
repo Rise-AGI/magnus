@@ -161,7 +161,7 @@ export default function BlueprintsPage() {
 
       <BlueprintEditor isOpen={isEditorOpen} mode={editorMode} initialData={editorData} onClose={() => setIsEditorOpen(false)} onSave={handleSave} isSaving={isSaving} />
       <BlueprintRunner blueprint={selectedBlueprint} onClose={() => setSelectedBlueprint(null)} />
-      <ConfirmationDialog isOpen={!!blueprintToDelete} onClose={() => setBlueprintToDelete(null)} onConfirm={handleDelete} title={t("blueprints.deleteTitle")} description={<span>{t("blueprints.deleteConfirm", { title: blueprintToDelete?.title || "" })}</span>} confirmText={t("common.delete")} variant="danger" isLoading={isDeleting} />
+      <ConfirmationDialog isOpen={!!blueprintToDelete} onClose={() => setBlueprintToDelete(null)} onConfirm={handleDelete} title={t("blueprints.deleteTitle")} description={<span>{t("blueprints.deleteConfirm", { title: blueprintToDelete?.title || "" })}</span>} confirmText={t("common.delete")} variant="danger" isLoading={isDeleting} confirmInput={blueprintToDelete?.id} />
       <ConfirmationDialog isOpen={!!errorMessage} onClose={() => setErrorMessage(null)} title={t("common.error")} description={errorMessage} confirmText={t("common.ok")} mode="alert" variant="danger" />
     </div>
   );

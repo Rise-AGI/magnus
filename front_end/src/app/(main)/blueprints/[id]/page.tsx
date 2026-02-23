@@ -468,6 +468,7 @@ export default function BlueprintDetailsPage() {
         confirmText={t("blueprintDetail.deleteBlueprint")}
         variant="danger"
         isLoading={isDeleting}
+        confirmInput={blueprint.id}
       />
 
       <ConfirmationDialog
