@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from .file_transfer import normalize_secret
+from .file_transfer import normalize_secret, get_tmp_base
 
 
 def _magnus_error(msg: str) -> Exception:
@@ -27,7 +27,7 @@ def download_file(
     token = normalize_secret(file_secret)
     url = _get_download_url(token)
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=get_tmp_base()) as tmp:
         tmp_dir = Path(tmp)
 
         with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:

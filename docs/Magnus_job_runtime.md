@@ -106,6 +106,7 @@ ${MAGNUS_HOME}/workspace/repository/         git checkout, 也是 --pwd
 ${MAGNUS_HOME}/workspace/.magnus_user_script.sh
 ${MAGNUS_HOME}/workspace/.magnus_result      $MAGNUS_RESULT
 ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
+${MAGNUS_HOME}/.tmp/                         SDK 文件中转目录 (容器可写层, 自动创建)
 ```
 
 容器文件系统是只读 squashfs (SIF)。可写层取决于隔离模式：
@@ -115,6 +116,26 @@ ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
 | containall + overlay | ephemeral overlay (ext3 image) | `ephemeral_storage` | 默认路径（rootless apptainer） |
 | containall/contain + writable-tmpfs | RAM tmpfs | 与 `memory_demand` 共享 | setuid apptainer 或 `MAGNUS_NO_OVERLAY=1` |
 | none（裸跑） | host 文件系统穿透 | 无限制 | `MAGNUS_CONTAIN_LEVEL=none`，等效 overlay 出现之前的行为 |
+
+### SDK 运行环境检测协议
+
+SDK 的 `file_transfer.get_tmp_base()` 用以下判据决定文件中转目录（上传 tar 压缩、下载 tar 解压的临时文件）：
+
+1. 环境变量 `MAGNUS_HOME` 存在
+2. `$MAGNUS_HOME/workspace/` 是已存在的目录（由 Magnus runtime 创建并 bind-mount）
+
+两个条件都满足时，中转目录为 `$MAGNUS_HOME/.tmp/`（容器可写层），否则 fallback 到系统 `/tmp`。
+
+**为什么不用 `/tmp`**：在两种隔离模式下 `/tmp` 都不是理想的中转位置：
+
+| 模式 | `/tmp` 位置 | 问题 |
+|------|-------------|------|
+| overlay | overlay 镜像内 | 与 pip install 等容器内写入共享 `ephemeral_storage` 配额 |
+| writable-tmpfs | RAM tmpfs | 容量有限（内核默认 50% cgroup RAM），大文件触发 ENOSPC |
+
+`$MAGNUS_HOME/.tmp/` 同样位于容器可写层（overlay 或 tmpfs），与 `/tmp` 共享同一写入预算，但避免了与系统临时文件混杂。更重要的是，它**不**写入 `$MAGNUS_HOME/workspace/`（host 磁盘 bind mount），从而保持容器隔离——容器内用户代码不会通过中转文件逃逸到宿主机文件系统。
+
+嵌套容器场景下，内层 `$MAGNUS_HOME/workspace/` 同样是 bind-mount 链的一环，检测协议同样有效；内层 `$MAGNUS_HOME/.tmp/` 仍位于内层容器的可写层。
 
 ## 环境变量协议
 

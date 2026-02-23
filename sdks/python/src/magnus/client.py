@@ -16,7 +16,7 @@ from .config import (
     _get_current_site,
 )
 from .actions import execute_action
-from .file_transfer import is_file_secret
+from .file_transfer import is_file_secret, get_tmp_base
 
 logger = logging.getLogger("magnus")
 
@@ -222,7 +222,7 @@ class MagnusClient:
         is_dir = p.is_dir()
         if is_dir:
             data["is_directory"] = "true"
-            with _tempfile.TemporaryDirectory() as tmpdir:
+            with _tempfile.TemporaryDirectory(dir=get_tmp_base()) as tmpdir:
                 tmp_path = Path(tmpdir) / f"{p.name}.tar.gz"
                 with _tarfile.open(str(tmp_path), "w:gz", dereference=True) as tar:
                     tar.add(str(p), arcname=p.name)
