@@ -1,6 +1,6 @@
 // front_end/src/components/ui/confirmation-dialog.tsx
 import { AlertTriangle, Info, Loader2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLanguage } from "@/context/language-context";
 
 interface ConfirmationDialogProps {
@@ -14,6 +14,8 @@ interface ConfirmationDialogProps {
   isLoading?: boolean;
   variant?: "danger" | "default" | "info";
   mode?: "confirm" | "alert";
+  confirmInput?: string;   // 需要手动输入匹配此字符串才能确认
+  confirmInputLabel?: string;
 }
 
 export function ConfirmationDialog({
@@ -27,12 +29,23 @@ export function ConfirmationDialog({
   isLoading = false,
   variant = "danger",
   mode = "confirm",
+  confirmInput,
+  confirmInputLabel,
 }: ConfirmationDialogProps) {
   const { t } = useLanguage();
+  const [inputValue, setInputValue] = useState("");
 
   const resolvedCancelText = cancelText ?? t("common.cancel");
   const resolvedConfirmText = confirmText ?? t("common.confirm");
-  
+
+  const needsInput = mode === "confirm" && confirmInput != null;
+  const inputMatched = !needsInput || inputValue === confirmInput;
+
+  // 打开/关闭时重置输入
+  useEffect(() => {
+    if (!isOpen) setInputValue("");
+  }, [isOpen]);
+
   // 支持 ESC 关闭
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -47,8 +60,8 @@ export function ConfirmationDialog({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 min-h-screen">
       {/* Backdrop */}
-      <div 
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" 
+      <div
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
         onClick={() => !isLoading && onClose()}
       />
 
@@ -72,6 +85,22 @@ export function ConfirmationDialog({
               </div>
             </div>
           </div>
+
+          {needsInput && (
+            <div className="mt-4">
+              <label className="block text-xs text-zinc-500 mb-1.5">
+                {confirmInputLabel || `${t("common.typeToConfirm", { v: confirmInput! })}`}
+              </label>
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder={confirmInput}
+                autoFocus
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 font-mono"
+              />
+            </div>
+          )}
         </div>
 
         <div className="bg-zinc-900/50 px-6 py-4 flex items-center justify-end gap-3 border-t border-zinc-800/50">
@@ -86,7 +115,7 @@ export function ConfirmationDialog({
           )}
           <button
             onClick={mode === "alert" ? onClose : onConfirm}
-            disabled={isLoading}
+            disabled={isLoading || !inputMatched}
             className={`px-4 py-2 rounded-lg text-sm font-medium text-white shadow-lg transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed
               ${variant === 'danger'
                 ? 'bg-red-600 hover:bg-red-500 border border-red-500/50 shadow-red-900/20'
