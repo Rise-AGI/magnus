@@ -36,7 +36,7 @@ _service_semaphores: Dict[str, asyncio.Semaphore] = {}
 # === [New] Double Bulkhead Configuration ===
 # 1. Outer Bulkhead: Global Concurrency Limit for Proxy
 #    Protects the Web Server (CPU/RAM/File Descriptors)
-PROXY_GLOBAL_LIMIT = 500
+PROXY_GLOBAL_LIMIT = magnus_config["server"]["service_proxy"]["max_concurrency"]
 _proxy_global_semaphore = asyncio.Semaphore(PROXY_GLOBAL_LIMIT)
 
 # 2. Inner Bulkhead: Database Access Limit
@@ -502,12 +502,11 @@ async def proxy_service_request(
                 raise HTTPException(status_code=504, detail="Service startup timed out within SLA budget.")
 
             # 7. Forward Request
-            service_config = magnus_config.get("server", {}).get("services", {})
             proxy_timeout = httpx.Timeout(
-                connect = service_config.get("proxy_connect_timeout", 2.0),
-                read = get_remaining_time(), # Dynamic Read Timeout based on remaining budget
-                write = service_config.get("proxy_write_timeout", 30.0),
-                pool = service_config.get("proxy_pool_timeout", 5.0),
+                connect = 2.0,
+                read = get_remaining_time(),
+                write = 30.0,
+                pool = 5.0,
             )
 
             client = httpx.AsyncClient(

@@ -33,7 +33,6 @@ server:
     snapshot_interval: 300
   service_proxy:
     max_concurrency: 1024
-    pool_size: 1024
   file_custody:
     max_size: 10G
     max_file_size: 2G        # per-file limit, None = no limit
