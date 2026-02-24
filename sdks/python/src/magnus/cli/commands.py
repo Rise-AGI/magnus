@@ -1711,7 +1711,7 @@ def _do_job_logs(job_ref: str, page: int = -1) -> None:
         total_pages = result.get("total_pages", 1)
 
         console.rule(f"[bold]Job Logs: {resolved_id}[/bold] (Page {current_page + 1}/{total_pages})")
-        console.print(logs, end="", markup=False, highlight=False)
+        console.print(logs.replace("\r", "\n"), end="", markup=False, highlight=False)
         console.rule()
 
     except MagnusError as e:
