@@ -65,17 +65,27 @@ __all__ = [
     "get_job",
     "get_job_async",
     "get_job_result",
+    "get_job_result_async",
     "get_job_action",
+    "get_job_action_async",
     "get_job_logs",
+    "get_job_logs_async",
     "terminate_job",
     "terminate_job_async",
     "get_cluster_stats",
+    "get_cluster_stats_async",
     "list_blueprints",
+    "list_blueprints_async",
     "list_services",
+    "list_services_async",
     "get_blueprint",
+    "get_blueprint_async",
     "save_blueprint",
+    "save_blueprint_async",
     "delete_blueprint",
+    "delete_blueprint_async",
     "get_blueprint_schema",
+    "get_blueprint_schema_async",
     "download_file",
     "download_file_async",
     "custody_file",
@@ -151,8 +161,14 @@ async def get_job_async(job_id: str, timeout: float = 10.0) -> Dict[str, Any]:
 def get_job_result(job_id: str, timeout: float = 10.0) -> Optional[str]:
     return default_client.get_job_result(job_id, timeout)
 
+async def get_job_result_async(job_id: str, timeout: float = 10.0) -> Optional[str]:
+    return await default_client.get_job_result_async(job_id, timeout)
+
 def get_job_action(job_id: str, timeout: float = 10.0) -> Optional[str]:
     return default_client.get_job_action(job_id, timeout)
+
+async def get_job_action_async(job_id: str, timeout: float = 10.0) -> Optional[str]:
+    return await default_client.get_job_action_async(job_id, timeout)
 
 def terminate_job(job_id: str, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.terminate_job(job_id, timeout)
@@ -163,23 +179,47 @@ async def terminate_job_async(job_id: str, timeout: float = 10.0) -> Dict[str, A
 def get_job_logs(job_id: str, page: int = -1, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.get_job_logs(job_id, page, timeout)
 
+async def get_job_logs_async(job_id: str, page: int = -1, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.get_job_logs_async(job_id, page, timeout)
+
 def get_cluster_stats(timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.get_cluster_stats(timeout)
+
+async def get_cluster_stats_async(timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.get_cluster_stats_async(timeout)
 
 def list_blueprints(limit: int = 20, skip: int = 0, search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_blueprints(limit, skip, search, timeout)
 
+async def list_blueprints_async(limit: int = 20, skip: int = 0, search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.list_blueprints_async(limit, skip, search, timeout)
+
 def get_blueprint(blueprint_id: str, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.get_blueprint(blueprint_id, timeout)
+
+async def get_blueprint_async(blueprint_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.get_blueprint_async(blueprint_id, timeout)
 
 def save_blueprint(blueprint_id: str, title: str, description: str, code: str, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.save_blueprint(blueprint_id, title, description, code, timeout)
 
+async def save_blueprint_async(blueprint_id: str, title: str, description: str, code: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.save_blueprint_async(blueprint_id, title, description, code, timeout)
+
 def delete_blueprint(blueprint_id: str, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.delete_blueprint(blueprint_id, timeout)
+
+async def delete_blueprint_async(blueprint_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.delete_blueprint_async(blueprint_id, timeout)
 
 def list_services(limit: int = 20, skip: int = 0, search: Optional[str] = None, active_only: bool = False, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_services(limit, skip, search, active_only, timeout)
 
+async def list_services_async(limit: int = 20, skip: int = 0, search: Optional[str] = None, active_only: bool = False, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.list_services_async(limit, skip, search, active_only, timeout)
+
 def get_blueprint_schema(blueprint_id: str, timeout: float = 10.0) -> List[Dict[str, Any]]:
     return default_client.get_blueprint_schema(blueprint_id, timeout)
+
+async def get_blueprint_schema_async(blueprint_id: str, timeout: float = 10.0) -> List[Dict[str, Any]]:
+    return await default_client.get_blueprint_schema_async(blueprint_id, timeout)

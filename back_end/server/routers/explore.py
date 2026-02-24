@@ -27,6 +27,7 @@ from ..schemas import (
     PagedExplorerSessionResponse,
 )
 from .._magnus_config import magnus_config, admin_open_ids
+from .._resource_manager import _parse_size_string
 from .auth import get_current_user
 
 
@@ -208,6 +209,10 @@ async def upload_file(
     filename = file.filename or "unknown"
     content_type = file.content_type or ""
 
+    _raw = magnus_config["server"]["file_custody"]["max_file_size"]
+    if _raw is not None and len(content) > _parse_size_string(_raw):
+        raise HTTPException(status_code=413, detail=f"File too large (limit: {_raw})")
+
     file_id = secrets.token_hex(8)
     ext = filename.split(".")[-1].lower() if "." in filename else ""
     saved_filename = f"{file_id}.{ext}" if ext else file_id
@@ -272,7 +277,10 @@ async def get_file(
     if not is_owner and not is_admin and not session.is_shared:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    file_path = Path(sessions_workspace) / session_id / "files" / file_name
+    allowed_dir = (Path(sessions_workspace) / session_id / "files").resolve()
+    file_path = (allowed_dir / file_name).resolve()
+    if not file_path.is_relative_to(allowed_dir):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 

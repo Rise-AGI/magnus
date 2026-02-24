@@ -163,7 +163,7 @@ class MagnusClient:
 
         try:
             detail = response.json().get("detail", response.text)
-        except Exception:
+        except ValueError:
             detail = response.text
 
         if response.status_code == 401:
@@ -280,7 +280,7 @@ class MagnusClient:
                 for param in schema
                 if param.get("type") == "file_secret"
             ]
-        except Exception:
+        except ResourceNotFoundError:
             return []
 
     def _upload_file_secret_value(
@@ -760,6 +760,13 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting job result.")
 
+    async def get_job_result_async(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Optional[str]:
+        return await asyncio.to_thread(self.get_job_result, job_id, timeout)
+
     def get_job_action(
         self,
         job_id: str,
@@ -771,6 +778,13 @@ class MagnusClient:
             return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting job action.")
+
+    async def get_job_action_async(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Optional[str]:
+        return await asyncio.to_thread(self.get_job_action, job_id, timeout)
 
     def terminate_job(
         self,
@@ -804,6 +818,14 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting job logs.")
 
+    async def get_job_logs_async(
+        self,
+        job_id: str,
+        page: int = -1,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.get_job_logs, job_id, page, timeout)
+
     def get_cluster_stats(
         self,
         timeout: float = 10.0,
@@ -814,6 +836,12 @@ class MagnusClient:
             return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting cluster stats.")
+
+    async def get_cluster_stats_async(
+        self,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.get_cluster_stats, timeout)
 
     def list_blueprints(
         self,
@@ -832,6 +860,15 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while listing blueprints.")
 
+    async def list_blueprints_async(
+        self,
+        limit: int = 20,
+        skip: int = 0,
+        search: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.list_blueprints, limit, skip, search, timeout)
+
     def get_blueprint_schema(
         self,
         blueprint_id: str,
@@ -844,6 +881,13 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting blueprint schema.")
 
+    async def get_blueprint_schema_async(
+        self,
+        blueprint_id: str,
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self.get_blueprint_schema, blueprint_id, timeout)
+
     def get_blueprint(
         self,
         blueprint_id: str,
@@ -855,6 +899,13 @@ class MagnusClient:
             return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting blueprint.")
+
+    async def get_blueprint_async(
+        self,
+        blueprint_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.get_blueprint, blueprint_id, timeout)
 
     def save_blueprint(
         self,
@@ -877,6 +928,18 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while saving blueprint.")
 
+    async def save_blueprint_async(
+        self,
+        blueprint_id: str,
+        title: str,
+        description: str,
+        code: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self.save_blueprint, blueprint_id, title, description, code, timeout,
+        )
+
     def delete_blueprint(
         self,
         blueprint_id: str,
@@ -888,6 +951,13 @@ class MagnusClient:
             return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while deleting blueprint.")
+
+    async def delete_blueprint_async(
+        self,
+        blueprint_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.delete_blueprint, blueprint_id, timeout)
 
     def list_services(
         self,
@@ -908,6 +978,18 @@ class MagnusClient:
             return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while listing services.")
+
+    async def list_services_async(
+        self,
+        limit: int = 20,
+        skip: int = 0,
+        search: Optional[str] = None,
+        active_only: bool = False,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self.list_services, limit, skip, search, active_only, timeout,
+        )
 
     # === Service Methods ===
 

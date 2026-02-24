@@ -54,12 +54,13 @@ custom_theme = Theme({
     "magnus.success": "green",
 })
 console = Console(theme=custom_theme)
+err_console = Console(theme=custom_theme, stderr=True)
 
 def print_msg(msg: str, end: str = "\n"):
-    console.print(f"[magnus.prefix][Magnus][/magnus.prefix] {msg}", end=end, highlight=False)
+    err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] {msg}", end=end, highlight=False)
 
 def print_error(msg: str):
-    console.print(f"[magnus.prefix][Magnus][/magnus.prefix] [magnus.error]Error:[/magnus.error] {msg}", highlight=False)
+    err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] [magnus.error]Error:[/magnus.error] {msg}", highlight=False)
 
 
 # === Output Format Helpers ===
@@ -1571,7 +1572,7 @@ def blueprint_get_cmd(
             print_msg(f"Code exported to [cyan]{code_file}[/cyan]")
             return
 
-        fmt: OutputFormat = format if format in ("yaml", "json") else _auto_format()
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
 
         if fmt in ("yaml", "json"):
             _output_data(bp, fmt)
