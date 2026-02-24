@@ -545,19 +545,23 @@ def _warn_env_overrides():
 
 @app.command(name="login")
 def login_cmd(
-    site: Optional[str] = typer.Argument(None, help="Site name to login/switch to"),
+    site: Optional[str] = typer.Argument(None, help="Site name"),
+    address: Optional[str] = typer.Option(None, "--address", "-a", help="Server address"),
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Trust token"),
 ):
     """
     Login to a Magnus site.
 
-    Interactive mode (no argument): prompts for site name, address, and token.
-    Quick switch (with argument): switch to an existing site, or create it interactively.
+    Interactive mode (no flags): prompts for site name, address, and token.
+    Non-interactive mode (site + --address + --token): saves directly, no prompts.
+    Quick switch (site name only): switch to an existing site.
     Special: 'magnus login default' switches to the hardcoded default site.
 
     Examples:
-      magnus login              # interactive
-      magnus login prod         # switch to existing 'prod', or create it
-      magnus login default      # switch to hardcoded default
+      magnus login                                       # interactive
+      magnus login prod                                  # switch to 'prod'
+      magnus login default                               # switch to default
+      magnus login prod -a http://host:8017 -t sk-xxx    # non-interactive
     """
     from ..config import _load_config, DEFAULT_ADDRESS, DEFAULT_TOKEN, RESERVED_SITE_NAME
 
@@ -570,6 +574,27 @@ def login_cmd(
 
     config = _load_config()
     sites = config.get("sites", {})
+
+    # --- Non-interactive mode: any of --address or --token provided ---
+    if address or token:
+        if not address or not token or not site:
+            print_error("Non-interactive login requires: magnus login <site> --address <url> --token <token>")
+            raise typer.Exit(code=1)
+
+        address = address.rstrip("/")
+
+        with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Verifying connection..."):
+            ok = _verify_connection(address, token)
+
+        if ok:
+            print_msg("[green]Connection verified.[/green]")
+        else:
+            print_msg("[yellow]Warning:[/yellow] Could not verify connection. Saving anyway.")
+
+        config_path = save_site(site, address, token, set_current=True)
+        print_msg(f"Saved [bold]{site}[/bold] to [cyan]{config_path}[/cyan]")
+        _warn_env_overrides()
+        return
 
     # --- Quick switch for existing site ---
     if site and site in sites:

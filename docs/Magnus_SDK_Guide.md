@@ -857,16 +857,20 @@ magnus config
 
 ### magnus login
 
-交互式配置 `MAGNUS_ADDRESS` 和 `MAGNUS_TOKEN`，验证连通性后保存到 `~/.magnus/config.json`。
+配置 `MAGNUS_ADDRESS` 和 `MAGNUS_TOKEN`，验证连通性后保存到 `~/.magnus/config.json`。
 
 ```bash
-magnus login
+magnus login                                              # 交互式
+magnus login prod                                         # 切换到已有 site
+magnus login prod -a http://host:8017 -t sk-xxx           # 非交互式（适合脚本/agent）
+magnus login default                                      # 切换到硬编码默认 site
 ```
 
-- 显示当前值（token 脱敏），回车保留
-- 输入后验证连通性（`GET /api/auth/my-token`）
-- 验证失败会警告但不阻止保存
-- 保存后所有终端立即生效
+**选项**（非交互式模式需 site + 两个选项齐全）：
+- `-a, --address`: 服务器地址
+- `-t, --token`: Trust Token
+
+交互式和非交互式都会验证连通性（`GET /api/auth/my-token`），验证失败会警告但不阻止保存。保存后所有终端立即生效。
 
 ### magnus job
 
