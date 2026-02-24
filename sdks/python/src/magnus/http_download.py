@@ -1,11 +1,25 @@
 # sdks/python/src/magnus/http_download.py
+import time
 import shutil
+import logging
 import httpx
 import tempfile
 from pathlib import Path
 from typing import Optional
 
 from .file_transfer import normalize_secret, get_tmp_base
+
+logger = logging.getLogger("magnus")
+
+_MAX_RETRIES = 3
+_BACKOFF_BASE = 2.0
+_MAX_BACKOFF = 30.0
+_TRANSIENT_ERRORS = (httpx.TransportError,)
+
+
+class _ServerError(Exception):
+    """5xx response — transient, worth retrying."""
+    pass
 
 
 def _magnus_error(msg: str) -> Exception:
@@ -16,6 +30,31 @@ def _magnus_error(msg: str) -> Exception:
 def _get_download_url(token: str) -> str:
     from . import default_client
     return f"{default_client.api_base}/files/download/{token}"
+
+
+def _stream_to_file(
+    url: str,
+    tmp_dir: Path,
+    timeout: Optional[float],
+) -> tuple[Path, bool]:
+    """Stream GET response to a temp file. Returns (tmp_file_path, is_directory)."""
+    with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
+        if resp.status_code == 404:
+            raise _magnus_error("File not found or expired")
+        if resp.status_code >= 500:
+            raise _ServerError(f"Server error {resp.status_code}")
+        if not resp.is_success:
+            raise _magnus_error(f"Download failed (HTTP {resp.status_code})")
+
+        filename = _parse_filename(resp.headers) or "download"
+        is_directory = resp.headers.get("x-magnus-directory", "").lower() == "true"
+
+        tmp_file = tmp_dir / filename
+        with open(tmp_file, "wb") as f:
+            for chunk in resp.iter_bytes(chunk_size=65536):
+                f.write(chunk)
+
+    return tmp_file, is_directory
 
 
 def download_file(
@@ -30,19 +69,19 @@ def download_file(
     with tempfile.TemporaryDirectory(dir=get_tmp_base()) as tmp:
         tmp_dir = Path(tmp)
 
-        with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
-            if resp.status_code == 404:
-                raise _magnus_error("File not found or expired")
-            if not resp.is_success:
-                raise _magnus_error(f"Download failed (HTTP {resp.status_code})")
-
-            filename = _parse_filename(resp.headers) or "download"
-            is_directory = resp.headers.get("x-magnus-directory", "").lower() == "true"
-
-            tmp_file = tmp_dir / filename
-            with open(tmp_file, "wb") as f:
-                for chunk in resp.iter_bytes(chunk_size=65536):
-                    f.write(chunk)
+        for attempt in range(_MAX_RETRIES):
+            try:
+                # Clean up any partial file from previous attempt
+                for leftover in tmp_dir.iterdir():
+                    leftover.unlink() if leftover.is_file() else shutil.rmtree(leftover)
+                tmp_file, is_directory = _stream_to_file(url, tmp_dir, timeout)
+                break
+            except (*_TRANSIENT_ERRORS, _ServerError) as e:
+                if attempt == _MAX_RETRIES - 1:
+                    raise
+                backoff = min(_BACKOFF_BASE * (2 ** attempt), _MAX_BACKOFF)
+                logger.warning(f"Download attempt {attempt + 1} failed: {e}. Retrying in {backoff:.0f}s...")
+                time.sleep(backoff)
 
         if is_directory:
             import tarfile

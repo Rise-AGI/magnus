@@ -204,6 +204,41 @@ class MagnusClient:
 
     # === File Upload ===
 
+    _TRANSFER_TRANSIENT_ERRORS = (httpx.TransportError,)
+    _TRANSFER_MAX_RETRIES = 3
+    _TRANSFER_BACKOFF_BASE = 2.0
+    _TRANSFER_MAX_BACKOFF = 30.0
+
+    def _post_file_with_retry(
+        self,
+        filename: str,
+        file_handle: Any,
+        data: Dict[str, str],
+        timeout: float,
+    ) -> httpx.Response:
+        last_exc: Optional[Exception] = None
+        for attempt in range(self._TRANSFER_MAX_RETRIES):
+            try:
+                file_handle.seek(0)
+                resp = self.http.post(
+                    "/files/upload",
+                    files={"file": (filename, file_handle)},
+                    data=data,
+                    timeout=timeout,
+                )
+                if resp.status_code >= 500:
+                    raise _ServerError(f"Server error {resp.status_code}")
+                return resp
+            except (*self._TRANSFER_TRANSIENT_ERRORS, _ServerError) as e:
+                last_exc = e
+                if attempt == self._TRANSFER_MAX_RETRIES - 1:
+                    break
+                backoff = min(self._TRANSFER_BACKOFF_BASE * (2 ** attempt), self._TRANSFER_MAX_BACKOFF)
+                logger.warning(f"Upload attempt {attempt + 1} failed: {e}. Retrying in {backoff:.0f}s...")
+                time.sleep(backoff)
+        assert last_exc is not None
+        raise last_exc
+
     def _upload_file(
         self,
         path: str,
@@ -227,20 +262,10 @@ class MagnusClient:
                 with _tarfile.open(str(tmp_path), "w:gz", dereference=True) as tar:
                     tar.add(str(p), arcname=p.name)
                 with open(tmp_path, "rb") as f:
-                    resp = self.http.post(
-                        "/files/upload",
-                        files={"file": (f"{p.name}.tar.gz", f)},
-                        data=data,
-                        timeout=timeout,
-                    )
+                    resp = self._post_file_with_retry(f"{p.name}.tar.gz", f, data, timeout)
         else:
             with open(p, "rb") as f:
-                resp = self.http.post(
-                    "/files/upload",
-                    files={"file": (p.name, f)},
-                    data=data,
-                    timeout=timeout,
-                )
+                resp = self._post_file_with_retry(p.name, f, data, timeout)
 
         self._handle_error(resp)
         return resp.json()["file_secret"]
