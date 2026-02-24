@@ -7,6 +7,7 @@ import {
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
   ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX
 } from "lucide-react";
+import { AnsiUp } from "ansi_up";
 import { client } from "@/lib/api";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { POLL_INTERVAL } from "@/lib/config";
@@ -21,6 +22,8 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { NotFound } from "@/components/ui/not-found";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
+
+const ansiUp = new AnsiUp();
 
 export default function JobDetailsPage() {
   const { user } = useAuth();
@@ -612,7 +615,10 @@ export default function JobDetailsPage() {
                   className="absolute inset-0 overflow-auto p-5 custom-scrollbar font-mono text-xs leading-5"
                 >
                   {logs ? (
-                    <pre className="text-zinc-300 whitespace-pre-wrap break-all pb-10">{logs}</pre>
+                    <pre
+                      className="text-zinc-300 whitespace-pre-wrap break-all pb-10"
+                      dangerouslySetInnerHTML={{ __html: ansiUp.ansi_to_html(logs) }}
+                    />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
                       <Terminal className="w-10 h-10 opacity-20" />
