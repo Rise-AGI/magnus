@@ -26,9 +26,7 @@ from .. import (
     remove_site,
     set_current_site,
     launch_blueprint,
-    run_blueprint,
     submit_job as api_submit_job,
-    execute_job as api_execute_job,
     call_service,
     custody_file as api_custody_file,
     list_jobs as api_list_jobs,
@@ -1770,22 +1768,29 @@ def blueprint_run_cmd(
 
         print_msg(f"Running blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
 
+        from .. import default_client
+
+        job_id = launch_blueprint(
+            blueprint_id=blueprint_id,
+            use_preference=cli_config["preference"],
+            expire_minutes=cli_config["expire_minutes"],
+            max_downloads=cli_config["max_downloads"],
+            args=bp_args,
+        )
+
+        print_msg(f"Job submitted. ID: [green]{job_id}[/green]")
+
         with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
-            result = run_blueprint(
-                blueprint_id=blueprint_id,
-                use_preference=cli_config["preference"],
-                expire_minutes=cli_config["expire_minutes"],
-                max_downloads=cli_config["max_downloads"],
+            result = default_client._poll_job_completion(
+                job_id,
                 timeout=cli_config["timeout"],
                 poll_interval=cli_config["poll_interval"],
-                execute_action=False,
-                args=bp_args,
+                execute_action_flag=False,
             )
 
         console.print("")
         print_msg("Job finished.")
 
-        from .. import default_client
         _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
 
     except MagnusError as e:
@@ -2161,18 +2166,23 @@ def job_execute_subcmd(ctx: typer.Context):
 
         print_msg(f"Executing job [bold cyan]{job_params['task_name']}[/bold cyan]...")
 
+        from .. import default_client
+
+        job_id = api_submit_job(**job_params)
+
+        print_msg(f"Job submitted. ID: [green]{job_id}[/green]")
+
         with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Waiting for job completion..."):
-            result = api_execute_job(
+            result = default_client._poll_job_completion(
+                job_id,
                 timeout=cli_config["timeout"],
                 poll_interval=cli_config["poll_interval"],
-                execute_action=False,
-                **job_params,
+                execute_action_flag=False,
             )
 
         console.print("")
         print_msg("Job finished.")
 
-        from .. import default_client
         _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
 
     except MagnusError as e:
