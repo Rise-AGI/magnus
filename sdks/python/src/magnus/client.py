@@ -156,6 +156,20 @@ class MagnusClient:
             raise AuthenticationError(
                 f"Magnus API Token is missing. Set {ENV_MAGNUS_TOKEN} or init with token."
             )
+        try:
+            self.token.encode("ascii")
+        except UnicodeEncodeError:
+            raise AuthenticationError(
+                "Token contains non-ASCII characters (likely from copy-paste). "
+                "Please re-enter the token with: magnus login"
+            )
+        try:
+            self.address.encode("ascii")
+        except UnicodeEncodeError:
+            raise MagnusError(
+                "Server address contains non-ASCII characters. "
+                "Please re-enter the address with: magnus login"
+            )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.is_success:
