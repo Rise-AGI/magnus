@@ -592,7 +592,10 @@ fi
 if [ -n "$APPTAINER_CONTAIN" ]; then
     APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
     if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]; then
-        apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}
+        if ! apptainer overlay create --sparse --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}} 2>/dev/null; then
+            echo "[Magnus] WARNING: --sparse not supported (apptainer < 1.3?), falling back to dense overlay" >&2
+            apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}
+        fi
         APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
     else
         APPTAINER_FLAGS="$APPTAINER_FLAGS --writable-tmpfs"
