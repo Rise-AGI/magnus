@@ -170,6 +170,16 @@ def _resolve_job_ref(ref: str) -> str:
     return items[actual_idx]["id"]
 
 
+_JOB_REF_CTX = {"ignore_unknown_options": True, "allow_extra_args": True}
+
+def _extract_job_ref(ctx: typer.Context) -> str:
+    """Extract job_ref from ctx.args (handles negative indices like -1 that Click misparses as options)."""
+    if not ctx.args:
+        print_error("Missing argument: JOB_REF (job index like -1, -2 or job ID)")
+        raise typer.Exit(code=1)
+    return ctx.args[0]
+
+
 # === Argument Parsing Logic ===
 
 # CLI control parameters have a known schema — convert explicitly, never guess.
@@ -946,21 +956,29 @@ def list_jobs_cmd(
     job_list_cmd(limit=limit, name=name, format=format)
 
 
-@app.command(name="status")
+@app.command(name="status", context_settings=_JOB_REF_CTX)
 def job_status_cmd(
-    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+    ctx: typer.Context,
 ):
-    """Show detailed status of a job."""
-    job_status_subcmd(job_ref=job_ref)
+    """
+    Show detailed status of a job.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+    """
+    _do_job_status(job_ref=_extract_job_ref(ctx))
 
 
-@app.command(name="kill")
+@app.command(name="kill", context_settings=_JOB_REF_CTX)
 def kill_job_cmd(
-    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+    ctx: typer.Context,
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ):
-    """Terminate a running job."""
-    job_kill_subcmd(job_ref=job_ref, force=force)
+    """
+    Terminate a running job.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+    """
+    _do_kill_job(job_ref=_extract_job_ref(ctx), force=force)
 
 
 # === Session Management Commands ===
@@ -1090,13 +1108,17 @@ def disconnect_cmd():
 
 # === New Commands ===
 
-@app.command(name="logs")
+@app.command(name="logs", context_settings=_JOB_REF_CTX)
 def job_logs_cmd(
-    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+    ctx: typer.Context,
     page: int = typer.Option(-1, "--page", "-p", help="Log page number (-1 for last)"),
 ):
-    """Show logs for a job."""
-    job_logs_subcmd(job_ref=job_ref, page=page)
+    """
+    Show logs for a job.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+    """
+    _do_job_logs(job_ref=_extract_job_ref(ctx), page=page)
 
 
 @app.command(name="cluster")
@@ -1627,11 +1649,7 @@ def job_list_cmd(
         raise typer.Exit(code=1)
 
 
-@job_app.command(name="status")
-def job_status_subcmd(
-    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
-):
-    """Show detailed status of a job."""
+def _do_job_status(job_ref: str) -> None:
     try:
         resolved_id = _resolve_job_ref(job_ref)
         job = api_get_job(resolved_id)
@@ -1673,12 +1691,17 @@ def job_status_subcmd(
         raise typer.Exit(code=1)
 
 
-@job_app.command(name="logs")
-def job_logs_subcmd(
-    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
-    page: int = typer.Option(-1, "--page", "-p", help="Log page number (-1 for last)"),
-):
-    """Show logs for a job."""
+@job_app.command(name="status", context_settings=_JOB_REF_CTX)
+def job_status_subcmd(ctx: typer.Context):
+    """
+    Show detailed status of a job.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+    """
+    _do_job_status(job_ref=_extract_job_ref(ctx))
+
+
+def _do_job_logs(job_ref: str, page: int = -1) -> None:
     try:
         resolved_id = _resolve_job_ref(job_ref)
         result = api_get_job_logs(resolved_id, page=page)
@@ -1699,11 +1722,20 @@ def job_logs_subcmd(
         raise typer.Exit(code=1)
 
 
-@job_app.command(name="result")
-def job_result_cmd(
-    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
+@job_app.command(name="logs", context_settings=_JOB_REF_CTX)
+def job_logs_subcmd(
+    ctx: typer.Context,
+    page: int = typer.Option(-1, "--page", "-p", help="Log page number (-1 for last)"),
 ):
-    """Show result of a completed job."""
+    """
+    Show logs for a job.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+    """
+    _do_job_logs(job_ref=_extract_job_ref(ctx), page=page)
+
+
+def _do_job_result(job_ref: str) -> None:
     try:
         resolved_id = _resolve_job_ref(job_ref)
         result = api_get_job_result(resolved_id)
@@ -1727,12 +1759,17 @@ def job_result_cmd(
         raise typer.Exit(code=1)
 
 
-@job_app.command(name="action")
-def job_action_cmd(
-    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
-    execute: bool = typer.Option(False, "--execute", "-e", help="Execute the action script"),
-):
-    """Show action of a completed job."""
+@job_app.command(name="result", context_settings=_JOB_REF_CTX)
+def job_result_cmd(ctx: typer.Context):
+    """
+    Show result of a completed job.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+    """
+    _do_job_result(job_ref=_extract_job_ref(ctx))
+
+
+def _do_job_action(job_ref: str, execute: bool = False) -> None:
     try:
         resolved_id = _resolve_job_ref(job_ref)
         action = api_get_job_action(resolved_id)
@@ -1762,12 +1799,20 @@ def job_action_cmd(
         raise typer.Exit(code=1)
 
 
-@job_app.command(name="kill")
-def job_kill_subcmd(
-    job_ref: str = typer.Argument(..., help="Job index (-1, -2, ...) or job ID"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+@job_app.command(name="action", context_settings=_JOB_REF_CTX)
+def job_action_cmd(
+    ctx: typer.Context,
+    execute: bool = typer.Option(False, "--execute", "-e", help="Execute the action script"),
 ):
-    """Terminate a running job."""
+    """
+    Show action of a completed job.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+    """
+    _do_job_action(job_ref=_extract_job_ref(ctx), execute=execute)
+
+
+def _do_kill_job(job_ref: str, force: bool = False) -> None:
     try:
         resolved_id = _resolve_job_ref(job_ref)
 
@@ -1787,6 +1832,19 @@ def job_kill_subcmd(
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
+
+
+@job_app.command(name="kill", context_settings=_JOB_REF_CTX)
+def job_kill_subcmd(
+    ctx: typer.Context,
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """
+    Terminate a running job.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+    """
+    _do_kill_job(job_ref=_extract_job_ref(ctx), force=force)
 
 
 @job_app.command(
