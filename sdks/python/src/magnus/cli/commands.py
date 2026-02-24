@@ -356,7 +356,16 @@ def _version_callback(value: bool):
 
 app = typer.Typer(
     name="magnus",
-    help="Magnus CLI - Focus on your Blueprint.",
+    help=(
+        "Magnus CLI — submit jobs, manage blueprints, and monitor your cluster.\n\n"
+        "Quick start:\n"
+        "  magnus login                  # authenticate\n"
+        "  magnus list                   # browse blueprints\n"
+        "  magnus run <blueprint_id>     # run a blueprint and wait for result\n"
+        "  magnus jobs                   # check recent jobs\n\n"
+        "Use 'magnus <command> -h' for details on any command.\n"
+        "Use 'magnus blueprint -h' and 'magnus job -h' for grouped operations."
+    ),
     add_completion=False,
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -375,17 +384,44 @@ def main_callback(
 blueprint_app = typer.Typer(
     name="blueprint",
     help=(
-        "Blueprint operations.\n\n"
-        "Typical workflow: list → schema → run.\n"
-        "Shortcuts: magnus launch, magnus run, magnus list."
+        "Blueprint operations: create, inspect, run, and manage reusable job templates.\n\n"
+        "Subcommands:\n"
+        "  list      List available blueprints\n"
+        "  get       Show blueprint details and code\n"
+        "  schema    Show parameter schema (what arguments to pass)\n"
+        "  save      Create or update a blueprint from a .py file\n"
+        "  delete    Delete a blueprint\n"
+        "  launch    Submit a blueprint job (fire & forget)\n"
+        "  run       Submit and wait for completion\n\n"
+        "Lifecycle: save → schema → launch/run → iterate.\n"
+        "Top-level shortcuts: magnus list, magnus launch, magnus run.\n\n"
+        "Examples:\n"
+        "  magnus blueprint list\n"
+        "  magnus blueprint schema my-bp\n"
+        "  magnus blueprint run my-bp -- --epochs 10\n"
+        "  magnus blueprint save my-bp -t 'My BP' -c bp.py"
     ),
 )
 job_app = typer.Typer(
     name="job",
     help=(
-        "Job operations.\n\n"
+        "Job operations: inspect status, read logs, fetch results, and terminate jobs.\n\n"
+        "Subcommands:\n"
+        "  list      List recent jobs\n"
+        "  status    Show detailed job status\n"
+        "  logs      Show job logs (paginated, ~200KB/page)\n"
+        "  result    Show job result (JSON)\n"
+        "  action    Show or execute the job's MAGNUS_ACTION script\n"
+        "  kill      Terminate a running job\n"
+        "  submit    Submit a job directly (fire & forget)\n"
+        "  execute   Submit a job and wait for completion\n\n"
         "Jobs can be referenced by negative index: -1 = newest, -2 = second newest.\n"
-        "Shortcuts: magnus jobs, magnus status, magnus logs, magnus kill."
+        "Top-level shortcuts: magnus jobs, magnus status, magnus logs, magnus kill.\n\n"
+        "Examples:\n"
+        "  magnus job list\n"
+        "  magnus job status -1\n"
+        "  magnus job logs -2 --page 0\n"
+        "  magnus job kill -1 -f"
     ),
 )
 app.add_typer(blueprint_app)
@@ -396,6 +432,13 @@ app.add_typer(job_app)
 def show_config():
     """
     Show current SDK configuration and all configured sites.
+
+    Displays the active site name, server address, and any environment variable
+    overrides (MAGNUS_ADDRESS, MAGNUS_TOKEN). Also lists all saved sites with
+    an arrow marking the current one.
+
+    Examples:
+      magnus config
     """
     from ..config import _load_config, DEFAULT_ADDRESS, RESERVED_SITE_NAME
 
@@ -627,7 +670,17 @@ def launch(
     """Launch a blueprint job (Fire & Forget)."""
     blueprint_launch_cmd(ctx, blueprint_id)
 
-launch.__doc__ = f"Launch a blueprint job (Fire & Forget).\n\n{_LAUNCH_OPTIONS_EPILOG}"
+launch.__doc__ = (
+    "Launch a blueprint job (Fire & Forget).\n\n"
+    "Shortcut for 'magnus blueprint launch'. Submits the job and returns\n"
+    "immediately with the job ID. Does not wait for completion — use\n"
+    "'magnus run' if you need to wait.\n\n"
+    "Examples:\n"
+    "  magnus launch my-bp\n"
+    "  magnus launch my-bp -- --epochs 10\n"
+    "  magnus launch my-bp -- --learning-rate 0.001 --batch-size 32\n\n"
+    f"{_LAUNCH_OPTIONS_EPILOG}"
+)
 
 
 @app.command(
@@ -640,7 +693,17 @@ def run(
     """Execute a blueprint and wait for completion."""
     blueprint_run_cmd(ctx, blueprint_id)
 
-run.__doc__ = f"Execute a blueprint and wait for completion.\n\n{_RUN_OPTIONS_EPILOG}"
+run.__doc__ = (
+    "Execute a blueprint and wait for completion.\n\n"
+    "Shortcut for 'magnus blueprint run'. Submits the job, polls until\n"
+    "it finishes, then displays the result and auto-executes any\n"
+    "MAGNUS_ACTION script (disable with --execute-action false).\n\n"
+    "Examples:\n"
+    "  magnus run my-bp\n"
+    "  magnus run my-bp -- --epochs 10\n"
+    "  magnus run my-bp -- --learning-rate 0.001 --batch-size 32\n\n"
+    f"{_RUN_OPTIONS_EPILOG}"
+)
 
 
 CLI_RESERVED_KEYS = {"timeout", "verbose", "execute_action"}
@@ -952,7 +1015,18 @@ def list_jobs_cmd(
     name: Optional[str] = typer.Option(None, "--name", "-n", "--search", "-s", help="Search by task name or job ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
 ):
-    """List recent jobs."""
+    """
+    List recent jobs.
+
+    Shortcut for 'magnus job list'. Displays a table of recent jobs with
+    index, ID, task name, status, GPU count, and creation time.
+    Use negative indices (-1, -2, ...) to reference jobs in other commands.
+
+    Examples:
+      magnus jobs
+      magnus jobs -l 20
+      magnus jobs -s "training"
+    """
     job_list_cmd(limit=limit, name=name, format=format)
 
 
@@ -963,7 +1037,14 @@ def job_status_cmd(
     """
     Show detailed status of a job.
 
+    Shortcut for 'magnus job status'. Displays task name, status, GPU count,
+    job type, timestamps, and any result or action attached to the job.
+
     JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus status -1
+      magnus status <job-id>
     """
     _do_job_status(job_ref=_extract_job_ref(ctx))
 
@@ -976,7 +1057,15 @@ def kill_job_cmd(
     """
     Terminate a running job.
 
+    Shortcut for 'magnus job kill'. Asks for confirmation unless --force is
+    given. Only running or pending jobs can be terminated.
+
     JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus kill -1
+      magnus kill -1 -f
+      magnus kill <job-id>
     """
     _do_kill_job(job_ref=_extract_job_ref(ctx), force=force)
 
@@ -1116,7 +1205,15 @@ def job_logs_cmd(
     """
     Show logs for a job.
 
+    Shortcut for 'magnus job logs'. Logs are paginated in ~200KB pages.
+    Defaults to the last page (--page -1). Use --page 0 for the first page.
+
     JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus logs -1
+      magnus logs -1 --page 0
+      magnus logs <job-id>
     """
     _do_job_logs(job_ref=_extract_job_ref(ctx), page=page)
 
@@ -1127,6 +1224,15 @@ def cluster_status_cmd(
 ):
     """
     Show cluster resource status.
+
+    Displays GPU totals (total / free / used), GPU model, and counts of
+    running and pending jobs. Pipe-friendly: outputs YAML when stdout is
+    not a TTY.
+
+    Examples:
+      magnus cluster
+      magnus cluster -f json
+      magnus cluster -f yaml | yq '.resources.free'
     """
     try:
         result = api_get_cluster_stats()
@@ -1167,7 +1273,18 @@ def list_blueprints_cmd(
     search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by title or ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
 ):
-    """List available blueprints."""
+    """
+    List available blueprints.
+
+    Shortcut for 'magnus blueprint list'. Displays a table of blueprints
+    with ID, title, creator, and last update time. For the full set of
+    blueprint operations, see 'magnus blueprint -h'.
+
+    Examples:
+      magnus list
+      magnus list -l 20
+      magnus list -s "physics"
+    """
     blueprint_list_cmd(limit=limit, search=search, format=format)
 
 
@@ -1180,6 +1297,15 @@ def list_services_cmd(
 ):
     """
     List managed services.
+
+    Displays a table of services with ID, name, active status, GPU count,
+    and last update time. Use --active to filter to running services only.
+    To call a service, use 'magnus call <service-id>'.
+
+    Examples:
+      magnus services
+      magnus services --active
+      magnus services -l 20 -f json
     """
     try:
         result = api_list_services(limit=limit, search=search, active_only=active)
@@ -1341,7 +1467,18 @@ def blueprint_list_cmd(
     search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by title or ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
 ):
-    """List available blueprints."""
+    """
+    List available blueprints.
+
+    Displays a table of blueprints with ID, title, creator, and last update
+    time. Pipe-friendly: outputs YAML when stdout is not a TTY.
+
+    Examples:
+      magnus blueprint list
+      magnus blueprint list -l 20
+      magnus blueprint list -s "physics"
+      magnus blueprint list -f json
+    """
     try:
         result = api_list_blueprints(limit=limit, search=search)
         items = result.get("items", [])
@@ -1388,7 +1525,18 @@ def blueprint_get_cmd(
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
     code_file: Optional[Path] = typer.Option(None, "--code-file", "-c", help="Export code to a .py file"),
 ):
-    """Show blueprint details including code."""
+    """
+    Show blueprint details including code.
+
+    Displays the blueprint's title, description, creator, last update time,
+    and full source code. Use -c to export the code to a .py file for
+    local editing.
+
+    Examples:
+      magnus blueprint get my-bp
+      magnus blueprint get my-bp -c my_bp.py
+      magnus blueprint get my-bp -f yaml
+    """
     try:
         bp = api_get_blueprint(blueprint_id)
 
@@ -1429,7 +1577,17 @@ def blueprint_schema_cmd(
     blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
 ):
-    """Show blueprint parameter schema."""
+    """
+    Show blueprint parameter schema.
+
+    Outputs the JSON schema describing the blueprint's accepted parameters,
+    including types, defaults, and constraints. Useful for understanding
+    what arguments to pass to 'magnus run' or 'magnus launch'.
+
+    Examples:
+      magnus blueprint schema my-bp
+      magnus blueprint schema my-bp -f yaml
+    """
     try:
         schema = api_get_blueprint_schema(blueprint_id)
         fmt: OutputFormat = format if format in ("yaml", "json") else "json"
@@ -1450,7 +1608,16 @@ def blueprint_save_cmd(
     description: str = typer.Option("", "--description", "--desc", "-d", help="Blueprint description"),
     code_file: Path = typer.Option(..., "--code-file", "-c", help="Path to Python source file"),
 ):
-    """Create or update a blueprint (upsert)."""
+    """
+    Create or update a blueprint (upsert).
+
+    If the blueprint ID already exists, it is overwritten (update). Otherwise
+    a new blueprint is created. The code is read from a local .py file.
+
+    Examples:
+      magnus blueprint save my-bp -t "My Blueprint" -c bp.py
+      magnus blueprint save my-bp -t "Updated" -d "New desc" -c bp.py
+    """
     if not code_file.exists():
         print_error(f"Code file not found: {code_file}")
         raise typer.Exit(code=1)
@@ -1478,7 +1645,16 @@ def blueprint_delete_cmd(
     blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ):
-    """Delete a blueprint."""
+    """
+    Delete a blueprint.
+
+    Asks for confirmation unless --force is given. This action is
+    irreversible.
+
+    Examples:
+      magnus blueprint delete my-bp
+      magnus blueprint delete my-bp -f
+    """
     try:
         if not force:
             confirm = typer.confirm(f"Delete blueprint {blueprint_id}?")
@@ -1536,7 +1712,15 @@ def blueprint_launch_cmd(
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
 
-blueprint_launch_cmd.__doc__ = f"Launch a blueprint job (fire & forget).\n\n{_LAUNCH_OPTIONS_EPILOG}"
+blueprint_launch_cmd.__doc__ = (
+    "Launch a blueprint job (fire & forget).\n\n"
+    "Submits the job and returns immediately with the job ID. Does not\n"
+    "wait for completion — use 'magnus blueprint run' to wait.\n\n"
+    "Examples:\n"
+    "  magnus blueprint launch my-bp\n"
+    "  magnus blueprint launch my-bp -- --epochs 10\n\n"
+    f"{_LAUNCH_OPTIONS_EPILOG}"
+)
 
 
 @blueprint_app.command(
@@ -1588,7 +1772,16 @@ def blueprint_run_cmd(
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
 
-blueprint_run_cmd.__doc__ = f"Execute a blueprint and wait for completion.\n\n{_RUN_OPTIONS_EPILOG}"
+blueprint_run_cmd.__doc__ = (
+    "Execute a blueprint and wait for completion.\n\n"
+    "Submits the job, polls until it finishes, then displays the result\n"
+    "and auto-executes any MAGNUS_ACTION script (disable with\n"
+    "--execute-action false).\n\n"
+    "Examples:\n"
+    "  magnus blueprint run my-bp\n"
+    "  magnus blueprint run my-bp -- --epochs 10\n\n"
+    f"{_RUN_OPTIONS_EPILOG}"
+)
 
 
 # =============================================================================
@@ -1601,7 +1794,20 @@ def job_list_cmd(
     name: Optional[str] = typer.Option(None, "--name", "-n", "--search", "-s", help="Search by task name or job ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
 ):
-    """List recent jobs. Index -1 = newest, -2 = second newest, ..."""
+    """
+    List recent jobs.
+
+    Displays a table of recent jobs with index, ID, task name, status, GPU
+    count, and creation time. The index column (-1, -2, ...) can be used
+    in place of job IDs in other commands. Pipe-friendly: outputs YAML
+    when stdout is not a TTY.
+
+    Examples:
+      magnus job list
+      magnus job list -l 20
+      magnus job list -s "training"
+      magnus job list -f json
+    """
     try:
         result = api_list_jobs(limit=limit, search=name)
         items = result.get("items", [])
@@ -1696,7 +1902,14 @@ def job_status_subcmd(ctx: typer.Context):
     """
     Show detailed status of a job.
 
+    Displays task name, status, GPU count, job type, timestamps, and any
+    result or action attached to the job.
+
     JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus job status -1
+      magnus job status <job-id>
     """
     _do_job_status(job_ref=_extract_job_ref(ctx))
 
@@ -1730,7 +1943,15 @@ def job_logs_subcmd(
     """
     Show logs for a job.
 
+    Logs are paginated in ~200KB pages. Defaults to the last page (--page -1).
+    Use --page 0 for the first page.
+
     JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus job logs -1
+      magnus job logs -2 --page 0
+      magnus job logs <job-id>
     """
     _do_job_logs(job_ref=_extract_job_ref(ctx), page=page)
 
@@ -1764,7 +1985,14 @@ def job_result_cmd(ctx: typer.Context):
     """
     Show result of a completed job.
 
+    Displays the MAGNUS_RESULT value set by the job. If the result is valid
+    JSON, it is pretty-printed; otherwise it is shown as plain text.
+
     JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus job result -1
+      magnus job result <job-id>
     """
     _do_job_result(job_ref=_extract_job_ref(ctx))
 
@@ -1807,7 +2035,16 @@ def job_action_cmd(
     """
     Show action of a completed job.
 
+    Displays the MAGNUS_ACTION script set by the job. This is a shell
+    command that the job wants executed on the client side (e.g., downloading
+    files). Use -e to execute it immediately.
+
     JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus job action -1
+      magnus job action -1 -e
+      magnus job action <job-id>
     """
     _do_job_action(job_ref=_extract_job_ref(ctx), execute=execute)
 
@@ -1842,7 +2079,15 @@ def job_kill_subcmd(
     """
     Terminate a running job.
 
+    Asks for confirmation unless --force is given. Only running or pending
+    jobs can be terminated.
+
     JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus job kill -1
+      magnus job kill -1 -f
+      magnus job kill <job-id>
     """
     _do_kill_job(job_ref=_extract_job_ref(ctx), force=force)
 
