@@ -14,19 +14,28 @@ import {
   ScrollText,
   Layers,
   ArrowRight,
+  Dna,
+  Construction,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { CLUSTER_CONFIG } from "@/lib/config";
 
-const NAV_ITEMS = [
+interface NavItem {
+  name: string;
+  href: string;
+  icon: typeof ArrowRight;
+  wip?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { name: "Explorer", href: "/explorer", icon: ArrowRight },
+  { name: "Skills", href: "/skills", icon: Dna, wip: true },
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Cluster", href: "/cluster", icon: Activity },
   { name: "Jobs", href: "/jobs", icon: Rocket },
   { name: "Blueprints", href: "/blueprints", icon: ScrollText },
   { name: "Services", href: "/services", icon: Layers },
-  // { name: "Tools", href: "/tools", icon: Wrench },
 ];
 
 export function Sidebar() {
@@ -53,27 +62,32 @@ export function Sidebar() {
       </div>
 
       {/* Navigation Links */}
-      <nav className="flex-1 py-6 px-3 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
-          
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium group ${
-                isActive 
-                  ? "bg-blue-600/10 text-blue-400 border border-blue-600/10 shadow-[0_0_15px_rgba(37,99,235,0.1)]" 
-                  : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 border border-transparent"
-              }`}
-            >
-              <item.icon className={`w-4 h-4 transition-colors ${
-                isActive ? "text-blue-400" : "text-zinc-500 group-hover:text-zinc-300"
-              }`} />
-              {item.name}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 py-6 px-3">
+        <div className="space-y-1">
+          {NAV_ITEMS.map((item) => {
+            const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium group ${
+                  isActive
+                    ? "bg-blue-600/10 text-blue-400 border border-blue-600/10 shadow-[0_0_15px_rgba(37,99,235,0.1)]"
+                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 border border-transparent"
+                }`}
+              >
+                <item.icon className={`w-4 h-4 transition-colors ${
+                  isActive ? "text-blue-400" : "text-zinc-500 group-hover:text-zinc-300"
+                }`} />
+                {item.name}
+                {item.wip && (
+                  <Construction className="w-3 h-3 text-zinc-600 ml-auto" />
+                )}
+              </Link>
+            );
+          })}
+        </div>
       </nav>
 
       {/* Footer / User Profile */}
