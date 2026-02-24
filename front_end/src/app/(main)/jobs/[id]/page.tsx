@@ -25,6 +25,10 @@ import { useLanguage } from "@/context/language-context";
 
 const ansiUp = new AnsiUp();
 
+function processCarriageReturns(text: string): string {
+  return text.replaceAll("\r", "\n");
+}
+
 export default function JobDetailsPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
@@ -617,7 +621,7 @@ export default function JobDetailsPage() {
                   {logs ? (
                     <pre
                       className="text-zinc-300 whitespace-pre-wrap break-all pb-10"
-                      dangerouslySetInnerHTML={{ __html: ansiUp.ansi_to_html(logs) }}
+                      dangerouslySetInnerHTML={{ __html: ansiUp.ansi_to_html(processCarriageReturns(logs)) }}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
