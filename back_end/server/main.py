@@ -17,6 +17,7 @@ from .database import *
 from ._scheduler import scheduler
 from ._service_manager import service_manager
 from ._file_custody_manager import file_custody_manager
+from ._feishu_client import feishu_client
 
 
 class EndpointFilter(logging.Filter):
@@ -75,13 +76,80 @@ def _log_admin_status()-> None:
 _log_admin_status()
 
 
+async def _refresh_all_user_info() -> None:
+    """
+    从飞书 Contact API 并发刷新所有用户的头像和姓名。
+    单个用户失败不影响其他用户。
+    """
+    CONCURRENCY = 10
+
+    with SessionLocal() as db:
+        users = db.query(models.User).filter(models.User.feishu_open_id.isnot(None)).all()
+        user_map = {u.feishu_open_id: u for u in users}
+
+    if not user_map:
+        logger.info("用户信息刷新：数据库中无飞书用户，跳过")
+        return
+
+    semaphore = asyncio.Semaphore(CONCURRENCY)
+    updated = 0
+    failed = 0
+
+    async def fetch_one(open_id: str, client: httpx.AsyncClient) -> tuple:
+        async with semaphore:
+            info = await feishu_client.get_user_info_by_open_id(open_id, client)
+            return (open_id, info)
+
+    async with httpx.AsyncClient() as client:
+        tasks = [fetch_one(oid, client) for oid in user_map]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    with SessionLocal() as db:
+        for result in results:
+            if isinstance(result, Exception):
+                failed += 1
+                logger.warning(f"用户信息刷新失败: {result}")
+                continue
+
+            assert not isinstance(result, BaseException)
+            open_id, info = result
+            user = user_map[open_id]
+            changes = []
+            if info["avatar_url"] and info["avatar_url"] != user.avatar_url:
+                changes.append(f"avatar: {user.avatar_url} -> {info['avatar_url']}")
+                db.query(models.User).filter(models.User.id == user.id).update({"avatar_url": info["avatar_url"]})
+            if info["name"] and info["name"] != user.name:
+                changes.append(f"name: {user.name} -> {info['name']}")
+                db.query(models.User).filter(models.User.id == user.id).update({"name": info["name"]})
+            if changes:
+                updated += 1
+                logger.info(f"用户信息已更新 {user.name} ({open_id}): {', '.join(changes)}")
+
+        db.commit()
+
+    if failed:
+        raise RuntimeError(f"用户信息刷新：{failed}/{len(user_map)} 人失败")
+
+    logger.info(f"用户信息刷新完成：共 {len(user_map)} 人，{updated} 人有更新")
+
+
+async def _run_user_info_refresh_loop() -> None:
+    refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]
+    while True:
+        await asyncio.sleep(refresh_interval)
+        try:
+            await _refresh_all_user_info()
+        except Exception as e:
+            logger.error(f"用户信息刷新循环异常: {e}")
+
+
 async def run_scheduler_loop(
 )-> None:
-    
+
     """
     后台调度循环，定期心跳
     """
-    
+
     logger.info("🚀 Scheduler loop started.")
     while True:
         try:
@@ -111,6 +179,15 @@ async def lifespan(
     service_manager_task = asyncio.create_task(service_manager.start_background_loop())
     file_custody_task = asyncio.create_task(file_custody_manager.cleanup_loop())
 
+    # 用户信息刷新：首次同步执行（quick fail），然后启动后台循环
+    refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]
+    user_refresh_task = None
+    if refresh_interval > 0:
+        await _refresh_all_user_info()
+        user_refresh_task = asyncio.create_task(_run_user_info_refresh_loop())
+    else:
+        logger.info("用户信息刷新已禁用 (refresh_interval = 0)")
+
     yield
 
     logger.info("Shutting down...")
@@ -118,10 +195,14 @@ async def lifespan(
     scheduler_task.cancel()
     service_manager_task.cancel()
     file_custody_task.cancel()
+    if user_refresh_task:
+        user_refresh_task.cancel()
     try:
         await scheduler_task
         await service_manager_task
         await file_custody_task
+        if user_refresh_task:
+            await user_refresh_task
     except asyncio.CancelledError:
         logger.info("Scheduler loop stopped.")
 

@@ -81,7 +81,8 @@ def _validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(feishu_client, "app_id", str)
     _check_key(feishu_client, "app_secret", str)
     _check_key(feishu_client, "admins", list)
-    _warn_extra_keys(feishu_client, {"app_id", "app_secret", "admins"}, "server.auth.feishu_client")
+    _check_key(feishu_client, "refresh_interval", int)
+    _warn_extra_keys(feishu_client, {"app_id", "app_secret", "admins", "refresh_interval"}, "server.auth.feishu_client")
 
     # github_client 配置
     _check_key(server["github_client"], "token", str)

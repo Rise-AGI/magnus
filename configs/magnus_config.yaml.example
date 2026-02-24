@@ -28,6 +28,7 @@ server:
       app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
       admins:                              # open_id list, empty = no admins
         - ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      refresh_interval: 3600               # 秒，用户信息刷新间隔（头像/姓名等），0 = 禁用
   github_client:
     token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   scheduler:
