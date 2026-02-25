@@ -415,6 +415,7 @@ job_app = typer.Typer(
         "  submit    Submit a job directly (fire & forget)\n"
         "  execute   Submit a job and wait for completion\n\n"
         "Jobs can be referenced by negative index: -1 = newest, -2 = second newest.\n"
+        "Indices are global and shift as new jobs arrive; use the job ID for stability.\n\n"
         "Top-level shortcuts: magnus jobs, magnus status, magnus logs, magnus kill.\n\n"
         "Examples:\n"
         "  magnus job list\n"
@@ -1045,6 +1046,7 @@ def list_jobs_cmd(
     Shortcut for 'magnus job list'. Displays a table of recent jobs with
     index, ID, task name, status, GPU count, and creation time.
     Use negative indices (-1, -2, ...) to reference jobs in other commands.
+    Indices are global and shift as new jobs arrive; use the job ID for stability.
 
     Examples:
       magnus jobs
@@ -1064,7 +1066,7 @@ def job_status_cmd(
     Shortcut for 'magnus job status'. Displays task name, status, GPU count,
     job type, timestamps, and any result or action attached to the job.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
 
     Examples:
       magnus status -1
@@ -1084,7 +1086,7 @@ def kill_job_cmd(
     Shortcut for 'magnus job kill'. Asks for confirmation unless --force is
     given. Only running or pending jobs can be terminated.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
 
     Examples:
       magnus kill -1
@@ -1232,7 +1234,7 @@ def job_logs_cmd(
     Shortcut for 'magnus job logs'. Logs are paginated in ~200KB pages.
     Defaults to the last page (--page -1). Use --page 0 for the first page.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
 
     Examples:
       magnus logs -1
@@ -1936,7 +1938,7 @@ def job_status_subcmd(ctx: typer.Context):
     Displays task name, status, GPU count, job type, timestamps, and any
     result or action attached to the job.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
 
     Examples:
       magnus job status -1
@@ -1977,7 +1979,7 @@ def job_logs_subcmd(
     Logs are paginated in ~200KB pages. Defaults to the last page (--page -1).
     Use --page 0 for the first page.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
 
     Examples:
       magnus job logs -1
@@ -2019,7 +2021,7 @@ def job_result_cmd(ctx: typer.Context):
     Displays the MAGNUS_RESULT value set by the job. If the result is valid
     JSON, it is pretty-printed; otherwise it is shown as plain text.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
 
     Examples:
       magnus job result -1
@@ -2070,7 +2072,7 @@ def job_action_cmd(
     command that the job wants executed on the client side (e.g., downloading
     files). Use -e to execute it immediately.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
 
     Examples:
       magnus job action -1
@@ -2113,7 +2115,7 @@ def job_kill_subcmd(
     Asks for confirmation unless --force is given. Only running or pending
     jobs can be terminated.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
 
     Examples:
       magnus job kill -1
