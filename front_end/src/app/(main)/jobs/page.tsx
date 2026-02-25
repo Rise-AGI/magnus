@@ -84,7 +84,7 @@ export default function JobsPage() {
 
   const userFilterOptions = useMemo(() => {
     return [
-      { label: "All Users", value: "", icon: "/api/logo" },
+      { label: t("common.allUsers"), value: "", icon: "/api/logo" },
       ...allUsers.map(u => ({
         label: u.name,
         value: u.id,
@@ -92,7 +92,7 @@ export default function JobsPage() {
         icon: u.avatar_url 
       }))
     ];
-  }, [allUsers]);
+  }, [allUsers, t]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);

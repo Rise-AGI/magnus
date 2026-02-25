@@ -28,6 +28,7 @@ const translations = {
   "common.ok": { zh: "知道了", en: "OK" },
   "common.operationFailed": { zh: "操作失败", en: "Operation Failed" },
   "common.typeToConfirm": { zh: "请输入 {v} 以确认", en: "Type {v} to confirm" },
+  "common.allUsers": { zh: "所有用户", en: "All Users" },
 
   // ===== Auth =====
   "auth.signInWithFeishu": { zh: "飞书登录", en: "Sign in with Feishu" },

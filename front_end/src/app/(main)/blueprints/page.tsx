@@ -58,9 +58,9 @@ export default function BlueprintsPage() {
   }, []);
 
   const userFilterOptions = useMemo(() => [
-      { label: "All Users", value: "", icon: "/api/logo" },
+      { label: t("common.allUsers"), value: "", icon: "/api/logo" },
       ...allUsers.map(u => ({ label: u.name, value: u.id, meta: u.email || "", icon: u.avatar_url || undefined }))
-  ], [allUsers]);
+  ], [allUsers, t]);
 
   useEffect(() => { const t = setTimeout(() => setDebouncedQuery(searchQuery), 300); return () => clearTimeout(t); }, [searchQuery]);
   useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);
