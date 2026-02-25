@@ -38,6 +38,7 @@ export default function JobsPage() {
         limit: pageSize.toString(),
       });
       if (debouncedQuery.trim()) params.append("search", debouncedQuery.trim());
+      params.append("all_users", "true");
       if (selectedUserId) params.append("creator_id", selectedUserId);
 
       const data = await client(`/api/jobs?${params.toString()}`);
