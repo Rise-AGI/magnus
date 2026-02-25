@@ -170,7 +170,9 @@ const translations = {
   "blueprints.run": { zh: "运行", en: "Run" },
 
   // ===== Blueprints Table =====
-  "blueprints.table.blueprint": { zh: "Blueprint / Blueprint ID", en: "Blueprint / Blueprint ID" },
+  "blueprints.table.blueprint": { zh: "蓝图 / 蓝图 ID", en: "Blueprint / Blueprint ID" },
+  "blueprintEditor.nameRequired": { zh: "Blueprint 名称是必填的", en: "Blueprint Name is required" },
+  "blueprintEditor.idRequired": { zh: "Blueprint ID 是必填的", en: "Blueprint ID is required" },
   "blueprints.table.description": { zh: "描述", en: "Description" },
   "blueprints.table.author": { zh: "作者 / 更新时间", en: "Author / Updated at" },
 

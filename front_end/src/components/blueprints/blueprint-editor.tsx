@@ -200,14 +200,14 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave, is
 
     if (!title) {
       setErrorField("title");
-      setErrorMessage("⚠️ Blueprint Name is required");
+      setErrorMessage(`⚠️ ${t("blueprintEditor.nameRequired")}`);
       scrollToError("field-title");
       keepOpenRef.current = false;
       return;
     }
     if (!id) {
       setErrorField("id");
-      setErrorMessage("⚠️ Blueprint ID is required");
+      setErrorMessage(`⚠️ ${t("blueprintEditor.idRequired")}`);
       scrollToError("field-id");
       keepOpenRef.current = false;
       return;
