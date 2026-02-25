@@ -115,8 +115,9 @@ def get_jobs(
     limit: int = 100,
     search: Optional[str] = None,
     creator_id: Optional[str] = None,
+    all_users: bool = False,
     db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
 ):
     query = db.query(models.Job)
 
@@ -129,8 +130,11 @@ def get_jobs(
             )
         )
 
-    if creator_id and creator_id != "all":
-        query = query.filter(models.Job.user_id == creator_id)
+    if all_users:
+        if creator_id:
+            query = query.filter(models.Job.user_id == creator_id)
+    else:
+        query = query.filter(models.Job.user_id == current_user.id)
 
     total = query.count()
 

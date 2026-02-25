@@ -415,7 +415,7 @@ job_app = typer.Typer(
         "  submit    Submit a job directly (fire & forget)\n"
         "  execute   Submit a job and wait for completion\n\n"
         "Jobs can be referenced by negative index: -1 = newest, -2 = second newest.\n"
-        "Indices are global and shift as new jobs arrive; use the job ID for stability.\n\n"
+        "Indices are shared across terminals and shift as new jobs arrive; use the job ID for stability.\n\n"
         "Top-level shortcuts: magnus jobs, magnus status, magnus logs, magnus kill.\n\n"
         "Examples:\n"
         "  magnus job list\n"
@@ -723,6 +723,9 @@ run.__doc__ = (
     "Shortcut for 'magnus blueprint run'. Submits the job, polls until\n"
     "it finishes, then displays the result and auto-executes any\n"
     "MAGNUS_ACTION script (disable with --execute-action false).\n\n"
+    "Jobs run server-side. If your client disconnects (Ctrl-C, network\n"
+    "drop), the job keeps running — do not re-submit. Reconnect with\n"
+    "'magnus status <job-id>' and 'magnus job result <job-id>'.\n\n"
     "Examples:\n"
     "  magnus run my-bp\n"
     "  magnus run my-bp -- --epochs 10\n"
@@ -1010,7 +1013,13 @@ def execute_job_cmd(ctx: typer.Context):
     """Submit a job and wait for completion."""
     job_execute_subcmd(ctx)
 
-execute_job_cmd.__doc__ = f"Submit a job and wait for completion.\n\n{_EXECUTE_OPTIONS_EPILOG}"
+execute_job_cmd.__doc__ = (
+    "Submit a job and wait for completion.\n\n"
+    "Jobs run server-side. If your client disconnects (Ctrl-C, network\n"
+    "drop), the job keeps running — do not re-submit. Reconnect with\n"
+    "'magnus status <job-id>' and 'magnus job result <job-id>'.\n\n"
+    f"{_EXECUTE_OPTIONS_EPILOG}"
+)
 
 
 # === Job Management Commands ===
@@ -1046,7 +1055,7 @@ def list_jobs_cmd(
     Shortcut for 'magnus job list'. Displays a table of recent jobs with
     index, ID, task name, status, GPU count, and creation time.
     Use negative indices (-1, -2, ...) to reference jobs in other commands.
-    Indices are global and shift as new jobs arrive; use the job ID for stability.
+    Indices are shared across terminals and shift as new jobs arrive; use the job ID for stability.
 
     Examples:
       magnus jobs
@@ -1066,7 +1075,7 @@ def job_status_cmd(
     Shortcut for 'magnus job status'. Displays task name, status, GPU count,
     job type, timestamps, and any result or action attached to the job.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
     Examples:
       magnus status -1
@@ -1086,7 +1095,7 @@ def kill_job_cmd(
     Shortcut for 'magnus job kill'. Asks for confirmation unless --force is
     given. Only running or pending jobs can be terminated.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
     Examples:
       magnus kill -1
@@ -1234,7 +1243,7 @@ def job_logs_cmd(
     Shortcut for 'magnus job logs'. Logs are paginated in ~200KB pages.
     Defaults to the last page (--page -1). Use --page 0 for the first page.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
     Examples:
       magnus logs -1
@@ -1810,6 +1819,9 @@ blueprint_run_cmd.__doc__ = (
     "Submits the job, polls until it finishes, then displays the result\n"
     "and auto-executes any MAGNUS_ACTION script (disable with\n"
     "--execute-action false).\n\n"
+    "Jobs run server-side. If your client disconnects (Ctrl-C, network\n"
+    "drop), the job keeps running — do not re-submit. Reconnect with\n"
+    "'magnus status <job-id>' and 'magnus job result <job-id>'.\n\n"
     "Examples:\n"
     "  magnus blueprint run my-bp\n"
     "  magnus blueprint run my-bp -- --epochs 10\n\n"
@@ -1938,7 +1950,7 @@ def job_status_subcmd(ctx: typer.Context):
     Displays task name, status, GPU count, job type, timestamps, and any
     result or action attached to the job.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
     Examples:
       magnus job status -1
@@ -1979,7 +1991,7 @@ def job_logs_subcmd(
     Logs are paginated in ~200KB pages. Defaults to the last page (--page -1).
     Use --page 0 for the first page.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
     Examples:
       magnus job logs -1
@@ -2021,7 +2033,7 @@ def job_result_cmd(ctx: typer.Context):
     Displays the MAGNUS_RESULT value set by the job. If the result is valid
     JSON, it is pretty-printed; otherwise it is shown as plain text.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
     Examples:
       magnus job result -1
@@ -2072,7 +2084,7 @@ def job_action_cmd(
     command that the job wants executed on the client side (e.g., downloading
     files). Use -e to execute it immediately.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
     Examples:
       magnus job action -1
@@ -2115,7 +2127,7 @@ def job_kill_subcmd(
     Asks for confirmation unless --force is given. Only running or pending
     jobs can be terminated.
 
-    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are global and shift as new jobs arrive; prefer ID.
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
     Examples:
       magnus job kill -1
@@ -2197,7 +2209,13 @@ def job_execute_subcmd(ctx: typer.Context):
         print_error(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
 
-job_execute_subcmd.__doc__ = f"Submit a job and wait for completion.\n\n{_EXECUTE_OPTIONS_EPILOG}"
+job_execute_subcmd.__doc__ = (
+    "Submit a job and wait for completion.\n\n"
+    "Jobs run server-side. If your client disconnects (Ctrl-C, network\n"
+    "drop), the job keeps running — do not re-submit. Reconnect with\n"
+    "'magnus status <job-id>' and 'magnus job result <job-id>'.\n\n"
+    f"{_EXECUTE_OPTIONS_EPILOG}"
+)
 
 
 if __name__ == "__main__":
