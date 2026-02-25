@@ -3,7 +3,11 @@ from importlib.metadata import version as _pkg_version
 from typing import Optional, Dict, Any, Union, Literal, List
 from enum import Enum
 
-from .exceptions import MagnusError, AuthenticationError, ResourceNotFoundError, ExecutionError
+from .exceptions import (
+    MagnusError, APIError,
+    AuthenticationError, ForbiddenError, ResourceNotFoundError, ConflictError,
+    ExecutionError,
+)
 from .config import save_site, remove_site, set_current_site
 from .client import MagnusClient
 from .http_download import download_file, download_file_async
@@ -94,8 +98,11 @@ __all__ = [
     "remove_site",
     "set_current_site",
     "MagnusError",
+    "APIError",
     "AuthenticationError",
+    "ForbiddenError",
     "ResourceNotFoundError",
+    "ConflictError",
     "ExecutionError",
 ]
 

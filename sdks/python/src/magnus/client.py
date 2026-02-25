@@ -10,7 +10,11 @@ import httpx
 from typing import Optional, Dict, Any, Union, Literal, List
 from pathlib import Path
 
-from .exceptions import MagnusError, AuthenticationError, ResourceNotFoundError, ExecutionError
+from .exceptions import (
+    MagnusError, APIError,
+    AuthenticationError, ForbiddenError, ResourceNotFoundError, ConflictError,
+    ExecutionError, _ServerError,
+)
 from .config import (
     DEFAULT_ADDRESS, DEFAULT_TOKEN, ENV_MAGNUS_TOKEN, ENV_MAGNUS_ADDRESS,
     _get_current_site,
@@ -19,11 +23,6 @@ from .actions import execute_action
 from .file_transfer import is_file_secret, get_tmp_base
 
 logger = logging.getLogger("magnus")
-
-
-class _ServerError(Exception):
-    """5xx response during job polling — transient, worth retrying."""
-    pass
 
 
 def _format_schema_hint(schema: List[Dict[str, Any]]) -> str:
@@ -171,6 +170,13 @@ class MagnusClient:
                 "Please re-enter the address with: magnus login"
             )
 
+    _STATUS_EXCEPTIONS: Dict[int, type] = {
+        401: AuthenticationError,
+        403: ForbiddenError,
+        404: ResourceNotFoundError,
+        409: ConflictError,
+    }
+
     def _handle_error(self, response: httpx.Response) -> None:
         if response.is_success:
             return
@@ -180,14 +186,10 @@ class MagnusClient:
         except ValueError:
             detail = response.text
 
-        if response.status_code == 401:
-            raise AuthenticationError(f"Authentication failed: {detail}")
-        elif response.status_code == 404:
-            raise ResourceNotFoundError(f"Resource not found: {detail}")
-        elif response.status_code == 413:
-            raise MagnusError(f"Upload rejected: {detail}")
-        else:
-            raise MagnusError(f"API Error ({response.status_code}): {detail}")
+        exc_class = self._STATUS_EXCEPTIONS.get(response.status_code)
+        if exc_class:
+            raise exc_class(detail)
+        raise APIError(response.status_code, detail)
 
     def _join_url(self, base: str, part: Optional[str]) -> str:
         if not part:

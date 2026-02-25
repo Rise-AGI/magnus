@@ -20,6 +20,7 @@ from .. import models
 from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse
 from .._service_manager import service_manager
+from .._id_registry import assert_id_available
 from .._magnus_config import magnus_config, admin_open_ids
 from .._scheduler import scheduler
 from .auth import get_current_user
@@ -236,6 +237,10 @@ def create_service(
 )-> models.Service:
     # ... (Same as original code) ...
     existing = db.query(Service).filter(Service.id == service_data.id).first()
+
+    if not existing:
+        assert_id_available(db, service_data.id)
+
     data = service_data.model_dump()
 
     # 所有 Optional 字段填入集群默认值

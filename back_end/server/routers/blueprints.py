@@ -20,6 +20,7 @@ from ..schemas import (
     BlueprintPreferenceResponse,
 )
 from .._blueprint_manager import blueprint_manager
+from .._id_registry import assert_id_available
 from .auth import get_current_user
 from .jobs import create_job
 from .._magnus_config import admin_open_ids
@@ -111,6 +112,9 @@ def create_blueprint(
     # 2. 检查 ID 是否冲突（如果是新建）
     # 注意：这里允许 overwrite (Update)，但如果是别人的蓝图则禁止覆盖
     existing = db.query(models.Blueprint).filter(models.Blueprint.id == bp.id).first()
+
+    if not existing:
+        assert_id_available(db, bp.id)
 
     if existing:
         if existing.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:

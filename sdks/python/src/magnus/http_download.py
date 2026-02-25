@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from .file_transfer import normalize_secret, get_tmp_base
+from .exceptions import _ServerError
 
 logger = logging.getLogger("magnus")
 
@@ -15,11 +16,6 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE = 2.0
 _MAX_BACKOFF = 30.0
 _TRANSIENT_ERRORS = (httpx.TransportError,)
-
-
-class _ServerError(Exception):
-    """5xx response — transient, worth retrying."""
-    pass
 
 
 def _magnus_error(msg: str) -> Exception:
