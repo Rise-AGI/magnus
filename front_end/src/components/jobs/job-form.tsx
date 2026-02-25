@@ -120,7 +120,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         ephemeral_storage: ephemeralStorage,
         runner: runner,
         container_image: containerImage,
-        // system_entry_command 不序列化，跨环境复制时用默认值更安全
+        system_entry_command: systemEntryCommand,
       };
     },
     applyPayload: (payload: any) => {
