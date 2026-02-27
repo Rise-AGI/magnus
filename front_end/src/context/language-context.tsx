@@ -37,6 +37,9 @@ const translations = {
   "auth.required": { zh: "需要登录", en: "Authentication Required" },
   "auth.requiredDesc": { zh: "您需要登录才能访问此资源。", en: "You need to be signed in to access this resource." },
   "auth.pleaseLogin": { zh: "请使用飞书账号登录以继续。", en: "Please login with your Feishu account to continue." },
+  "auth.authenticating": { zh: "正在通过飞书登录...", en: "Authenticating with Feishu..." },
+  "auth.loginFailed": { zh: "登录失败", en: "Login Failed" },
+  "auth.backToHome": { zh: "返回首页", en: "Back to Home" },
 
   // ===== Header =====
   "header.hideToken": { zh: "隐藏令牌", en: "Hide Token" },

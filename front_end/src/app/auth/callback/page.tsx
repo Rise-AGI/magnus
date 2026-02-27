@@ -6,12 +6,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { API_BASE, DEFAULT_ROUTE } from "@/lib/config";
 import { LoginResponse } from "@/types/auth";
 import { Loader2 } from "lucide-react";
+import { useLanguage } from "@/context/language-context";
 
 function LoadingState() {
+  const { t } = useLanguage();
   return (
     <div className="flex flex-col items-center justify-center h-screen space-y-4">
       <Loader2 className="w-10 h-10 animate-spin text-blue-600" />
-      <p className="text-gray-500">Authenticating with Feishu...</p>
+      <p className="text-gray-500">{t("auth.authenticating")}</p>
     </div>
   );
 }
@@ -20,7 +22,8 @@ function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const code = searchParams.get("code");
-  
+  const { t } = useLanguage();
+
   // 防止 React StrictMode 在开发环境下导致 useEffect 执行两次
   const hasFetched = useRef(false);
   const [error, setError] = useState("");
@@ -67,13 +70,13 @@ function AuthCallbackContent() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-screen text-red-500">
-        <h2 className="text-xl font-bold">Login Failed</h2>
+        <h2 className="text-xl font-bold">{t("auth.loginFailed")}</h2>
         <p>{error}</p>
-        <button 
+        <button
           onClick={() => router.push("/")}
           className="mt-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-black"
         >
-          Back to Home
+          {t("auth.backToHome")}
         </button>
       </div>
     );
