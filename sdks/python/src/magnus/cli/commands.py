@@ -179,6 +179,72 @@ def _extract_job_ref(ctx: typer.Context) -> str:
     return ctx.args[0]
 
 
+def _show_blueprint_help(blueprint_id: str) -> None:
+    """Fetch blueprint schema from server and display parameter help."""
+    try:
+        schema = api_get_blueprint_schema(blueprint_id)
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+    bp = None
+    try:
+        bp = api_get_blueprint(blueprint_id)
+    except Exception:
+        pass
+
+    console.print()
+    title = bp.get("title", blueprint_id) if bp else blueprint_id
+    desc = bp.get("description", "") if bp else ""
+    console.print(f"[bold cyan]{title}[/bold cyan]  [dim]({blueprint_id})[/dim]")
+    if desc:
+        console.print(f"[dim]{desc}[/dim]")
+    console.print()
+
+    if not schema:
+        console.print("[dim]This blueprint takes no parameters.[/dim]")
+        raise typer.Exit(0)
+
+    console.print("[bold]Parameters:[/bold]")
+    for param in schema:
+        key = param.get("key", "?")
+        ptype = param.get("type", "unknown")
+        default = param.get("default")
+        desc_text = param.get("description", "")
+        is_optional = param.get("is_optional", False)
+        is_list = param.get("is_list", False)
+
+        options = param.get("options") or []
+        if ptype == "select" and options:
+            values = [str(o["value"]) for o in options]
+            type_label = " | ".join(f'"{v}"' for v in values)
+        else:
+            type_label = ptype
+        if is_list:
+            type_label = f"List[{type_label}]"
+        if is_optional:
+            type_label = f"Optional[{type_label}]"
+
+        flag = f"--{key.replace('_', '-')}"
+        if default is not None:
+            header = f"  [green]{flag}[/green] [dim]{type_label}[/dim]  [dim](default: {default!r})[/dim]"
+        else:
+            header = f"  [green]{flag}[/green] [dim]{type_label}[/dim]"
+        console.print(header)
+
+        if desc_text:
+            console.print(f"      [dim]{desc_text}[/dim]")
+        if ptype == "select" and options:
+            for o in options:
+                opt_desc = o.get("description")
+                if opt_desc:
+                    console.print(f"      [dim]{o['value']}: {opt_desc}[/dim]")
+
+    console.print()
+    console.print("[dim]Usage: magnus run {id} -- {params}[/dim]".format(id=blueprint_id, params=" ".join(f"--{p['key'].replace('_', '-')} VALUE" for p in schema if not p.get("is_optional"))))
+    raise typer.Exit(0)
+
+
 # === Argument Parsing Logic ===
 
 # CLI control parameters have a known schema — convert explicitly, never guess.
@@ -321,6 +387,9 @@ CLI Options (before --):
 Blueprint arguments (after --) are passed to the blueprint function.
 Without --, all arguments are routed to the blueprint; CLI options
 use default values.
+
+Per-blueprint help:
+  magnus launch <blueprint-id> --help    Show parameters for this blueprint
 """.strip()
 
 _RUN_OPTIONS_EPILOG = """
@@ -336,6 +405,9 @@ CLI Options (before --):
 Blueprint arguments (after --) are passed to the blueprint function.
 Without --, all arguments are routed to the blueprint; CLI options
 use default values.
+
+Per-blueprint help:
+  magnus run <blueprint-id> --help       Show parameters for this blueprint
 """.strip()
 
 
@@ -1649,6 +1721,11 @@ def blueprint_save_cmd(
     If the blueprint ID already exists, it is overwritten (update). Otherwise
     a new blueprint is created. The code is read from a local .py file.
 
+    Import lines (import / from-import) are automatically stripped before
+    upload — the backend sandbox provides all necessary symbols (Annotated,
+    Optional, List, JobType, submit_job, etc.). This means your .py file can
+    include real imports for local IDE support, linting, and testing.
+
     Examples:
       magnus blueprint save my-bp -t "My Blueprint" -c bp.py
       magnus blueprint save my-bp -t "Updated" -d "New desc" -c bp.py
@@ -1717,6 +1794,8 @@ def blueprint_launch_cmd(
     blueprint_id: str = typer.Argument(..., help="ID of the blueprint"),
 ):
     """Launch a blueprint job (fire & forget)."""
+    if "--help" in ctx.args or "-h" in ctx.args:
+        _show_blueprint_help(blueprint_id)
     try:
         cli_args, bp_args = partition_args(ctx.args)
         cli_config = apply_cli_defaults(cli_args, command_type="submit")
@@ -1767,6 +1846,8 @@ def blueprint_run_cmd(
     blueprint_id: str = typer.Argument(..., help="ID of the blueprint"),
 ):
     """Execute a blueprint and wait for completion."""
+    if "--help" in ctx.args or "-h" in ctx.args:
+        _show_blueprint_help(blueprint_id)
     try:
         cli_args, bp_args = partition_args(ctx.args)
         cli_config = apply_cli_defaults(cli_args, command_type="run")

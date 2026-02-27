@@ -1,5 +1,6 @@
 # sdks/python/src/magnus/client.py
 import os
+import ast
 import time
 import json
 import asyncio
@@ -23,6 +24,39 @@ from .actions import execute_action
 from .file_transfer import is_file_secret, get_tmp_base
 
 logger = logging.getLogger("magnus")
+
+
+def strip_imports(code: str) -> str:
+    """Strip top-level import/from-import statements from blueprint code.
+
+    Blueprint .py files can include real imports for IDE support, linting,
+    and local testing. The backend sandbox already provides all necessary
+    symbols via execution_globals, so imports are stripped before upload
+    to avoid triggering the restricted-import guard.
+
+    Uses ast to correctly handle multi-line imports (parenthesized, backslash).
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+
+    import_lines: set = set()
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for lineno in range(node.lineno, node.end_lineno + 1):  # type: ignore[operator]
+                import_lines.add(lineno)
+
+    lines = code.splitlines(keepends=True)
+    result: List[str] = []
+    for i, line in enumerate(lines):
+        if (i + 1) not in import_lines:
+            result.append(line)
+
+    # Remove leading blank lines left by stripping
+    while result and not result[0].strip():
+        result.pop(0)
+    return "".join(result)
 
 
 def _format_schema_hint(schema: List[Dict[str, Any]]) -> str:
@@ -959,7 +993,7 @@ class MagnusClient:
             "id": blueprint_id,
             "title": title,
             "description": description,
-            "code": code,
+            "code": strip_imports(code),
         }
         try:
             resp = self.http.post("/blueprints", json=payload, timeout=timeout)
