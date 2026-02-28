@@ -7,7 +7,6 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Rocket,
-  Activity,
   Server,
   LogIn,
   LogOut,
@@ -16,26 +15,31 @@ import {
   ArrowRight,
   Dna,
   Construction,
+  Users,
+  Waypoints,
+  Container,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { CLUSTER_CONFIG } from "@/lib/config";
 
 interface NavItem {
-  name: string;
+  i18nKey: string;
   href: string;
   icon: typeof ArrowRight;
   wip?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { name: "Explorer", href: "/explorer", icon: ArrowRight },
-  { name: "Skills", href: "/skills", icon: Dna, wip: true },
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Cluster", href: "/cluster", icon: Activity },
-  { name: "Jobs", href: "/jobs", icon: Rocket },
-  { name: "Blueprints", href: "/blueprints", icon: ScrollText },
-  { name: "Services", href: "/services", icon: Layers },
+  { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight },
+  { i18nKey: "nav.people", href: "/people", icon: Users },
+  { i18nKey: "nav.motions", href: "/motions", icon: Waypoints, wip: true },
+  { i18nKey: "nav.jobs", href: "/jobs", icon: Rocket },
+  { i18nKey: "nav.blueprints", href: "/blueprints", icon: ScrollText },
+  { i18nKey: "nav.services", href: "/services", icon: Layers },
+  { i18nKey: "nav.skills", href: "/skills", icon: Dna },
+  { i18nKey: "nav.images", href: "/images", icon: Container },
+  { i18nKey: "nav.cluster", href: "/cluster", icon: LayoutDashboard },
 ];
 
 export function Sidebar() {
@@ -65,7 +69,8 @@ export function Sidebar() {
       <nav className="flex-1 py-6 px-3">
         <div className="space-y-1">
           {NAV_ITEMS.map((item) => {
-            const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
+            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+            const label = t(item.i18nKey as any);
 
             return (
               <Link
@@ -80,7 +85,7 @@ export function Sidebar() {
                 <item.icon className={`w-4 h-4 transition-colors ${
                   isActive ? "text-blue-400" : "text-zinc-500 group-hover:text-zinc-300"
                 }`} />
-                {item.name}
+                {label}
                 {item.wip && (
                   <Construction className="w-3 h-3 text-zinc-600 ml-auto" />
                 )}

@@ -1,7 +1,6 @@
 # back_end/server/routers/cluster.py
-import random
 from typing import List
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -9,7 +8,7 @@ from sqlalchemy.orm import Session
 from .. import database
 from .. import models
 from ..models import JobStatus, JobType
-from ..schemas import ClusterStatsResponse, JobResponse, DashboardJobsResponse, UserInfo
+from ..schemas import ClusterStatsResponse, JobResponse, PagedJobResponse, UserInfo
 from .._slurm_manager import SlurmManager
 from .auth import get_current_user
 from .._magnus_config import magnus_config
@@ -181,8 +180,8 @@ def get_cluster_stats(
 
 
 @router.get(
-    "/dashboard/my-active-jobs",
-    response_model =DashboardJobsResponse,
+    "/cluster/my-active-jobs",
+    response_model=PagedJobResponse,
 )
 def get_my_active_jobs(
     skip: int = 0,
@@ -191,7 +190,7 @@ def get_my_active_jobs(
     current_user: models.User = Depends(get_current_user),
 ):
     """
-    Dashboard 专用：获取当前用户“活跃”的任务
+    获取当前用户"活跃"的任务
     """
     # 获取 Running 任务
     running_orm = db.query(models.Job).filter(
@@ -224,44 +223,4 @@ def get_my_active_jobs(
     return {
         "items": [JobResponse.model_validate(job) for job in paginated_orm],
         "total": total_count,
-    }
-
-
-@router.get("/dashboard/stats")
-def get_dashboard_stats(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(database.get_db),
-):
-    """
-    Dashboard 统计接口:
-    - Occupancy (占有率): 真实数据 (基于 ClusterSnapshot 历史平均)
-    - Utilization (利用率): Mock 数据 (因为没有 DCGM 监控)
-    """
-    now = datetime.now(timezone.utc)
-
-    # --- 逻辑 A: 计算真实的 Occupancy (Allocation) ---
-    def get_real_occupancy(hours: int)-> float:
-        start_time = now - timedelta(hours=hours)
-        snapshots = db.query(models.ClusterSnapshot).filter(
-            models.ClusterSnapshot.timestamp >= start_time
-        ).all()
-
-        if not snapshots:
-            return 0.0
-
-        total_cap = sum(s.total_gpus for s in snapshots)
-        total_used = sum(s.slurm_used_gpus for s in snapshots)
-
-        return (total_used / total_cap) if total_cap > 0 else 0.0
-
-    # --- 逻辑 B: Mock 利用率 ---
-    # 模拟一个 30% ~ 60% 之间的随机负载
-    mock_util_24h = 0.45 + random.uniform(-0.05, 0.05)
-    mock_util_7d = 0.38
-
-    return {
-        "total_occupancy_24h": get_real_occupancy(24),
-        "total_occupancy_7d": get_real_occupancy(24 * 7),
-        "magnus_utilization_24h": mock_util_24h,
-        "magnus_utilization_7d": mock_util_7d,
     }

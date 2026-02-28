@@ -51,7 +51,6 @@ export default function JobDetailsPage() {
 
     const config: Record<string, { path: string; label: string }> = {
       cluster:   { path: "/cluster",   label: t("jobDetail.backToCluster") },
-      dashboard: { path: "/dashboard", label: t("jobDetail.backToDashboard") },
       jobs:      { path: "/jobs",      label: t("jobDetail.backToJobs") },
     };
     return config[fromSource] || config["jobs"];

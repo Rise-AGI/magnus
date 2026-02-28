@@ -1,8 +1,6 @@
 # back_end/python_scripts/migrate_database.py
 """
-数据库迁移脚本 - 容器镜像支持
-
-为 jobs 和 services 表添加 container_image 和 system_entry_command 字段。
+数据库迁移脚本
 
 运行方式:
     cd back_end && uv run python python_scripts/migrate_database.py
@@ -16,16 +14,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from library import load_from_yaml
 
 
-def _add_column(cursor: sqlite3.Cursor, table: str, column: str, col_type: str = "TEXT"):
-    """尝试添加列，如果已存在则跳过。"""
-    try:
-        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type};")
-        print(f"✅ [{table}] {column} 列已添加。")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e).lower():
-            print(f"⏭️  [{table}] {column} 列已存在，跳过。")
-        else:
-            raise
+
+def _create_table(cursor: sqlite3.Cursor, ddl: str, table: str):
+    """创建表（IF NOT EXISTS），幂等。"""
+    cursor.execute(ddl)
+    print(f"✅ [{table}] 表已就绪。")
+
+
+def _create_index(cursor: sqlite3.Cursor, index_name: str, table: str, column: str):
+    """创建索引（IF NOT EXISTS），幂等。"""
+    cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}({column});")
+    print(f"✅ [{table}] 索引 {index_name} 已就绪。")
 
 
 def migrate(develop: bool = False):
@@ -49,23 +48,43 @@ def migrate(develop: bool = False):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # === Jobs 表 ===
-    _add_column(cursor, "jobs", "container_image")
-    _add_column(cursor, "jobs", "system_entry_command")
+    # === CachedImages 表 ===
+    _create_table(cursor, """
+        CREATE TABLE IF NOT EXISTS cached_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uri TEXT NOT NULL UNIQUE,
+            filename TEXT NOT NULL UNIQUE,
+            user_id TEXT NOT NULL REFERENCES users(id),
+            status TEXT NOT NULL DEFAULT 'cached',
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """, "cached_images")
 
-    # 填充 jobs.container_image NULL 值为默认值
-    default_image = config["cluster"]["default_container_image"]
-    cursor.execute(
-        "UPDATE jobs SET container_image = ? WHERE container_image IS NULL;",
-        (default_image,)
-    )
-    print(f"✅ [jobs] 已更新 {cursor.rowcount} 条记录的 container_image。")
+    # === Skills 表 ===
+    _create_table(cursor, """
+        CREATE TABLE IF NOT EXISTS skills (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            user_id TEXT NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """, "skills")
 
-    # === Services 表 ===
-    _add_column(cursor, "services", "container_image")
-    _add_column(cursor, "services", "system_entry_command")
-
-    # services.container_image 保持 NULL（可选字段，使用时 fallback 到默认值）
+    # === SkillFiles 表 ===
+    _create_table(cursor, """
+        CREATE TABLE IF NOT EXISTS skill_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            skill_id TEXT NOT NULL REFERENCES skills(id),
+            path TEXT NOT NULL,
+            content TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """, "skill_files")
+    _create_index(cursor, "ix_skill_files_skill_id", "skill_files", "skill_id")
 
     conn.commit()
     conn.close()

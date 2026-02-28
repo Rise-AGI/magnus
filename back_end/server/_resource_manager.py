@@ -151,15 +151,16 @@ class ResourceManager:
             except OSError as e:
                 logger.warning(f"Failed to evict repo {path}: {e}")
 
-    async def ensure_image(self, image: str)-> Tuple[bool, Optional[str]]:
+    async def ensure_image(self, image: str, force: bool = False)-> Tuple[bool, Optional[str]]:
         """
         确保镜像可用。返回 (success, error_msg)
         - 成功：(True, None)
         - 失败：(False, "error message")
+        force=True 时跳过缓存检查，pull 到 .tmp 再原子 rename，旧文件在 rename 前保持可用。
         """
         sif_path = self.get_sif_path(image)
 
-        if os.path.exists(sif_path):
+        if not force and os.path.exists(sif_path):
             try:
                 os.utime(sif_path, None)
             except OSError:
@@ -170,7 +171,7 @@ class ResourceManager:
             self.image_locks[image] = asyncio.Lock()
 
         async with self.image_locks[image]:
-            if os.path.exists(sif_path):
+            if not force and os.path.exists(sif_path):
                 try:
                     os.utime(sif_path, None)
                 except OSError:
@@ -178,6 +179,8 @@ class ResourceManager:
                 return True, None
 
             self._evict_lru_images()
+
+            pull_dest = sif_path + ".tmp" if force else sif_path
 
             logger.info(f"Pulling container image: {image}")
             start_time = time.time()
@@ -192,7 +195,7 @@ class ResourceManager:
                 env["APPTAINER_CACHEDIR"] = magnus_apptainer_cache_path
                 env["GODEBUG"] = "http2client=0"
                 proc = await asyncio.create_subprocess_exec(
-                    "apptainer", "pull", sif_path, image,
+                    "apptainer", "pull", pull_dest, image,
                     stdout = asyncio.subprocess.PIPE,
                     stderr = asyncio.subprocess.PIPE,
                     env = env,
@@ -203,9 +206,9 @@ class ResourceManager:
                     break
 
                 # 清理残留的不完整 SIF
-                if os.path.exists(sif_path):
+                if os.path.exists(pull_dest):
                     try:
-                        os.remove(sif_path)
+                        os.remove(pull_dest)
                     except OSError:
                         pass
 
@@ -223,6 +226,10 @@ class ResourceManager:
                 else:
                     logger.error(f"Failed to pull image {image} after {max_retries} attempts: {error_msg}")
                     return False, error_msg
+
+            # 成功：如果是 force pull，原子替换旧文件
+            if force:
+                os.rename(pull_dest, sif_path)
 
             elapsed = time.time() - start_time
             os.chmod(sif_path, 0o644)

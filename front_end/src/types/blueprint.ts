@@ -8,7 +8,7 @@ export interface Blueprint {
   code: string;
   user_id: string;
   user?: User;
-  updatedAt: string;
+  updated_at: string;
 }
 
 export interface BlueprintParamOption {

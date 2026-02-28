@@ -7,6 +7,7 @@ import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
 import { Job, User } from "@/types/job";
 import { useLanguage } from "@/context/language-context";
+import { useDebounce } from "@/hooks/use-debounce";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { JobDrawer } from "@/components/jobs/job-drawer";
@@ -21,8 +22,8 @@ export default function JobsPage() {
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   
-  const [searchQuery, setSearchQuery] = useState(""); 
-  const [debouncedQuery, setDebouncedQuery] = useState(""); 
+  const [searchQuery, setSearchQuery] = useState("");
+  const debouncedQuery = useDebounce(searchQuery);
   const [selectedUserId, setSelectedUserId] = useState(""); 
   
   const [currentPage, setCurrentPage] = useState(1);
@@ -96,11 +97,6 @@ export default function JobsPage() {
   }, [allUsers, t]);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-  useEffect(() => {
     setCurrentPage(1);
   }, [debouncedQuery, selectedUserId]);
 
@@ -121,7 +117,7 @@ export default function JobsPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            Jobs
+            {t("nav.jobs")}
           </h1>
           <p className="text-zinc-500 text-sm mt-1">{t("jobs.subtitle")}</p>
         </div>

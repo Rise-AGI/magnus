@@ -90,6 +90,22 @@ __all__ = [
     "delete_blueprint_async",
     "get_blueprint_schema",
     "get_blueprint_schema_async",
+    "list_skills",
+    "list_skills_async",
+    "get_skill",
+    "get_skill_async",
+    "save_skill",
+    "save_skill_async",
+    "delete_skill",
+    "delete_skill_async",
+    "list_images",
+    "list_images_async",
+    "pull_image",
+    "pull_image_async",
+    "refresh_image",
+    "refresh_image_async",
+    "remove_image",
+    "remove_image_async",
     "download_file",
     "download_file_async",
     "custody_file",
@@ -230,3 +246,51 @@ def get_blueprint_schema(blueprint_id: str, timeout: float = 10.0) -> List[Dict[
 
 async def get_blueprint_schema_async(blueprint_id: str, timeout: float = 10.0) -> List[Dict[str, Any]]:
     return await default_client.get_blueprint_schema_async(blueprint_id, timeout)
+
+def list_skills(limit: int = 20, skip: int = 0, search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.list_skills(limit, skip, search, timeout)
+
+async def list_skills_async(limit: int = 20, skip: int = 0, search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.list_skills_async(limit, skip, search, timeout)
+
+def get_skill(skill_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.get_skill(skill_id, timeout)
+
+async def get_skill_async(skill_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.get_skill_async(skill_id, timeout)
+
+def save_skill(skill_id: str, title: str, description: str, files: List[Dict[str, str]], timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.save_skill(skill_id, title, description, files, timeout)
+
+async def save_skill_async(skill_id: str, title: str, description: str, files: List[Dict[str, str]], timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.save_skill_async(skill_id, title, description, files, timeout)
+
+def delete_skill(skill_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.delete_skill(skill_id, timeout)
+
+async def delete_skill_async(skill_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.delete_skill_async(skill_id, timeout)
+
+def list_images(search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.list_images(search, timeout)
+
+async def list_images_async(search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.list_images_async(search, timeout)
+
+def pull_image(uri: str, timeout: float = 30.0) -> Dict[str, Any]:
+    return default_client.pull_image(uri, timeout)
+
+async def pull_image_async(uri: str, timeout: float = 30.0) -> Dict[str, Any]:
+    return await default_client.pull_image_async(uri, timeout)
+
+def refresh_image(image_id: int, timeout: float = 30.0) -> Dict[str, Any]:
+    return default_client.refresh_image(image_id, timeout)
+
+async def refresh_image_async(image_id: int, timeout: float = 30.0) -> Dict[str, Any]:
+    return await default_client.refresh_image_async(image_id, timeout)
+
+def remove_image(image_id: int, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.remove_image(image_id, timeout)
+
+async def remove_image_async(image_id: int, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.remove_image_async(image_id, timeout)

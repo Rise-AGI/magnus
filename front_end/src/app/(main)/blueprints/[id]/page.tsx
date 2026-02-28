@@ -18,18 +18,12 @@ import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { DynamicForm } from "@/components/ui/dynamic-form";
 import { BlueprintEditor } from "@/components/blueprints/blueprint-editor";
+import { CodeEditor } from "@/components/ui/code-editor";
 import RenderMarkdown from "@/components/ui/render-markdown";
 
 import { Blueprint, BlueprintPreference } from "@/types/blueprint";
 import { FieldSchema, getFieldInitialValue, validateFieldValue } from "@/components/ui/dynamic-form/types";
 import { BlueprintImplicitImports } from "@/lib/blueprint-defaults";
-
-// Syntax Highlighting for Read-only view
-import Editor from "react-simple-code-editor";
-import { highlight, languages } from "prismjs";
-import "prismjs/components/prism-clike";
-import "prismjs/components/prism-python";
-import "prismjs/themes/prism-okaidia.css";
 
 export default function BlueprintDetailsPage() {
   const params = useParams();
@@ -57,7 +51,6 @@ export default function BlueprintDetailsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorData, setEditorData] = useState({ id: "", title: "", description: "", code: "" });
-  const [isSavingClone, setIsSavingClone] = useState(false);
   
   // Copy States
   const [copiedDesc, setCopiedDesc] = useState(false);
@@ -73,7 +66,7 @@ export default function BlueprintDetailsPage() {
       
       const mappedData = {
           ...data,
-          updatedAt: data.updated_at || data.updatedAt,
+          updated_at: data.updated_at,
       };
 
       setBlueprint(mappedData);
@@ -87,9 +80,9 @@ export default function BlueprintDetailsPage() {
       setNotFound(false);
     } catch (e) {
       console.error("Failed to fetch blueprint", e);
-      setNotFound(true);
+      if (!isBackground) setNotFound(true);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }, [blueprintId]);
 
@@ -186,19 +179,14 @@ export default function BlueprintDetailsPage() {
   };
 
   const handleEditorSave = async (data: any) => {
-    setIsSavingClone(true);
-    try {
-      await client("/api/blueprints", { method: "POST", json: data });
+    await client("/api/blueprints", { method: "POST", json: data });
 
-      if (data.id === blueprint?.id) {
-        await fetchBlueprint(true);
-      } else {
-        sessionStorage.setItem('magnus_new_blueprint', 'true');
-        router.refresh();
-        router.push('/blueprints');
-      }
-    } finally {
-      setIsSavingClone(false);
+    if (data.id === blueprint?.id) {
+      await fetchBlueprint(true);
+    } else {
+      sessionStorage.setItem('magnus_new_blueprint', 'true');
+      router.refresh();
+      router.push('/blueprints');
     }
   };
 
@@ -279,7 +267,7 @@ export default function BlueprintDetailsPage() {
                <span className="text-zinc-700">|</span>
                <span className="flex items-center gap-1.5">
                  <Clock className="w-3.5 h-3.5" />
-                 {formatBeijingTime(blueprint.updatedAt)}
+                 {formatBeijingTime(blueprint.updated_at)}
                </span>
             </div>
           </div>
@@ -385,15 +373,10 @@ export default function BlueprintDetailsPage() {
               <pre className="text-[13px] font-mono leading-relaxed px-5 pt-5 pb-2 text-zinc-500 border-b border-zinc-800/50 mb-0">
                 <BlueprintImplicitImports />
               </pre>
-              <Editor
+              <CodeEditor
                 value={blueprint.code}
-                onValueChange={() => {}}
-                highlight={code => highlight(code, languages.python, 'python')}
-                padding={20}
-                className="prism-editor font-mono text-sm leading-relaxed"
-                style={{ fontFamily: '"Fira Code", "Fira Mono", monospace', fontSize: 13, minHeight: "100%", pointerEvents: "none" }}
-                textareaClassName="focus:outline-none"
-                disabled
+                readOnly
+                language="python"
               />
             </div>
           </div>
@@ -450,13 +433,12 @@ export default function BlueprintDetailsPage() {
       </div>
 
       {/* Dialogs */}
-      <BlueprintEditor 
-        isOpen={editorOpen} 
-        mode='clone' // 始终为 clone 模式，内部逻辑由 isOriginalId 判断是更新还是复制
-        initialData={editorData} 
-        onClose={() => setEditorOpen(false)} 
-        onSave={handleEditorSave} 
-        isSaving={isSavingClone} 
+      <BlueprintEditor
+        isOpen={editorOpen}
+        mode='clone'
+        initialData={editorData}
+        onClose={() => setEditorOpen(false)}
+        onSave={handleEditorSave}
       />
 
       <ConfirmationDialog

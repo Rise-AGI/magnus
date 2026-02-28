@@ -8,6 +8,7 @@ import { POLL_INTERVAL } from "@/lib/config";
 import { Service } from "@/types/service";
 import { User } from "@/types/job";
 import { useLanguage } from "@/context/language-context";
+import { useDebounce } from "@/hooks/use-debounce";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ServiceTable } from "@/components/services/service-table";
@@ -29,7 +30,7 @@ export default function ServicesPage() {
 
   // Filters & Sorting
   const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const debouncedQuery = useDebounce(searchQuery);
   const [selectedUserId, setSelectedUserId] = useState("");
   // [Magnus Update] 新增筛选和排序状态
   const [activeOnly, setActiveOnly] = useState(false);
@@ -103,12 +104,6 @@ export default function ServicesPage() {
       })),
     ];
   }, [allUsers, t]);
-
-  // 3. Debounce & Polling
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -240,7 +235,7 @@ export default function ServicesPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            Services
+            {t("nav.services")}
           </h1>
           <p className="text-zinc-500 text-sm mt-1">
             {t("services.subtitle")}

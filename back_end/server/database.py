@@ -15,6 +15,7 @@ engine = create_engine(
     url = sqlalchemy_database_url,
     connect_args = {
         "check_same_thread": False,
+        "timeout": 30,
     },
 )
 

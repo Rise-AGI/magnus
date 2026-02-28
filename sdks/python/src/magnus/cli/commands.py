@@ -42,6 +42,14 @@ from .. import (
     save_blueprint as api_save_blueprint,
     delete_blueprint as api_delete_blueprint,
     list_services as api_list_services,
+    list_skills as api_list_skills,
+    get_skill as api_get_skill,
+    save_skill as api_save_skill,
+    delete_skill as api_delete_skill,
+    list_images as api_list_images,
+    pull_image as api_pull_image,
+    refresh_image as api_refresh_image,
+    remove_image as api_remove_image,
 )
 
 # === UI Setup ===
@@ -498,6 +506,42 @@ job_app = typer.Typer(
 )
 app.add_typer(blueprint_app)
 app.add_typer(job_app)
+skill_app = typer.Typer(
+    name="skill",
+    help=(
+        "Skill operations: create, inspect, and manage reusable knowledge packs.\n\n"
+        "A skill is a named collection of files (SKILL.md + optional code/data)\n"
+        "that can be loaded by the Explorer agent to extend its capabilities.\n\n"
+        "Subcommands:\n"
+        "  list      List available skills\n"
+        "  get       Show skill details and files\n"
+        "  save      Create or update a skill from a local directory\n"
+        "  delete    Delete a skill\n\n"
+        "Lifecycle: create a directory with SKILL.md → save → iterate.\n"
+        "Top-level shortcut: magnus skills.\n\n"
+        "Examples:\n"
+        "  magnus skill list\n"
+        "  magnus skill get my-skill\n"
+        "  magnus skill save my-skill -t 'My Skill' ./skill_dir\n"
+        "  magnus skill delete my-skill"
+    ),
+)
+app.add_typer(skill_app)
+image_app = typer.Typer(
+    name="image",
+    help=(
+        "Image cache operations: list, pull, refresh, and remove cached container images.\n\n"
+        "When you push a new version to an existing tag, use 'refresh' to update\n"
+        "the local cache. Use 'pull' to add a new image to the cache.\n\n"
+        "Subcommands:\n"
+        "  list      List cached images with sizes and owners\n"
+        "  pull      Pull a new image into the cache\n"
+        "  refresh   Re-pull a cached image to update it\n"
+        "  remove    Remove a cached image from the cluster\n\n"
+        "Top-level shortcut: magnus refresh."
+    ),
+)
+app.add_typer(image_app)
 
 
 @app.command(name="config")
@@ -1035,7 +1079,8 @@ Optional parameters:
   --cpu-count INT           Number of CPUs
   --memory-demand TEXT      Memory limit (e.g. 16G)
   --ephemeral-storage TEXT  Disk limit (e.g. 10G)
-  --container-image TEXT    Container image URI
+  --container-image TEXT    Container image URI (default: cluster config;
+                              e.g. docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime)
   --runner TEXT             Runner name
   --namespace TEXT          Repository namespace
   --job-type TEXT           Job type (A1/A2/B1/B2)
@@ -1047,7 +1092,9 @@ _SUBMIT_OPTIONS_EPILOG = f"""{_JOB_PARAMS_DOC}
 
 CLI options:
   --timeout FLOAT           HTTP timeout in seconds (default: 10)
-  --verbose                 Print debug info"""
+  --verbose                 Print debug info
+
+Cached images: 'magnus image list'. Refresh: 'magnus refresh <image_id>'."""
 
 _EXECUTE_OPTIONS_EPILOG = f"""{_JOB_PARAMS_DOC}
 
@@ -1055,7 +1102,9 @@ CLI options:
   --timeout FLOAT           Max wait time in seconds (default: infinite)
   --poll-interval FLOAT     Poll interval in seconds (default: 2)
   --execute-action BOOL     Auto-execute MAGNUS_ACTION (default: true)
-  --verbose                 Print debug info"""
+  --verbose                 Print debug info
+
+Cached images: 'magnus image list'. Refresh: 'magnus refresh <image_id>'."""
 
 
 def _validate_job_params(params: Dict[str, Any]) -> None:
@@ -1818,6 +1867,8 @@ def blueprint_launch_cmd(
         )
 
         print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
+        from .. import default_client
+        print_msg(f"View: [link={default_client.address}/jobs/{job_id}]{default_client.address}/jobs/{job_id}[/link]")
 
     except MagnusError as e:
         print_error(str(e))
@@ -1884,6 +1935,7 @@ def blueprint_run_cmd(
         print_msg("Job finished.")
 
         _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
+        print_msg(f"View: [link={default_client.address}/jobs/{job_id}]{default_client.address}/jobs/{job_id}[/link]")
 
     except MagnusError as e:
         print_error(str(e))
@@ -2237,6 +2289,8 @@ def job_submit_subcmd(ctx: typer.Context):
         )
 
         print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
+        from .. import default_client
+        print_msg(f"View: [link={default_client.address}/jobs/{job_id}]{default_client.address}/jobs/{job_id}[/link]")
 
     except MagnusError as e:
         print_error(str(e))
@@ -2279,6 +2333,7 @@ def job_execute_subcmd(ctx: typer.Context):
         print_msg("Job finished.")
 
         _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
+        print_msg(f"View: [link={default_client.address}/jobs/{job_id}]{default_client.address}/jobs/{job_id}[/link]")
 
     except MagnusError as e:
         print_error(str(e))
@@ -2297,6 +2352,467 @@ job_execute_subcmd.__doc__ = (
     "'magnus status <job-id>' and 'magnus job result <job-id>'.\n\n"
     f"{_EXECUTE_OPTIONS_EPILOG}"
 )
+
+
+# =============================================================================
+# Skill sub-commands: magnus skill <verb>
+# =============================================================================
+
+
+def _collect_skill_files(source: Path) -> List[Dict[str, str]]:
+    """Read files from a directory into the [{path, content}] format."""
+    files: List[Dict[str, str]] = []
+    if source.is_file():
+        files.append({
+            "path": source.name,
+            "content": source.read_text(encoding="utf-8"),
+        })
+        return files
+
+    for p in sorted(source.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = str(p.relative_to(source))
+        try:
+            content = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            print_error(f"Skipping binary file: {rel}")
+            continue
+        files.append({"path": rel, "content": content})
+    return files
+
+
+@skill_app.command(name="list")
+def skill_list_cmd(
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of skills to fetch"),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by title or ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """
+    List available skills.
+
+    Displays a table of skills with ID, title, creator, file count, and last
+    update time. Pipe-friendly: outputs YAML when stdout is not a TTY.
+
+    Examples:
+      magnus skill list
+      magnus skill list -l 20
+      magnus skill list -s "coding"
+      magnus skill list -f json
+    """
+    try:
+        result = api_list_skills(limit=limit, search=search)
+        items = result.get("items", [])
+        total = result.get("total", 0)
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data({"total": total, "items": items}, fmt)
+            return
+
+        if not items:
+            print_msg("No skills found.")
+            return
+
+        table = Table(title=f"Skills ({len(items)}/{total})", show_header=True, header_style="bold")
+        table.add_column("ID", max_width=25)
+        table.add_column("Title", max_width=30)
+        table.add_column("Creator", width=15)
+        table.add_column("Files", width=5)
+        table.add_column("Updated", width=12)
+
+        for sk in items:
+            user = sk.get("user") or {}
+            files = sk.get("files") or []
+            table.add_row(
+                sk.get("id", "")[:25],
+                (sk.get("title") or "-")[:30],
+                (user.get("name") or "-")[:15],
+                str(len(files)),
+                _format_time(sk.get("updated_at")),
+            )
+
+        console.print(table)
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@skill_app.command(name="get")
+def skill_get_cmd(
+    skill_id: str = typer.Argument(..., help="Skill ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
+    export_dir: Optional[Path] = typer.Option(None, "--export", "-e", help="Export files to a local directory"),
+):
+    """
+    Show skill details and files.
+
+    Displays the skill's title, description, creator, and file listing with
+    sizes. Use -e to export all files to a local directory for editing.
+
+    Examples:
+      magnus skill get my-skill
+      magnus skill get my-skill -e ./my_skill/
+      magnus skill get my-skill -f yaml
+    """
+    try:
+        sk = api_get_skill(skill_id)
+
+        if export_dir is not None:
+            export_dir.mkdir(parents=True, exist_ok=True)
+            resolved_root = export_dir.resolve()
+            files = sk.get("files") or []
+            written = 0
+            for f in files:
+                fp = (export_dir / f["path"]).resolve()
+                if not fp.is_relative_to(resolved_root):
+                    print_error(f"Skipping suspicious path: {f['path']}")
+                    continue
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                fp.write_text(f["content"], encoding="utf-8")
+                written += 1
+            print_msg(f"Exported {written} file(s) to [cyan]{export_dir}[/cyan]")
+            return
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data(sk, fmt)
+            return
+
+        user = sk.get("user") or {}
+        files = sk.get("files") or []
+        console.print()
+        console.rule(f"[bold]Skill: {sk.get('id', 'N/A')}[/bold]")
+        console.print(f"  [bold]Title:[/bold]       {sk.get('title', '-')}")
+        console.print(f"  [bold]Description:[/bold] {sk.get('description', '-')}")
+        console.print(f"  [bold]Creator:[/bold]     {user.get('name', '-')}")
+        console.print(f"  [bold]Updated:[/bold]     {_format_time(sk.get('updated_at'))}")
+        console.print()
+        console.rule("[bold cyan]Files[/bold cyan]")
+        for f in files:
+            size = len(f.get("content", "").encode("utf-8"))
+            if size < 1024:
+                size_str = f"{size} B"
+            else:
+                size_str = f"{size / 1024:.1f} KB"
+            console.print(f"  {f['path']}  [dim]({size_str})[/dim]")
+        if not files:
+            console.print("  [dim](no files)[/dim]")
+        console.rule()
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@skill_app.command(name="save")
+def skill_save_cmd(
+    skill_id: str = typer.Argument(..., help="Skill ID"),
+    source: Path = typer.Argument(..., help="Directory or file to upload"),
+    title: str = typer.Option(..., "--title", "-t", help="Skill title"),
+    description: str = typer.Option("", "--description", "--desc", "-d", help="Skill description"),
+):
+    """
+    Create or update a skill from a local directory (upsert).
+
+    Reads all files from SOURCE and uploads them. A SKILL.md file is
+    required — it describes what the skill does and how to use it.
+
+    Total file size is capped at 512 KB. Skills are for knowledge and
+    prompts, not large datasets. Binary files are skipped.
+
+    Examples:
+      magnus skill save my-skill ./my_skill/ -t "My Skill"
+      magnus skill save my-skill ./my_skill/ -t "Updated" -d "New desc"
+      magnus skill save my-skill SKILL.md -t "Minimal Skill"
+    """
+    if not source.exists():
+        print_error(f"Source not found: {source}")
+        raise typer.Exit(code=1)
+
+    files = _collect_skill_files(source)
+    if not files:
+        print_error("No files found in source.")
+        raise typer.Exit(code=1)
+
+    has_skill_md = any(f["path"] == "SKILL.md" for f in files)
+    if not has_skill_md:
+        print_error("SKILL.md is required. Create a SKILL.md file describing your skill.")
+        raise typer.Exit(code=1)
+
+    try:
+        result = api_save_skill(
+            skill_id=skill_id,
+            title=title,
+            description=description,
+            files=files,
+        )
+        print_msg(
+            f"Skill [bold cyan]{result.get('id', skill_id)}[/bold cyan] saved "
+            f"({len(files)} file(s))."
+        )
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@skill_app.command(name="delete")
+def skill_delete_cmd(
+    skill_id: str = typer.Argument(..., help="Skill ID"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """
+    Delete a skill.
+
+    Asks for confirmation unless --force is given. This action is
+    irreversible.
+
+    Examples:
+      magnus skill delete my-skill
+      magnus skill delete my-skill -f
+    """
+    try:
+        if not force:
+            confirm = typer.confirm(f"Delete skill {skill_id}?")
+            if not confirm:
+                print_msg("Cancelled.")
+                return
+
+        api_delete_skill(skill_id)
+        print_msg(f"Skill [bold]{skill_id}[/bold] deleted.")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+# Top-level shortcut: magnus skills
+@app.command(name="skills")
+def list_skills_cmd(
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of skills to fetch"),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by title or ID"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """
+    List available skills.
+
+    Shortcut for 'magnus skill list'. For the full set of skill operations,
+    see 'magnus skill -h'.
+
+    Examples:
+      magnus skills
+      magnus skills -l 20
+      magnus skills -s "coding"
+    """
+    skill_list_cmd(limit=limit, search=search, format=format)
+
+
+# =============================================================================
+# Image sub-commands: magnus image <verb>
+# =============================================================================
+
+
+def _format_size(size_bytes: int) -> str:
+    if size_bytes <= 0:
+        return "-"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.0f} KB"
+    if size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+IMAGE_STATUS_COLORS = {
+    "cached": "green",
+    "pulling": "cyan",
+    "refreshing": "yellow",
+    "unregistered": "dim",
+    "missing": "red",
+}
+
+
+@image_app.command(name="list")
+def image_list_cmd(
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Filter by URI"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
+):
+    """
+    List cached container images.
+
+    Shows all images in the cluster cache, including their URI, owner,
+    size, and status. Unregistered images (present on disk but not in DB)
+    are also shown.
+
+    Examples:
+      magnus image list
+      magnus image list -s pytorch
+      magnus image list -f json
+    """
+    try:
+        result = api_list_images(search=search)
+        items = result.get("items", [])
+        total = result.get("total", 0)
+
+        fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
+
+        if fmt in ("yaml", "json"):
+            _output_data({"total": total, "items": items}, fmt)
+            return
+
+        if not items:
+            print_msg("No cached images found.")
+            return
+
+        table = Table(title=f"Images ({len(items)}/{total})", show_header=True, header_style="bold")
+        table.add_column("ID", width=5)
+        table.add_column("URI", max_width=55)
+        table.add_column("Owner", width=12)
+        table.add_column("Size", width=10)
+        table.add_column("Status", width=14)
+        table.add_column("Updated", width=12)
+
+        for img in items:
+            status = img.get("status", "unknown")
+            status_color = IMAGE_STATUS_COLORS.get(status, "white")
+            user = img.get("user") or {}
+            img_id = img.get("id")
+            id_str = str(img_id) if img_id is not None else "-"
+
+            table.add_row(
+                id_str,
+                (img.get("uri") or "-")[:55],
+                (user.get("name") or "-")[:12],
+                _format_size(img.get("size_bytes", 0)),
+                f"[{status_color}]{status}[/{status_color}]",
+                _format_time(img.get("updated_at")),
+            )
+
+        console.print(table)
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@image_app.command(name="pull")
+def image_pull_cmd(
+    uri: str = typer.Argument(..., help="Container image URI (e.g. docker://pytorch/pytorch:latest)"),
+):
+    """
+    Pull a new container image into the cluster cache.
+
+    Registers the image in the database and triggers a pull. This can
+    take several minutes for large images.
+
+    Examples:
+      magnus image pull docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+      magnus image pull docker://nvcr.io/nvidia/pytorch:24.01-py3
+    """
+    try:
+        result = api_pull_image(uri=uri, timeout=30.0)
+        img_id = result.get("id")
+        print_msg(f"Pull started. Image ID: [green]{img_id}[/green]")
+        print_msg("Track progress: [bold]magnus image list[/bold]")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@image_app.command(name="refresh")
+def image_refresh_cmd(
+    image_id: int = typer.Argument(..., help="Image ID (from 'magnus image list')"),
+):
+    """
+    Re-pull a cached image to update it.
+
+    Re-pulls to a temp file and atomically replaces the old one, so the
+    existing image stays available during the refresh. Use this when
+    you've pushed a new version to an existing tag.
+
+    Examples:
+      magnus image refresh 3
+    """
+    try:
+        result = api_refresh_image(image_id=image_id, timeout=30.0)
+        print_msg(f"Refresh started for image [bold cyan]{image_id}[/bold cyan].")
+        print_msg("Track progress: [bold]magnus image list[/bold]")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@image_app.command(name="remove")
+def image_remove_cmd(
+    image_id: int = typer.Argument(..., help="Image ID (from 'magnus image list')"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """
+    Remove a cached container image.
+
+    Deletes both the SIF file and the database record. Only the image
+    owner or an admin can remove an image.
+
+    Examples:
+      magnus image remove 3
+      magnus image remove 3 -f
+    """
+    try:
+        if not force:
+            confirm = typer.confirm(f"Remove cached image {image_id}?")
+            if not confirm:
+                print_msg("Cancelled.")
+                return
+
+        api_remove_image(image_id=image_id)
+        print_msg(f"Image [bold]{image_id}[/bold] removed.")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+# Top-level shortcut: magnus refresh <image_id>
+@app.command(name="refresh")
+def refresh_cmd(
+    image_id: int = typer.Argument(..., help="Image ID to refresh (from 'magnus image list')"),
+):
+    """
+    Re-pull a cached image (shortcut for 'magnus image refresh').
+
+    Examples:
+      magnus refresh 3
+    """
+    image_refresh_cmd(image_id=image_id)
 
 
 if __name__ == "__main__":

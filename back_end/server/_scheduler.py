@@ -13,6 +13,7 @@ from .models import *
 from ._slurm_manager import SlurmManager
 from ._magnus_config import magnus_config
 from ._resource_manager import resource_manager
+from ._resource_manager import _image_to_sif_filename
 
 
 __all__ = [
@@ -30,6 +31,29 @@ guarantee_file_exist(magnus_uv_cache_path, is_directory=True)
 
 
 logger = logging.getLogger(__name__)
+
+
+def _register_image_if_needed(db: Session, image_uri: str, user_id: str) -> None:
+    """Job 拉取镜像后，自动注册到 cached_images（首次拉取者成为 owner）。"""
+    existing = db.query(CachedImage).filter(CachedImage.uri == image_uri).first()
+    if existing:
+        return
+    sif_path = os.path.join(magnus_container_cache_path, _image_to_sif_filename(image_uri))
+    try:
+        size = os.stat(sif_path).st_size
+    except OSError:
+        size = 0
+    db.add(CachedImage(
+        uri=image_uri,
+        filename=_image_to_sif_filename(image_uri),
+        user_id=user_id,
+        status="cached",
+        size_bytes=size,
+    ))
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 class MagnusScheduler:
@@ -281,6 +305,9 @@ class MagnusScheduler:
                 db.commit()
                 logger.error(f"Job {job.id} failed: {image_err}")
                 return
+
+            # 注册镜像到 cached_images（首次拉取者成为 owner）
+            _register_image_if_needed(db, job.container_image, job.user_id)
 
             if not repo_ok:
                 job.status = JobStatus.FAILED

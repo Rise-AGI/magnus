@@ -159,7 +159,7 @@ export default function ExplorePage() {
             <span className="text-zinc-100">{t("explorer.tagline1")}</span>
             <span className="text-blue-500">{t("explorer.tagline2")}</span>
           </h1>
-          <p className="text-zinc-500">Magnus · Explorer</p>
+          <p className="text-zinc-500">Magnus · {t("nav.explorer")}</p>
         </div>
 
         {/* Input */}

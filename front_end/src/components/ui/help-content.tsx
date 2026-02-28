@@ -546,3 +546,45 @@ magnus run <blueprint-id> --data /path/to/file`}</HelpCodeBlock>
     </>
   );
 }
+
+
+// ============================================================================
+// Skill Editor Help
+// ============================================================================
+
+export function SkillEditorHelp() {
+  const { t } = useLanguage();
+
+  return (
+    <>
+      <p>
+        {t("help.skillEditor.intro")}
+      </p>
+
+      <HelpSection title={t("help.skillEditor.structure")}>
+        <HelpFieldList>
+          <HelpField name="SKILL.md" color="text-green-400">
+            {t("help.skillEditor.skillMd")}
+          </HelpField>
+          <HelpField name={t("help.skillEditor.additionalFiles")} color="text-blue-400">
+            {t("help.skillEditor.additionalFilesDesc")}
+          </HelpField>
+        </HelpFieldList>
+      </HelpSection>
+
+      <HelpSection title={t("help.skillEditor.shortcuts")}>
+        <HelpFieldList>
+          <HelpField name="Ctrl+S / Cmd+S" color="text-purple-400">
+            {t("help.skillEditor.saveShortcut")}
+          </HelpField>
+          <HelpField name="Tab / Shift+Tab" color="text-purple-400">
+            {t("help.skillEditor.tabShortcut")}
+          </HelpField>
+          <HelpField name="Ctrl+/ / Cmd+/" color="text-purple-400">
+            {t("help.skillEditor.commentShortcut")}
+          </HelpField>
+        </HelpFieldList>
+      </HelpSection>
+    </>
+  );
+}

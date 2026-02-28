@@ -19,6 +19,9 @@ __all__ = [
     "BlueprintUserPreference",
     "ExplorerSession",
     "ExplorerMessage",
+    "Skill",
+    "SkillFile",
+    "CachedImage",
 ]
 
 
@@ -165,6 +168,44 @@ class BlueprintUserPreference(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
+class Skill(Base):
+    __tablename__ = "skills"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(String)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    user: Mapped["User"] = relationship("User")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    files: Mapped[list["SkillFile"]] = relationship(
+        back_populates="skill",
+        cascade="all, delete-orphan",
+    )
+
+
+class SkillFile(Base):
+    __tablename__ = "skill_files"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    skill_id: Mapped[str] = mapped_column(String, ForeignKey("skills.id"), index=True)
+    skill: Mapped["Skill"] = relationship(back_populates="files")
+    path: Mapped[str] = mapped_column(String)
+    content: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class CachedImage(Base):
+    __tablename__ = "cached_images"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uri: Mapped[str] = mapped_column(String, unique=True)
+    filename: Mapped[str] = mapped_column(String, unique=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    user: Mapped["User"] = relationship("User")
+    status: Mapped[str] = mapped_column(String, default="cached")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
 class ExplorerSession(Base):
     __tablename__ = "explorer_sessions"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_hex_id)
@@ -172,8 +213,8 @@ class ExplorerSession(Base):
     user: Mapped["User"] = relationship("User")
     title: Mapped[str] = mapped_column(String, default="New Session")
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     messages: Mapped[list["ExplorerMessage"]] = relationship(
         back_populates = "session",
         cascade = "all, delete-orphan",
@@ -188,4 +229,4 @@ class ExplorerMessage(Base):
     session: Mapped["ExplorerSession"] = relationship(back_populates="messages")
     role: Mapped[str] = mapped_column(String)
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

@@ -1037,6 +1037,214 @@ class MagnusClient:
     ) -> Dict[str, Any]:
         return await asyncio.to_thread(self.delete_blueprint, blueprint_id, timeout)
 
+    # === Skill Methods ===
+
+    _SKILL_MAX_TOTAL_BYTES = 512 * 1024  # 512 KB
+
+    def _validate_skill_size(self, files: List[Dict[str, str]]) -> None:
+        total = sum(len(f.get("content", "").encode("utf-8")) for f in files)
+        if total > self._SKILL_MAX_TOTAL_BYTES:
+            raise MagnusError(
+                f"Skill total file size ({total:,} bytes) exceeds limit "
+                f"({self._SKILL_MAX_TOTAL_BYTES:,} bytes). "
+                f"Skills are for knowledge & prompts, not large data."
+            )
+
+    def list_skills(
+        self,
+        limit: int = 20,
+        skip: int = 0,
+        search: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"limit": limit, "skip": skip}
+        if search:
+            params["search"] = search
+        try:
+            resp = self.http.get("/skills", params=params, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while listing skills.")
+        except httpx.TransportError as e:
+            raise MagnusError(f"Network error while listing skills: {e}")
+
+    async def list_skills_async(
+        self,
+        limit: int = 20,
+        skip: int = 0,
+        search: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.list_skills, limit, skip, search, timeout)
+
+    def get_skill(
+        self,
+        skill_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = self.http.get(f"/skills/{skill_id}", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting skill.")
+        except httpx.TransportError as e:
+            raise MagnusError(f"Network error while getting skill: {e}")
+
+    async def get_skill_async(
+        self,
+        skill_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.get_skill, skill_id, timeout)
+
+    def save_skill(
+        self,
+        skill_id: str,
+        title: str,
+        description: str,
+        files: List[Dict[str, str]],
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        self._validate_skill_size(files)
+        payload = {
+            "id": skill_id,
+            "title": title,
+            "description": description,
+            "files": files,
+        }
+        try:
+            resp = self.http.post("/skills", json=payload, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while saving skill.")
+        except httpx.TransportError as e:
+            raise MagnusError(f"Network error while saving skill: {e}")
+
+    async def save_skill_async(
+        self,
+        skill_id: str,
+        title: str,
+        description: str,
+        files: List[Dict[str, str]],
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self.save_skill, skill_id, title, description, files, timeout,
+        )
+
+    def delete_skill(
+        self,
+        skill_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = self.http.delete(f"/skills/{skill_id}", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while deleting skill.")
+        except httpx.TransportError as e:
+            raise MagnusError(f"Network error while deleting skill: {e}")
+
+    async def delete_skill_async(
+        self,
+        skill_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.delete_skill, skill_id, timeout)
+
+    # === Image Management ===
+
+    def list_images(
+        self,
+        search: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        if search:
+            params["search"] = search
+        try:
+            resp = self.http.get("/images", params=params, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while listing images.")
+        except httpx.TransportError as e:
+            raise MagnusError(f"Network error while listing images: {e}")
+
+    async def list_images_async(
+        self,
+        search: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.list_images, search, timeout)
+
+    def pull_image(
+        self,
+        uri: str,
+        timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = self.http.post("/images", json={"uri": uri}, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while submitting image pull.")
+        except httpx.TransportError as e:
+            raise MagnusError(f"Network error while pulling image: {e}")
+
+    async def pull_image_async(
+        self,
+        uri: str,
+        timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.pull_image, uri, timeout)
+
+    def refresh_image(
+        self,
+        image_id: int,
+        timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = self.http.post(f"/images/{image_id}/refresh", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while submitting image refresh.")
+        except httpx.TransportError as e:
+            raise MagnusError(f"Network error while refreshing image: {e}")
+
+    async def refresh_image_async(
+        self,
+        image_id: int,
+        timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.refresh_image, image_id, timeout)
+
+    def remove_image(
+        self,
+        image_id: int,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            resp = self.http.delete(f"/images/{image_id}", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while removing image.")
+        except httpx.TransportError as e:
+            raise MagnusError(f"Network error while removing image: {e}")
+
+    async def remove_image_async(
+        self,
+        image_id: int,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.remove_image, image_id, timeout)
+
     def list_services(
         self,
         limit: int = 20,

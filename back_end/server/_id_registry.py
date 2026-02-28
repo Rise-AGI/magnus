@@ -9,7 +9,7 @@ from . import models
 PUBLISHABLE_MODELS: List[Tuple[Type, str]] = [
     (models.Blueprint, "blueprint"),
     (models.Service, "service"),
-    # 未来: (models.Skill, "skill"),
+    (models.Skill, "skill"),
 ]
 
 

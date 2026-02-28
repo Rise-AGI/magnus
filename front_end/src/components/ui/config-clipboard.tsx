@@ -7,7 +7,7 @@ import { CopyableText } from "./copyable-text";
 import yaml from "js-yaml";
 
 interface ConfigClipboardProps {
-  kind: "magnus/service" | "magnus/job" | "magnus/blueprint";
+  kind: "magnus/service" | "magnus/job" | "magnus/blueprint" | "magnus/skill";
   onGetPayload: () => any;
   onApplyPayload: (payload: any) => void;
 }

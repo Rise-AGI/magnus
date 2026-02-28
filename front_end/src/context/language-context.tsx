@@ -29,6 +29,18 @@ const translations = {
   "common.operationFailed": { zh: "操作失败", en: "Operation Failed" },
   "common.typeToConfirm": { zh: "请输入 {v} 以确认", en: "Type {v} to confirm" },
   "common.allUsers": { zh: "所有用户", en: "All Users" },
+  "common.wip": { zh: "施工中", en: "Under Construction" },
+
+  // ===== Navigation =====
+  "nav.explorer": { zh: "启新", en: "Explorer" },
+  "nav.people": { zh: "人事", en: "People" },
+  "nav.motions": { zh: "共决", en: "Motions" },
+  "nav.jobs": { zh: "任务", en: "Jobs" },
+  "nav.blueprints": { zh: "蓝图", en: "Blueprints" },
+  "nav.services": { zh: "服务", en: "Services" },
+  "nav.skills": { zh: "技能", en: "Skills" },
+  "nav.images": { zh: "镜像", en: "Images" },
+  "nav.cluster": { zh: "集群", en: "Cluster" },
 
   // ===== Auth =====
   "auth.signInWithFeishu": { zh: "飞书登录", en: "Sign in with Feishu" },
@@ -64,21 +76,11 @@ const translations = {
   "notifications.welcome": { zh: "欢迎使用 Magnus", en: "Welcome to Magnus" },
   "notifications.systemInit": { zh: "系统已初始化。您现在可以提交训练任务。", en: "System initialized. You can now submit training jobs." },
 
-  // ===== Dashboard =====
-  "dashboard.welcome": { zh: "欢迎回来，{name}。这是您的工作负载概览。", en: "Welcome back, {name}. Here is your workload overview." },
-  "dashboard.totalOccupancy24h": { zh: "总占用 (24h)", en: "Total Occupancy (24h)" },
-  "dashboard.allSlurmTasks": { zh: "所有 Slurm 任务", en: "All Slurm Tasks" },
-  "dashboard.totalOccupancy7d": { zh: "总占用 (7d)", en: "Total Occupancy (7d)" },
-  "dashboard.magnusUtil24h": { zh: "Magnus 利用率 (24h)", en: "Magnus Utilization (24h)" },
-  "dashboard.magnusUtil7d": { zh: "Magnus 利用率 (7d)", en: "Magnus Utilization (7d)" },
-  "dashboard.platformManaged": { zh: "平台管理（施工中）", en: "Platform Managed (WIP)" },
-  "dashboard.myActiveJobs": { zh: "我的活跃任务", en: "My Active Jobs" },
-  "dashboard.noActiveJobs": { zh: "暂无活跃任务。", en: "No active jobs." },
-  "dashboard.newJob": { zh: "新建任务", en: "New Job" },
-
   // ===== Cluster =====
-  "cluster.loadingStatus": { zh: "正在加载集群状态...", en: "Loading cluster status..." },
-  "cluster.subtitle": { zh: "实时资源监控与队列状态。", en: "Real-time resource monitoring and queue status." },
+  "cluster.welcome": { zh: "欢迎回来，{name}。这是集群概览。", en: "Welcome back, {name}. Here is your cluster overview." },
+  "cluster.newJob": { zh: "新建任务", en: "New Job" },
+  "cluster.myActiveJobs": { zh: "我的活跃任务", en: "My Active Jobs" },
+  "cluster.noActiveJobs": { zh: "暂无活跃任务。", en: "No active jobs." },
   "cluster.availableGpus": { zh: "可用 GPU", en: "Available GPUs" },
   "cluster.availableCpuMem": { zh: "CPU / 内存", en: "CPUs / Memory" },
   "cluster.cores": { zh: "核心", en: "cores" },
@@ -161,29 +163,30 @@ const translations = {
   "priority.b2.desc": { zh: "可抢占（低）", en: "Preemptible (Low)" },
 
   // ===== Blueprints =====
-  "blueprints.title": { zh: "Blueprints 注册表", en: "Blueprints Registry" },
+  "blueprints.title": { zh: "蓝图注册表", en: "Blueprints Registry" },
   "blueprints.subtitle": { zh: "通过 Python 定义逻辑的标准化任务模板。", en: "Standardized task templates via Python-defined logic." },
-  "blueprints.new": { zh: "新建 Blueprint", en: "New Blueprint" },
-  "blueprints.searchPlaceholder": { zh: "搜索 Blueprints...", en: "Search Blueprints..." },
+  "blueprints.new": { zh: "新建蓝图", en: "New Blueprint" },
+  "blueprints.searchPlaceholder": { zh: "搜索蓝图...", en: "Search Blueprints..." },
   "blueprints.filterByUser": { zh: "按用户筛选", en: "Filter by User" },
-  "blueprints.deleteTitle": { zh: "删除 Blueprint", en: "Delete Blueprint" },
-  "blueprints.deleteConfirm": { zh: "确定要删除 Blueprint {title} 吗？", en: "Are you sure you want to delete blueprint {title}?" },
-  "blueprints.noFound": { zh: "未找到 Blueprints。", en: "No blueprints found." },
-  "blueprints.fetching": { zh: "正在获取 Blueprints...", en: "Fetching blueprints..." },
+  "blueprints.deleteTitle": { zh: "删除蓝图", en: "Delete Blueprint" },
+  "blueprints.deleteConfirm": { zh: "确定要删除蓝图「{title}」吗？", en: "Are you sure you want to delete blueprint {title}?" },
+  "blueprints.noFound": { zh: "未找到蓝图。", en: "No blueprints found." },
+  "blueprints.fetching": { zh: "正在获取蓝图...", en: "Fetching blueprints..." },
   "blueprints.clone": { zh: "克隆", en: "Clone" },
   "blueprints.run": { zh: "运行", en: "Run" },
 
   // ===== Blueprints Table =====
   "blueprints.table.blueprint": { zh: "蓝图 / 蓝图 ID", en: "Blueprint / Blueprint ID" },
-  "blueprintEditor.nameRequired": { zh: "Blueprint 名称是必填的", en: "Blueprint Name is required" },
-  "blueprintEditor.idRequired": { zh: "Blueprint ID 是必填的", en: "Blueprint ID is required" },
+  "blueprintEditor.nameRequired": { zh: "蓝图名称是必填的", en: "Blueprint Name is required" },
+  "blueprintEditor.idRequired": { zh: "蓝图 ID 是必填的", en: "Blueprint ID is required" },
+  "blueprintEditor.descriptionRequired": { zh: "蓝图描述是必填的", en: "Description is required" },
   "blueprints.table.description": { zh: "描述", en: "Description" },
   "blueprints.table.author": { zh: "作者 / 更新时间", en: "Author / Updated at" },
 
   // ===== Services =====
-  "services.title": { zh: "Service 注册表", en: "Service Registry" },
+  "services.title": { zh: "服务注册表", en: "Service Registry" },
   "services.subtitle": { zh: "管理持久端点和弹性驱动。", en: "Manage persistent endpoints and elastic drivers." },
-  "services.new": { zh: "新建 Service", en: "New Service" },
+  "services.new": { zh: "新建服务", en: "New Service" },
   "services.searchPlaceholder": { zh: "按服务名称或 ID 搜索...", en: "Search by Service Name or ID..." },
   "services.filterByOwner": { zh: "按所有者筛选", en: "Filter by Owner" },
   "services.sortLastActive": { zh: "排序：最后活跃", en: "Sort: Last Active" },
@@ -192,13 +195,13 @@ const translations = {
   "services.sortConfig": { zh: "配置", en: "Config" },
   "services.activeOnly": { zh: "仅活跃", en: "Active Only" },
   "services.activeOnlyTitle": { zh: "仅显示活跃服务", en: "Show active services only" },
-  "services.deleteTitle": { zh: "删除 Service", en: "Delete Service" },
+  "services.deleteTitle": { zh: "删除服务", en: "Delete Service" },
   "services.deleteConfirm": { zh: "确定要删除服务 {name} 吗？", en: "Are you sure you want to delete service {name}?" },
   "services.deleteWarning": { zh: "此操作不可撤销，将终止所有运行中的实例。", en: "This action cannot be undone and will terminate any running instances." },
-  "services.stopTitle": { zh: "停止 Service", en: "Stop Service" },
+  "services.stopTitle": { zh: "停止服务", en: "Stop Service" },
   "services.stopConfirm": { zh: "确定要停止 {name} 吗？", en: "Are you sure you want to stop {name}?" },
   "services.stopWarning": { zh: "代理端点将停止接受流量。", en: "The proxy endpoint will stop accepting traffic." },
-  "services.startTitle": { zh: "启动 Service", en: "Start Service" },
+  "services.startTitle": { zh: "启动服务", en: "Start Service" },
   "services.startConfirm": { zh: "确定要激活 {name} 吗？", en: "Are you sure you want to activate {name}?" },
   "services.startWarning": { zh: "这将启用流量路由并按需扩展资源。", en: "This will enable traffic routing and scale up resources on demand." },
   "services.noFound": { zh: "未找到服务。", en: "No services found." },
@@ -262,7 +265,7 @@ const translations = {
   "explorer.confirmDelete": { zh: "确认删除", en: "Confirm Delete" },
   "explorer.notFound": { zh: "会话不存在", en: "Session Not Found" },
   "explorer.notFoundDesc": { zh: "该会话不存在或已被删除。", en: "This session does not exist or has been deleted." },
-  "explorer.returnToExplorer": { zh: "返回 Explorer", en: "Return to Explorer" },
+  "explorer.returnToExplorer": { zh: "返回启新", en: "Return to Explorer" },
 
   // ===== Pagination =====
   "pagination.showing": { zh: "显示", en: "Showing" },
@@ -280,47 +283,47 @@ const translations = {
   "validation.serviceIdInvalid": { zh: "服务 ID 只能包含小写字母、数字和连字符", en: "Service ID can only contain lowercase letters, numbers, and hyphens" },
 
   // ===== Blueprint Editor =====
-  "blueprintEditor.create": { zh: "创建 Blueprint", en: "Create Blueprint" },
-  "blueprintEditor.cloneUpdate": { zh: "克隆 / 更新 Blueprint", en: "Clone / Update Blueprint" },
+  "blueprintEditor.create": { zh: "创建蓝图", en: "Create Blueprint" },
+  "blueprintEditor.cloneUpdate": { zh: "克隆 / 更新蓝图", en: "Clone / Update Blueprint" },
   "blueprintEditor.help": { zh: "蓝图编辑帮助", en: "Blueprint Editor Help" },
   "blueprintEditor.basicInfo": { zh: "基本信息", en: "Basic Information" },
-  "blueprintEditor.name": { zh: "Blueprint 名称", en: "Blueprint Name" },
-  "blueprintEditor.id": { zh: "Blueprint ID", en: "Blueprint ID" },
+  "blueprintEditor.name": { zh: "蓝图名称", en: "Blueprint Name" },
+  "blueprintEditor.id": { zh: "蓝图 ID", en: "Blueprint ID" },
   "blueprintEditor.idHint": { zh: "唯一标识符（URL 安全）。", en: "Unique identifier (URL safe)." },
   "blueprintEditor.implementation": { zh: "实现逻辑", en: "Implementation" },
   "blueprintEditor.pythonLogic": { zh: "Python 逻辑", en: "Python Logic" },
-  "blueprintEditor.updating": { zh: "正在更新现有 Blueprint。", en: "Updating existing blueprint." },
+  "blueprintEditor.updating": { zh: "正在更新现有蓝图。", en: "Updating existing blueprint." },
   "blueprintEditor.saved": { zh: "已保存", en: "Saved" },
-  "blueprintEditor.creating": { zh: "正在创建新 Blueprint 定义。", en: "Creating new blueprint definition." },
-  "blueprintEditor.updateBtn": { zh: "更新 Blueprint", en: "Update Blueprint" },
-  "blueprintEditor.createBtn": { zh: "创建 Blueprint", en: "Create Blueprint" },
-  "blueprintEditor.cloneBtn": { zh: "克隆 Blueprint", en: "Clone Blueprint" },
+  "blueprintEditor.creating": { zh: "正在创建新蓝图定义。", en: "Creating new blueprint definition." },
+  "blueprintEditor.updateBtn": { zh: "更新蓝图", en: "Update Blueprint" },
+  "blueprintEditor.createBtn": { zh: "创建蓝图", en: "Create Blueprint" },
+  "blueprintEditor.cloneBtn": { zh: "克隆蓝图", en: "Clone Blueprint" },
 
   // ===== Blueprint Runner =====
   "blueprintRunner.help": { zh: "蓝图运行帮助", en: "Blueprint Runner Help" },
   "blueprintRunner.launching": { zh: "启动中...", en: "Launching..." },
   "blueprintRunner.launch": { zh: "启动", en: "Launch" },
-  "blueprintRunner.loadFailed": { zh: "加载 Blueprint 失败", en: "Failed to load blueprint" },
+  "blueprintRunner.loadFailed": { zh: "加载蓝图失败", en: "Failed to load blueprint" },
 
   // ===== Blueprint Detail Page =====
-  "blueprintDetail.backTo": { zh: "返回 Blueprints", en: "Back to Blueprints" },
-  "blueprintDetail.notFound": { zh: "Blueprint 未找到", en: "Blueprint Not Found" },
-  "blueprintDetail.notFoundDesc": { zh: "在注册表中未找到 Blueprint 定义 {id}。它可能已被删除或 ID 不正确。", en: "The blueprint definition {id} could not be located in the registry. It may have been deleted or the ID is incorrect." },
+  "blueprintDetail.backTo": { zh: "← 返回蓝图", en: "← Back to Blueprints" },
+  "blueprintDetail.notFound": { zh: "蓝图未找到", en: "Blueprint Not Found" },
+  "blueprintDetail.notFoundDesc": { zh: "在注册表中未找到蓝图「{id}」。它可能已被删除或 ID 不正确。", en: "The blueprint definition {id} could not be located in the registry. It may have been deleted or the ID is incorrect." },
   "blueprintDetail.returnToRegistry": { zh: "返回注册表", en: "Return to Registry" },
   "blueprintDetail.author": { zh: "作者", en: "Author" },
-  "blueprintDetail.editClone": { zh: "编辑 / 克隆 Blueprint", en: "Edit / Clone Blueprint" },
-  "blueprintDetail.runBlueprint": { zh: "运行 Blueprint", en: "Run Blueprint" },
-  "blueprintDetail.deleteBlueprint": { zh: "删除 Blueprint", en: "Delete Blueprint" },
+  "blueprintDetail.editClone": { zh: "编辑 / 克隆蓝图", en: "Edit / Clone Blueprint" },
+  "blueprintDetail.runBlueprint": { zh: "运行蓝图", en: "Run Blueprint" },
+  "blueprintDetail.deleteBlueprint": { zh: "删除蓝图", en: "Delete Blueprint" },
   "blueprintDetail.description": { zh: "描述", en: "Description" },
   "blueprintDetail.copyDescription": { zh: "复制描述", en: "Copy Description" },
   "blueprintDetail.implementationLogic": { zh: "实现逻辑", en: "Implementation Logic" },
   "blueprintDetail.copyCode": { zh: "复制代码", en: "Copy Code" },
   "blueprintDetail.configuration": { zh: "配置", en: "Configuration" },
   "blueprintDetail.configureParams": { zh: "配置参数以实例化此任务。", en: "Configure parameters to instantiate this task." },
-  "blueprintDetail.deleteConfirmDesc": { zh: "确定要删除 Blueprint {title} 吗？此操作不可撤销。", en: "Are you sure you want to delete blueprint {title}? This action cannot be undone." },
+  "blueprintDetail.deleteConfirmDesc": { zh: "确定要删除蓝图「{title}」吗？此操作不可撤销。", en: "Are you sure you want to delete blueprint {title}? This action cannot be undone." },
 
   // ===== Job Detail Page =====
-  "jobDetail.backTo": { zh: "返回 Jobs", en: "Back to Jobs" },
+  "jobDetail.backTo": { zh: "返回任务", en: "Back to Jobs" },
   "jobDetail.cloneJob": { zh: "克隆此任务", en: "Clone this job" },
   "jobDetail.terminateTask": { zh: "终止任务", en: "Terminate Task" },
   "jobDetail.openRepoGithub": { zh: "在 GitHub 中打开仓库", en: "Open Repository in GitHub" },
@@ -335,11 +338,11 @@ const translations = {
   "jobDetail.lastPageFollow": { zh: "最后一页（双击跟随）", en: "Last Page (Double-click to follow)" },
 
   // ===== Service Detail Page =====
-  "serviceDetail.backTo": { zh: "返回 Services", en: "Back to Services" },
-  "serviceDetail.editClone": { zh: "编辑 / 克隆 Service", en: "Edit / Clone Service" },
-  "serviceDetail.stopService": { zh: "停止 Service", en: "Stop Service" },
-  "serviceDetail.startService": { zh: "启动 Service", en: "Start Service" },
-  "serviceDetail.deleteService": { zh: "删除 Service", en: "Delete Service" },
+  "serviceDetail.backTo": { zh: "返回服务", en: "Back to Services" },
+  "serviceDetail.editClone": { zh: "编辑 / 克隆服务", en: "Edit / Clone Service" },
+  "serviceDetail.stopService": { zh: "停止服务", en: "Stop Service" },
+  "serviceDetail.startService": { zh: "启动服务", en: "Start Service" },
+  "serviceDetail.deleteService": { zh: "删除服务", en: "Delete Service" },
   "serviceDetail.copyDescription": { zh: "复制描述", en: "Copy Description" },
   "serviceDetail.openRepoGithub": { zh: "在 GitHub 中打开仓库", en: "Open Repository in GitHub" },
   "serviceDetail.viewBranchTree": { zh: "查看分支树", en: "View Branch Tree" },
@@ -368,11 +371,10 @@ const translations = {
   "explorer.send": { zh: "发送", en: "Send" },
 
   // ===== Job Detail - Navigation =====
-  "jobDetail.backToService": { zh: "返回 Service", en: "Back to Service" },
-  "jobDetail.backToServices": { zh: "返回 Services", en: "Back to Services" },
-  "jobDetail.backToCluster": { zh: "返回 Cluster", en: "Back to Cluster" },
-  "jobDetail.backToDashboard": { zh: "返回 Dashboard", en: "Back to Dashboard" },
-  "jobDetail.backToJobs": { zh: "返回 Jobs", en: "Back to Jobs" },
+  "jobDetail.backToService": { zh: "返回服务", en: "Back to Service" },
+  "jobDetail.backToServices": { zh: "返回服务", en: "Back to Services" },
+  "jobDetail.backToCluster": { zh: "返回集群", en: "Back to Cluster" },
+  "jobDetail.backToJobs": { zh: "返回任务", en: "Back to Jobs" },
 
   // ===== Job Detail - States =====
   "jobDetail.loading": { zh: "正在加载任务上下文...", en: "Loading Job Context..." },
@@ -438,9 +440,9 @@ const translations = {
   "jobDetail.underConstruction": { zh: "施工中...", en: "Under construction..." },
 
   // ===== Service Detail - Not Found =====
-  "serviceDetail.notFound": { zh: "Service 未找到", en: "Service Not Found" },
+  "serviceDetail.notFound": { zh: "服务未找到", en: "Service Not Found" },
   "serviceDetail.notFoundDesc": { zh: "在注册表中未找到服务 {id}。它可能已被删除或 ID 不正确。", en: "The service {id} could not be located in the registry. It may have been deleted or the ID is incorrect." },
-  "serviceDetail.returnToServices": { zh: "返回 Services", en: "Return to Services" },
+  "serviceDetail.returnToServices": { zh: "返回服务", en: "Return to Services" },
 
   // ===== Service Detail - Status =====
   "serviceDetail.status": { zh: "状态", en: "Status" },
@@ -477,15 +479,15 @@ const translations = {
   "serviceDetail.entryCommand": { zh: "入口指令", en: "Entry Command" },
 
   // ===== Service Detail - Dialogs =====
-  "serviceDetail.deleteTitle": { zh: "删除 Service", en: "Delete Service" },
+  "serviceDetail.deleteTitle": { zh: "删除服务", en: "Delete Service" },
   "serviceDetail.deleteDesc": { zh: "确定要删除服务 {name} 吗？此操作不可撤销，将终止所有运行中的实例。", en: "Are you sure you want to delete service {name}? This action cannot be undone and will terminate any running instances." },
-  "serviceDetail.deleteConfirm": { zh: "删除 Service", en: "Delete Service" },
-  "serviceDetail.stopTitle": { zh: "停止 Service", en: "Stop Service" },
+  "serviceDetail.deleteConfirm": { zh: "删除服务", en: "Delete Service" },
+  "serviceDetail.stopTitle": { zh: "停止服务", en: "Stop Service" },
   "serviceDetail.stopDesc": { zh: "确定要停止 {name} 吗？代理端点将停止接受流量。", en: "Are you sure you want to stop {name}? The proxy endpoint will stop accepting traffic." },
-  "serviceDetail.stopConfirm": { zh: "停止 Service", en: "Stop Service" },
-  "serviceDetail.startTitle": { zh: "启动 Service", en: "Start Service" },
+  "serviceDetail.stopConfirm": { zh: "停止服务", en: "Stop Service" },
+  "serviceDetail.startTitle": { zh: "启动服务", en: "Start Service" },
   "serviceDetail.startDesc": { zh: "确定要激活 {name} 吗？这将启用流量路由并按需扩展资源。", en: "Are you sure you want to activate {name}? This will enable traffic routing and scale up resources on demand." },
-  "serviceDetail.startConfirm": { zh: "启动 Service", en: "Start Service" },
+  "serviceDetail.startConfirm": { zh: "启动服务", en: "Start Service" },
 
   // ===== Job Form Help =====
   "help.jobForm.intro": {
@@ -821,13 +823,132 @@ def blueprint(
     en: "System validates parameters, calls blueprint function to execute submit_job"
   },
   "help.blueprintRunner.flow4": {
-    zh: "任务提交成功后自动跳转到 Jobs 页面",
+    zh: "任务提交成功后自动跳转到任务页面",
     en: "Auto-redirects to Jobs page after successful submission"
   },
   "help.blueprintRunner.flow5": {
-    zh: "在 Jobs 页面可查看任务状态、日志和结果",
+    zh: "在任务页面可查看任务状态、日志和结果",
     en: "View task status, logs, and results on the Jobs page"
   },
+
+  // ===== Skill Editor Help =====
+  "help.skillEditor.intro": { zh: "技能是可复用的领域知识模块，由描述文件和代码文件组成。", en: "Skills are reusable domain knowledge modules composed of description and code files." },
+  "help.skillEditor.structure": { zh: "文件结构", en: "File Structure" },
+  "help.skillEditor.skillMd": { zh: "必需。描述技能的用途和使用场景。", en: "Required. Describes the skill's purpose and usage." },
+  "help.skillEditor.additionalFiles": { zh: "附加文件", en: "Additional files" },
+  "help.skillEditor.additionalFilesDesc": { zh: "代码、配置等支撑文件，支持语法高亮。", en: "Code, configs, and other supporting files with syntax highlighting." },
+  "help.skillEditor.shortcuts": { zh: "快捷键", en: "Keyboard Shortcuts" },
+  "help.skillEditor.saveShortcut": { zh: "保存但不关闭编辑器", en: "Save without closing the editor" },
+  "help.skillEditor.tabShortcut": { zh: "增加 / 减少缩进（4空格）", en: "Indent / Dedent (4 spaces)" },
+  "help.skillEditor.commentShortcut": { zh: "切换注释", en: "Toggle comment" },
+
+  "skillEditor.help": { zh: "技能编辑器帮助", en: "Skill Editor Help" },
+
+  // ===== Skills =====
+  "skills.subtitle": { zh: "领域知识模块", en: "Domain knowledge modules for AI agents" },
+  "skills.new": { zh: "新建技能", en: "New Skill" },
+  "skills.searchPlaceholder": { zh: "搜索技能...", en: "Search skills..." },
+  "skills.filterByUser": { zh: "按用户筛选", en: "Filter by user" },
+  "skills.fetching": { zh: "正在加载技能...", en: "Loading skills..." },
+  "skills.noFound": { zh: "暂无技能", en: "No skills found" },
+  "skills.clone": { zh: "克隆", en: "Clone" },
+  "skills.deleteTitle": { zh: "删除技能", en: "Delete Skill" },
+  "skills.deleteConfirm": {
+    zh: "确定要删除技能「{title}」吗？此操作不可撤销。",
+    en: "Are you sure you want to delete skill \"{title}\"? This action cannot be undone."
+  },
+  "skills.table.skill": { zh: "技能", en: "Skill" },
+  "skills.table.description": { zh: "描述", en: "Description" },
+  "skills.table.author": { zh: "作者", en: "Author" },
+  "skills.table.files": { zh: "文件", en: "Files" },
+
+  // Skills Detail
+  "skillDetail.backTo": { zh: "← 返回技能", en: "← Back to Skills" },
+  "skillDetail.notFound": { zh: "技能不存在", en: "Skill Not Found" },
+  "skillDetail.notFoundDesc": {
+    zh: "找不到 ID 为「{id}」的技能。",
+    en: "Could not find a skill with ID \"{id}\"."
+  },
+  "skillDetail.returnToRegistry": { zh: "返回技能列表", en: "Return to Skills" },
+  "skillDetail.author": { zh: "作者", en: "AUTHOR" },
+  "skillDetail.description": { zh: "描述", en: "Description" },
+  "skillDetail.files": { zh: "文件", en: "Files" },
+  "skillDetail.noFiles": { zh: "暂无文件", en: "No files" },
+  "skillDetail.deleteSkill": { zh: "删除技能", en: "Delete Skill" },
+  "skillDetail.deleteConfirmDesc": {
+    zh: "此操作将永久删除技能「{title}」及其所有文件。",
+    en: "This will permanently delete skill \"{title}\" and all its files."
+  },
+  "skillDetail.editClone": { zh: "编辑 / 克隆", en: "Edit / Clone" },
+
+  // Skills Editor
+  "skillEditor.create": { zh: "新建技能", en: "Create Skill" },
+  "skillEditor.cloneUpdate": { zh: "编辑 / 克隆技能", en: "Edit / Clone Skill" },
+  "skillEditor.basicInfo": { zh: "基本信息", en: "Basic Info" },
+  "skillEditor.name": { zh: "名称", en: "Name" },
+  "skillEditor.nameRequired": { zh: "名称不能为空", en: "Name is required" },
+  "skillEditor.id": { zh: "ID", en: "ID" },
+  "skillEditor.idRequired": { zh: "ID 不能为空", en: "ID is required" },
+  "skillEditor.idHint": { zh: "唯一标识符，创建后慎改", en: "Unique identifier, be careful changing after creation" },
+  "skillEditor.descriptionRequired": { zh: "描述不能为空", en: "Description is required" },
+  "skillEditor.filesSection": { zh: "文件", en: "Files" },
+  "skillEditor.addFile": { zh: "添加文件", en: "Add File" },
+  "skillEditor.fileName": { zh: "文件名", en: "Filename" },
+  "skillEditor.fileContent": { zh: "内容", en: "Content" },
+  "skillEditor.skillMdRequired": { zh: "SKILL.md 为必选文件", en: "SKILL.md is required" },
+  "skillEditor.saved": { zh: "已保存", en: "Saved" },
+  "skillEditor.updating": { zh: "将更新现有技能", en: "Will update existing skill" },
+  "skillEditor.creating": { zh: "将创建新技能", en: "Will create new skill" },
+  "skillEditor.updateBtn": { zh: "更新", en: "Update" },
+  "skillEditor.createBtn": { zh: "创建", en: "Create" },
+  "skillEditor.cloneBtn": { zh: "克隆创建", en: "Clone" },
+  "skillEditor.filePathEmpty": { zh: "文件路径不能为空", en: "File path cannot be empty" },
+  "skillEditor.filePathUntitled": { zh: "(未命名)", en: "(untitled)" },
+  "skillEditor.filePathDuplicate": { zh: "文件路径重复: {v}", en: "Duplicate file path: {v}" },
+
+  // ===== Editor Common =====
+  "editor.unsavedChanges": { zh: "有未保存的更改，确定要关闭吗？", en: "Discard unsaved changes?" },
+  "editor.saveFailed": { zh: "保存失败", en: "Save failed" },
+
+  // ===== Images =====
+  "images.subtitle": { zh: "集群容器镜像缓存", en: "Cluster container image cache" },
+  "images.preheat": { zh: "预热镜像", en: "Preheat Image" },
+  "images.searchPlaceholder": { zh: "搜索镜像...", en: "Search images..." },
+  "images.fetching": { zh: "正在加载...", en: "Loading..." },
+  "images.noFound": { zh: "暂无缓存镜像", en: "No cached images" },
+  "images.refresh": { zh: "刷新镜像", en: "Refresh Image" },
+  "images.preheatTitle": { zh: "预热镜像", en: "Preheat Image" },
+  "images.preheating": { zh: "预热中...", en: "Preheating..." },
+  "images.deleteTitle": { zh: "删除镜像", en: "Delete Image" },
+  "images.deleteConfirm": {
+    zh: "确定要删除「{uri}」吗？SIF 文件和数据库记录都将被删除。",
+    en: "Delete \"{uri}\"? Both the SIF file and database record will be removed."
+  },
+  "images.uri": { zh: "镜像 URI", en: "Image URI" },
+  "images.uriRequired": { zh: "URI 不能为空", en: "URI is required" },
+  "images.uriHint": { zh: "例如 docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime", en: "e.g. docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime" },
+  "images.table.owner": { zh: "所有者", en: "Owner" },
+  "images.table.size": { zh: "大小", en: "Size" },
+  "images.table.status": { zh: "状态", en: "Status" },
+  "images.status.cached": { zh: "已就绪", en: "Cached" },
+  "images.status.pulling": { zh: "拉取中", en: "Pulling" },
+  "images.status.refreshing": { zh: "刷新中", en: "Refreshing" },
+  "images.status.unregistered": { zh: "未注册", en: "Unregistered" },
+  "images.status.missing": { zh: "文件缺失", en: "Missing" },
+
+  // ===== People =====
+  "people.subtitle": { zh: "团队成员", en: "Team members" },
+  "people.recruit": { zh: "招募人员", en: "Recruit" },
+  "people.recruitTitle": { zh: "招募人员", en: "Recruit Member" },
+  "people.recruitWip": { zh: "功能开发中", en: "Feature under development" },
+  "people.fetching": { zh: "正在加载...", en: "Loading..." },
+  "people.noFound": { zh: "暂无成员", en: "No members found" },
+  "people.searchPlaceholder": { zh: "搜索成员...", en: "Search members..." },
+  "people.table.member": { zh: "成员", en: "Member" },
+  "people.table.email": { zh: "邮箱", en: "Email" },
+  "people.table.role": { zh: "角色", en: "Role" },
+  "people.role.admin": { zh: "管理员", en: "Admin" },
+  "people.role.member": { zh: "成员", en: "Member" },
 } as const;
 
 

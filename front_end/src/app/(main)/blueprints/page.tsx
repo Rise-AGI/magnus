@@ -10,6 +10,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { POLL_INTERVAL } from "@/lib/config";
 import { DEFAULT_CODE_TEMPLATE } from "@/lib/blueprint-defaults";
 import { useLanguage } from "@/context/language-context";
+import { useDebounce } from "@/hooks/use-debounce";
 
 import { User } from "@/types/auth";
 import { Blueprint } from "@/types/blueprint";
@@ -23,7 +24,7 @@ export default function BlueprintsPage() {
   const [blueprints, setBlueprints] = useState<Blueprint[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const debouncedQuery = useDebounce(searchQuery);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [selectedUserId, setSelectedUserId] = useState("");
   
@@ -39,7 +40,6 @@ export default function BlueprintsPage() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<'create' | 'clone'>('create');
   const [editorData, setEditorData] = useState({ id: "", title: "", description: "", code: DEFAULT_CODE_TEMPLATE });
-  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const justCreated = sessionStorage.getItem('magnus_new_blueprint');
@@ -62,7 +62,6 @@ export default function BlueprintsPage() {
       ...allUsers.map(u => ({ label: u.name, value: u.id, meta: u.email || "", icon: u.avatar_url || undefined }))
   ], [allUsers, t]);
 
-  useEffect(() => { const t = setTimeout(() => setDebouncedQuery(searchQuery), 300); return () => clearTimeout(t); }, [searchQuery]);
   useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);
 
   const fetchBlueprints = useCallback(async (isBackground = false) => {
@@ -75,10 +74,10 @@ export default function BlueprintsPage() {
       const res = await client(`/api/blueprints?${params.toString()}`);
       
       // Data Mapping: Backend (snake_case) -> Frontend Interface (camelCase)
-      setBlueprints(res.items.map((b: any) => ({ 
-          ...b, 
-          updatedAt: b.updated_at || b.updatedAt, // Handle backend inconsistency here, not in Type
-          user: b.user || allUsers.find(u => u.id === b.user_id) 
+      setBlueprints(res.items.map((b: any) => ({
+          ...b,
+          updated_at: b.updated_at,
+          user: b.user || allUsers.find(u => u.id === b.user_id)
       })));
       setTotalItems(res.total);
     } catch (e) { console.error(e); } finally { if (!isBackground) setLoading(false); }
@@ -109,15 +108,10 @@ export default function BlueprintsPage() {
   };
   
   const handleSave = async (data: any) => {
-    setIsSaving(true);
-    try {
-      await client("/api/blueprints", { method: "POST", json: data });
-      const main = document.querySelector('main');
-      if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
-      fetchBlueprints();
-    } finally {
-      setIsSaving(false);
-    }
+    await client("/api/blueprints", { method: "POST", json: data });
+    const main = document.querySelector('main');
+    if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+    fetchBlueprints();
   };
 
   return (
@@ -131,7 +125,7 @@ export default function BlueprintsPage() {
 
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">Blueprints</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">{t("nav.blueprints")}</h1>
           <p className="text-zinc-500 text-sm mt-1">{t("blueprints.subtitle")}</p>
         </div>
         <button onClick={() => { setEditorData({ id: "", title: "", description: "", code: DEFAULT_CODE_TEMPLATE }); setEditorMode('create'); setIsEditorOpen(true); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50">
@@ -159,7 +153,7 @@ export default function BlueprintsPage() {
         </div>
       )}
 
-      <BlueprintEditor isOpen={isEditorOpen} mode={editorMode} initialData={editorData} onClose={() => setIsEditorOpen(false)} onSave={handleSave} isSaving={isSaving} />
+      <BlueprintEditor isOpen={isEditorOpen} mode={editorMode} initialData={editorData} onClose={() => setIsEditorOpen(false)} onSave={handleSave} />
       <BlueprintRunner blueprint={selectedBlueprint} onClose={() => setSelectedBlueprint(null)} />
       <ConfirmationDialog isOpen={!!blueprintToDelete} onClose={() => setBlueprintToDelete(null)} onConfirm={handleDelete} title={t("blueprints.deleteTitle")} description={<span>{t("blueprints.deleteConfirm", { title: blueprintToDelete?.title || "" })}</span>} confirmText={t("common.delete")} variant="danger" isLoading={isDeleting} confirmInput={blueprintToDelete?.id} />
       <ConfirmationDialog isOpen={!!errorMessage} onClose={() => setErrorMessage(null)} title={t("common.error")} description={errorMessage} confirmText={t("common.ok")} mode="alert" variant="danger" />

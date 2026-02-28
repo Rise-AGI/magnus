@@ -14,7 +14,6 @@ __all__ = [
     "UserInfo",
     "LoginResponse",
     "ClusterStatsResponse",
-    "DashboardJobsResponse",
     "BlueprintCreate",
     "BlueprintResponse",
     "PagedBlueprintResponse",
@@ -31,6 +30,14 @@ __all__ = [
     "ExplorerSessionResponse",
     "ExplorerSessionWithMessages",
     "PagedExplorerSessionResponse",
+    "SkillFileCreate",
+    "SkillFileResponse",
+    "SkillCreate",
+    "SkillResponse",
+    "PagedSkillResponse",
+    "CachedImageCreate",
+    "CachedImageResponse",
+    "PagedCachedImageResponse",
 ]
 
 
@@ -128,11 +135,6 @@ class ClusterStatsResponse(BaseModel):
     pending_jobs: List[JobResponse]
     total_pending: int
     class Config: from_attributes = True
-    
-    
-class DashboardJobsResponse(BaseModel):
-    items: List[JobResponse]
-    total: int
     
     
 class BlueprintCreate(BaseModel):
@@ -283,3 +285,75 @@ class ExplorerSessionWithMessages(ExplorerSessionResponse):
 class PagedExplorerSessionResponse(BaseModel):
     total: int
     items: List[ExplorerSessionResponse]
+
+
+class SkillFileCreate(BaseModel):
+    path: str
+    content: str
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("path must not be empty")
+        if "\x00" in v:
+            raise ValueError("path must not contain null bytes")
+        if v.startswith("/") or v.startswith("\\"):
+            raise ValueError("path must be relative")
+        if ".." in v.split("/"):
+            raise ValueError("path must not contain '..'")
+        return v
+
+
+class SkillFileResponse(BaseModel):
+    path: str
+    content: str
+    updated_at: datetime
+    class Config: from_attributes = True
+
+
+class SkillCreate(BaseModel):
+    id: str
+    title: str
+    description: str
+    files: List[SkillFileCreate]
+
+
+class SkillResponse(BaseModel):
+    id: str
+    title: str
+    description: str
+    user_id: str
+    created_at: datetime
+    updated_at: datetime
+    user: Optional[UserInfo] = None
+    files: List[SkillFileResponse] = []
+    class Config: from_attributes = True
+
+
+class PagedSkillResponse(BaseModel):
+    total: int
+    items: List[SkillResponse]
+
+
+class CachedImageCreate(BaseModel):
+    uri: str
+
+
+class CachedImageResponse(BaseModel):
+    id: Optional[int] = None
+    uri: str
+    filename: str
+    user_id: Optional[str] = None
+    user: Optional[UserInfo] = None
+    status: str = "cached"
+    size_bytes: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    class Config: from_attributes = True
+
+
+class PagedCachedImageResponse(BaseModel):
+    total: int
+    items: List[CachedImageResponse]

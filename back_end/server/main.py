@@ -27,8 +27,7 @@ class EndpointFilter(logging.Filter):
         return not any(x in msg for x in [
             "GET /api/jobs",
             "GET /api/cluster/stats",
-            "GET /api/dashboard/stats",
-            "GET /api/dashboard/my-active-jobs",
+            "GET /api/cluster/my-active-jobs",
             "GET /api/blueprints",
             "GET /api/services",
             "/logs HTTP",
