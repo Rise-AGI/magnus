@@ -253,6 +253,15 @@ def get_my_token(
 def get_users(
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
-)-> List[models.User]:
+) -> List[UserInfo]:
     users = db.query(models.User).order_by(models.User.name).all()
-    return users
+    return [
+        UserInfo(
+            id=u.id,
+            name=u.name,
+            avatar_url=u.avatar_url,
+            email=u.email,
+            is_admin=u.feishu_open_id in admin_open_ids,
+        )
+        for u in users
+    ]
