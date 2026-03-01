@@ -18,6 +18,7 @@ from ._scheduler import scheduler
 from ._service_manager import service_manager
 from ._file_custody_manager import file_custody_manager
 from ._feishu_client import feishu_client
+from .routers.images import recover_stuck_images
 
 
 class EndpointFilter(logging.Filter):
@@ -174,6 +175,9 @@ async def lifespan(
     limiter = anyio.to_thread.current_default_thread_limiter() # type: ignore
     limiter.total_tokens = thread_pool_size
     
+    # 镜像恢复：清理上次异常退出遗留的 .tmp 和卡在 pulling/refreshing 的记录
+    recover_stuck_images()
+
     scheduler_task = asyncio.create_task(run_scheduler_loop())
     service_manager_task = asyncio.create_task(service_manager.start_background_loop())
     file_custody_task = asyncio.create_task(file_custody_manager.cleanup_loop())

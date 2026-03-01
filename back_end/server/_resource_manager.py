@@ -116,7 +116,10 @@ class ResourceManager:
         return repos
 
     def _evict_lru_images(self):
-        """LRU 清理：按访问时间淘汰旧镜像"""
+        """LRU 清理：按访问时间淘汰旧镜像。
+        注：此方法在 self.image_locks[image] 内调用，不会与同一 URI 的拉取并发；
+        不同 URI 的并发淘汰理论上存在 TOCTOU，但 ensure_image 入口处的 os.utime
+        会刷新 atime，使正在使用的镜像不会被误淘汰，无需额外加锁。"""
         images = self._get_cached_images()
         if not images:
             return
@@ -156,7 +159,8 @@ class ResourceManager:
         确保镜像可用。返回 (success, error_msg)
         - 成功：(True, None)
         - 失败：(False, "error message")
-        force=True 时跳过缓存检查，pull 到 .tmp 再原子 rename，旧文件在 rename 前保持可用。
+        force=True 时跳过缓存检查，强制重新拉取。
+        所有拉取都写入 .tmp 再原子 rename，断电不会留下半成品 .sif。
         """
         sif_path = self.get_sif_path(image)
 
@@ -180,7 +184,9 @@ class ResourceManager:
 
             self._evict_lru_images()
 
-            pull_dest = sif_path + ".tmp" if force else sif_path
+            # 始终写入临时文件，成功后原子 rename
+            # 这样断电/OOM 只会留下 .tmp，重启时统一清理，正式 .sif 不会被污染
+            pull_dest = sif_path + ".tmp"
 
             logger.info(f"Pulling container image: {image}")
             start_time = time.time()
@@ -200,12 +206,23 @@ class ResourceManager:
                     stderr = asyncio.subprocess.PIPE,
                     env = env,
                 )
-                _, stderr = await proc.communicate()
+                try:
+                    _, stderr = await proc.communicate()
+                except asyncio.CancelledError:
+                    # 优雅关闭：终止子进程，避免孤儿 apptainer 进程
+                    proc.terminate()
+                    await proc.wait()
+                    if os.path.exists(pull_dest):
+                        try:
+                            os.remove(pull_dest)
+                        except OSError:
+                            pass
+                    raise
 
                 if proc.returncode == 0:
                     break
 
-                # 清理残留的不完整 SIF
+                # 清理残留的不完整 .tmp
                 if os.path.exists(pull_dest):
                     try:
                         os.remove(pull_dest)
@@ -227,12 +244,12 @@ class ResourceManager:
                     logger.error(f"Failed to pull image {image} after {max_retries} attempts: {error_msg}")
                     return False, error_msg
 
-            # 成功：如果是 force pull，原子替换旧文件
-            if force:
-                os.rename(pull_dest, sif_path)
+            # 先 chmod 再 rename：rename 保留权限，若在两者之间断电，
+            # .sif 会以 umask 默认权限（可能是 0600）落盘，其他 runner 无法读取
+            os.chmod(pull_dest, 0o644)
+            os.rename(pull_dest, sif_path)
 
             elapsed = time.time() - start_time
-            os.chmod(sif_path, 0o644)
             logger.info(f"Image ready: {sif_path} ({elapsed:.1f}s)")
             return True, None
 

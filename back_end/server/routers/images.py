@@ -3,7 +3,7 @@ import os
 import asyncio
 import logging
 import threading
-from typing import List, Optional
+from typing import Dict, Optional
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,11 +28,31 @@ router = APIRouter()
 magnus_root = magnus_config['server']['root']
 container_cache_path = f"{magnus_root}/container_cache"
 
+
+# ─── 进程级状态 ──────────────────────────────────────────────────
+
+# 启动恢复：只在首次 list 时执行一次，清理上次进程异常退出遗留的中间态
 _recovered = False
 _recover_lock = threading.Lock()
 
+# 请求级互斥：同一 URI 的 API 操作（预热/刷新）不可并发穿透状态检查
+# ensure_image 内部也有 asyncio.Lock 防止文件系统并发，这里防的是 DB 层面的 TOCTOU
+_uri_locks: Dict[str, asyncio.Lock] = {}
 
-def _recover_stuck_images(db: Session) -> None:
+
+def _get_uri_lock(uri: str) -> asyncio.Lock:
+    if uri not in _uri_locks:
+        _uri_locks[uri] = asyncio.Lock()
+    return _uri_locks[uri]
+
+
+def recover_stuck_images() -> None:
+    """
+    启动时调用：清理上次进程异常退出遗留的中间态。
+    - .sif.tmp 文件：一律删除（不完整或孤儿进程遗留）
+    - DB 中 pulling/refreshing 状态的记录：有 .sif 则恢复为 cached，否则删除记录
+    必须在 lifespan 中调用，而不是懒加载——否则重启后 POST 请求会被 409 卡住。
+    """
     global _recovered
     if _recovered:
         return
@@ -41,7 +61,7 @@ def _recover_stuck_images(db: Session) -> None:
             return
         _recovered = True
 
-    # 清理残留的 .tmp 文件（进程异常退出时遗留）
+    # 清理残留的 .tmp 文件（进程异常退出时遗留，或孤儿 apptainer 进程写的）
     if os.path.isdir(container_cache_path):
         for fname in os.listdir(container_cache_path):
             if fname.endswith(".sif.tmp"):
@@ -52,24 +72,28 @@ def _recover_stuck_images(db: Session) -> None:
                 except OSError:
                     pass
 
-    stuck = db.query(models.CachedImage).filter(
-        models.CachedImage.status.in_(["pulling", "refreshing"]),
-    ).all()
-    if not stuck:
-        return
-    for img in stuck:
-        sif_path = os.path.join(container_cache_path, img.filename)
-        if os.path.exists(sif_path):
-            img.status = "cached"
-            try:
-                img.size_bytes = os.stat(sif_path).st_size
-            except OSError:
-                pass
-            logger.info(f"Recovered stuck image → cached: {img.uri}")
-        else:
-            db.delete(img)
-            logger.info(f"Removed orphan image record: {img.uri}")
-    db.commit()
+    db = database.SessionLocal()
+    try:
+        stuck = db.query(models.CachedImage).filter(
+            models.CachedImage.status.in_(["pulling", "refreshing"]),
+        ).all()
+        if not stuck:
+            return
+        for img in stuck:
+            sif_path = os.path.join(container_cache_path, img.filename)
+            if os.path.exists(sif_path):
+                img.status = "cached"
+                try:
+                    img.size_bytes = os.stat(sif_path).st_size
+                except OSError:
+                    pass
+                logger.info(f"Recovered stuck image → cached: {img.uri}")
+            else:
+                db.delete(img)
+                logger.info(f"Removed orphan image record: {img.uri}")
+        db.commit()
+    finally:
+        db.close()
 
 
 def _is_admin(current_user: models.User) -> bool:
@@ -84,43 +108,142 @@ def _is_admin_or_owner(current_user: models.User, owner_id: str) -> bool:
 
 async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
     """
-    后台拉取镜像。
-    - is_refresh=True: force pull 到 .tmp 再 rename（旧文件在 rename 前保持可用）
-    - is_refresh=False: 正常 pull（首次拉取）
-    失败时：refresh 恢复 "cached"/"missing"，new pull 删除 DB 记录。
+    后台拉取镜像，由路由 handler 通过 asyncio.create_task 调度。
+    分三阶段：防御性校验 → 拉取 → 加锁结算，每阶段独立 DB session。
     """
+
+    # Phase 1: 防御性校验，确认记录仍处于预期的进行态
     db = database.SessionLocal()
     try:
-        success, error_msg = await resource_manager.ensure_image(uri, force=is_refresh)
-
         img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
         if not img:
             return
+        expected = "refreshing" if is_refresh else "pulling"
+        if img.status != expected:
+            logger.warning(f"Skipping _do_pull for image {image_id}: expected status '{expected}', got '{img.status}'")
+            return
+    finally:
+        db.close()
 
-        sif_path = os.path.join(container_cache_path, img.filename)
+    # Phase 2: 拉取镜像（耗时操作，不持有任何锁和 DB session）
+    success, error_msg = await resource_manager.ensure_image(uri, force=is_refresh)
 
-        if success:
-            try:
-                img.size_bytes = os.stat(sif_path).st_size
-            except OSError:
-                img.size_bytes = 0
-            img.status = "cached"
-            img.updated_at = datetime.now(timezone.utc)
-            db.commit()
-        else:
-            logger.error(f"Image {'refresh' if is_refresh else 'pull'} failed for {uri}: {error_msg}")
-            if is_refresh:
-                img.status = "cached" if os.path.exists(sif_path) else "missing"
+    # Phase 3: 状态结算（加锁防止和 delete_image / 新 pull 并发竞态）
+    async with _get_uri_lock(uri):
+        db = database.SessionLocal()
+        try:
+            img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
+            if not img:
+                # 记录已被删除；仅当该 URI 无任何记录时才清理文件，避免误杀并发请求的成果
+                any_exist = db.query(models.CachedImage).filter(models.CachedImage.uri == uri).first()
+                if not any_exist:
+                    sif_path = os.path.join(container_cache_path, _image_to_sif_filename(uri))
+                    if os.path.exists(sif_path):
+                        try:
+                            os.remove(sif_path)
+                            logger.info(f"Cleaned up orphan .sif after deleted record: {uri}")
+                        except OSError:
+                            pass
+                return
+
+            sif_path = os.path.join(container_cache_path, img.filename)
+
+            if success:
+                try:
+                    img.size_bytes = os.stat(sif_path).st_size
+                except OSError:
+                    img.size_bytes = 0
+                img.status = "cached"
                 img.updated_at = datetime.now(timezone.utc)
                 db.commit()
             else:
-                db.delete(img)
-                db.commit()
-    except Exception:
-        db.rollback()
-        logger.exception(f"Background pull task crashed for image {image_id}")
-    finally:
-        db.close()
+                logger.error(f"Image {'refresh' if is_refresh else 'pull'} failed for {uri}: {error_msg}")
+                if is_refresh:
+                    # 刷新失败：旧文件还在就仍算 cached，否则 missing
+                    img.status = "cached" if os.path.exists(sif_path) else "missing"
+                    img.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+                else:
+                    # 首次拉取失败：删除这条记录，干净撤退
+                    db.delete(img)
+                    db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(f"Background pull task crashed for image {image_id}")
+        finally:
+            db.close()
+
+
+# ─── 共享逻辑 ────────────────────────────────────────────────────
+
+async def _begin_pull(
+    db: Session,
+    uri: str,
+    current_user: models.User,
+    is_refresh: bool,
+    image_id: Optional[int] = None,
+) -> CachedImageResponse:
+    """
+    预热和刷新共用的 check-set-commit-fire 流程。
+    在调用方持有 _uri_locks[uri] 的前提下执行，保证同一 URI 不会并发穿透。
+
+    is_refresh=False: 预热（可能是新镜像，也可能已存在则视为重新拉取）
+    is_refresh=True:  刷新已知镜像（必须传 image_id）
+    """
+    filename = _image_to_sif_filename(uri)
+
+    # force_pull: 已有文件时用 .tmp + rename 确保原子替换
+    # 仅首次拉取全新镜像时 force=False，其余都 force=True
+    force_pull = True
+
+    if is_refresh:
+        assert image_id is not None
+        img = db.query(models.CachedImage).options(
+            joinedload(models.CachedImage.user),
+        ).filter(models.CachedImage.id == image_id).first()
+        if not img:
+            raise HTTPException(status_code=404, detail="Image not found")
+        if not _is_admin_or_owner(current_user, img.user_id):
+            raise HTTPException(status_code=403, detail="Only the owner or admin can refresh this image")
+        if img.status in ("pulling", "refreshing"):
+            raise HTTPException(status_code=409, detail="Image is already being pulled/refreshed.")
+        img.status = "refreshing"
+        img.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(img)
+    else:
+        existing = db.query(models.CachedImage).filter(models.CachedImage.uri == uri).first()
+
+        if existing and existing.status in ("pulling", "refreshing"):
+            raise HTTPException(status_code=409, detail="Image is currently being pulled/refreshed.")
+        if existing and not _is_admin_or_owner(current_user, existing.user_id):
+            raise HTTPException(status_code=403, detail="Only the owner or admin can re-pull this image.")
+
+        if existing:
+            existing.status = "pulling"
+            existing.updated_at = datetime.now(timezone.utc)
+            img = existing
+        else:
+            force_pull = False
+            img = models.CachedImage(
+                uri=uri,
+                filename=filename,
+                user_id=current_user.id,
+                status="pulling",
+            )
+            db.add(img)
+
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Image is already being pulled.")
+
+        db.refresh(img)
+
+    resp = CachedImageResponse.model_validate(img)
+    asyncio.create_task(_do_pull(img.id, uri, is_refresh=force_pull))
+    return resp
 
 
 # ─── 路由 ───────────────────────────────────────────────────────
@@ -133,8 +256,6 @@ def list_images(
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
 ):
-    _recover_stuck_images(db)
-
     # 1. DB records
     query = db.query(models.CachedImage)
     if search:
@@ -147,7 +268,7 @@ def list_images(
     # 2. 防御性扫描：磁盘上有 DB 里没有的 .sif → 标记 "unregistered"
     #    正常情况下不应出现（scheduler 和 API 都会自动注册）。
     #    如果运维看到 unregistered 镜像，说明有异常的镜像落盘路径，应排查。
-    fs_items: List[CachedImageResponse] = []
+    fs_items: list[CachedImageResponse] = []
     if os.path.isdir(container_cache_path):
         for fname in os.listdir(container_cache_path):
             if not fname.endswith(".sif"):
@@ -169,8 +290,8 @@ def list_images(
             except OSError:
                 continue
 
-    # 3. Mark DB records with missing files
-    combined: List[CachedImageResponse] = []
+    # 3. 标记文件缺失的 DB 记录
+    combined: list[CachedImageResponse] = []
     for img in db_images:
         sif_path = os.path.join(container_cache_path, img.filename)
         resp = CachedImageResponse.model_validate(img)
@@ -192,44 +313,8 @@ async def pull_image(
     current_user: models.User = Depends(get_current_user),
 ):
     uri = body.uri.strip()
-    filename = _image_to_sif_filename(uri)
-
-    existing = db.query(models.CachedImage).filter(models.CachedImage.uri == uri).first()
-
-    if existing and existing.status in ("pulling", "refreshing"):
-        raise HTTPException(status_code=409, detail="Image is currently being pulled/refreshed.")
-
-    # 已存在的镜像只有 owner 或 admin 可以重新拉取
-    if existing and not _is_admin_or_owner(current_user, existing.user_id):
-        raise HTTPException(status_code=403, detail="Only the owner or admin can re-pull this image.")
-
-    is_refresh = existing is not None
-    if not is_refresh:
-        existing = models.CachedImage(
-            uri=uri,
-            filename=filename,
-            user_id=current_user.id,
-            status="pulling",
-        )
-        db.add(existing)
-    else:
-        existing.status = "pulling"
-        existing.updated_at = datetime.now(timezone.utc)
-
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Image is already being pulled.")
-
-    db.refresh(existing)
-
-    image_id = existing.id
-    resp = CachedImageResponse.model_validate(existing)
-
-    asyncio.create_task(_do_pull(image_id, uri, is_refresh=is_refresh))
-
-    return resp
+    async with _get_uri_lock(uri):
+        return await _begin_pull(db, uri, current_user, is_refresh=False)
 
 
 @router.post("/images/{image_id}/refresh", response_model=CachedImageResponse, status_code=202)
@@ -238,55 +323,45 @@ async def refresh_image(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    img = db.query(models.CachedImage).options(
-        joinedload(models.CachedImage.user),
-    ).filter(models.CachedImage.id == image_id).first()
-
+    # 先查出 URI 以获取正确的锁
+    img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
-
-    if not _is_admin_or_owner(current_user, img.user_id):
-        raise HTTPException(status_code=403, detail="Only the owner or admin can refresh this image")
-
-    if img.status in ("pulling", "refreshing"):
-        raise HTTPException(status_code=409, detail="Image is already being pulled/refreshed.")
-
-    img.status = "refreshing"
-    img.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(img)
-
-    resp = CachedImageResponse.model_validate(img)
-
-    asyncio.create_task(_do_pull(img.id, img.uri, is_refresh=True))
-
-    return resp
+    async with _get_uri_lock(img.uri):
+        return await _begin_pull(db, img.uri, current_user, is_refresh=True, image_id=image_id)
 
 
 @router.delete("/images/{image_id}")
-def delete_image(
+async def delete_image(
     image_id: int,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
-
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    if not _is_admin_or_owner(current_user, img.user_id):
-        raise HTTPException(status_code=403, detail="Only the owner or admin can delete this image")
+    # 删除也要走锁：防止 delete 和 pull/refresh 并发冲突
+    async with _get_uri_lock(img.uri):
+        # 锁内重新读取状态
+        db.expire(img)
+        img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
+        if not img:
+            raise HTTPException(status_code=404, detail="Image not found")
 
-    if img.status in ("pulling", "refreshing"):
-        raise HTTPException(status_code=409, detail="Cannot delete an image that is being pulled/refreshed.")
+        if not _is_admin_or_owner(current_user, img.user_id):
+            raise HTTPException(status_code=403, detail="Only the owner or admin can delete this image")
 
-    sif_path = os.path.join(container_cache_path, img.filename)
-    if os.path.exists(sif_path):
-        try:
-            os.remove(sif_path)
-        except OSError as e:
-            logger.warning(f"Failed to delete SIF file {sif_path}: {e}")
+        if img.status in ("pulling", "refreshing"):
+            raise HTTPException(status_code=409, detail="Cannot delete an image that is being pulled/refreshed.")
 
-    db.delete(img)
-    db.commit()
-    return {"message": "Image deleted successfully"}
+        sif_path = os.path.join(container_cache_path, img.filename)
+        if os.path.exists(sif_path):
+            try:
+                os.remove(sif_path)
+            except OSError as e:
+                logger.warning(f"Failed to delete SIF file {sif_path}: {e}")
+
+        db.delete(img)
+        db.commit()
+        return {"message": "Image deleted successfully"}

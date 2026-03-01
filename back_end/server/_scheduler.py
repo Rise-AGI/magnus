@@ -6,6 +6,7 @@ import logging
 import traceback
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import Any, List, Dict
 from pywheels.file_tools import guarantee_file_exist, delete_file
 from .database import SessionLocal
@@ -50,9 +51,10 @@ def _register_image_if_needed(db: Session, image_uri: str, user_id: str) -> None
         status="cached",
         size_bytes=size,
     ))
+    # 唯一可接受的冲突：API 端已先一步注册了同一 URI（IntegrityError）
     try:
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
 
 
@@ -307,7 +309,8 @@ class MagnusScheduler:
                 return
 
             # 注册镜像到 cached_images（首次拉取者成为 owner）
-            _register_image_if_needed(db, job.container_image, job.user_id)
+            if job.user_id:
+                _register_image_if_needed(db, job.container_image, job.user_id)
 
             if not repo_ok:
                 job.status = JobStatus.FAILED
