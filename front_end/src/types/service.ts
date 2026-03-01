@@ -1,5 +1,6 @@
 // front_end/src/types/service.ts
-import { Job, User } from "./job";
+import { Job } from "./job";
+import { User } from "@/types/auth";
 
 export interface Service {
   id: string;

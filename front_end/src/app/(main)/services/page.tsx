@@ -6,7 +6,7 @@ import { Search, Plus, Activity, ArrowUpDown } from "lucide-react";
 import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
 import { Service } from "@/types/service";
-import { User } from "@/types/job";
+import { User } from "@/types/auth";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -100,7 +100,7 @@ export default function ServicesPage() {
         label: u.name,
         value: u.id,
         meta: u.email || "",
-        icon: u.avatar_url,
+        icon: u.avatar_url || undefined,
       })),
     ];
   }, [allUsers, t]);

@@ -1,10 +1,5 @@
 // front_end/src/types/job.ts
-export interface User {
-  id: string;
-  name: string;
-  avatar_url?: string;
-  email?: string;
-}
+import { User } from "@/types/auth";
 
 export interface Job {
   id: string;

@@ -1,5 +1,5 @@
 // front_end/src/components/ui/user-avatar.tsx
-import { User } from "@/types/job";
+import { User } from "@/types/auth";
 import { User as UserIcon } from "lucide-react";
 
 interface UserAvatarProps {
