@@ -1,9 +1,10 @@
 // front_end/src/app/(main)/people/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Search, Plus, Users, Loader2, Shield } from "lucide-react";
 import { client } from "@/lib/api";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -16,6 +17,9 @@ export default function PeoplePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
   const [showRecruitWip, setShowRecruitWip] = useState(false);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -31,12 +35,19 @@ export default function PeoplePage() {
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
-  const filtered = debouncedQuery.trim()
-    ? users.filter(u =>
-        u.name.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
-        (u.email || "").toLowerCase().includes(debouncedQuery.toLowerCase())
-      )
-    : users;
+  const filtered = useMemo(() => {
+    const q = debouncedQuery.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(u =>
+      u.name.toLowerCase().includes(q) ||
+      (u.email || "").toLowerCase().includes(q)
+    );
+  }, [users, debouncedQuery]);
+
+  useEffect(() => { setCurrentPage(1); }, [debouncedQuery]);
+
+  const totalPages = Math.ceil(filtered.length / pageSize);
+  const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div className="relative min-h-[calc(100vh-8rem)] pb-20">
@@ -92,7 +103,7 @@ export default function PeoplePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/50">
-                {filtered.map((user) => (
+                {paginated.map((user) => (
                   <tr key={user.id} className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -127,6 +138,19 @@ export default function PeoplePage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <div className="mt-4 px-6">
+          <PaginationControls
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={filtered.length}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={(s) => { setPageSize(s); setCurrentPage(1); }}
+          />
         </div>
       )}
 

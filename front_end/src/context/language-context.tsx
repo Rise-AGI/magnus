@@ -306,7 +306,7 @@ const translations = {
   "blueprintRunner.loadFailed": { zh: "加载蓝图失败", en: "Failed to load blueprint" },
 
   // ===== Blueprint Detail Page =====
-  "blueprintDetail.backTo": { zh: "← 返回蓝图", en: "← Back to Blueprints" },
+  "blueprintDetail.backTo": { zh: "返回蓝图", en: "Back to Blueprints" },
   "blueprintDetail.notFound": { zh: "蓝图未找到", en: "Blueprint Not Found" },
   "blueprintDetail.notFoundDesc": { zh: "在注册表中未找到蓝图「{id}」。它可能已被删除或 ID 不正确。", en: "The blueprint definition {id} could not be located in the registry. It may have been deleted or the ID is incorrect." },
   "blueprintDetail.returnToRegistry": { zh: "返回注册表", en: "Return to Registry" },
@@ -863,7 +863,7 @@ def blueprint(
   "skills.table.files": { zh: "文件", en: "Files" },
 
   // Skills Detail
-  "skillDetail.backTo": { zh: "← 返回技能", en: "← Back to Skills" },
+  "skillDetail.backTo": { zh: "返回技能", en: "Back to Skills" },
   "skillDetail.notFound": { zh: "技能不存在", en: "Skill Not Found" },
   "skillDetail.notFoundDesc": {
     zh: "找不到 ID 为「{id}」的技能。",
@@ -918,6 +918,9 @@ def blueprint(
   "images.noFound": { zh: "暂无缓存镜像", en: "No cached images" },
   "images.refresh": { zh: "刷新镜像", en: "Refresh Image" },
   "images.preheatTitle": { zh: "预热镜像", en: "Preheat Image" },
+  "images.detailTitle": { zh: "镜像详情", en: "Image Details" },
+  "images.detail.created": { zh: "创建时间", en: "Created" },
+  "images.detail.updated": { zh: "更新时间", en: "Updated" },
   "images.preheating": { zh: "预热中...", en: "Preheating..." },
   "images.deleteTitle": { zh: "删除镜像", en: "Delete Image" },
   "images.deleteConfirm": {

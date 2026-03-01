@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Search, Plus, Container, Loader2 } from "lucide-react";
+import { Search, Plus, Container, Loader2, RefreshCw, Clock } from "lucide-react";
 import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -10,8 +10,9 @@ import { Drawer } from "@/components/ui/drawer";
 import { POLL_INTERVAL } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
+import { formatBeijingTime } from "@/lib/utils";
 
-import { ImageTable, CachedImage } from "@/components/images/image-table";
+import { ImageTable, CachedImage, formatSize, STATUS_STYLES, STATUS_I18N, isBusy } from "@/components/images/image-table";
 
 export default function ImagesPage() {
   const { t } = useLanguage();
@@ -29,10 +30,14 @@ export default function ImagesPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Preheat drawer
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isPreheatOpen, setIsPreheatOpen] = useState(false);
   const [preheatUri, setPreheatUri] = useState("");
   const [isPreheating, setIsPreheating] = useState(false);
   const [preheatError, setPreheatError] = useState<string | null>(null);
+
+  // Detail drawer (view + refresh)
+  const [viewingImage, setViewingImage] = useState<CachedImage | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => { setCurrentPage(1); }, [debouncedQuery]);
 
@@ -58,16 +63,17 @@ export default function ImagesPage() {
     return () => clearInterval(i);
   }, [fetchImages]);
 
-  const openDrawer = () => {
+  // Preheat
+  const openPreheat = () => {
     setPreheatUri("");
     setPreheatError(null);
     setIsPreheating(false);
-    setIsDrawerOpen(true);
+    setIsPreheatOpen(true);
   };
 
-  const closeDrawer = () => {
+  const closePreheat = () => {
     if (isPreheating) return;
-    setIsDrawerOpen(false);
+    setIsPreheatOpen(false);
   };
 
   const handlePreheat = async () => {
@@ -80,7 +86,7 @@ export default function ImagesPage() {
     setIsPreheating(true);
     try {
       await client("/api/images", { method: "POST", json: { uri } });
-      setIsDrawerOpen(false);
+      setIsPreheatOpen(false);
       fetchImages();
     } catch (e: any) {
       setPreheatError(e.message || t("common.operationFailed"));
@@ -89,16 +95,27 @@ export default function ImagesPage() {
     }
   };
 
-  const handleRefresh = async (image: CachedImage) => {
-    if (!image.id) return;
+  // View + Refresh
+  const closeDetail = () => {
+    if (isRefreshing) return;
+    setViewingImage(null);
+  };
+
+  const handleRefresh = async () => {
+    if (!viewingImage?.id) return;
+    setIsRefreshing(true);
     try {
-      await client(`/api/images/${image.id}/refresh`, { method: "POST" });
+      await client(`/api/images/${viewingImage.id}/refresh`, { method: "POST" });
+      setViewingImage(null);
       fetchImages();
     } catch (e: any) {
       setErrorMessage(e.message || t("common.operationFailed"));
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
+  // Delete
   const handleDelete = async () => {
     if (!imageToDelete || !imageToDelete.id) return;
     setIsDeleting(true);
@@ -113,6 +130,10 @@ export default function ImagesPage() {
     }
   };
 
+  const detailBusy = viewingImage ? isBusy(viewingImage.status) : false;
+  const detailStatusKey = viewingImage ? STATUS_I18N[viewingImage.status] as any : undefined;
+  const detailStatusLabel = detailStatusKey ? t(detailStatusKey) : viewingImage?.status;
+
   return (
     <div className="relative min-h-[calc(100vh-8rem)] pb-20">
       <style jsx global>{`
@@ -126,7 +147,7 @@ export default function ImagesPage() {
           <p className="text-zinc-500 text-sm mt-1">{t("images.subtitle")}</p>
         </div>
         <button
-          onClick={openDrawer}
+          onClick={openPreheat}
           className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50"
         >
           <Plus className="w-4 h-4" /> {t("images.preheat")}
@@ -145,7 +166,7 @@ export default function ImagesPage() {
         </div>
       </div>
 
-      <ImageTable data={images} loading={loading} onRefresh={handleRefresh} onDelete={setImageToDelete} />
+      <ImageTable data={images} loading={loading} onView={setViewingImage} onDelete={setImageToDelete} />
 
       {images.length > 0 && (
         <div className="mt-4 px-6">
@@ -162,8 +183,8 @@ export default function ImagesPage() {
 
       {/* Preheat Drawer */}
       <Drawer
-        isOpen={isDrawerOpen}
-        onClose={closeDrawer}
+        isOpen={isPreheatOpen}
+        onClose={closePreheat}
         title={t("images.preheatTitle")}
         icon={<Container className="w-5 h-5 text-blue-500" />}
       >
@@ -191,7 +212,7 @@ export default function ImagesPage() {
               <span className="text-red-500 text-xs font-bold animate-pulse">{preheatError}</span>
             )}
             <div className="flex gap-3 w-full sm:w-auto sm:ml-auto">
-              <button onClick={closeDrawer} disabled={isPreheating} className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
+              <button onClick={closePreheat} disabled={isPreheating} className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
               <button
                 onClick={handlePreheat}
                 disabled={isPreheating || !preheatUri.trim()}
@@ -203,6 +224,103 @@ export default function ImagesPage() {
             </div>
           </div>
         </div>
+      </Drawer>
+
+      {/* Detail / Refresh Drawer */}
+      <Drawer
+        isOpen={!!viewingImage}
+        onClose={closeDetail}
+        title={t("images.detailTitle")}
+        icon={<Container className="w-5 h-5 text-blue-500" />}
+      >
+        {viewingImage && (
+          <div className="flex flex-col min-h-full">
+            <div className="flex-1 space-y-5">
+
+              {/* URI */}
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">URI</label>
+                <div className="bg-zinc-950 border border-zinc-800 px-4 py-2.5 rounded-lg text-zinc-200 text-sm font-mono break-all">
+                  {viewingImage.uri}
+                </div>
+              </div>
+
+              {/* Status + Size */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("images.table.status")}</label>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${STATUS_STYLES[viewingImage.status] || "bg-zinc-800 text-zinc-400 border-zinc-700"}`}>
+                    {detailBusy && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {detailStatusLabel}
+                  </span>
+                </div>
+                <div>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("images.table.size")}</label>
+                  <span className="text-sm text-zinc-200 font-mono">{formatSize(viewingImage.size_bytes)}</span>
+                </div>
+              </div>
+
+              {/* Owner */}
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("images.table.owner")}</label>
+                <div className="flex items-center gap-3 mt-1">
+                  {viewingImage.user ? (
+                    <>
+                      <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700/50 flex-shrink-0 overflow-hidden flex items-center justify-center">
+                        {viewingImage.user.avatar_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={viewingImage.user.avatar_url} alt={viewingImage.user.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-xs font-bold text-zinc-400">{viewingImage.user.name.substring(0, 1).toUpperCase()}</span>
+                        )}
+                      </div>
+                      <span className="text-sm font-medium text-zinc-200">{viewingImage.user.name}</span>
+                    </>
+                  ) : (
+                    <span className="text-sm text-zinc-500">-</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Timestamps */}
+              <div className="grid grid-cols-2 gap-4">
+                {viewingImage.created_at && (
+                  <div>
+                    <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("images.detail.created")}</label>
+                    <span className="text-sm text-zinc-400 font-mono flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      {formatBeijingTime(viewingImage.created_at)}
+                    </span>
+                  </div>
+                )}
+                {viewingImage.updated_at && (
+                  <div>
+                    <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("images.detail.updated")}</label>
+                    <span className="text-sm text-zinc-400 font-mono flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      {formatBeijingTime(viewingImage.updated_at)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            <div className="mt-auto pt-6 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-4 pb-1">
+              <div className="flex gap-3 w-full sm:w-auto sm:ml-auto">
+                <button onClick={closeDetail} disabled={isRefreshing} className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
+                <button
+                  onClick={handleRefresh}
+                  disabled={isRefreshing || detailBusy}
+                  className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRefreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  {t("images.refresh")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </Drawer>
 
       {/* Delete Confirmation */}

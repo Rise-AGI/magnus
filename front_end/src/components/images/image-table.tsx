@@ -21,14 +21,14 @@ export interface CachedImage {
   updated_at: string | null;
 }
 
-function formatSize(bytes: number): string {
+export function formatSize(bytes: number): string {
   if (bytes <= 0) return "-";
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-const STATUS_STYLES: Record<string, string> = {
+export const STATUS_STYLES: Record<string, string> = {
   cached: "bg-green-900/30 text-green-400 border-green-800/50",
   refreshing: "bg-yellow-900/30 text-yellow-400 border-yellow-800/50",
   pulling: "bg-blue-900/30 text-blue-400 border-blue-800/50",
@@ -36,7 +36,7 @@ const STATUS_STYLES: Record<string, string> = {
   missing: "bg-red-900/30 text-red-400 border-red-800/50",
 };
 
-const STATUS_I18N: Record<string, string> = {
+export const STATUS_I18N: Record<string, string> = {
   cached: "images.status.cached",
   refreshing: "images.status.refreshing",
   pulling: "images.status.pulling",
@@ -44,18 +44,18 @@ const STATUS_I18N: Record<string, string> = {
   missing: "images.status.missing",
 };
 
+export const isBusy = (s: string) => s === "refreshing" || s === "pulling";
+
 interface ImageTableProps {
   data: CachedImage[];
   loading: boolean;
-  onRefresh: (image: CachedImage) => void;
+  onView: (image: CachedImage) => void;
   onDelete: (image: CachedImage) => void;
 }
 
-export function ImageTable({ data, loading, onRefresh, onDelete }: ImageTableProps) {
+export function ImageTable({ data, loading, onView, onDelete }: ImageTableProps) {
   const { user: currentUser } = useAuth();
   const { t } = useLanguage();
-
-  const isBusy = (s: string) => s === "refreshing" || s === "pulling";
 
   if (loading) {
     return (
@@ -81,11 +81,11 @@ export function ImageTable({ data, loading, onRefresh, onDelete }: ImageTablePro
         <table className="w-full text-left text-sm whitespace-nowrap table-fixed">
           <thead className="bg-zinc-900/90 text-zinc-500 border-b border-zinc-800 backdrop-blur-md">
             <tr>
-              <th className="px-6 py-4 font-medium w-[45%]">URI</th>
+              <th className="px-6 py-4 font-medium w-[50%]">URI</th>
               <th className="px-6 py-4 font-medium w-[15%] text-center">{t("images.table.owner")}</th>
               <th className="px-6 py-4 font-medium w-[10%] text-right">{t("images.table.size")}</th>
-              <th className="px-6 py-4 font-medium w-[14%] text-center">{t("images.table.status")}</th>
-              <th className="px-6 py-4 font-medium text-right w-[16%]"></th>
+              <th className="px-6 py-4 font-medium w-[12%] text-center">{t("images.table.status")}</th>
+              <th className="px-6 py-4 font-medium text-right w-[13%]"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
@@ -108,7 +108,7 @@ export function ImageTable({ data, loading, onRefresh, onDelete }: ImageTablePro
               return (
                 <tr key={img.id ?? `fs-${idx}`} className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0">
                   <td className="px-6 py-4 align-top whitespace-normal break-all">
-                    <CopyableText text={img.uri} className="text-sm font-mono text-zinc-300" />
+                    <CopyableText text={img.uri} variant="text" className="font-semibold text-zinc-200 text-base" />
                   </td>
                   <td className="px-6 py-4 align-top">
                     <div className="flex justify-center">
@@ -132,9 +132,8 @@ export function ImageTable({ data, loading, onRefresh, onDelete }: ImageTablePro
                       {canManage && img.id !== null && (
                         <>
                           <button
-                            onClick={() => onRefresh(img)}
-                            disabled={busy}
-                            className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                            onClick={() => onView(img)}
+                            className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
                             title={t("images.refresh")}
                           >
                             <RefreshCw className={`w-4 h-4 ${busy ? "animate-spin" : ""}`} />
