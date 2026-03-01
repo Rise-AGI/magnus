@@ -926,7 +926,6 @@ def blueprint(
   },
   "images.uri": { zh: "镜像 URI", en: "Image URI" },
   "images.uriRequired": { zh: "URI 不能为空", en: "URI is required" },
-  "images.uriHint": { zh: "例如 docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime", en: "e.g. docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime" },
   "images.table.owner": { zh: "所有者", en: "Owner" },
   "images.table.size": { zh: "大小", en: "Size" },
   "images.table.status": { zh: "状态", en: "Status" },

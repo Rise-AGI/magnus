@@ -168,34 +168,29 @@ export default function ImagesPage() {
         icon={<Container className="w-5 h-5 text-blue-500" />}
       >
         <div className="flex flex-col min-h-full">
-          <div className="flex-1 space-y-6">
-            <div className="max-w-lg mx-auto space-y-6">
-              <div>
-                <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${preheatError ? "text-red-500" : "text-zinc-500"}`}>
-                  {t("images.uri")} <span className="text-red-500">*</span>
-                </label>
-                <input
-                  value={preheatUri}
-                  onChange={(e) => { setPreheatUri(e.target.value); setPreheatError(null); }}
-                  placeholder="docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
-                  className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm font-mono focus:border-blue-500 outline-none transition-all placeholder-zinc-700
-                    ${preheatError ? "animate-shake border-red-500" : "border-zinc-800"}`}
-                  disabled={isPreheating}
-                  onKeyDown={(e) => { if (e.key === "Enter") handlePreheat(); }}
-                  autoFocus
-                />
-                <p className="text-[10px] text-zinc-600 mt-1">{t("images.uriHint")}</p>
-              </div>
+          <div className="flex-1">
+            <div>
+              <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${preheatError ? "text-red-500" : "text-zinc-500"}`}>
+                {t("images.uri")} <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={preheatUri}
+                onChange={(e) => { setPreheatUri(e.target.value); setPreheatError(null); }}
+                placeholder="docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
+                className={`w-full bg-zinc-950 border px-4 py-2.5 rounded-lg text-zinc-200 text-sm font-mono focus:border-blue-500 outline-none transition-all placeholder-zinc-700
+                  ${preheatError ? "animate-shake border-red-500" : "border-zinc-800"}`}
+                disabled={isPreheating}
+                onKeyDown={(e) => { if (e.key === "Enter") handlePreheat(); }}
+                autoFocus
+              />
             </div>
           </div>
 
           <div className="mt-auto pt-6 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-4 pb-1">
-            {preheatError ? (
+            {preheatError && (
               <span className="text-red-500 text-xs font-bold animate-pulse">{preheatError}</span>
-            ) : (
-              <span className="text-zinc-500 text-xs hidden sm:block">{t("images.uriHint")}</span>
             )}
-            <div className="flex gap-3 w-full sm:w-auto">
+            <div className="flex gap-3 w-full sm:w-auto sm:ml-auto">
               <button onClick={closeDrawer} disabled={isPreheating} className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
               <button
                 onClick={handlePreheat}
