@@ -842,8 +842,13 @@ asyncio.run(main())
 | `terminate_job(job_id)` | 终止任务 |
 | `get_cluster_stats()` | 获取集群状态 |
 | `list_blueprints(limit, search)` | 列出蓝图 |
+| `get_blueprint(id)` | 获取蓝图详情（含代码） |
+| `get_blueprint_schema(id)` | 获取蓝图参数 Schema |
+| `save_blueprint(id, title, description, code)` | 创建或更新蓝图 (upsert) |
+| `delete_blueprint(id)` | 删除蓝图 |
 | `list_services(limit, search)` | 列出服务 |
 | `list_skills(limit, search)` | 列出技能 |
+| `get_skill(id)` | 获取技能详情（含文件） |
 | `save_skill(id, title, description, files)` | 创建或更新技能 |
 | `delete_skill(id)` | 删除技能 |
 | `list_images(search)` | 列出缓存镜像 |
