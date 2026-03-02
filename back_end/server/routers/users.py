@@ -290,6 +290,9 @@ def update_headcount(
     if not _can_manage(current_user, target):
         raise HTTPException(status_code=403, detail="Permission denied")
 
+    if target.user_type != "agent":
+        raise HTTPException(status_code=400, detail="Cannot modify headcount of human users")
+
     new_headcount = body.headcount
 
     # 检查 target 自身下属占用了多少编制

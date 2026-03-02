@@ -83,7 +83,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
   const maskedToken = "sk-" + "\u2022".repeat(MAGNUS_TOKEN_LENGTH - 3);
   const displayToken = showToken && drawerToken ? drawerToken : maskedToken;
 
-  const canEditHeadcount = user && currentUser && (
+  const canEditHeadcount = user && currentUser && user.user_type === "agent" && (
     currentUser.is_admin || user.parent_id === currentUser.id
   );
 
