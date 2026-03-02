@@ -1020,11 +1020,10 @@ class MagnusClient:
         self,
         blueprint_id: str,
         timeout: float = 10.0,
-    ) -> Dict[str, Any]:
+    ) -> None:
         try:
             resp = self.http.delete(f"/blueprints/{blueprint_id}", timeout=timeout)
             self._handle_error(resp)
-            return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while deleting blueprint.")
         except httpx.TransportError as e:
@@ -1034,7 +1033,7 @@ class MagnusClient:
         self,
         blueprint_id: str,
         timeout: float = 10.0,
-    ) -> Dict[str, Any]:
+    ) -> None:
         return await asyncio.to_thread(self.delete_blueprint, blueprint_id, timeout)
 
     # === Skill Methods ===
@@ -1139,11 +1138,10 @@ class MagnusClient:
         self,
         skill_id: str,
         timeout: float = 10.0,
-    ) -> Dict[str, Any]:
+    ) -> None:
         try:
             resp = self.http.delete(f"/skills/{skill_id}", timeout=timeout)
             self._handle_error(resp)
-            return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while deleting skill.")
         except httpx.TransportError as e:
@@ -1153,7 +1151,7 @@ class MagnusClient:
         self,
         skill_id: str,
         timeout: float = 10.0,
-    ) -> Dict[str, Any]:
+    ) -> None:
         return await asyncio.to_thread(self.delete_skill, skill_id, timeout)
 
     # === Image Management ===
@@ -1228,11 +1226,10 @@ class MagnusClient:
         self,
         image_id: int,
         timeout: float = 10.0,
-    ) -> Dict[str, Any]:
+    ) -> None:
         try:
             resp = self.http.delete(f"/images/{image_id}", timeout=timeout)
             self._handle_error(resp)
-            return resp.json()
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while removing image.")
         except httpx.TransportError as e:
@@ -1242,7 +1239,7 @@ class MagnusClient:
         self,
         image_id: int,
         timeout: float = 10.0,
-    ) -> Dict[str, Any]:
+    ) -> None:
         return await asyncio.to_thread(self.remove_image, image_id, timeout)
 
     def list_services(

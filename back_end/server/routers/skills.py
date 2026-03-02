@@ -3,7 +3,7 @@ import logging
 from typing import List, Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import or_
@@ -97,12 +97,12 @@ def create_skill(
     return db_skill
 
 
-@router.delete("/skills/{skill_id}")
+@router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_skill(
     skill_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-):
+) -> None:
     skill = db.query(models.Skill).filter(models.Skill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -112,7 +112,6 @@ def delete_skill(
 
     db.delete(skill)
     db.commit()
-    return {"message": "Skill deleted successfully"}
 
 
 @router.get("/skills", response_model=PagedSkillResponse)

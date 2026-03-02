@@ -3,7 +3,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 
@@ -143,12 +143,12 @@ def create_blueprint(
     return db_bp
 
 
-@router.delete("/blueprints/{blueprint_id}")
+@router.delete("/blueprints/{blueprint_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_blueprint(
     blueprint_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-):
+) -> None:
     """
     删除蓝图。仅拥有者可操作。
     """
@@ -162,8 +162,6 @@ def delete_blueprint(
 
     db.delete(bp)
     db.commit()
-
-    return {"message": "Blueprint deleted successfully"}
 
 
 @router.get(

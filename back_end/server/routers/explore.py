@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, AsyncGenerator, cast
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from openai import OpenAI
@@ -383,12 +383,12 @@ def unshare_session(
     return session
 
 
-@router.delete("/explorer/sessions/{session_id}")
+@router.delete("/explorer/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_session(
     session_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-) -> Dict[str, str]:
+) -> None:
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
     ).first()
@@ -406,8 +406,6 @@ def delete_session(
     if session_dir.exists():
         shutil.rmtree(session_dir)
         logger.info(f"Deleted session directory: {session_dir}")
-
-    return {"message": "Session deleted"}
 
 
 @router.patch("/explorer/sessions/{session_id}", response_model=ExplorerSessionResponse)

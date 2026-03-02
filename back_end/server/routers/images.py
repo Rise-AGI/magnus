@@ -6,7 +6,7 @@ import threading
 from typing import Dict, Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -331,12 +331,12 @@ async def refresh_image(
         return await _begin_pull(db, img.uri, current_user, is_refresh=True, image_id=image_id)
 
 
-@router.delete("/images/{image_id}")
+@router.delete("/images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_image(
     image_id: int,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-):
+) -> None:
     img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -364,4 +364,3 @@ async def delete_image(
 
         db.delete(img)
         db.commit()
-        return {"message": "Image deleted successfully"}

@@ -68,7 +68,8 @@ export async function client(endpoint: string, { json, body, ...customConfig }: 
       throw new Error(errorData.detail || `API Error: ${response.statusText}`);
     }
 
-    // 返回解析后的 JSON
+    // 返回解析后的 JSON（204 No Content 无 body）
+    if (response.status === 204) return null;
     return response.json();
     
   } catch (error) {

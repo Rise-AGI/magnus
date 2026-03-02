@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 from pydantic import BaseModel
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
@@ -296,12 +296,12 @@ def create_service(
     return new_service
 
 
-@router.delete("/services/{service_id}")
+@router.delete("/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_service(
     service_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
-):
+) -> None:
     # ... (Same as original code) ...
     svc = db.query(Service).filter(Service.id == service_id).first()
     if not svc:
@@ -316,8 +316,6 @@ def delete_service(
 
     if service_id in _service_semaphores:
         del _service_semaphores[service_id]
-
-    return {"message": "Service deleted successfully"}
 
 
 @router.get("/services", response_model=PagedServiceResponse)
