@@ -52,6 +52,7 @@ export default function PeoplePage() {
     if (!selectedUser) return;
     const fresh = users.find((u) => u.id === selectedUser.id);
     if (fresh) setSelectedUser(fresh);
+    else setSelectedUser(null);
   }, [users]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = Math.ceil(totalItems / pageSize);

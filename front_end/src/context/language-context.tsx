@@ -958,6 +958,7 @@ def blueprint(
   "people.drawer.editHeadcount": { zh: "点击编辑属额", en: "Click to edit headcount" },
   "people.drawer.avatarHint": { zh: "点击上传头像", en: "Click to upload avatar" },
   "people.recruit.name": { zh: "名称", en: "Name" },
+  "people.recruit.nameRequired": { zh: "请输入成员名称", en: "Name is required" },
   "people.recruit.namePlaceholder": { zh: "输入成员名称", en: "Enter member name" },
   "people.recruit.submit": { zh: "招募", en: "Recruit" },
 } as const;

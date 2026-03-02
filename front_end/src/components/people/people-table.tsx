@@ -22,7 +22,6 @@ function Avatar({ user, size = "sm" }: { user: { name: string; avatar_url?: stri
   const dim = size === "lg" ? "w-16 h-16" : size === "xs" ? "w-7 h-7" : "w-9 h-9";
   const textSize = size === "lg" ? "text-xl" : size === "xs" ? "text-[10px]" : "text-xs";
   const iconSize = size === "lg" ? "w-7 h-7" : size === "xs" ? "w-3 h-3" : "w-4 h-4";
-  const logoPad = size === "lg" ? "p-2" : "p-1";
 
   return (
     <div className={`${dim} rounded-full bg-zinc-800 border border-zinc-700/50 flex-shrink-0 overflow-hidden flex items-center justify-center`}>
@@ -31,9 +30,6 @@ function Avatar({ user, size = "sm" }: { user: { name: string; avatar_url?: stri
         <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" onError={() => setBroken(true)} />
       ) : broken ? (
         <UserX className={`${iconSize} text-zinc-600`} />
-      ) : user.user_type === "agent" ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src="/api/logo" alt="Agent" className={`w-full h-full object-cover ${logoPad} opacity-60`} />
       ) : (
         <span className={`${textSize} font-bold text-zinc-400`}>{user.name.substring(0, 1).toUpperCase()}</span>
       )}
