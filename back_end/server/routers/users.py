@@ -135,7 +135,27 @@ def _build_roster(
             created_at=u.created_at,
         ))
 
-    result.sort(key=lambda u: u.name)
+    # 排序：先按层级深度（BFS），同层内 human 在 agent 前，再按 name
+    depth_map: Dict[str, int] = {}
+
+    def _depth(uid: str) -> int:
+        if uid in depth_map:
+            return depth_map[uid]
+        u = user_map.get(uid)
+        if not u or not u.parent_id or u.parent_id not in user_map:
+            depth_map[uid] = 0
+        else:
+            depth_map[uid] = _depth(u.parent_id) + 1
+        return depth_map[uid]
+
+    for u in all_users:
+        _depth(u.id)
+
+    result.sort(key=lambda d: (
+        0 if d.user_type == "human" else 1,
+        depth_map.get(d.id, 0),
+        d.name,
+    ))
     return result
 
 
