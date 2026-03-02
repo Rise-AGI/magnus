@@ -144,22 +144,13 @@ extra_body = {"enable_thinking": True}  # 返回 <think>...</think>
 messages_for_vlm = messages[-6:]  # 最近 6 条消息提供上下文
 ```
 
-### Skill 扩展点（规划中）
+### Skill 系统
 
-```python
-# 未来 Skill 接口
-class Skill:
-    name: str
-    description: str
+Skill 是多文件知识包，每个 Skill 包含 `SKILL.md`（必须）和任意附件文件。通过 Web 编辑器或 SDK/CLI 进行 CRUD 管理。Owner 和 Admin 权限控制。
 
-    def match(self, user_input: str) -> bool: ...
-    def execute(self, context: dict) -> str: ...
-```
+### 镜像管理
 
-设计原则：
-- Skill 声明式注册，运行时动态发现
-- 沙箱执行，隔离副作用
-- 支持同步/异步两种模式
+容器镜像缓存的完整生命周期管理。拉取/刷新在后台异步执行（返回 202），刷新期间旧镜像保持可用（原子替换）。服务器重启后自动恢复中断的拉取状态。
 
 ---
 

@@ -565,7 +565,7 @@ magnus.delete_blueprint("my-old-blueprint")
 **参数**：
 - `blueprint_id` (str): 蓝图 ID
 
-**返回值**：`{"message": "Blueprint deleted successfully"}`
+**返回值**：`None`（HTTP 204 No Content）
 
 > **Admin 特权**：管理员可以删除任何人的蓝图，非管理员只能删除自己的蓝图。
 
@@ -794,7 +794,7 @@ magnus.delete_skill("my-old-skill")
 **参数**：
 - `skill_id` (str): 技能 ID
 
-**返回值**：`{"message": "Skill deleted successfully"}`
+**返回值**：`None`（HTTP 204 No Content）
 
 ### 镜像 (Image)
 
@@ -860,7 +860,7 @@ magnus.remove_image(3)
 **参数**：
 - `image_id` (int): 镜像 ID
 
-**返回值**：`{"message": "Image deleted successfully"}`
+**返回值**：`None`（HTTP 204 No Content）
 
 ### 异步 API
 
@@ -935,7 +935,7 @@ asyncio.run(run_experiments())
 | `get_blueprint(id)` | 获取蓝图详情（含代码） | 蓝图信息 |
 | `get_blueprint_schema(id)` | 获取蓝图参数 Schema | 参数列表 |
 | `save_blueprint(id, title, description, code)` | 创建或更新蓝图 (upsert) | 蓝图信息 |
-| `delete_blueprint(id)` | 删除蓝图 | 确认消息 |
+| `delete_blueprint(id)` | 删除蓝图 | `None` |
 | `call_service(id, payload, timeout)` | 调用弹性服务 | 服务响应 |
 | `list_services(limit, search, active_only)` | 列出服务 | `{total, items}` |
 | `get_cluster_stats()` | 获取集群状态 | 集群信息 |
@@ -944,11 +944,11 @@ asyncio.run(run_experiments())
 | `list_skills(limit, search)` | 列出技能 | `{total, items}` |
 | `get_skill(id)` | 获取技能详情（含文件） | 技能信息 |
 | `save_skill(id, title, description, files)` | 创建或更新技能 (upsert) | 技能信息 |
-| `delete_skill(id)` | 删除技能 | 确认消息 |
+| `delete_skill(id)` | 删除技能 | `None` |
 | `list_images(search)` | 列出缓存镜像 | `{total, items}` |
 | `pull_image(uri)` | 拉取新镜像（异步 202） | 镜像信息 |
 | `refresh_image(image_id)` | 刷新已缓存镜像（异步 202） | 镜像信息 |
-| `remove_image(image_id)` | 删除缓存镜像 | 确认消息 |
+| `remove_image(image_id)` | 删除缓存镜像 | `None` |
 | `configure(token, address)` | 配置 SDK | None |
 
 ---
