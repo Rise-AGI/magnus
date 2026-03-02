@@ -27,6 +27,59 @@ def _create_index(cursor: sqlite3.Cursor, index_name: str, table: str, column: s
     print(f"✅ [{table}] 索引 {index_name} 已就绪。")
 
 
+def _add_column(cursor: sqlite3.Cursor, table: str, column: str, col_type: str, default: str = ""):
+    """幂等地添加列。如果列已存在则跳过。"""
+    cursor.execute(f"PRAGMA table_info({table});")
+    existing = {row[1] for row in cursor.fetchall()}
+    if column in existing:
+        print(f"⏭️  [{table}.{column}] 列已存在，跳过。")
+        return
+    default_clause = f" DEFAULT {default}" if default else ""
+    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}{default_clause};")
+    print(f"✅ [{table}.{column}] 列已添加。")
+
+
+def _make_column_nullable(cursor: sqlite3.Cursor, table: str, column: str):
+    """将 NOT NULL 列改为 nullable（SQLite 不支持 ALTER COLUMN，需重建表）。"""
+    cursor.execute(f"PRAGMA table_info({table});")
+    columns = cursor.fetchall()
+    col_info = None
+    for c in columns:
+        if c[1] == column:
+            col_info = c
+            break
+    if col_info is None:
+        print(f"⏭️  [{table}.{column}] 列不存在，跳过。")
+        return
+    # notnull = c[3]: 0 means nullable, 1 means NOT NULL
+    if col_info[3] == 0:
+        print(f"⏭️  [{table}.{column}] 已是 nullable，跳过。")
+        return
+
+    # 重建表：收集所有列定义
+    col_defs = []
+    col_names = []
+    for c in columns:
+        cid, cname, ctype, notnull, dflt, pk = c
+        col_names.append(cname)
+        parts = [cname, ctype or "TEXT"]
+        if pk:
+            parts.append("PRIMARY KEY")
+        if notnull and cname != column:
+            parts.append("NOT NULL")
+        if dflt is not None:
+            parts.append(f"DEFAULT {dflt}")
+        col_defs.append(" ".join(parts))
+
+    tmp = f"_{table}_migrate_tmp"
+    cols_csv = ", ".join(col_names)
+    cursor.execute(f"CREATE TABLE {tmp} ({', '.join(col_defs)});")
+    cursor.execute(f"INSERT INTO {tmp} ({cols_csv}) SELECT {cols_csv} FROM {table};")
+    cursor.execute(f"DROP TABLE {table};")
+    cursor.execute(f"ALTER TABLE {tmp} RENAME TO {table};")
+    print(f"✅ [{table}.{column}] 已改为 nullable。")
+
+
 def migrate(develop: bool = False):
     config_path = os.path.join(
         os.path.dirname(__file__), "..", "..", "configs", "magnus_config.yaml"
@@ -85,6 +138,14 @@ def migrate(develop: bool = False):
         );
     """, "skill_files")
     _create_index(cursor, "ix_skill_files_skill_id", "skill_files", "skill_id")
+
+    # === Users 表扩展：Agent 支持 ===
+    _add_column(cursor, "users", "user_type", "TEXT NOT NULL", "'human'")
+    _add_column(cursor, "users", "parent_id", "TEXT REFERENCES users(id)")
+    _add_column(cursor, "users", "headcount", "INTEGER")
+
+    # feishu_open_id 需要 nullable（Agent 没有飞书 ID）
+    _make_column_nullable(cursor, "users", "feishu_open_id")
 
     conn.commit()
     conn.close()

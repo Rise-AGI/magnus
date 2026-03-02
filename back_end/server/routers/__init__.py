@@ -11,6 +11,7 @@ from . import explore
 from . import files
 from . import skills
 from . import images
+from . import users
 
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
 router = APIRouter()
 
 router.include_router(auth.router, tags=["Auth"])
+router.include_router(users.router, tags=["Users"])
 router.include_router(github.router, tags=["GitHub"])
 router.include_router(jobs.router, tags=["Jobs"])
 router.include_router(cluster.router, tags=["Cluster"])

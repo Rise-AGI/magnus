@@ -3,7 +3,7 @@ import secrets
 import logging
 import jwt
 import asyncio
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 from cachetools import TTLCache
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .. import database
 from .. import models
-from ..schemas import UserInfo, LoginResponse, FeishuLoginRequest, TokenResponse
+from ..schemas import LoginResponse, FeishuLoginRequest, TokenResponse
 from .._magnus_config import magnus_config, admin_open_ids
 from .._jwt_signer import jwt_signer
 from .._feishu_client import feishu_client
@@ -244,24 +244,3 @@ def get_my_token(
     current_user: models.User = Depends(get_current_user),
 )-> Dict[str, Any]:
     return {"magnus_token": current_user.token or ""}
-
-
-@router.get(
-    "/users",
-    response_model = List[UserInfo],
-)
-def get_users(
-    db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
-) -> List[UserInfo]:
-    users = db.query(models.User).order_by(models.User.name).all()
-    return [
-        UserInfo(
-            id=u.id,
-            name=u.name,
-            avatar_url=u.avatar_url,
-            email=u.email,
-            is_admin=u.feishu_open_id in admin_open_ids,
-        )
-        for u in users
-    ]

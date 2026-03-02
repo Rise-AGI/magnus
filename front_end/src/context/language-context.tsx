@@ -940,17 +940,26 @@ def blueprint(
 
   // ===== People =====
   "people.subtitle": { zh: "团队成员", en: "Team members" },
-  "people.recruit": { zh: "招募人员", en: "Recruit" },
   "people.recruitTitle": { zh: "招募人员", en: "Recruit Member" },
-  "people.recruitWip": { zh: "功能开发中", en: "Feature under development" },
   "people.fetching": { zh: "正在加载...", en: "Loading..." },
   "people.noFound": { zh: "暂无成员", en: "No members found" },
   "people.searchPlaceholder": { zh: "搜索成员...", en: "Search members..." },
   "people.table.member": { zh: "成员", en: "Member" },
-  "people.table.email": { zh: "邮箱", en: "Email" },
-  "people.table.role": { zh: "角色", en: "Role" },
+  "people.table.leader": { zh: "直属上级", en: "+1 Leader" },
+  "people.table.bpSvc": { zh: "蓝图 / 服务", en: "Blueprints / Services" },
+  "people.table.headcount": { zh: "属额", en: "Headcount" },
   "people.role.admin": { zh: "管理员", en: "Admin" },
-  "people.role.member": { zh: "成员", en: "Member" },
+  "people.leader.void": { zh: "无", en: "void" },
+  "people.drawer.title": { zh: "成员详情", en: "Member Details" },
+  "people.drawer.headcount": { zh: "属额", en: "Headcount" },
+  "people.drawer.created": { zh: "加入时间", en: "Joined" },
+  "people.drawer.delete": { zh: "删除", en: "Delete" },
+  "people.drawer.deleteConfirm": { zh: "确定删除此成员？此操作不可撤销。", en: "Delete this member? This cannot be undone." },
+  "people.drawer.editHeadcount": { zh: "点击编辑属额", en: "Click to edit headcount" },
+  "people.drawer.avatarHint": { zh: "点击上传头像", en: "Click to upload avatar" },
+  "people.recruit.name": { zh: "名称", en: "Name" },
+  "people.recruit.namePlaceholder": { zh: "输入成员名称", en: "Enter member name" },
+  "people.recruit.submit": { zh: "招募", en: "Recruit" },
 } as const;
 
 

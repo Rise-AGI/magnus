@@ -1,5 +1,6 @@
 # back_end/server/_file_custody_manager.py
 import os
+import json
 import time
 import shutil
 import random
@@ -7,7 +8,7 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
-from typing import Optional, Dict, Tuple, List, BinaryIO
+from typing import Any, Optional, Dict, Tuple, List, BinaryIO
 from dataclasses import dataclass
 
 from ._magnus_config import magnus_config
@@ -265,6 +266,7 @@ class CustodyEntry:
     original_filename: str
     is_directory: bool
     expires_at: float
+    permanent: bool = False
     max_downloads: Optional[int] = None
     download_count: int = 0
 
@@ -282,15 +284,39 @@ class FileCustodyManager:
 
         self._storage_root = Path(magnus_config["server"]["root"]) / "file_custody"
         self._storage_root.mkdir(parents=True, exist_ok=True)
-
-        for child in self._storage_root.iterdir():
-            if child.is_dir():
-                shutil.rmtree(child, ignore_errors=True)
-                logger.info(f"Cleaned up stale custody dir: {child.name}")
+        self._manifest_path = self._storage_root / "_manifest.json"
 
         self._entries: Dict[str, CustodyEntry] = {}
         self._lock = threading.Lock()
         self._rng = random.SystemRandom()
+
+        # 恢复永久条目，清理非永久残留
+        manifest = self._load_manifest()
+        restored = set()
+        for token, meta in manifest.items():
+            entry_dir = self._storage_root / token
+            file_path = entry_dir / meta["filename"]
+            if file_path.exists():
+                self._entries[token] = CustodyEntry(
+                    entry_id=token,
+                    file_dir=entry_dir,
+                    original_filename=meta["filename"],
+                    is_directory=meta.get("is_directory", False),
+                    expires_at=float("inf"),
+                    permanent=True,
+                )
+                restored.add(token)
+                logger.info(f"Restored permanent custody entry: {token}")
+
+        # 清理不在 manifest 中的旧目录
+        for child in self._storage_root.iterdir():
+            if child.is_dir() and child.name not in restored:
+                shutil.rmtree(child, ignore_errors=True)
+                logger.info(f"Cleaned up stale custody dir: {child.name}")
+
+        # 同步 manifest（移除磁盘已丢失的条目）
+        if set(manifest.keys()) != restored:
+            self._save_manifest()
 
     def _generate_token(self)-> str:
         for _ in range(64):
@@ -300,6 +326,29 @@ class FileCustodyManager:
             if token not in self._entries:
                 return token
         raise RuntimeError("Failed to generate unique token after 64 attempts")
+
+    def _load_manifest(self) -> Dict[str, Dict[str, Any]]:
+        if not self._manifest_path.exists():
+            return {}
+        try:
+            with open(self._manifest_path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Corrupt manifest file, starting fresh.")
+            return {}
+
+    def _save_manifest(self) -> None:
+        data: Dict[str, Dict[str, Any]] = {}
+        for eid, entry in self._entries.items():
+            if entry.permanent:
+                data[eid] = {
+                    "filename": entry.original_filename,
+                    "is_directory": entry.is_directory,
+                }
+        tmp = self._manifest_path.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, self._manifest_path)
 
     def _get_storage_size(self)-> int:
         total = 0
@@ -315,10 +364,13 @@ class FileCustodyManager:
         expire_minutes: Optional[int] = None,
         is_directory: bool = False,
         max_downloads: Optional[int] = None,
+        permanent: bool = False,
     )-> str:
-        if expire_minutes is None:
-            expire_minutes = self._default_ttl_minutes
-        expire_minutes = min(expire_minutes, self._max_ttl_minutes)
+        # permanent 条目由服务端内部代码控制（如头像），不受 max_ttl 限制
+        if not permanent:
+            if expire_minutes is None:
+                expire_minutes = self._default_ttl_minutes
+            expire_minutes = min(expire_minutes, self._max_ttl_minutes)
 
         # 先占位再写文件，避免并发请求绕过 _max_processes 限制
         with self._lock:
@@ -334,6 +386,7 @@ class FileCustodyManager:
                 original_filename = filename,
                 is_directory = is_directory,
                 expires_at = 0.0,
+                permanent = permanent,
                 max_downloads = max_downloads,
             )
             self._entries[entry_id] = placeholder
@@ -373,9 +426,15 @@ class FileCustodyManager:
             raise
 
         # 写入成功，更新过期时间使 entry 生效
-        placeholder.expires_at = time.time() + expire_minutes * 60
+        if permanent:
+            placeholder.expires_at = float("inf")
+            with self._lock:
+                self._save_manifest()
+        else:
+            assert expire_minutes is not None
+            placeholder.expires_at = time.time() + expire_minutes * 60
 
-        logger.info(f"File custody stored: {entry_id}, filename={filename}, expire_minutes={expire_minutes}")
+        logger.info(f"File custody stored: {entry_id}, filename={filename}, permanent={permanent}")
         return entry_id
 
     def get_entry(self, token: str)-> Optional[CustodyEntry]:
@@ -406,9 +465,11 @@ class FileCustodyManager:
     def delete_entry(self, token: str)-> None:
         with self._lock:
             entry = self._entries.pop(token, None)
+            if entry is not None and entry.permanent:
+                self._save_manifest()
         if entry is not None and entry.file_dir.exists():
             shutil.rmtree(entry.file_dir, ignore_errors=True)
-            logger.info(f"File custody purged (download limit): {token}")
+            logger.info(f"File custody purged: {token}")
 
     async def cleanup_loop(self)-> None:
         logger.info("File custody cleanup loop started.")
@@ -433,10 +494,12 @@ class FileCustodyManager:
 
     def shutdown(self)-> None:
         with self._lock:
-            entries = list(self._entries.values())
-            self._entries.clear()
-        logger.info(f"Shutting down file custody manager ({len(entries)} entries)...")
-        for entry in entries:
+            ephemeral = [e for e in self._entries.values() if not e.permanent]
+            for e in ephemeral:
+                self._entries.pop(e.entry_id, None)
+        logger.info(f"Shutting down file custody manager ({len(ephemeral)} ephemeral entries cleaned, "
+                     f"{len(self._entries)} permanent entries preserved)...")
+        for entry in ephemeral:
             if entry.file_dir.exists():
                 shutil.rmtree(entry.file_dir, ignore_errors=True)
 
