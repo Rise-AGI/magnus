@@ -2447,36 +2447,36 @@ def skill_list_cmd(
 def skill_get_cmd(
     skill_id: str = typer.Argument(..., help="Skill ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
-    export_dir: Optional[Path] = typer.Option(None, "--export", "-e", help="Export files to a local directory"),
+    output_dir: Optional[Path] = typer.Option(None, "--output", "-o", help="Export files to a local directory"),
 ):
     """
     Show skill details and files.
 
     Displays the skill's title, description, creator, and file listing with
-    sizes. Use -e to export all files to a local directory for editing.
+    sizes. Use -o to export all files to a local directory for editing.
 
     Examples:
       magnus skill get my-skill
-      magnus skill get my-skill -e ./my_skill/
+      magnus skill get my-skill -o ./my_skill/
       magnus skill get my-skill -f yaml
     """
     try:
         sk = api_get_skill(skill_id)
 
-        if export_dir is not None:
-            export_dir.mkdir(parents=True, exist_ok=True)
-            resolved_root = export_dir.resolve()
+        if output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            resolved_root = output_dir.resolve()
             files = sk.get("files") or []
             written = 0
             for f in files:
-                fp = (export_dir / f["path"]).resolve()
+                fp = (output_dir / f["path"]).resolve()
                 if not fp.is_relative_to(resolved_root):
                     print_error(f"Skipping suspicious path: {f['path']}")
                     continue
                 fp.parent.mkdir(parents=True, exist_ok=True)
                 fp.write_text(f["content"], encoding="utf-8")
                 written += 1
-            print_msg(f"Exported {written} file(s) to [cyan]{export_dir}[/cyan]")
+            print_msg(f"Exported {written} file(s) to [cyan]{output_dir}[/cyan]")
             return
 
         fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()

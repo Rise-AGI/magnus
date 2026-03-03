@@ -1370,7 +1370,7 @@ magnus skill get my-skill -f yaml
 
 **选项**：
 - `-f, --format`: 输出格式 (yaml/json)，默认人类可读
-- `-e, --export DIR`: 导出所有文件到本地目录，方便编辑后用 `skill save` 上传
+- `-o, --output DIR`: 导出所有文件到本地目录，方便编辑后用 `skill save` 上传
 
 #### magnus skill save
 
