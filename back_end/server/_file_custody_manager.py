@@ -269,6 +269,7 @@ class CustodyEntry:
     permanent: bool = False
     max_downloads: Optional[int] = None
     download_count: int = 0
+    file_size: int = 0
 
 
 class FileCustodyManager:
@@ -304,6 +305,7 @@ class FileCustodyManager:
                     is_directory=meta.get("is_directory", False),
                     expires_at=float("inf"),
                     permanent=True,
+                    file_size=file_path.stat().st_size,
                 )
                 restored.add(token)
                 logger.info(f"Restored permanent custody entry: {token}")
@@ -317,6 +319,8 @@ class FileCustodyManager:
         # 同步 manifest（移除磁盘已丢失的条目）
         if set(manifest.keys()) != restored:
             self._save_manifest()
+
+        self._current_size = sum(e.file_size for e in self._entries.values())
 
     def _generate_token(self)-> str:
         for _ in range(64):
@@ -350,13 +354,6 @@ class FileCustodyManager:
             json.dump(data, f, indent=2)
         os.replace(tmp, self._manifest_path)
 
-    def _get_storage_size(self)-> int:
-        total = 0
-        for dirpath, _, filenames in os.walk(self._storage_root):
-            for f in filenames:
-                total += os.path.getsize(os.path.join(dirpath, f))
-        return total
-
     def store_file(
         self,
         filename: str,
@@ -379,6 +376,11 @@ class FileCustodyManager:
                     f"File custody limit reached ({self._max_processes}). "
                     "Try again later or increase max_processes."
                 )
+            if self._current_size >= self._max_size:
+                raise RuntimeError(
+                    "File custody storage full. "
+                    "Wait for entries to expire or increase max_size."
+                )
             entry_id = self._generate_token()
             placeholder = CustodyEntry(
                 entry_id = entry_id,
@@ -390,14 +392,6 @@ class FileCustodyManager:
                 max_downloads = max_downloads,
             )
             self._entries[entry_id] = placeholder
-
-        if self._get_storage_size() >= self._max_size:
-            with self._lock:
-                self._entries.pop(entry_id, None)
-            raise RuntimeError(
-                "File custody storage full. "
-                "Wait for entries to expire or increase max_size."
-            )
 
         file_dir = placeholder.file_dir
         file_dir.mkdir(parents=True, exist_ok=True)
@@ -415,10 +409,15 @@ class FileCustodyManager:
                         raise FileTooLargeError(filename, self._max_file_size)
                     f.write(chunk)
 
-            if self._get_storage_size() > self._max_size:
-                raise RuntimeError(
-                    "File custody storage exceeded after write. File removed."
-                )
+            with self._lock:
+                self._current_size += written
+                placeholder.file_size = written
+                if self._current_size > self._max_size:
+                    self._current_size -= written
+                    placeholder.file_size = 0
+                    raise RuntimeError(
+                        "File custody storage exceeded after write. File removed."
+                    )
         except Exception:
             with self._lock:
                 self._entries.pop(entry_id, None)
@@ -465,8 +464,10 @@ class FileCustodyManager:
     def delete_entry(self, token: str)-> None:
         with self._lock:
             entry = self._entries.pop(token, None)
-            if entry is not None and entry.permanent:
-                self._save_manifest()
+            if entry is not None:
+                self._current_size -= entry.file_size
+                if entry.permanent:
+                    self._save_manifest()
         if entry is not None and entry.file_dir.exists():
             shutil.rmtree(entry.file_dir, ignore_errors=True)
             logger.info(f"File custody purged: {token}")
@@ -486,6 +487,8 @@ class FileCustodyManager:
             for eid in expired_ids:
                 with self._lock:
                     entry = self._entries.pop(eid, None)
+                    if entry is not None:
+                        self._current_size -= entry.file_size
                 if entry is None:
                     continue
                 if entry.file_dir.exists():
@@ -497,6 +500,7 @@ class FileCustodyManager:
             ephemeral = [e for e in self._entries.values() if not e.permanent]
             for e in ephemeral:
                 self._entries.pop(e.entry_id, None)
+                self._current_size -= e.file_size
         logger.info(f"Shutting down file custody manager ({len(ephemeral)} ephemeral entries cleaned, "
                      f"{len(self._entries)} permanent entries preserved)...")
         for entry in ephemeral:

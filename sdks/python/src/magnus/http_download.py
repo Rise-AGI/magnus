@@ -16,6 +16,7 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE = 2.0
 _MAX_BACKOFF = 30.0
 _TRANSIENT_ERRORS = (httpx.TransportError,)
+_SMALL_FILE_THRESHOLD = 5 * 1024 * 1024  # 5 MB
 
 
 def _magnus_error(msg: str) -> Exception:
@@ -28,12 +29,12 @@ def _get_download_url(token: str) -> str:
     return f"{default_client.api_base}/files/download/{token}"
 
 
-def _stream_to_file(
+def _download_once(
     url: str,
-    tmp_dir: Path,
+    target_path: Optional[str],
     timeout: Optional[float],
-) -> tuple[Path, bool]:
-    """Stream GET response to a temp file. Returns (tmp_file_path, is_directory)."""
+    overwrite: bool,
+) -> Path:
     with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
         if resp.status_code == 404:
             raise _magnus_error("File not found or expired")
@@ -44,13 +45,48 @@ def _stream_to_file(
 
         filename = _parse_filename(resp.headers) or "download"
         is_directory = resp.headers.get("x-magnus-directory", "").lower() == "true"
+        content_length_str = resp.headers.get("content-length")
 
-        tmp_file = tmp_dir / filename
-        with open(tmp_file, "wb") as f:
-            for chunk in resp.iter_bytes(chunk_size=65536):
-                f.write(chunk)
+        # Fast path: small non-directory files read into memory, skip temp dir
+        if (not is_directory
+            and content_length_str is not None
+            and int(content_length_str) < _SMALL_FILE_THRESHOLD):
+            data = resp.read()
+            target = Path(target_path).resolve() if target_path else Path.cwd() / filename
+            if overwrite and target.exists():
+                shutil.rmtree(target) if target.is_dir() else target.unlink()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            return target
 
-    return tmp_file, is_directory
+        # Standard path: stream to temp dir, then move
+        with tempfile.TemporaryDirectory(dir=get_tmp_base()) as tmp:
+            tmp_dir = Path(tmp)
+            tmp_file = tmp_dir / filename
+            with open(tmp_file, "wb") as f:
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    f.write(chunk)
+
+            if is_directory:
+                import tarfile
+                with tarfile.open(tmp_file) as tar:
+                    tar.extractall(tmp_dir, filter="data")
+                tmp_file.unlink()
+                extracted = list(tmp_dir.iterdir())
+                if len(extracted) != 1:
+                    raise _magnus_error(
+                        f"Expected 1 item from archive, got {len(extracted)}: {extracted}"
+                    )
+                source = extracted[0]
+            else:
+                source = tmp_file
+
+            target = Path(target_path).resolve() if target_path else Path.cwd() / source.name
+            if overwrite and target.exists():
+                shutil.rmtree(target) if target.is_dir() else target.unlink()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(target))
+            return target
 
 
 def download_file(
@@ -62,44 +98,16 @@ def download_file(
     token = normalize_secret(file_secret)
     url = _get_download_url(token)
 
-    with tempfile.TemporaryDirectory(dir=get_tmp_base()) as tmp:
-        tmp_dir = Path(tmp)
-
-        for attempt in range(_MAX_RETRIES):
-            try:
-                # Clean up any partial file from previous attempt
-                for leftover in tmp_dir.iterdir():
-                    leftover.unlink() if leftover.is_file() else shutil.rmtree(leftover)
-                tmp_file, is_directory = _stream_to_file(url, tmp_dir, timeout)
-                break
-            except (*_TRANSIENT_ERRORS, _ServerError) as e:
-                if attempt == _MAX_RETRIES - 1:
-                    raise
-                backoff = min(_BACKOFF_BASE * (2 ** attempt), _MAX_BACKOFF)
-                logger.warning(f"Download attempt {attempt + 1} failed: {e}. Retrying in {backoff:.0f}s...")
-                time.sleep(backoff)
-
-        if is_directory:
-            import tarfile
-            with tarfile.open(tmp_file) as tar:
-                tar.extractall(tmp_dir, filter="data")
-            tmp_file.unlink()
-            extracted = [p for p in tmp_dir.iterdir()]
-            if len(extracted) != 1:
-                raise _magnus_error(
-                    f"Expected 1 item from archive, got {len(extracted)}: {extracted}"
-                )
-            source = extracted[0]
-        else:
-            source = tmp_file
-
-        target = Path(target_path).resolve() if target_path else Path.cwd() / source.name
-        if overwrite and target.exists():
-            shutil.rmtree(target) if target.is_dir() else target.unlink()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(target))
-
-    return target
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return _download_once(url, target_path, timeout, overwrite)
+        except (*_TRANSIENT_ERRORS, _ServerError) as e:
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            backoff = min(_BACKOFF_BASE * (2 ** attempt), _MAX_BACKOFF)
+            logger.warning(f"Download attempt {attempt + 1} failed: {e}. Retrying in {backoff:.0f}s...")
+            time.sleep(backoff)
+    assert False, "unreachable"
 
 
 async def download_file_async(
