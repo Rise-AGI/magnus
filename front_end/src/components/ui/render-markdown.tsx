@@ -31,7 +31,7 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
   className,
 }: RenderMarkdownProps) {
 
-  const processed = content.replace(/^---\n([\s\S]*?)\n---/, (_m, yaml) => "```yaml\n" + yaml.trim() + "\n```");
+  const processed = content.replace(/^---\n([\s\S]*?)\n---/, (_m, yaml) => "```yaml\n" + yaml.trim() + "\n```\n");
 
   const markdownComponents = {
     h1: ({ className, ...props }: any) => (
