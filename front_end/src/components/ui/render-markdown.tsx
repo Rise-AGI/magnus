@@ -31,6 +31,8 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
   className,
 }: RenderMarkdownProps) {
 
+  const processed = content.replace(/^---\n([\s\S]*?)\n---/, (_m, yaml) => "```yaml\n" + yaml.trim() + "\n```");
+
   const markdownComponents = {
     h1: ({ className, ...props }: any) => (
       <h1
@@ -203,7 +205,7 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
         rehypePlugins={[rehypeKatex, rehypeRaw, rehypeStringify]}
         components={markdownComponents}
       >
-        {content}
+        {processed}
       </Markdown>
     </div>
   );
