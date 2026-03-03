@@ -238,8 +238,12 @@ export default function SkillDetailPage() {
                  {copiedDesc ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                </button>
              </div>
-             <div className="p-5 overflow-auto custom-scrollbar">
-                <RenderMarkdown content={skill.description} />
+             <div className="p-5 overflow-auto custom-scrollbar min-h-[60px]">
+                {skill.description.trim() ? (
+                  <RenderMarkdown content={skill.description} />
+                ) : (
+                  <p className="text-sm text-zinc-600 italic">{t("skillDetail.noDescription")}</p>
+                )}
              </div>
           </div>
 

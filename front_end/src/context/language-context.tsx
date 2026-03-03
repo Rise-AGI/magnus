@@ -874,6 +874,7 @@ def blueprint(
   "skillDetail.description": { zh: "描述", en: "Description" },
   "skillDetail.files": { zh: "文件", en: "Files" },
   "skillDetail.noFiles": { zh: "暂无文件", en: "No files" },
+  "skillDetail.noDescription": { zh: "暂无描述", en: "No description" },
   "skillDetail.deleteSkill": { zh: "删除技能", en: "Delete Skill" },
   "skillDetail.deleteConfirmDesc": {
     zh: "此操作将永久删除技能「{title}」及其所有文件。",
