@@ -56,7 +56,7 @@ export function SkillTable({
             <tr>
               <th className="px-6 py-4 font-medium w-[25%]">{t("skills.table.skill")}</th>
               <th className="px-6 py-4 font-medium w-[45%]">{t("skills.table.description")}</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("skills.table.author")}</th>
+              <th className="px-6 py-4 font-medium w-[15%]">{t("skills.table.author")}</th>
               <th className="px-6 py-4 font-medium text-right w-[15%]"></th>
             </tr>
           </thead>
@@ -96,7 +96,7 @@ export function SkillTable({
                     <p className="text-zinc-400 text-sm leading-relaxed break-words whitespace-pre-line">{skill.description}</p>
                   </td>
                   <td className="px-6 py-4 align-top">
-                    <div className="flex justify-center">
+                    <div>
                       <UserAvatar
                         user={{
                             ...displayUser,
