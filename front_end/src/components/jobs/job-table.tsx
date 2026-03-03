@@ -65,7 +65,7 @@ export function JobTable({
               <th className="px-6 py-4 font-medium w-[13%] text-center">{t("jobs.table.status")}</th>
               <th className="px-6 py-4 font-medium w-[20%] text-center">{t("jobs.table.repo")}</th>
               <th className="px-6 py-4 font-medium w-[13%] text-center">{t("jobs.table.resources")}</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("jobs.table.creator")}</th>
+              <th className="px-6 py-4 font-medium w-[15%]">{t("jobs.table.creator")}</th>
               <th className="px-6 py-4 font-medium text-right w-[10%]"></th>
             </tr>
           </thead>
@@ -154,7 +154,7 @@ export function JobTable({
                   </td>
 
                   <td className="px-6 py-4 align-top">
-                    <div className="flex justify-center">
+                    <div>
                       <UserAvatar
                         user={job.user}
                         subText={formatBeijingTime(job.created_at)}

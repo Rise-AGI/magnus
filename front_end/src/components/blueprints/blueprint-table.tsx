@@ -58,7 +58,7 @@ export function BlueprintTable({
             <tr>
               <th className="px-6 py-4 font-medium w-[25%]">{t("blueprints.table.blueprint")}</th>
               <th className="px-6 py-4 font-medium w-[45%]">{t("blueprints.table.description")}</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("blueprints.table.author")}</th>
+              <th className="px-6 py-4 font-medium w-[15%]">{t("blueprints.table.author")}</th>
               <th className="px-6 py-4 font-medium text-right w-[15%]"></th>
             </tr>
           </thead>
@@ -98,8 +98,8 @@ export function BlueprintTable({
                     <p className="text-zinc-400 text-sm leading-relaxed break-words whitespace-pre-line">{bp.description}</p>
                   </td>
                   <td className="px-6 py-4 align-top">
-                    <div className="flex justify-center">
-                      <UserAvatar 
+                    <div>
+                      <UserAvatar
                         user={{
                             ...displayUser,
                             email: displayUser.email || undefined,

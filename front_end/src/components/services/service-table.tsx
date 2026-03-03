@@ -61,7 +61,7 @@ export function ServiceTable({
               <th className="px-6 py-4 font-medium w-[25%]">{t("services.table.service")}</th>
               <th className="px-6 py-4 font-medium w-[45%]">{t("services.table.description")}</th>
               <th className="px-6 py-4 font-medium w-[15%] text-center">{t("services.table.jobStatus")}</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("services.table.manager")}</th>
+              <th className="px-6 py-4 font-medium w-[15%]">{t("services.table.manager")}</th>
               <th className="px-6 py-4 font-medium text-right w-[15%]"></th>
             </tr>
           </thead>
@@ -170,7 +170,7 @@ export function ServiceTable({
 
                   {/* Column 4: Creator / Updated at */}
                   <td className="px-6 py-4 align-top">
-                    <div className="flex justify-center">
+                    <div>
                       <UserAvatar
                         user={{
                           ...displayUser,

@@ -82,7 +82,7 @@ export function ImageTable({ data, loading, onView, onDelete }: ImageTableProps)
           <thead className="bg-zinc-900/90 text-zinc-500 border-b border-zinc-800 backdrop-blur-md">
             <tr>
               <th className="px-6 py-4 font-medium w-[50%]">URI</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("images.table.owner")}</th>
+              <th className="px-6 py-4 font-medium w-[15%]">{t("images.table.owner")}</th>
               <th className="px-6 py-4 font-medium w-[10%] text-right">{t("images.table.size")}</th>
               <th className="px-6 py-4 font-medium w-[12%] text-center">{t("images.table.status")}</th>
               <th className="px-6 py-4 font-medium text-right w-[13%]"></th>
@@ -111,7 +111,7 @@ export function ImageTable({ data, loading, onView, onDelete }: ImageTableProps)
                     <CopyableText text={img.uri} variant="text" className="font-semibold text-zinc-200 text-base" />
                   </td>
                   <td className="px-6 py-4 align-top">
-                    <div className="flex justify-center">
+                    <div>
                       <UserAvatar
                         user={displayUser}
                         subText={img.updated_at ? formatBeijingTime(img.updated_at) : ""}
