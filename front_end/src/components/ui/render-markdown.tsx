@@ -23,15 +23,17 @@ import { CopyableText } from "@/components/ui/copyable-text";
 interface RenderMarkdownProps {
   content: string;
   className?: string;
+  onLinkClick?: (href: string) => void;
 }
 
 
 const RenderMarkdown = React.memo(function RenderMarkdown({
   content,
   className,
+  onLinkClick,
 }: RenderMarkdownProps) {
 
-  const processed = content.replace(/^---\n([\s\S]*?)\n---/, (_m, yaml) => "```yaml\n" + yaml.trim() + "\n```\n");
+  const processed = content.replace(/^---\n([\s\S]*?)\n---/, (_m, yaml) => "```yaml\n" + yaml.trim() + "\n```\n\n---\n");
 
   const markdownComponents = {
     h1: ({ className, ...props }: any) => (
@@ -145,15 +147,21 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
         {children}
       </div>
     ),
-    a: ({ className, ...props }: any) => (
-      <a
-        className={cn(
-          "font-medium underline underline-offset-4 text-blue-400 hover:text-blue-300 transition-all",
-          className,
-        )}
-        {...props}
-      />
-    ),
+    a: ({ className, href, ...props }: any) => {
+      const isRelative = href && !href.match(/^(https?:\/\/|#|mailto:)/);
+      return (
+        <a
+          className={cn(
+            "font-medium underline underline-offset-4 text-blue-400 hover:text-blue-300 transition-all",
+            isRelative && onLinkClick && "cursor-pointer",
+            className,
+          )}
+          href={isRelative && onLinkClick ? undefined : href}
+          onClick={isRelative && onLinkClick ? (e: React.MouseEvent) => { e.preventDefault(); onLinkClick(href); } : undefined}
+          {...props}
+        />
+      );
+    },
     code: (props: any) => {
       const { children, className, node, ...rest } = props;
       const match = /language-(\w+)/.exec(className || "");
@@ -210,7 +218,7 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
     </div>
   );
 }, (prevProps, nextProps) => {
-  return prevProps.content === nextProps.content && prevProps.className === nextProps.className;
+  return prevProps.content === nextProps.content && prevProps.className === nextProps.className && prevProps.onLinkClick === nextProps.onLinkClick;
 });
 
 export default RenderMarkdown;

@@ -112,6 +112,19 @@ export default function SkillDetailPage() {
     }
   };
 
+  const handleFileLink = useCallback((href: string) => {
+    if (!skill) return;
+    const dir = activeFile?.path.includes("/") ? activeFile.path.substring(0, activeFile.path.lastIndexOf("/") + 1) : "";
+    const parts = (dir + href).split("/");
+    const resolved: string[] = [];
+    for (const part of parts) {
+      if (part === "..") resolved.pop();
+      else if (part !== ".") resolved.push(part);
+    }
+    const target = skill.files.find(f => f.path === resolved.join("/"));
+    if (target) setActiveFile(target);
+  }, [skill, activeFile]);
+
   if (loading) return <div className="flex h-[50vh] items-center justify-center text-zinc-500"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
   if (notFound || !skill) {
@@ -298,7 +311,7 @@ export default function SkillDetailPage() {
               </div>
               <div className="flex-1 overflow-auto p-5">
                 {isMarkdown ? (
-                  <RenderMarkdown content={activeFile.content} />
+                  <RenderMarkdown content={activeFile.content} onLinkClick={handleFileLink} />
                 ) : (
                   <div className="bg-[#1e1e1e] rounded-lg overflow-hidden min-h-full">
                     <CodeEditor
