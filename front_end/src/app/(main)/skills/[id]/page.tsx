@@ -225,7 +225,7 @@ export default function SkillDetailPage() {
         <div className="lg:col-span-2 flex flex-col gap-6 h-full overflow-hidden">
 
           {/* Description */}
-          <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden flex flex-col max-h-[300px]">
+          <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden flex flex-col min-h-[160px] max-h-[260px]">
              <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
                <div className="flex items-center gap-2">
                  <Dna className="w-4 h-4 text-zinc-400" />
