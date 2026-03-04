@@ -193,7 +193,7 @@ def get_my_active_jobs(
     获取当前用户及其下属"活跃"的任务
     """
     # 收集自己 + 所有下属的 user_id（递归）
-    def _collect_descendant_ids(user: models.User) -> list[str]:
+    def _collect_descendant_ids(user: models.User) -> List[str]:
         ids = []
         for child in user.children:
             ids.append(child.id)
