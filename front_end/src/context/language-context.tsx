@@ -182,6 +182,7 @@ const translations = {
   "blueprintEditor.descriptionRequired": { zh: "蓝图描述是必填的", en: "Description is required" },
   "blueprints.table.description": { zh: "描述", en: "Description" },
   "blueprints.table.author": { zh: "作者 / 更新时间", en: "Author / Updated at" },
+  "blueprints.table.noDescription": { zh: "暂无描述", en: "No description" },
 
   // ===== Services =====
   "services.title": { zh: "服务注册表", en: "Service Registry" },
