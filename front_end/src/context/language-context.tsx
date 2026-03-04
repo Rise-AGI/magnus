@@ -79,7 +79,7 @@ const translations = {
   // ===== Cluster =====
   "cluster.welcome": { zh: "欢迎回来，{name}。这是集群概览。", en: "Welcome back, {name}. Here is your cluster overview." },
   "cluster.newJob": { zh: "新建任务", en: "New Job" },
-  "cluster.myActiveJobs": { zh: "我的活跃任务", en: "My Active Jobs" },
+  "cluster.myActiveJobs": { zh: "我和下属的活跃任务", en: "My & Team Active Jobs" },
   "cluster.noActiveJobs": { zh: "暂无活跃任务。", en: "No active jobs." },
   "cluster.availableGpus": { zh: "可用 GPU", en: "Available GPUs" },
   "cluster.availableCpuMem": { zh: "CPU / 内存", en: "CPUs / Memory" },

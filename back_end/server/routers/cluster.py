@@ -190,21 +190,31 @@ def get_my_active_jobs(
     current_user: models.User = Depends(get_current_user),
 ):
     """
-    获取当前用户"活跃"的任务
+    获取当前用户及其下属"活跃"的任务
     """
+    # 收集自己 + 所有下属的 user_id（递归）
+    def _collect_descendant_ids(user: models.User) -> list[str]:
+        ids = []
+        for child in user.children:
+            ids.append(child.id)
+            ids.extend(_collect_descendant_ids(child))
+        return ids
+
+    user_ids = [current_user.id] + _collect_descendant_ids(current_user)
+
     # 获取 Running 任务
     running_orm = db.query(models.Job).filter(
-        models.Job.user_id == current_user.id,
+        models.Job.user_id.in_(user_ids),
         models.Job.status == JobStatus.RUNNING,
     ).order_by(models.Job.start_time.desc()).all()
 
     # 获取排队任务 (QUEUED 在前端显示为 Pending，PREPARING 单独显示)
     queued_orm = db.query(models.Job).filter(
-        models.Job.user_id == current_user.id,
+        models.Job.user_id.in_(user_ids),
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
     ).all()
     preparing_orm = db.query(models.Job).filter(
-        models.Job.user_id == current_user.id,
+        models.Job.user_id.in_(user_ids),
         models.Job.status == JobStatus.PREPARING,
     ).all()
 
