@@ -95,7 +95,11 @@ export function BlueprintTable({
                     </div>
                   </td>
                   <td className="px-6 py-4 align-top whitespace-normal">
-                    <p className="text-zinc-400 text-sm leading-relaxed break-words whitespace-pre-line">{bp.description}</p>
+                    {bp.description ? (
+                      <p className="text-zinc-400 text-sm leading-relaxed break-words whitespace-pre-line">{bp.description}</p>
+                    ) : (
+                      <p className="text-zinc-600 text-sm italic">{t("blueprints.table.noDescription")}</p>
+                    )}
                   </td>
                   <td className="px-6 py-4 align-top">
                     <div>
