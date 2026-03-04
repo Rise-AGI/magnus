@@ -220,7 +220,7 @@ async def _begin_pull(
             raise HTTPException(status_code=403, detail="Only the owner or admin can re-pull this image.")
 
         if existing:
-            existing.status = "pulling"
+            existing.status = "refreshing"
             existing.updated_at = datetime.now(timezone.utc)
             img = existing
         else:
