@@ -47,6 +47,7 @@ server:
     model_name: qwen3-235b-a22b
     visual_model_name: qwen-vl-max
     small_fast_model_name: qwen-turbo
+    stt_model_name: whisper-1
     api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 execution:
