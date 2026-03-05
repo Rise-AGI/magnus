@@ -1,6 +1,7 @@
 # back_end/server/main.py
 import anyio
 import asyncio
+import shutil
 import logging
 import uvicorn
 import argparse
@@ -37,6 +38,34 @@ class EndpointFilter(logging.Filter):
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 logger = logging.getLogger(__name__)
+
+
+# ── 系统依赖检查（启动时 fast fail） ──────────────────────────────
+# 新站点部署时，缺什么一目了然
+SYSTEM_DEPENDENCIES = {
+    "SLURM 调度":  ["sbatch", "squeue", "scancel", "sinfo", "scontrol"],
+    "容器运行时":   ["apptainer"],
+    "版本控制":     ["git"],
+    "音频转码":     ["ffmpeg"],
+    "文件权限":     ["setfacl"],
+}
+
+def _check_system_dependencies() -> None:
+    missing: Dict[str, List[str]] = {}
+    for category, commands in SYSTEM_DEPENDENCIES.items():
+        not_found = [cmd for cmd in commands if shutil.which(cmd) is None]
+        if not_found:
+            missing[category] = not_found
+
+    if missing:
+        lines = [f"  {cat}: {', '.join(cmds)}" for cat, cmds in missing.items()]
+        msg = "❌ 系统依赖缺失（请安装后重启）:\n" + "\n".join(lines)
+        logger.critical(msg)
+        raise RuntimeError(msg)
+
+    logger.info("✅ 系统依赖检查通过")
+
+_check_system_dependencies()
 
 
 models.Base.metadata.create_all(

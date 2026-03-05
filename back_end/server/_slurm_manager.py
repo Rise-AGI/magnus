@@ -2,7 +2,7 @@
 import os
 import json
 import time
-import shutil
+
 import logging
 import traceback
 import subprocess
@@ -30,22 +30,8 @@ class SlurmResourceError(SlurmError):
 
 class SlurmManager:
 
-    def __init__(
-        self
-    )-> None:
-        
-        # Fast Fail 检查：Magnus 强依赖 Slurm 环境
-        # 若缺失核心命令，直接抛出运行时异常阻止服务启动
-        required_commands = ["sbatch", "squeue", "scancel", "sinfo"]
-        missing_commands = [command for command in required_commands if shutil.which(command) is None]
-        
-        if missing_commands:
-            error_msg = (
-                f"CRITICAL: SLURM commands not found: {', '.join(missing_commands)}. "
-                "Magnus requires a valid SLURM environment to operate."
-            )
-            logger.critical(error_msg)
-            raise RuntimeError(error_msg)
+    def __init__(self) -> None:
+        pass
 
 
     def _get_capacity_and_usage(self)-> Tuple[int, int]:
