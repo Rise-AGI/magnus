@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation";
 import { Play, RefreshCw, Trash2, FileCode, Loader2 } from "lucide-react";
 import { formatBeijingTime } from "@/lib/utils";
 import { CopyableText } from "@/components/ui/copyable-text";
-import { UserAvatar } from "@/components/ui/user-avatar";
-import { useAuth } from "@/context/auth-context";
+import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useLanguage } from "@/context/language-context";
 import { Blueprint } from "@/types/blueprint";
 
@@ -16,6 +15,7 @@ interface BlueprintTableProps {
   onRun: (bp: Blueprint) => void;
   onClone: (bp: Blueprint) => void;
   onDelete: (bp: Blueprint) => void;
+  onRefresh?: () => void;
   emptyMessage?: string;
 }
 
@@ -25,11 +25,11 @@ export function BlueprintTable({
   onRun,
   onClone,
   onDelete,
+  onRefresh,
   emptyMessage,
 }: BlueprintTableProps) {
 
   const router = useRouter();
-  const { user: currentUser } = useAuth();
   const { t } = useLanguage();
 
   if (loading) {
@@ -64,14 +64,11 @@ export function BlueprintTable({
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
             {data.map((bp) => {
-              const isOwner = currentUser?.id === bp.user_id;
-              const canManage = isOwner || currentUser?.is_admin;
-              
-              const displayUser = bp.user || { 
-                id: bp.user_id, 
-                name: "Unknown", 
-                feishu_open_id: "", 
-                email: "" 
+              const displayUser = bp.user || {
+                id: bp.user_id,
+                name: "Unknown",
+                feishu_open_id: "",
+                email: ""
               };
 
               return (
@@ -103,13 +100,18 @@ export function BlueprintTable({
                   </td>
                   <td className="px-6 py-4 align-top">
                     <div>
-                      <UserAvatar
+                      <TransferableAuthor
                         user={{
                             ...displayUser,
                             email: displayUser.email || undefined,
                             avatar_url: displayUser.avatar_url || undefined
-                        }} 
+                        }}
+                        canTransfer={!!bp.can_manage}
+                        entityType="blueprints"
+                        entityId={bp.id}
+                        avatarSize="sm"
                         subText={formatBeijingTime(bp.updated_at)}
+                        onTransferred={() => onRefresh?.()}
                       />
                     </div>
                   </td>
@@ -121,7 +123,7 @@ export function BlueprintTable({
                       <button onClick={(e) => { e.stopPropagation(); onRun(bp); }} className="p-2 bg-blue-900/20 hover:bg-blue-600 hover:text-white text-blue-500 rounded-lg transition-colors border border-blue-500/20 shadow-sm" title={t("blueprints.run")}>
                         <Play className="w-4 h-4 fill-current" />
                       </button>
-                      {canManage && (
+                      {bp.can_manage && (
                         <button onClick={(e) => { e.stopPropagation(); onDelete(bp); }} className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30" title={t("common.delete")}>
                           <Trash2 className="w-4 h-4" />
                         </button>

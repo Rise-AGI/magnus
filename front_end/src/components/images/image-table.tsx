@@ -3,9 +3,8 @@
 
 import { RefreshCw, Trash2, Container, Loader2 } from "lucide-react";
 import { formatBeijingTime } from "@/lib/utils";
-import { UserAvatar } from "@/components/ui/user-avatar";
+import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { CopyableText } from "@/components/ui/copyable-text";
-import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { User } from "@/types/auth";
 
@@ -19,6 +18,7 @@ export interface CachedImage {
   size_bytes: number;
   created_at: string | null;
   updated_at: string | null;
+  can_manage?: boolean;
 }
 
 export function formatSize(bytes: number): string {
@@ -51,10 +51,10 @@ interface ImageTableProps {
   loading: boolean;
   onView: (image: CachedImage) => void;
   onDelete: (image: CachedImage) => void;
+  onRefresh?: () => void;
 }
 
-export function ImageTable({ data, loading, onView, onDelete }: ImageTableProps) {
-  const { user: currentUser } = useAuth();
+export function ImageTable({ data, loading, onView, onDelete, onRefresh }: ImageTableProps) {
   const { t } = useLanguage();
 
   if (loading) {
@@ -90,8 +90,6 @@ export function ImageTable({ data, loading, onView, onDelete }: ImageTableProps)
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
             {data.map((img, idx) => {
-              const isOwner = currentUser?.id === img.user_id;
-              const canManage = isOwner || currentUser?.is_admin;
               const busy = isBusy(img.status);
 
               const displayUser = img.user ? {
@@ -112,10 +110,19 @@ export function ImageTable({ data, loading, onView, onDelete }: ImageTableProps)
                   </td>
                   <td className="px-6 py-4 align-top">
                     <div>
-                      <UserAvatar
-                        user={displayUser}
-                        subText={img.updated_at ? formatBeijingTime(img.updated_at) : ""}
-                      />
+                      {displayUser && img.id !== null ? (
+                        <TransferableAuthor
+                          user={displayUser}
+                          canTransfer={!!img.can_manage}
+                          entityType="images"
+                          entityId={String(img.id)}
+                          avatarSize="sm"
+                          subText={img.updated_at ? formatBeijingTime(img.updated_at) : ""}
+                          onTransferred={() => onRefresh?.()}
+                        />
+                      ) : (
+                        <span className="text-xs text-zinc-500">-</span>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right text-zinc-400 font-mono text-xs">
@@ -129,7 +136,7 @@ export function ImageTable({ data, loading, onView, onDelete }: ImageTableProps)
                   </td>
                   <td className="px-6 py-4 align-middle text-right">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
-                      {canManage && img.id !== null && (
+                      {img.can_manage && img.id !== null && (
                         <>
                           <button
                             onClick={() => onView(img)}

@@ -10,7 +10,6 @@ import {
 
 import { client } from "@/lib/api";
 import { formatBeijingTime } from "@/lib/utils";
-import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { NotFound } from "@/components/ui/not-found";
 import { CopyableText } from "@/components/ui/copyable-text";
@@ -18,12 +17,12 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { SkillEditor } from "@/components/skills/skill-editor";
 import { CodeEditor } from "@/components/ui/code-editor";
 import RenderMarkdown from "@/components/ui/render-markdown";
+import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { Skill, SkillFile } from "@/types/skill";
 
 export default function SkillDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { user: currentUser } = useAuth();
   const { t } = useLanguage();
   const skillId = params.id as string;
 
@@ -138,14 +137,12 @@ export default function SkillDetailPage() {
     );
   }
 
-  const isOwner = currentUser?.id === skill.user_id;
-  const canManage = isOwner || currentUser?.is_admin;
   const displayUser = skill.user || {
       id: skill.user_id,
       name: "Unknown",
       email: undefined,
       avatar_url: undefined,
-      feishu_open_id: ""
+      feishu_open_id: "",
   };
 
   const isMarkdown = activeFile?.path.endsWith(".md");
@@ -186,38 +183,25 @@ export default function SkillDetailPage() {
 
           {/* Creator Card */}
           <div className="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
-             <div className="flex-shrink-0">
-                {displayUser.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={displayUser.avatar_url}
-                    alt={displayUser.name}
-                    className="w-10 h-10 rounded-full border border-zinc-700/50 object-cover shadow-sm"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/30">
-                    {displayUser.name.substring(0, 2).toUpperCase()}
-                  </div>
-                )}
-             </div>
-
-             <div className="flex flex-col">
-                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("skillDetail.author")}</span>
-                <span className="text-base font-bold tracking-wide text-zinc-200">
-                   {displayUser.name}
-                </span>
-             </div>
+             <TransferableAuthor
+               user={displayUser}
+               label={t("skillDetail.author")}
+               canTransfer={!!skill.can_manage}
+               entityType="skills"
+               entityId={skill.id}
+               onTransferred={(newOwner) => setSkill(prev => prev ? { ...prev, user_id: newOwner.id, user: newOwner } : prev)}
+             />
 
              <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center gap-2">
                 <button
                     onClick={() => { setEditorOpen(true); }}
                     className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                    title={isOwner ? t("skillDetail.editClone") : t("skills.clone")}
+                    title={skill.can_manage ? t("skillDetail.editClone") : t("skills.clone")}
                 >
                     <RefreshCw className="w-5 h-5" />
                 </button>
 
-                {canManage && (
+                {skill.can_manage && (
                     <button
                         onClick={() => setShowDeleteConfirm(true)}
                         className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"

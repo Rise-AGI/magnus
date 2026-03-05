@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import { Loader2, Power, RefreshCw, Trash2, Box } from "lucide-react";
 import { Service } from "@/types/service";
 import { CopyableText } from "@/components/ui/copyable-text";
-import { UserAvatar } from "@/components/ui/user-avatar";
+import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { formatBeijingTime } from "@/lib/utils";
-import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 
 interface ServiceTableProps {
@@ -17,6 +16,7 @@ interface ServiceTableProps {
   onClone: (service: Service) => void;
   onToggle: (service: Service) => void;
   onDelete: (service: Service) => void;
+  onRefresh?: () => void;
   emptyMessage?: string;
   className?: string;
 }
@@ -27,10 +27,10 @@ export function ServiceTable({
   onClone,
   onToggle,
   onDelete,
+  onRefresh,
   emptyMessage,
   className = "",
 }: ServiceTableProps) {
-  const { user: currentUser } = useAuth();
   const { t } = useLanguage();
   const router = useRouter();
 
@@ -67,9 +67,6 @@ export function ServiceTable({
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
             {services.map((svc) => {
-              const isOwner = currentUser?.id === svc.owner_id;
-              const canManage = isOwner || currentUser?.is_admin;
-
               const displayUser = svc.owner || {
                 id: svc.owner_id,
                 name: "Unknown",
@@ -171,13 +168,18 @@ export function ServiceTable({
                   {/* Column 4: Creator / Updated at */}
                   <td className="px-6 py-4 align-top">
                     <div>
-                      <UserAvatar
+                      <TransferableAuthor
                         user={{
                           ...displayUser,
                           email: displayUser.email || undefined,
                           avatar_url: displayUser.avatar_url || undefined
                         }}
+                        canTransfer={!!svc.can_manage}
+                        entityType="services"
+                        entityId={svc.id}
+                        avatarSize="sm"
                         subText={formatBeijingTime(svc.updated_at)}
+                        onTransferred={() => onRefresh?.()}
                       />
                     </div>
                   </td>
@@ -192,12 +194,12 @@ export function ServiceTable({
                           onClone(svc);
                         }}
                         className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                        title={isOwner ? t("services.editService") : t("services.cloneService")}
+                        title={svc.can_manage ? t("services.editService") : t("services.cloneService")}
                       >
                         <RefreshCw className="w-4 h-4" />
                       </button>
 
-                      {canManage && (
+                      {svc.can_manage && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -213,7 +215,7 @@ export function ServiceTable({
                         </button>
                       )}
 
-                      {canManage && (
+                      {svc.can_manage && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

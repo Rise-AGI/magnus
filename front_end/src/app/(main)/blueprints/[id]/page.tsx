@@ -10,7 +10,6 @@ import {
 
 import { client } from "@/lib/api";
 import { formatBeijingTime, computeStableHash } from "@/lib/utils";
-import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { NotFound } from "@/components/ui/not-found";
 
@@ -20,6 +19,7 @@ import { DynamicForm } from "@/components/ui/dynamic-form";
 import { BlueprintEditor } from "@/components/blueprints/blueprint-editor";
 import { CodeEditor } from "@/components/ui/code-editor";
 import RenderMarkdown from "@/components/ui/render-markdown";
+import { TransferableAuthor } from "@/components/ui/transferable-author";
 
 import { Blueprint, BlueprintPreference } from "@/types/blueprint";
 import { FieldSchema, getFieldInitialValue, validateFieldValue } from "@/components/ui/dynamic-form/types";
@@ -28,7 +28,6 @@ import { BlueprintImplicitImports } from "@/lib/blueprint-defaults";
 export default function BlueprintDetailsPage() {
   const params = useParams();
   const router = useRouter();
-  const { user: currentUser } = useAuth();
   const { t } = useLanguage();
   const blueprintId = params.id as string;
 
@@ -225,14 +224,12 @@ export default function BlueprintDetailsPage() {
     );
   }
 
-  const isOwner = currentUser?.id === blueprint.user_id;
-  const canManage = isOwner || currentUser?.is_admin;
-  const displayUser = blueprint.user || { 
-      id: blueprint.user_id, 
-      name: "Unknown", 
-      email: undefined, 
+  const displayUser = blueprint.user || {
+      id: blueprint.user_id,
+      name: "Unknown",
+      email: undefined,
       avatar_url: undefined,
-      feishu_open_id: ""
+      feishu_open_id: "",
   };
 
   return (
@@ -272,35 +269,22 @@ export default function BlueprintDetailsPage() {
             </div>
           </div>
 
-          {/* Creator Card (复刻 Job Status Card 布局) */}
+          {/* Creator Card */}
           <div className="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
-             <div className="flex-shrink-0">
-                {displayUser.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img 
-                    src={displayUser.avatar_url} 
-                    alt={displayUser.name} 
-                    className="w-10 h-10 rounded-full border border-zinc-700/50 object-cover shadow-sm"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/30">
-                    {displayUser.name.substring(0, 2).toUpperCase()}
-                  </div>
-                )}
-             </div>
-             
-             <div className="flex flex-col">
-                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("blueprintDetail.author")}</span>
-                <span className="text-base font-bold tracking-wide text-zinc-200">
-                   {displayUser.name}
-                </span>
-             </div>
+             <TransferableAuthor
+               user={displayUser}
+               label={t("blueprintDetail.author")}
+               canTransfer={!!blueprint.can_manage}
+               entityType="blueprints"
+               entityId={blueprint.id}
+               onTransferred={(newOwner) => setBlueprint(prev => prev ? { ...prev, user_id: newOwner.id, user: newOwner } : prev)}
+             />
 
              <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center gap-2">
                 <button
                     onClick={() => { setEditorOpen(true); }}
                     className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                    title={isOwner ? t("blueprintDetail.editClone") : t("blueprints.clone")}
+                    title={blueprint.can_manage ? t("blueprintDetail.editClone") : t("blueprints.clone")}
                 >
                     <RefreshCw className="w-5 h-5" />
                 </button>
@@ -314,7 +298,7 @@ export default function BlueprintDetailsPage() {
                     {isRunning ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
                 </button>
 
-                {canManage && (
+                {blueprint.can_manage && (
                     <button
                         onClick={() => setShowDeleteConfirm(true)}
                         className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"

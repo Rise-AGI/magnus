@@ -30,11 +30,39 @@ def _is_admin(user: models.User) -> bool:
     return user.feishu_open_id in admin_open_ids
 
 
-def _can_manage(actor: models.User, target: models.User) -> bool:
-    """actor 是否有权管理 target（parent 或 admin）。"""
+def _is_ancestor(db: Session, ancestor_id: str, descendant_id: str) -> bool:
+    """ancestor_id 是否是 descendant_id 的上级（递归向上走 parent 链）。"""
+    visited = set()
+    current_id = descendant_id
+    while current_id and current_id not in visited:
+        user = db.query(models.User).filter(models.User.id == current_id).first()
+        if not user or not user.parent_id:
+            return False
+        if user.parent_id == ancestor_id:
+            return True
+        visited.add(current_id)
+        current_id = user.parent_id
+    return False
+
+
+def _get_all_subordinate_ids(db: Session, user_id: str) -> List[str]:
+    """递归收集所有下属的 ID。"""
+    result: List[str] = []
+    queue = [user_id]
+    while queue:
+        pid = queue.pop()
+        children = db.query(models.User.id).filter(models.User.parent_id == pid).all()
+        for (cid,) in children:
+            result.append(cid)
+            queue.append(cid)
+    return result
+
+
+def _can_manage(actor: models.User, target: models.User, db: Session) -> bool:
+    """actor 是否有权管理 target（递归上级 或 admin）。"""
     if _is_admin(actor):
         return True
-    return target.parent_id == actor.id
+    return _is_ancestor(db, actor.id, target.id)
 
 
 def _get_occupied_headcount(db: Session, user_id: str) -> int:
@@ -183,6 +211,31 @@ def get_users(
     ]
 
 
+@router.get("/users/transfer-candidates", response_model=List[UserInfo])
+def get_transfer_candidates(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> List[UserInfo]:
+    if _is_admin(current_user):
+        users = db.query(models.User).order_by(models.User.name).all()
+    else:
+        subordinate_ids = _get_all_subordinate_ids(db, current_user.id)
+        candidate_ids = [current_user.id] + subordinate_ids
+        users = db.query(models.User).filter(
+            models.User.id.in_(candidate_ids)
+        ).order_by(models.User.name).all()
+    return [
+        UserInfo(
+            id=u.id,
+            name=u.name,
+            avatar_url=u.avatar_url,
+            email=u.email,
+            is_admin=_is_admin(u),
+        )
+        for u in users
+    ]
+
+
 @router.get(
     "/users/roster",
     response_model=PagedUserResponse,
@@ -271,7 +324,7 @@ def delete_user(
     if target.user_type != "agent":
         raise HTTPException(status_code=400, detail="Cannot delete human users")
 
-    if not _can_manage(current_user, target):
+    if not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     # 检查是否有下属
@@ -307,7 +360,7 @@ def update_headcount(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if not _can_manage(current_user, target):
+    if not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     if target.user_type != "agent":
@@ -360,7 +413,7 @@ def get_user_token(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if target.id != current_user.id and not _can_manage(current_user, target):
+    if target.id != current_user.id and not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     return {"magnus_token": target.token or ""}
@@ -380,7 +433,7 @@ def refresh_user_token(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if target.id != current_user.id and not _can_manage(current_user, target):
+    if target.id != current_user.id and not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     new_token = generate_trust_token()
@@ -408,7 +461,7 @@ def set_user_token(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if target.id != current_user.id and not _can_manage(current_user, target):
+    if target.id != current_user.id and not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     token = payload.get("token", "")
@@ -446,7 +499,7 @@ async def upload_avatar(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if target.id != current_user.id and not _can_manage(current_user, target):
+    if target.id != current_user.id and not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     if file.content_type not in _ALLOWED_AVATAR_TYPES:

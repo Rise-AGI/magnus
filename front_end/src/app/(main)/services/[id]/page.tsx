@@ -10,7 +10,6 @@ import {
 
 import { client } from "@/lib/api";
 import { formatBeijingTime } from "@/lib/utils";
-import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { POLL_INTERVAL } from "@/lib/config";
 
@@ -20,13 +19,13 @@ import { NotFound } from "@/components/ui/not-found";
 import { ServiceDrawer } from "@/components/services/service-drawer";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { ServiceImplicitExport } from "@/lib/service-defaults";
+import { TransferableAuthor } from "@/components/ui/transferable-author";
 
 import { Service } from "@/types/service";
 
 export default function ServiceDetailsPage() {
   const params = useParams();
   const router = useRouter();
-  const { user: currentUser } = useAuth();
   const { t } = useLanguage();
   const serviceId = params.id as string;
 
@@ -179,8 +178,6 @@ export default function ServiceDetailsPage() {
     );
   }
 
-  const isOwner = currentUser?.id === service.owner_id;
-  const canManage = isOwner || currentUser?.is_admin;
   const displayUser = service.owner || {
     id: service.owner_id,
     name: "Unknown",
@@ -285,22 +282,15 @@ export default function ServiceDetailsPage() {
 
             {/* Owner */}
             <div className="ml-4 pl-4 border-l border-zinc-700/50 flex items-center gap-3">
-              {displayUser.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={displayUser.avatar_url}
-                  alt={displayUser.name}
-                  className="w-8 h-8 rounded-full border border-zinc-700/50 object-cover shadow-sm"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/30">
-                  {displayUser.name.substring(0, 2).toUpperCase()}
-                </div>
-              )}
-              <div className="flex flex-col">
-                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("serviceDetail.manager")}</span>
-                <span className="text-sm font-medium text-zinc-200">{displayUser.name}</span>
-              </div>
+              <TransferableAuthor
+                user={displayUser}
+                label={t("serviceDetail.manager")}
+                canTransfer={!!service.can_manage}
+                entityType="services"
+                entityId={service.id}
+                onTransferred={(newOwner) => setService(prev => prev ? { ...prev, owner_id: newOwner.id, owner: newOwner } : prev)}
+                avatarSize="sm"
+              />
             </div>
 
             <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center gap-2">
@@ -308,13 +298,13 @@ export default function ServiceDetailsPage() {
               <button
                 onClick={() => setIsDrawerOpen(true)}
                 className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                title={isOwner ? t("serviceDetail.editClone") : t("services.cloneService")}
+                title={service.can_manage ? t("serviceDetail.editClone") : t("services.cloneService")}
               >
                 <RefreshCw className="w-5 h-5" />
               </button>
 
               {/* Toggle Button */}
-              {canManage && (
+              {service.can_manage && (
                 <button
                   onClick={handleToggleClick}
                   className={`p-2 rounded-lg transition-colors border shadow-sm ${service.is_active
@@ -328,7 +318,7 @@ export default function ServiceDetailsPage() {
               )}
 
               {/* Delete Button */}
-              {canManage && (
+              {service.can_manage && (
                 <button
                   onClick={handleDeleteClick}
                   className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"

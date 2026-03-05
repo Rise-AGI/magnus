@@ -16,8 +16,10 @@ from ..schemas import (
     CachedImageCreate,
     CachedImageResponse,
     PagedCachedImageResponse,
+    TransferRequest,
 )
 from .auth import get_current_user
+from .users import _is_ancestor, _get_all_subordinate_ids
 from .._magnus_config import magnus_config, admin_open_ids
 from .._resource_manager import resource_manager, _image_to_sif_filename
 
@@ -100,8 +102,10 @@ def _is_admin(current_user: models.User) -> bool:
     return current_user.feishu_open_id in admin_open_ids
 
 
-def _is_admin_or_owner(current_user: models.User, owner_id: str) -> bool:
-    return current_user.id == owner_id or _is_admin(current_user)
+def _is_admin_or_owner(current_user: models.User, owner_id: str, db: Session) -> bool:
+    if current_user.id == owner_id or _is_admin(current_user):
+        return True
+    return _is_ancestor(db, current_user.id, owner_id)
 
 
 # ─── 后台拉取任务 ───────────────────────────────────────────────
@@ -203,7 +207,7 @@ async def _begin_pull(
         ).filter(models.CachedImage.id == image_id).first()
         if not img:
             raise HTTPException(status_code=404, detail="Image not found")
-        if not _is_admin_or_owner(current_user, img.user_id):
+        if not _is_admin_or_owner(current_user, img.user_id, db):
             raise HTTPException(status_code=403, detail="Only the owner or admin can refresh this image")
         if img.status in ("pulling", "refreshing"):
             raise HTTPException(status_code=409, detail="Image is already being pulled/refreshed.")
@@ -216,7 +220,7 @@ async def _begin_pull(
 
         if existing and existing.status in ("pulling", "refreshing"):
             raise HTTPException(status_code=409, detail="Image is currently being pulled/refreshed.")
-        if existing and not _is_admin_or_owner(current_user, existing.user_id):
+        if existing and not _is_admin_or_owner(current_user, existing.user_id, db):
             raise HTTPException(status_code=403, detail="Only the owner or admin can re-pull this image.")
 
         if existing:
@@ -254,7 +258,7 @@ def list_images(
     limit: int = 50,
     search: Optional[str] = None,
     db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
 ):
     # 1. DB records
     query = db.query(models.CachedImage)
@@ -300,7 +304,29 @@ def list_images(
         combined.append(resp)
 
     combined.extend(fs_items)
-    combined.sort(key=lambda x: x.updated_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    # human-first sort: 人类用户的镜像排前面，agent 排后面；同类按更新时间倒序
+    user_type_map: dict[str, str] = {}
+    for img in db_images:
+        if img.user and img.user_id and img.user_id not in user_type_map:
+            user_type_map[img.user_id] = img.user.user_type
+
+    def _sort_key(x: CachedImageResponse) -> tuple:
+        user_type_weight = 1  # default: agent / no owner → sort later
+        if x.user_id and x.user_id in user_type_map:
+            user_type_weight = 0 if user_type_map[x.user_id] == "human" else 1
+        updated = x.updated_at or datetime.min.replace(tzinfo=timezone.utc)
+        return (user_type_weight, -updated.timestamp())
+
+    combined.sort(key=_sort_key)
+
+    # 4. 计算 can_manage
+    is_admin = _is_admin(current_user)
+    subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
+    for resp in combined:
+        if resp.user_id:
+            resp.can_manage = is_admin or resp.user_id == current_user.id or resp.user_id in subordinate_ids
+
     total = len(combined)
     page = combined[skip:skip + limit]
     return {"total": total, "items": page}
@@ -349,7 +375,7 @@ async def delete_image(
         if not img:
             raise HTTPException(status_code=404, detail="Image not found")
 
-        if not _is_admin_or_owner(current_user, img.user_id):
+        if not _is_admin_or_owner(current_user, img.user_id, db):
             raise HTTPException(status_code=403, detail="Only the owner or admin can delete this image")
 
         if img.status in ("pulling", "refreshing"):
@@ -364,3 +390,36 @@ async def delete_image(
 
         db.delete(img)
         db.commit()
+
+
+@router.post("/images/{image_id}/transfer", response_model=CachedImageResponse)
+def transfer_image(
+    image_id: int,
+    body: TransferRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> models.CachedImage:
+    img = db.query(models.CachedImage).options(
+        joinedload(models.CachedImage.user),
+    ).filter(models.CachedImage.id == image_id).first()
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    is_admin = _is_admin(current_user)
+    is_owner = img.user_id == current_user.id
+    is_superior = not is_owner and _is_ancestor(db, current_user.id, img.user_id)
+
+    if not (is_admin or is_owner or is_superior):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
+    if not new_owner:
+        raise HTTPException(status_code=404, detail="Target user not found")
+    if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
+        raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
+
+    img.user_id = body.new_owner_id
+    img.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(img)
+    return img

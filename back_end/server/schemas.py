@@ -53,6 +53,10 @@ class UserInfo(BaseModel):
     class Config: from_attributes = True
 
 
+class TransferRequest(BaseModel):
+    new_owner_id: str
+
+
 class UserDetail(BaseModel):
     id: str
     name: str
@@ -184,7 +188,8 @@ class BlueprintResponse(BaseModel):
     code: str
     user_id: str
     updated_at: datetime
-    user: Optional[UserInfo] = None 
+    user: Optional[UserInfo] = None
+    can_manage: bool = False
     class Config: from_attributes = True
 
 
@@ -267,6 +272,7 @@ class ServiceResponse(ServiceCreate):
     current_job: Optional[JobResponse] = None
     owner: Optional[UserInfo] = None
     updated_at: datetime
+    can_manage: bool = False
     class Config: from_attributes = True
     
     
@@ -362,6 +368,7 @@ class SkillResponse(BaseModel):
     updated_at: datetime
     user: Optional[UserInfo] = None
     files: List[SkillFileResponse] = []
+    can_manage: bool = False
     class Config: from_attributes = True
 
 
@@ -384,6 +391,7 @@ class CachedImageResponse(BaseModel):
     size_bytes: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    can_manage: bool = False
     class Config: from_attributes = True
 
 

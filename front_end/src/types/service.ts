@@ -14,6 +14,7 @@ export interface Service {
   assigned_port?: number;
   current_job?: Job;
   owner?: User;
+  can_manage?: boolean;
   request_timeout: number;
   idle_timeout: number;
   max_concurrency: number;

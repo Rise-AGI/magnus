@@ -132,7 +132,7 @@ export default function SkillsPage() {
       </div>
 
       <SkillTable
-        data={skills} loading={loading} onClone={handleClone} onDelete={setSkillToDelete}
+        data={skills} loading={loading} onClone={handleClone} onDelete={setSkillToDelete} onRefresh={() => fetchSkills(true)}
       />
       {skills.length > 0 && (
         <div className="mt-4 px-6">

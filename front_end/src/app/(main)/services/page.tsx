@@ -316,6 +316,7 @@ export default function ServicesPage() {
           onClone={handleClone}
           onToggle={handleToggleClick}
           onDelete={handleDeleteClick}
+          onRefresh={() => fetchServices(true)}
         />
         {services.length > 0 && (
           <div className="px-6 py-2 border-zinc-900/30">

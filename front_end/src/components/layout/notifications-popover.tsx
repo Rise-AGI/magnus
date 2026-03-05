@@ -1,8 +1,9 @@
 // front_end/src/components/layout/notifications-popover.tsx
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Bell, Check, Info, AlertCircle, X, CheckCheck } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
 import { useLanguage } from "@/context/language-context";
 
 // --- Types ---
@@ -20,10 +21,8 @@ export interface Notification {
 
 export function NotificationsPopover() {
   const { t } = useLanguage();
-  const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const popoverRef = useRef<HTMLDivElement>(null);
 
   // --- Logic: Load Data ---
   useEffect(() => {
@@ -44,17 +43,6 @@ export function NotificationsPopover() {
   useEffect(() => {
     setUnreadCount(notifications.filter(n => !n.read).length);
   }, [notifications]);
-
-  // --- Logic: Click Outside to Close ---
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const markAllAsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
@@ -79,24 +67,27 @@ export function NotificationsPopover() {
   };
 
   return (
-    <div className="relative" ref={popoverRef}>
+    <Popover.Root>
       {/* Trigger Button */}
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className={`p-2 rounded-lg transition-all relative
-          ${isOpen ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'}`}
-      >
-        <Bell className="w-4 h-4" />
-        {unreadCount > 0 && (
-          <span className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full border-2 border-[#0A0A0C]"></span>
-        )}
-      </button>
+      <Popover.Trigger asChild>
+        <button
+          className="p-2 rounded-lg transition-all relative text-zinc-400 hover:text-white hover:bg-zinc-800/50 data-[state=open]:bg-zinc-800 data-[state=open]:text-white focus:outline-none"
+        >
+          <Bell className="w-4 h-4" />
+          {unreadCount > 0 && (
+            <span className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full border-2 border-[#0A0A0C]"></span>
+          )}
+        </button>
+      </Popover.Trigger>
 
       {/* Popover Panel */}
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-[#0A0A0C] border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden ring-1 ring-white/5 animate-in fade-in zoom-in-95 duration-100">
-          
-          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-sm">
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={8}
+          className="w-80 bg-[#0A0A0C] border border-zinc-800 rounded-xl shadow-2xl z-[200] overflow-hidden ring-1 ring-white/5 animate-in fade-in zoom-in-95 duration-100"
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900/50">
             <h3 className="text-sm font-semibold text-zinc-200">{t("notifications.title")}</h3>
             {unreadCount > 0 && (
               <button
@@ -117,12 +108,12 @@ export function NotificationsPopover() {
             ) : (
               <div className="divide-y divide-zinc-800/50">
                 {notifications.map(n => (
-                  <div 
-                    key={n.id} 
+                  <div
+                    key={n.id}
                     className={`px-4 py-3 flex gap-3 group transition-colors relative
                       ${n.read ? 'bg-transparent' : 'bg-zinc-900/30 hover:bg-zinc-900/50'}`}
                   >
-                    <div className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center border border-zinc-800 bg-zinc-900`}>
+                    <div className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center border border-zinc-800 bg-zinc-900">
                       {getIcon(n.type)}
                     </div>
 
@@ -140,13 +131,13 @@ export function NotificationsPopover() {
                       </p>
                     </div>
 
-                    <button 
+                    <button
                       onClick={(e) => removeNotification(n.id, e)}
                       className="absolute right-2 top-2 p-1 rounded hover:bg-zinc-700 text-zinc-600 hover:text-zinc-300 opacity-0 group-hover:opacity-100 transition-all"
                     >
                       <X className="w-3 h-3" />
                     </button>
-                    
+
                     {!n.read && (
                       <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500/50"></div>
                     )}
@@ -155,8 +146,8 @@ export function NotificationsPopover() {
               </div>
             )}
           </div>
-        </div>
-      )}
-    </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

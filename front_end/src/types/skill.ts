@@ -16,4 +16,5 @@ export interface Skill {
   files: SkillFile[];
   created_at: string;
   updated_at: string;
+  can_manage?: boolean;
 }

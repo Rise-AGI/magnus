@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation";
 import { RefreshCw, Trash2, Dna, Loader2 } from "lucide-react";
 import { formatBeijingTime } from "@/lib/utils";
 import { CopyableText } from "@/components/ui/copyable-text";
-import { UserAvatar } from "@/components/ui/user-avatar";
-import { useAuth } from "@/context/auth-context";
+import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useLanguage } from "@/context/language-context";
 import { Skill } from "@/types/skill";
 
@@ -15,6 +14,7 @@ interface SkillTableProps {
   loading: boolean;
   onClone: (skill: Skill) => void;
   onDelete: (skill: Skill) => void;
+  onRefresh?: () => void;
   emptyMessage?: string;
 }
 
@@ -23,11 +23,11 @@ export function SkillTable({
   loading,
   onClone,
   onDelete,
+  onRefresh,
   emptyMessage,
 }: SkillTableProps) {
 
   const router = useRouter();
-  const { user: currentUser } = useAuth();
   const { t } = useLanguage();
 
   if (loading) {
@@ -62,9 +62,6 @@ export function SkillTable({
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
             {data.map((skill) => {
-              const isOwner = currentUser?.id === skill.user_id;
-              const canManage = isOwner || currentUser?.is_admin;
-
               const displayUser = skill.user || {
                 id: skill.user_id,
                 name: "Unknown",
@@ -97,13 +94,18 @@ export function SkillTable({
                   </td>
                   <td className="px-6 py-4 align-top">
                     <div>
-                      <UserAvatar
+                      <TransferableAuthor
                         user={{
                             ...displayUser,
                             email: displayUser.email || undefined,
                             avatar_url: displayUser.avatar_url || undefined
                         }}
+                        canTransfer={!!skill.can_manage}
+                        entityType="skills"
+                        entityId={skill.id}
+                        avatarSize="sm"
                         subText={formatBeijingTime(skill.updated_at)}
+                        onTransferred={() => onRefresh?.()}
                       />
                     </div>
                   </td>
@@ -112,7 +114,7 @@ export function SkillTable({
                       <button onClick={(e) => { e.stopPropagation(); onClone(skill); }} className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm" title={t("skills.clone")}>
                         <RefreshCw className="w-4 h-4" />
                       </button>
-                      {canManage && (
+                      {skill.can_manage && (
                         <button onClick={(e) => { e.stopPropagation(); onDelete(skill); }} className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30" title={t("common.delete")}>
                           <Trash2 className="w-4 h-4" />
                         </button>

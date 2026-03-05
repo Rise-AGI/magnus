@@ -144,8 +144,8 @@ export default function BlueprintsPage() {
         </div>
       </div>
 
-      <BlueprintTable 
-        data={blueprints} loading={loading} onRun={handleOpenRun} onClone={handleClone} onDelete={setBlueprintToDelete} 
+      <BlueprintTable
+        data={blueprints} loading={loading} onRun={handleOpenRun} onClone={handleClone} onDelete={setBlueprintToDelete} onRefresh={() => fetchBlueprints(true)}
       />
       {blueprints.length > 0 && (
         <div className="mt-4 px-6">

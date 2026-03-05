@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, subqueryload
-from sqlalchemy import or_
+from sqlalchemy import or_, case
 
 from .. import database
 from .. import models
@@ -15,9 +15,11 @@ from ..schemas import (
     SkillFileCreate,
     SkillResponse,
     PagedSkillResponse,
+    TransferRequest,
 )
 from .._id_registry import assert_id_available
 from .auth import get_current_user
+from .users import _is_ancestor, _get_all_subordinate_ids
 from .._magnus_config import admin_open_ids
 
 
@@ -107,11 +109,47 @@ def delete_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    if skill.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
-        raise HTTPException(status_code=403, detail="You do not have permission to delete this skill")
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_owner = skill.user_id == current_user.id
+    is_superior = not is_owner and _is_ancestor(db, current_user.id, skill.user_id)
+
+    if not (is_admin or is_owner or is_superior):
+        raise HTTPException(status_code=403, detail="Permission denied")
 
     db.delete(skill)
     db.commit()
+
+
+@router.post("/skills/{skill_id}/transfer", response_model=SkillResponse)
+def transfer_skill(
+    skill_id: str,
+    body: TransferRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> models.Skill:
+    skill = db.query(models.Skill).options(joinedload(models.Skill.user))\
+              .filter(models.Skill.id == skill_id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_owner = skill.user_id == current_user.id
+    is_superior = not is_owner and _is_ancestor(db, current_user.id, skill.user_id)
+
+    if not (is_admin or is_owner or is_superior):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
+    if not new_owner:
+        raise HTTPException(status_code=404, detail="Target user not found")
+    if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
+        raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
+
+    skill.user_id = body.new_owner_id
+    skill.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(skill)
+    return skill
 
 
 @router.get("/skills", response_model=PagedSkillResponse)
@@ -121,7 +159,7 @@ def list_skills(
     search: Optional[str] = None,
     creator_id: Optional[str] = None,
     db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
 ):
     query = db.query(models.Skill)
 
@@ -141,20 +179,28 @@ def list_skills(
 
     total = query.count()
 
-    items = query.options(joinedload(models.Skill.user), subqueryload(models.Skill.files))\
-                 .order_by(models.Skill.updated_at.desc())\
-                 .offset(skip)\
-                 .limit(limit)\
-                 .all()
+    human_first = case((models.User.user_type == "human", 0), else_=1)
+    items = query.join(models.User, models.Skill.user_id == models.User.id)\
+                 .options(joinedload(models.Skill.user), subqueryload(models.Skill.files))\
+                 .order_by(human_first, models.Skill.updated_at.desc())\
+                 .offset(skip).limit(limit).all()
 
-    return {"total": total, "items": items}
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
+    result = []
+    for skill in items:
+        resp = SkillResponse.model_validate(skill)
+        resp.can_manage = is_admin or skill.user_id == current_user.id or skill.user_id in subordinate_ids
+        result.append(resp)
+
+    return {"total": total, "items": result}
 
 
 @router.get("/skills/{skill_id}", response_model=SkillResponse)
 def get_skill(
     skill_id: str,
     db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
 ):
     skill = db.query(models.Skill)\
         .options(joinedload(models.Skill.user), joinedload(models.Skill.files))\
@@ -164,6 +210,9 @@ def get_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    return skill
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    resp = SkillResponse.model_validate(skill)
+    resp.can_manage = is_admin or skill.user_id == current_user.id or _is_ancestor(db, current_user.id, skill.user_id)
+    return resp
 
 

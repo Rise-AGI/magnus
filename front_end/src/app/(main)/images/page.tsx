@@ -166,7 +166,7 @@ export default function ImagesPage() {
         </div>
       </div>
 
-      <ImageTable data={images} loading={loading} onView={setViewingImage} onDelete={setImageToDelete} />
+      <ImageTable data={images} loading={loading} onView={setViewingImage} onDelete={setImageToDelete} onRefresh={() => fetchImages(true)} />
 
       {images.length > 0 && (
         <div className="mt-4 px-6">

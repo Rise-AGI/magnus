@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_
+from sqlalchemy import or_, case
 
 from .. import database
 from .. import models
@@ -18,10 +18,12 @@ from ..schemas import (
     BlueprintParamSchema,
     BlueprintPreferenceUpdate,
     BlueprintPreferenceResponse,
+    TransferRequest,
 )
 from .._blueprint_manager import blueprint_manager
 from .._id_registry import assert_id_available
 from .auth import get_current_user
+from .users import _is_ancestor, _get_all_subordinate_ids
 from .jobs import create_job
 from .._magnus_config import admin_open_ids
 from library import *
@@ -150,23 +152,59 @@ def delete_blueprint(
     current_user: models.User = Depends(get_current_user),
 ) -> None:
     """
-    删除蓝图。仅拥有者可操作。
+    删除蓝图。拥有者、管理员、上司可操作。
     """
     bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
 
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    if bp.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
-        raise HTTPException(status_code=403, detail="You do not have permission to delete this blueprint")
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_owner = bp.user_id == current_user.id
+    is_superior = not is_owner and _is_ancestor(db, current_user.id, bp.user_id)
+
+    if not (is_admin or is_owner or is_superior):
+        raise HTTPException(status_code=403, detail="Permission denied")
 
     db.delete(bp)
     db.commit()
 
 
+@router.post("/blueprints/{blueprint_id}/transfer", response_model=BlueprintResponse)
+def transfer_blueprint(
+    blueprint_id: str,
+    body: TransferRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> models.Blueprint:
+    bp = db.query(models.Blueprint).options(joinedload(models.Blueprint.user))\
+           .filter(models.Blueprint.id == blueprint_id).first()
+    if not bp:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_owner = bp.user_id == current_user.id
+    is_superior = not is_owner and _is_ancestor(db, current_user.id, bp.user_id)
+
+    if not (is_admin or is_owner or is_superior):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
+    if not new_owner:
+        raise HTTPException(status_code=404, detail="Target user not found")
+    if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
+        raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
+
+    bp.user_id = body.new_owner_id
+    bp.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(bp)
+    return bp
+
+
 @router.get(
     "/blueprints",
-    response_model =PagedBlueprintResponse,
+    response_model=PagedBlueprintResponse,
 )
 def list_blueprints(
     skip: int = 0,
@@ -174,7 +212,7 @@ def list_blueprints(
     search: Optional[str] = None,
     creator_id: Optional[str] = None,
     db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
 ):
     """
     获取蓝图列表（支持分页、搜索、筛选）
@@ -198,15 +236,21 @@ def list_blueprints(
 
     total = query.count()
 
-    # 3. 分页查询
-    # 按更新时间倒序排列（最近更新的在前面）
-    items = query.options(joinedload(models.Blueprint.user))\
-                 .order_by(models.Blueprint.updated_at.desc())\
-                 .offset(skip)\
-                 .limit(limit)\
-                 .all()
+    human_first = case((models.User.user_type == "human", 0), else_=1)
+    items = query.join(models.User, models.Blueprint.user_id == models.User.id)\
+                 .options(joinedload(models.Blueprint.user))\
+                 .order_by(human_first, models.Blueprint.updated_at.desc())\
+                 .offset(skip).limit(limit).all()
 
-    return {"total": total, "items": items}
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
+    result = []
+    for bp in items:
+        resp = BlueprintResponse.model_validate(bp)
+        resp.can_manage = is_admin or bp.user_id == current_user.id or bp.user_id in subordinate_ids
+        result.append(resp)
+
+    return {"total": total, "items": result}
 
 
 @router.get(
@@ -216,17 +260,20 @@ def list_blueprints(
 def get_blueprint(
     blueprint_id: str,
     db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
 ):
     blueprint = db.query(models.Blueprint)\
         .options(joinedload(models.Blueprint.user))\
         .filter(models.Blueprint.id == blueprint_id)\
         .first()
-    
+
     if not blueprint:
         raise HTTPException(status_code=404, detail="Blueprint not found")
-        
-    return blueprint
+
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    resp = BlueprintResponse.model_validate(blueprint)
+    resp.can_manage = is_admin or blueprint.user_id == current_user.id or _is_ancestor(db, current_user.id, blueprint.user_id)
+    return resp
 
 
 @router.get(

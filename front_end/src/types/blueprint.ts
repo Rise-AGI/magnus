@@ -9,6 +9,7 @@ export interface Blueprint {
   user_id: string;
   user?: User;
   updated_at: string;
+  can_manage?: boolean;
 }
 
 export interface BlueprintParamOption {

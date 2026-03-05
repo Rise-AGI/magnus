@@ -12,18 +12,19 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, case
 
 from .. import database
 from ..database import SessionLocal
 from .. import models
 from ..models import JobStatus, Service
-from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse
+from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse, TransferRequest
 from .._service_manager import service_manager
 from .._id_registry import assert_id_available
 from .._magnus_config import magnus_config, admin_open_ids
 from .._scheduler import scheduler
 from .auth import get_current_user
+from .users import _is_ancestor, _get_all_subordinate_ids
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -306,8 +307,13 @@ def delete_service(
     svc = db.query(Service).filter(Service.id == service_id).first()
     if not svc:
         raise HTTPException(status_code=404, detail="Service not found")
-    if svc.owner_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
-        raise HTTPException(status_code=403, detail="You do not have permission to delete this service")
+
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_owner = svc.owner_id == current_user.id
+    is_superior = not is_owner and _is_ancestor(db, current_user.id, svc.owner_id)
+
+    if not (is_admin or is_owner or is_superior):
+        raise HTTPException(status_code=403, detail="Permission denied")
 
     _shutdown_service_resources_sync(service_id, db)
 
@@ -316,6 +322,37 @@ def delete_service(
 
     if service_id in _service_semaphores:
         del _service_semaphores[service_id]
+
+
+@router.post("/services/{service_id}/transfer", response_model=ServiceResponse)
+def transfer_service(
+    service_id: str,
+    body: TransferRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> models.Service:
+    svc = db.query(Service).filter(Service.id == service_id).first()
+    if not svc:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_owner = svc.owner_id == current_user.id
+    is_superior = not is_owner and _is_ancestor(db, current_user.id, svc.owner_id)
+
+    if not (is_admin or is_owner or is_superior):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
+    if not new_owner:
+        raise HTTPException(status_code=404, detail="Target user not found")
+    if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
+        raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
+
+    svc.owner_id = body.new_owner_id
+    svc.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(svc)
+    return svc
 
 
 @router.get("/services", response_model=PagedServiceResponse)
@@ -327,7 +364,7 @@ def list_services(
     active_only: bool = False,
     sort_by: str = Query("activity", regex="^(activity|updated)$"),
     db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(get_current_user),
 )-> Dict[str, Any]:
     query = db.query(models.Service)
 
@@ -347,27 +384,38 @@ def list_services(
 
     total = query.count()
 
-    if sort_by == "updated":
-        query = query.order_by(models.Service.updated_at.desc())
-    else:
-        query = query.order_by(models.Service.last_activity_time.desc())
+    human_first = case((models.User.user_type == "human", 0), else_=1)
+    secondary = models.Service.updated_at.desc() if sort_by == "updated" else models.Service.last_activity_time.desc()
+    items = query.join(models.User, models.Service.owner_id == models.User.id)\
+                 .order_by(human_first, secondary)\
+                 .offset(skip).limit(limit).all()
 
-    items = query.offset(skip).limit(limit).all()
-    return {"total": total, "items": items}
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
+    result = []
+    for svc in items:
+        resp = ServiceResponse.model_validate(svc)
+        resp.can_manage = is_admin or svc.owner_id == current_user.id or svc.owner_id in subordinate_ids
+        result.append(resp)
+
+    return {"total": total, "items": result}
 
 
 @router.get("/services/{service_id}", response_model=ServiceResponse)
 def get_service(
     service_id: str,
     db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
-)-> models.Service:
+    current_user: models.User = Depends(get_current_user),
+)-> ServiceResponse:
     service = db.query(models.Service).filter(models.Service.id == service_id).first()
 
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    return service
+    is_admin = current_user.feishu_open_id in admin_open_ids
+    resp = ServiceResponse.model_validate(service)
+    resp.can_manage = is_admin or service.owner_id == current_user.id or _is_ancestor(db, current_user.id, service.owner_id)
+    return resp
 
 
 # === [Modified] Standalone Auth Logic for Proxy ===
