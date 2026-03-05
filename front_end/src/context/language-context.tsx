@@ -370,6 +370,9 @@ const translations = {
   "explorer.thinking": { zh: "思考中", en: "Thinking" },
   "explorer.thinkingWait": { zh: "思考中...", en: "Thinking..." },
   "explorer.send": { zh: "发送", en: "Send" },
+  "explorer.voiceStart": { zh: "语音输入", en: "Voice input" },
+  "explorer.voiceStop": { zh: "停止录音", en: "Stop recording" },
+  "explorer.voiceTranscribing": { zh: "识别中...", en: "Transcribing..." },
 
   // ===== Job Detail - Navigation =====
   "jobDetail.backToService": { zh: "返回服务", en: "Back to Service" },

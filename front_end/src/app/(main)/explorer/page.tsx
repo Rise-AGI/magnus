@@ -6,6 +6,7 @@ import { ArrowUp, Loader2, X, FileText, Image as ImageIcon } from "lucide-react"
 import { client } from "@/lib/api";
 import { API_BASE } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
+import { VoiceInputButton } from "@/components/ui/voice-input-button";
 import type { ExplorerSession, Attachment } from "@/types/explore";
 
 
@@ -201,10 +202,15 @@ export default function ExplorePage() {
               style={{ minHeight: "48px", maxHeight: "192px" }}
               disabled={isUploading || isSending}
             />
+            <VoiceInputButton
+              onTranscript={(text) => setInput((prev) => prev + text)}
+              context={input}
+              disabled={isUploading || isSending}
+            />
             <button
               onClick={sendMessage}
               disabled={(!input.trim() && attachments.length === 0) || isUploading || isSending}
-              className="m-2 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
             >
               {isUploading || isSending ? (
                 <Loader2 className="w-5 h-5 animate-spin" />

@@ -106,8 +106,9 @@ def _validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(explorer, "model_name", str)
     _check_key(explorer, "visual_model_name", str)
     _check_key(explorer, "small_fast_model_name", str)
+    _check_key(explorer, "stt_model_name", str)
     _warn_extra_keys(explorer, {
-        "api_key", "base_url", "model_name", "visual_model_name", "small_fast_model_name",
+        "api_key", "base_url", "model_name", "visual_model_name", "small_fast_model_name", "stt_model_name",
     }, "server.explorer")
 
     # file_custody 配置

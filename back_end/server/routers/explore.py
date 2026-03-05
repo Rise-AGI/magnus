@@ -7,11 +7,12 @@ import secrets
 import asyncio
 import threading
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any, AsyncGenerator, cast
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, BackgroundTasks, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from openai import OpenAI
@@ -432,6 +433,47 @@ def update_session(
     db.commit()
     db.refresh(session)
     return session
+
+
+def _convert_audio_to_mp3(audio_bytes: bytes) -> bytes:
+    """内存管道转码，不落盘。要求系统已安装 ffmpeg。"""
+    result = subprocess.run(
+        [
+            "ffmpeg", "-i", "pipe:0",
+            "-f", "mp3", "-acodec", "libmp3lame",
+            "-ab", "64k", "-ac", "1",
+            "pipe:1",
+        ],
+        input=audio_bytes,
+        capture_output=True,
+        timeout=15,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg 转码失败: {result.stderr.decode(errors='replace')[:200]}")
+    return result.stdout
+
+
+@router.post("/explorer/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    context: str = Form(""),
+    current_user: models.User = Depends(get_current_user),
+) -> Dict[str, str]:
+    audio_bytes = await file.read()
+    # 统一转为 mp3：单声道 64kbps，体积小且中转站能正确解析时长
+    mp3_bytes = _convert_audio_to_mp3(audio_bytes)
+    prompt = context[:900] if context else ""
+
+    try:
+        transcription = llm_client.audio.transcriptions.create(
+            model=str(explorer_config["stt_model_name"]),
+            file=("audio.mp3", mp3_bytes),
+            prompt=prompt,
+        )
+        return {"text": transcription.text}
+    except Exception as e:
+        logger.error(f"Transcription error: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
 
 @router.post("/explorer/sessions/{session_id}/chat")

@@ -257,8 +257,8 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
 
   return (
     <div className="flex h-full w-full bg-zinc-950 overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-56 flex-shrink-0 border-r border-zinc-800 flex flex-col">
+      {/* Session sidebar - hidden on mobile */}
+      <div className="hidden md:flex w-56 flex-shrink-0 border-r border-zinc-800 flex-col">
         <div className="px-4 py-3 flex items-center justify-between">
           <h3 className="text-base font-medium text-zinc-400">{t("explorer.sessions")}</h3>
           <button

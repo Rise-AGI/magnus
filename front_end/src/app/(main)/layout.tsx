@@ -20,8 +20,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     // 修改点 2: 添加 w-screen overflow-hidden
     // 这就像给整个页面加了一个不可逾越的"铁框"
     <div className="h-screen w-screen bg-[#050505] overflow-hidden flex">
-      {/* Sidebar 容器不需要 fixed，在 flex 布局中自然左侧固定 */}
-      <div className="flex-shrink-0 w-64 h-full border-r border-zinc-800 bg-[#050505]">
+      {/* Sidebar - hidden on mobile */}
+      <div className="hidden md:flex flex-shrink-0 w-64 h-full border-r border-zinc-800 bg-[#050505]">
          <Sidebar />
       </div>
 

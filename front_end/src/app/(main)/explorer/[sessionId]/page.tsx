@@ -6,6 +6,7 @@ import { ArrowUp, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileTex
 import { client } from "@/lib/api";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { NotFound } from "@/components/ui/not-found";
+import { VoiceInputButton } from "@/components/ui/voice-input-button";
 import type { ExplorerSessionWithMessages, ExplorerMessage, Attachment } from "@/types/explore";
 import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
@@ -918,10 +919,15 @@ export default function SessionPage() {
                   style={{ minHeight: "48px", maxHeight: "192px" }}
                   disabled={isUploading}
                 />
+                <VoiceInputButton
+                  onTranscript={(text) => setInput((prev) => prev + text)}
+                  context={input}
+                  disabled={isUploading}
+                />
                 <button
                   onClick={() => sendMessage()}
                   disabled={(!input.trim() && attachments.length === 0) || isUploading}
-                  className="m-2 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                  className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                 >
                   {isUploading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -1139,17 +1145,27 @@ export default function SessionPage() {
                 <Square className="w-3.5 h-3.5 fill-current" />
               </button>
             ) : (
-              <button
-                onClick={() => sendMessage()}
-                disabled={(!input.trim() && attachments.length === 0) || isUploading}
-                className="m-2 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-              >
-                {isUploading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <ArrowUp className="w-5 h-5" />
-                )}
-              </button>
+              <>
+                <VoiceInputButton
+                  onTranscript={(text) => setInput((prev) => prev + text)}
+                  context={
+                    (session?.messages.slice(-6).map((m) => m.content).join("\n") || "") +
+                    (input ? "\n" + input : "")
+                  }
+                  disabled={isUploading}
+                />
+                <button
+                  onClick={() => sendMessage()}
+                  disabled={(!input.trim() && attachments.length === 0) || isUploading}
+                  className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                >
+                  {isUploading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <ArrowUp className="w-5 h-5" />
+                  )}
+                </button>
+              </>
             )}
           </div>
           <p className="text-xs text-zinc-600 mt-2 text-center">
