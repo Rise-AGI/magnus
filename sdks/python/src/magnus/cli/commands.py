@@ -634,8 +634,7 @@ def print_cmd(
 # === Login ===
 
 
-def _verify_connection(address: str, token: str) -> bool:
-    """Verify connectivity by calling GET /api/auth/my-token."""
+def _try_connect(address: str, token: str) -> bool:
     try:
         resp = httpx.get(
             f"{address}/api/auth/my-token",
@@ -645,6 +644,30 @@ def _verify_connection(address: str, token: str) -> bool:
         return resp.status_code == 200
     except Exception:
         return False
+
+
+def _verify_connection(address: str, token: str) -> Tuple[bool, str]:
+    """Verify connectivity, auto-detecting scheme if not provided.
+    IP addresses try http first (LAN), domain names try https first.
+    Returns (success, resolved_address).
+    """
+    from ..config import normalize_address, _looks_like_ip
+
+    address = address.strip().rstrip("/")
+    if address.startswith(("http://", "https://")):
+        return (_try_connect(address, token), address)
+
+    # 按优先级尝试两种协议
+    if _looks_like_ip(address):
+        candidates = [f"http://{address}", f"https://{address}"]
+    else:
+        candidates = [f"https://{address}", f"http://{address}"]
+
+    for url in candidates:
+        if _try_connect(url, token):
+            return (True, url)
+
+    return (False, candidates[0])
 
 
 def _warn_env_overrides():
@@ -697,10 +720,10 @@ def login_cmd(
             print_error("Non-interactive login requires: magnus login <site> --address <url> --token <token>")
             raise typer.Exit(code=1)
 
-        address = address.rstrip("/")
+        address = address.strip().rstrip("/")
 
         with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Verifying connection..."):
-            ok = _verify_connection(address, token)
+            ok, address = _verify_connection(address, token)
 
         if ok:
             print_msg("[green]Connection verified.[/green]")
@@ -716,7 +739,7 @@ def login_cmd(
     if site and site in sites:
         existing = sites[site]
         with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Verifying {site}..."):
-            ok = _verify_connection(existing["address"], existing["token"])
+            ok, _ = _verify_connection(existing["address"], existing["token"])
         if ok:
             set_current_site(site)
             print_msg(f"[green]Switched to [bold]{site}[/bold][/green] ({existing['address']})")
@@ -745,8 +768,7 @@ def login_cmd(
         raise typer.Exit(code=1)
 
     print_msg(f"Address [{DEFAULT_ADDRESS}]: ", end="")
-    address = input().strip() or DEFAULT_ADDRESS
-    address = address.rstrip("/")
+    address = (input().strip() or DEFAULT_ADDRESS).strip().rstrip("/")
 
     print_msg("Token: ", end="")
     token = input().strip()
@@ -756,7 +778,7 @@ def login_cmd(
 
     console.print()
     with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Verifying connection..."):
-        ok = _verify_connection(address, token)
+        ok, address = _verify_connection(address, token)
 
     if ok:
         print_msg("[green]Connection verified.[/green]")

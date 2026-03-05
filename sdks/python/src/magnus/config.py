@@ -16,6 +16,30 @@ RESERVED_SITE_NAME = "default"
 logger = logging.getLogger("magnus")
 
 
+def _looks_like_ip(host: str) -> bool:
+    """粗判 host 部分是否为 IP 地址（含端口）。"""
+    bare = host.split(":")[0]
+    return all(ch in "0123456789." for ch in bare) and bare.count(".") >= 1
+
+
+def normalize_address(address: str) -> str:
+    if not address:
+        raise ValueError("Address cannot be empty.")
+
+    address = address.strip().rstrip("/")
+
+    # 拒绝非 HTTP 协议（tcp://, ftp://, ws:// 等）
+    if "://" in address and not address.startswith(("http://", "https://")):
+        raise ValueError(f"Unsupported protocol: '{address}'. Use http:// or https://")
+
+    if not address.startswith(("http://", "https://")):
+        # IP 地址优先 http（内网），域名优先 https
+        scheme = "http" if _looks_like_ip(address) else "https"
+        address = f"{scheme}://{address}"
+
+    return address
+
+
 def _empty_config() -> Dict[str, Any]:
     return {"version": CONFIG_VERSION, "current": None, "sites": {}}
 

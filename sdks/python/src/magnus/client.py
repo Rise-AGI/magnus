@@ -18,7 +18,7 @@ from .exceptions import (
 )
 from .config import (
     DEFAULT_ADDRESS, DEFAULT_TOKEN, ENV_MAGNUS_TOKEN, ENV_MAGNUS_ADDRESS,
-    _get_current_site,
+    _get_current_site, normalize_address,
 )
 from .actions import execute_action
 from .file_transfer import is_file_secret, get_tmp_base
@@ -120,7 +120,7 @@ class MagnusClient:
             or site.get("address")
             or DEFAULT_ADDRESS
         )
-        self.address = raw_address.rstrip("/")
+        self.address = normalize_address(raw_address)
         if self.address.endswith("/api"):
             self.address = self.address[:-4]
 
