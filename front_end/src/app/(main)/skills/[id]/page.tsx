@@ -19,6 +19,7 @@ import { SkillEditor } from "@/components/skills/skill-editor";
 import { CodeEditor } from "@/components/ui/code-editor";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
+import { useBackNavigation } from "@/hooks/use-back-navigation";
 import { Skill, SkillFile } from "@/types/skill";
 
 export default function SkillDetailPage() {
@@ -26,6 +27,7 @@ export default function SkillDetailPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const skillId = params.id as string;
+  const { backLabel, goBack } = useBackNavigation("/skills", t("skillDetail.backTo"));
 
   const [skill, setSkill] = useState<Skill | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,7 +116,9 @@ export default function SkillDetailPage() {
 
   const handleFileLink = useCallback((href: string) => {
     if (href.startsWith("magnus:///")) {
-      router.push("/" + href.slice("magnus:///".length));
+      const target = "/" + href.slice("magnus:///".length);
+      const sep = target.includes("?") ? "&" : "?";
+      router.push(`${target}${sep}from=/skills/${skillId}`);
       return;
     }
     if (!skill) return;
@@ -141,10 +145,12 @@ export default function SkillDetailPage() {
   const magnusLinkComponents = useMemo(() => ({
     a: ({ href, children, ...props }: any) => {
       if (href?.startsWith("magnus:///")) {
-        const path = "/" + href.slice("magnus:///".length);
+        const target = "/" + href.slice("magnus:///".length);
+        const sep = target.includes("?") ? "&" : "?";
+        const fullPath = `${target}${sep}from=/skills/${skillId}`;
         return (
           <Link
-            href={path}
+            href={fullPath}
             className="font-medium underline underline-offset-4 text-blue-400 hover:text-blue-300 transition-all"
             {...props}
           >
@@ -162,7 +168,7 @@ export default function SkillDetailPage() {
         </a>
       );
     },
-  }), []);
+  }), [skillId]);
 
   if (loading) return <div className="flex h-[50vh] items-center justify-center text-zinc-500"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
@@ -196,9 +202,9 @@ export default function SkillDetailPage() {
 
       {/* Navigation */}
       <div className="mb-8">
-        <button onClick={() => router.push("/skills")} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group">
+        <button onClick={goBack} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group">
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-          {t("skillDetail.backTo")}
+          {backLabel}
         </button>
 
         {/* Header */}

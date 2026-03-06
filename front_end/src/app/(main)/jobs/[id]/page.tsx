@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
   ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX
@@ -22,6 +22,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { NotFound } from "@/components/ui/not-found";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
+import { useBackNavigation } from "@/hooks/use-back-navigation";
 
 const ansiUp = new AnsiUp();
 
@@ -34,29 +35,9 @@ export default function JobDetailsPage() {
   const { t } = useLanguage();
   const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const jobId = params.id as string;
   const isSlurmTask = decodeURIComponent(jobId).endsWith("(slurm)");
-
-  const fromSource = searchParams.get("from") || "jobs";
-  const fromId = searchParams.get("id");
-
-  // Navigation Logic
-  const getBackNav = (): { path: string; label: string } => {
-    if (fromSource === "services") {
-      return fromId
-        ? { path: `/services/${fromId}`, label: t("jobDetail.backToService") }
-        : { path: "/services", label: t("jobDetail.backToServices") };
-    }
-
-    const config: Record<string, { path: string; label: string }> = {
-      cluster:   { path: "/cluster",   label: t("jobDetail.backToCluster") },
-      jobs:      { path: "/jobs",      label: t("jobDetail.backToJobs") },
-    };
-    return config[fromSource] || config["jobs"];
-  };
-
-  const { path: backDestination, label: backLabel } = getBackNav();
+  const { backLabel, goBack } = useBackNavigation("/jobs", t("jobDetail.backToJobs"));
 
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
@@ -266,7 +247,7 @@ export default function JobDetailsPage() {
       {/* Top Navigation */}
       <div className="mb-8">
         <button
-          onClick={() => router.push(backDestination)}
+          onClick={() => goBack()}
           className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group"
         >
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />

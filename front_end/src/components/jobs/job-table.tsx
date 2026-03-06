@@ -30,7 +30,7 @@ export function JobTable({
   onTerminate,
   emptyMessage,
   className = "min-h-[400px]",
-  fromSource = "jobs",
+  fromSource = "/jobs",
 }: JobTableProps) {
   const router = useRouter();
   const { user: currentUser } = useAuth();

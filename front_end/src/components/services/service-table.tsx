@@ -116,7 +116,7 @@ export function ServiceTable({
                   <div
                     onClick={(e) => {
                       e.stopPropagation();
-                      router.push(`/jobs/${svc.current_job!.id}?from=services`);
+                      router.push(`/jobs/${svc.current_job!.id}?from=/services`);
                     }}
                     className="cursor-pointer hover:opacity-80 transition-opacity block"
                   >

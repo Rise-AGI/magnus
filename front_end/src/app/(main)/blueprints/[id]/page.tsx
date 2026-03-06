@@ -20,6 +20,7 @@ import { BlueprintEditor } from "@/components/blueprints/blueprint-editor";
 import { CodeEditor } from "@/components/ui/code-editor";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
+import { useBackNavigation } from "@/hooks/use-back-navigation";
 
 import { Blueprint, BlueprintPreference } from "@/types/blueprint";
 import { FieldSchema, getFieldInitialValue, validateFieldValue } from "@/components/ui/dynamic-form/types";
@@ -30,6 +31,7 @@ export default function BlueprintDetailsPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const blueprintId = params.id as string;
+  const { backLabel, goBack } = useBackNavigation("/blueprints", t("blueprintDetail.backTo"));
 
   // Data States
   const [blueprint, setBlueprint] = useState<Blueprint | null>(null);
@@ -243,9 +245,9 @@ export default function BlueprintDetailsPage() {
 
       {/* Navigation */}
       <div className="mb-8">
-        <button onClick={() => router.push('/blueprints')} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group">
+        <button onClick={goBack} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group">
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-          {t("blueprintDetail.backTo")}
+          {backLabel}
         </button>
 
         {/* Header Section */}
