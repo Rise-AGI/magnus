@@ -215,6 +215,7 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
       <Markdown
         remarkPlugins={[remarkMath, remarkGfm, remarkParse]}
         rehypePlugins={[rehypeKatex, rehypeRaw, rehypeStringify]}
+        urlTransform={(url) => url}
         components={mergedComponents}
       >
         {processed}
