@@ -131,7 +131,7 @@ export default function SkillDetailPage() {
     }
     const target = skill.files.find(f => f.path === resolved.join("/"));
     if (target) setActiveFile(target);
-  }, [skill, activeFile, router]);
+  }, [skill, activeFile, router, skillId]);
 
   const sortedFiles = useMemo(() => {
     if (!skill) return [];
