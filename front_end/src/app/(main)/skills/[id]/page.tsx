@@ -1,7 +1,7 @@
 // front_end/src/app/(main)/skills/[id]/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Clock, Dna, RefreshCw,
@@ -123,6 +123,15 @@ export default function SkillDetailPage() {
     const target = skill.files.find(f => f.path === resolved.join("/"));
     if (target) setActiveFile(target);
   }, [skill, activeFile]);
+
+  const sortedFiles = useMemo(() => {
+    if (!skill) return [];
+    return [...skill.files].sort((a, b) => {
+      if (a.path === "SKILL.md") return -1;
+      if (b.path === "SKILL.md") return 1;
+      return a.path.localeCompare(b.path);
+    });
+  }, [skill]);
 
   if (loading) return <div className="flex h-[50vh] items-center justify-center text-zinc-500"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
@@ -249,14 +258,14 @@ export default function SkillDetailPage() {
             <div className="shrink-0 px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
               <FileText className="w-4 h-4 text-zinc-400" />
               <h3 className="text-sm font-semibold text-zinc-200">{t("skillDetail.files")}</h3>
-              <span className="text-xs text-zinc-600 ml-auto">{skill.files.length}</span>
+              <span className="text-xs text-zinc-600 ml-auto">{sortedFiles.length}</span>
             </div>
             <div className="flex-1 overflow-auto">
-              {skill.files.length === 0 ? (
+              {sortedFiles.length === 0 ? (
                 <div className="p-5 text-zinc-500 text-sm">{t("skillDetail.noFiles")}</div>
               ) : (
                 <div className="py-1">
-                  {skill.files.map((file) => (
+                  {sortedFiles.map((file) => (
                     <button
                       key={file.path}
                       onClick={() => setActiveFile(file)}
