@@ -4,7 +4,7 @@
 {/* 感谢 @wjsoj 卫同学！love you ❤ */}
 
 import React from "react";
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
@@ -24,6 +24,7 @@ interface RenderMarkdownProps {
   content: string;
   className?: string;
   onLinkClick?: (href: string) => void;
+  components?: Components;
 }
 
 
@@ -31,6 +32,7 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
   content,
   className,
   onLinkClick,
+  components: componentOverrides,
 }: RenderMarkdownProps) {
 
   const processed = content.replace(/^---\n([\s\S]*?)\n---/, (_m, yaml) => "```yaml\n" + yaml.trim() + "\n```\n\n---\n");
@@ -206,19 +208,21 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
     },
   };
 
+  const mergedComponents = { ...markdownComponents, ...componentOverrides };
+
   return (
     <div className={cn("markdown-body max-w-full overflow-hidden [&>*:first-child]:!mt-0", className)}>
       <Markdown
         remarkPlugins={[remarkMath, remarkGfm, remarkParse]}
         rehypePlugins={[rehypeKatex, rehypeRaw, rehypeStringify]}
-        components={markdownComponents}
+        components={mergedComponents}
       >
         {processed}
       </Markdown>
     </div>
   );
 }, (prevProps, nextProps) => {
-  return prevProps.content === nextProps.content && prevProps.className === nextProps.className && prevProps.onLinkClick === nextProps.onLinkClick;
+  return prevProps.content === nextProps.content && prevProps.className === nextProps.className && prevProps.onLinkClick === nextProps.onLinkClick && prevProps.components === nextProps.components;
 });
 
 export default RenderMarkdown;

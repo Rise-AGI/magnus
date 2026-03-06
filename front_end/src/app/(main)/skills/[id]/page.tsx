@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   ArrowLeft, Clock, Dna, RefreshCw,
   Trash2, Loader2, FileText, Check, Copy
@@ -112,6 +113,10 @@ export default function SkillDetailPage() {
   };
 
   const handleFileLink = useCallback((href: string) => {
+    if (href.startsWith("magnus:///")) {
+      router.push("/" + href.slice("magnus:///".length));
+      return;
+    }
     if (!skill) return;
     const dir = activeFile?.path.includes("/") ? activeFile.path.substring(0, activeFile.path.lastIndexOf("/") + 1) : "";
     const parts = (dir + href).split("/");
@@ -122,7 +127,7 @@ export default function SkillDetailPage() {
     }
     const target = skill.files.find(f => f.path === resolved.join("/"));
     if (target) setActiveFile(target);
-  }, [skill, activeFile]);
+  }, [skill, activeFile, router]);
 
   const sortedFiles = useMemo(() => {
     if (!skill) return [];
@@ -132,6 +137,32 @@ export default function SkillDetailPage() {
       return a.path.localeCompare(b.path);
     });
   }, [skill]);
+
+  const magnusLinkComponents = useMemo(() => ({
+    a: ({ href, children, ...props }: any) => {
+      if (href?.startsWith("magnus:///")) {
+        const path = "/" + href.slice("magnus:///".length);
+        return (
+          <Link
+            href={path}
+            className="font-medium underline underline-offset-4 text-blue-400 hover:text-blue-300 transition-all"
+            {...props}
+          >
+            {children}
+          </Link>
+        );
+      }
+      return (
+        <a
+          href={href}
+          className="font-medium underline underline-offset-4 text-blue-400 hover:text-blue-300 transition-all"
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    },
+  }), []);
 
   if (loading) return <div className="flex h-[50vh] items-center justify-center text-zinc-500"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
@@ -246,7 +277,7 @@ export default function SkillDetailPage() {
              </div>
              <div className="p-5 overflow-auto custom-scrollbar min-h-[60px]">
                 {skill.description.trim() ? (
-                  <RenderMarkdown content={skill.description} />
+                  <RenderMarkdown content={skill.description} components={magnusLinkComponents} />
                 ) : (
                   <p className="text-sm text-zinc-600 italic">{t("skillDetail.noDescription")}</p>
                 )}
