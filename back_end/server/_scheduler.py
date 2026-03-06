@@ -244,7 +244,14 @@ class MagnusScheduler:
         # Phase 2: 清理已完成的 preparing tasks
         done_jobs = [jid for jid, task in self.preparing_jobs.items() if task.done()]
         for jid in done_jobs:
-            del self.preparing_jobs[jid]
+            task = self.preparing_jobs.pop(jid)
+            exc = task.exception()
+            if exc is not None:
+                logger.error(f"Job {jid} preparation crashed: {exc}")
+                failed_job = db.query(Job).filter(Job.id == jid).first()
+                if failed_job and failed_job.status == JobStatus.PREPARING:
+                    failed_job.status = JobStatus.FAILED
+                    db.commit()
 
         # Phase 3: 调度 Pending 任务（资源已就绪，等待提交到 SLURM）
         # 获取所有待调度任务（Pending 和 Paused）
