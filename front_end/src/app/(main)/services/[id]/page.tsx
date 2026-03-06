@@ -20,6 +20,7 @@ import { ServiceDrawer } from "@/components/services/service-drawer";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { ServiceImplicitExport } from "@/lib/service-defaults";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
+import { useBackNavigation } from "@/hooks/use-back-navigation";
 
 import { Service } from "@/types/service";
 
@@ -28,6 +29,7 @@ export default function ServiceDetailsPage() {
   const router = useRouter();
   const { t } = useLanguage();
   const serviceId = params.id as string;
+  const { backLabel, goBack } = useBackNavigation("/services", t("serviceDetail.backTo"));
 
   // Data States
   const [service, setService] = useState<Service | null>(null);
@@ -200,7 +202,7 @@ export default function ServiceDetailsPage() {
   } else if (hasLiveJob) {
     statusNode = (
       <div
-        onClick={() => router.push(`/jobs/${service.current_job!.id}?from=services&id=${service.id}`)}
+        onClick={() => router.push(`/jobs/${service.current_job!.id}?from=/services/${service.id}`)}
         className="cursor-pointer hover:opacity-80 transition-opacity"
       >
         <JobStatusBadge status={currentJobStatus!} size="md" />
@@ -228,11 +230,11 @@ export default function ServiceDetailsPage() {
       {/* Top Navigation */}
       <div className="mb-8">
         <button
-          onClick={() => router.push("/services")}
+          onClick={goBack}
           className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group"
         >
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-          {t("serviceDetail.backTo")}
+          {backLabel}
         </button>
 
         {/* Header Section */}

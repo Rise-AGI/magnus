@@ -27,6 +27,7 @@ const translations = {
   "common.error": { zh: "错误", en: "Error" },
   "common.ok": { zh: "知道了", en: "OK" },
   "common.operationFailed": { zh: "操作失败", en: "Operation Failed" },
+  "common.back": { zh: "返回", en: "Back" },
   "common.typeToConfirm": { zh: "请输入 {v} 以确认", en: "Type {v} to confirm" },
   "common.allUsers": { zh: "所有用户", en: "All Users" },
   "common.wip": { zh: "施工中", en: "Under Construction" },
@@ -324,7 +325,6 @@ const translations = {
   "blueprintDetail.deleteConfirmDesc": { zh: "确定要删除蓝图「{title}」吗？此操作不可撤销。", en: "Are you sure you want to delete blueprint {title}? This action cannot be undone." },
 
   // ===== Job Detail Page =====
-  "jobDetail.backTo": { zh: "返回任务", en: "Back to Jobs" },
   "jobDetail.cloneJob": { zh: "克隆此任务", en: "Clone this job" },
   "jobDetail.terminateTask": { zh: "终止任务", en: "Terminate Task" },
   "jobDetail.openRepoGithub": { zh: "在 GitHub 中打开仓库", en: "Open Repository in GitHub" },
@@ -374,10 +374,6 @@ const translations = {
   "explorer.voiceStop": { zh: "停止录音", en: "Stop recording" },
   "explorer.voiceTranscribing": { zh: "识别中...", en: "Transcribing..." },
 
-  // ===== Job Detail - Navigation =====
-  "jobDetail.backToService": { zh: "返回服务", en: "Back to Service" },
-  "jobDetail.backToServices": { zh: "返回服务", en: "Back to Services" },
-  "jobDetail.backToCluster": { zh: "返回集群", en: "Back to Cluster" },
   "jobDetail.backToJobs": { zh: "返回任务", en: "Back to Jobs" },
 
   // ===== Job Detail - States =====

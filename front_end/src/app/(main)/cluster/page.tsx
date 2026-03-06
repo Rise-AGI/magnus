@@ -219,7 +219,7 @@ export default function ClusterPage() {
               onTerminate={onClickTerminate}
               emptyMessage={t("cluster.noActiveJobs")}
               className="border-none min-h-[200px]"
-              fromSource="cluster"
+              fromSource="/cluster"
             />
             {totalMyJobs > 0 && (
               <div className="px-4 pb-2 bg-zinc-900/30">
@@ -251,7 +251,7 @@ export default function ClusterPage() {
               onTerminate={onClickTerminate}
               emptyMessage={t("cluster.noRunningJobs")}
               className="border-none min-h-[175px]"
-              fromSource="cluster"
+              fromSource="/cluster"
             />
             {(cluster?.total_running || 0) > 0 && (
               <div className="px-4 pb-2 bg-zinc-900/30">
@@ -283,7 +283,7 @@ export default function ClusterPage() {
               onTerminate={onClickTerminate}
               emptyMessage={t("cluster.queueEmpty")}
               className="border-none min-h-[175px]"
-              fromSource="cluster"
+              fromSource="/cluster"
             />
             {(cluster?.total_pending || 0) > 0 && (
               <div className="px-4 pb-2 bg-zinc-900/30">
