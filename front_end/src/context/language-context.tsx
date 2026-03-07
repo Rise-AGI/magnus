@@ -29,6 +29,9 @@ const translations = {
   "common.operationFailed": { zh: "操作失败", en: "Operation Failed" },
   "common.back": { zh: "返回", en: "Back" },
   "common.typeToConfirm": { zh: "请输入 {v} 以确认", en: "Type {v} to confirm" },
+  "common.transferTitle": { zh: "转让所有权", en: "Transfer Ownership" },
+  "common.transfer": { zh: "转让", en: "Transfer" },
+  "common.transferDesc": { zh: "确定要转让{type}「{title}」吗？", en: "Are you sure you want to transfer {type} {title}?" },
   "common.allUsers": { zh: "所有用户", en: "All Users" },
   "common.wip": { zh: "施工中", en: "Under Construction" },
 

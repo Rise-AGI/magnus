@@ -103,6 +103,7 @@ export function SkillTable({
                         canTransfer={!!skill.can_manage}
                         entityType="skills"
                         entityId={skill.id}
+                        entityTitle={skill.title}
                         avatarSize="sm"
                         subText={formatBeijingTime(skill.updated_at)}
                         onTransferred={() => onRefresh?.()}

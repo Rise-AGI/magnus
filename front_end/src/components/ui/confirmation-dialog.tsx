@@ -1,6 +1,7 @@
 // front_end/src/components/ui/confirmation-dialog.tsx
 import { AlertTriangle, Info, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLanguage } from "@/context/language-context";
 
 interface ConfirmationDialogProps {
@@ -41,6 +42,10 @@ export function ConfirmationDialog({
   const needsInput = mode === "confirm" && confirmInput != null;
   const inputMatched = !needsInput || inputValue === confirmInput;
 
+  const focusColor = variant === 'danger'
+    ? "focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20"
+    : "focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20";
+
   // 打开/关闭时重置输入
   useEffect(() => {
     if (!isOpen) setInputValue("");
@@ -57,8 +62,8 @@ export function ConfirmationDialog({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 min-h-screen">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 min-h-screen" onClick={(e) => e.stopPropagation()}>
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
@@ -97,7 +102,7 @@ export function ConfirmationDialog({
                 onChange={(e) => setInputValue(e.target.value)}
                 placeholder={confirmInput}
                 autoFocus
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 font-mono"
+                className={`w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none ${focusColor} font-mono`}
               />
             </div>
           )}
@@ -127,6 +132,7 @@ export function ConfirmationDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

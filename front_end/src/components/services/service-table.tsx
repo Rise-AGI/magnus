@@ -177,6 +177,7 @@ export function ServiceTable({
                         canTransfer={!!svc.can_manage}
                         entityType="services"
                         entityId={svc.id}
+                        entityTitle={svc.name}
                         avatarSize="sm"
                         subText={formatBeijingTime(svc.updated_at)}
                         onTransferred={() => onRefresh?.()}

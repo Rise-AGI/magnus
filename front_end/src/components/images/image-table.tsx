@@ -116,6 +116,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                           canTransfer={!!img.can_manage}
                           entityType="images"
                           entityId={String(img.id)}
+                          entityTitle={img.filename}
                           avatarSize="sm"
                           subText={img.updated_at ? formatBeijingTime(img.updated_at) : ""}
                           onTransferred={() => onRefresh?.()}

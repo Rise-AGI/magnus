@@ -109,6 +109,7 @@ export function BlueprintTable({
                         canTransfer={!!bp.can_manage}
                         entityType="blueprints"
                         entityId={bp.id}
+                        entityTitle={bp.title}
                         avatarSize="sm"
                         subText={formatBeijingTime(bp.updated_at)}
                         onTransferred={() => onRefresh?.()}

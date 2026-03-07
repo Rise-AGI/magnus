@@ -2,9 +2,11 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Loader2 } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { client } from "@/lib/api";
+import { useLanguage } from "@/context/language-context";
+import { ConfirmationDialog } from "./confirmation-dialog";
 import type { User } from "@/types/auth";
 
 
@@ -15,6 +17,7 @@ interface TransferableAuthorProps {
   canTransfer: boolean;
   entityType: "blueprints" | "skills" | "services" | "images";
   entityId: string;
+  entityTitle: string;
   onTransferred: (newOwner: User) => void;
   avatarSize?: "sm" | "md";
 }
@@ -40,12 +43,14 @@ function Avatar({ user, size }: { user: User; size: string }) {
 
 
 export function TransferableAuthor({
-  user, label, subText, canTransfer, entityType, entityId, onTransferred, avatarSize = "md",
+  user, label, subText, canTransfer, entityType, entityId, entityTitle, onTransferred, avatarSize = "md",
 }: TransferableAuthorProps) {
   const [candidates, setCandidates] = useState<User[]>([]);
   const [search, setSearch] = useState("");
   const [isTransferring, setIsTransferring] = useState(false);
+  const [pendingTarget, setPendingTarget] = useState<User | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const { t } = useLanguage();
 
   const handleOpenChange = (open: boolean) => {
     if (open) {
@@ -68,6 +73,7 @@ export function TransferableAuthor({
       console.error("Transfer failed:", error);
     } finally {
       setIsTransferring(false);
+      setPendingTarget(null);
     }
   };
 
@@ -95,6 +101,7 @@ export function TransferableAuthor({
   }
 
   return (
+    <>
     <DropdownMenu.Root onOpenChange={handleOpenChange}>
       <DropdownMenu.Trigger asChild>
         <button
@@ -138,7 +145,7 @@ export function TransferableAuthor({
               <DropdownMenu.Item
                 key={c.id}
                 disabled={isTransferring}
-                onSelect={() => handleTransfer(c.id)}
+                onSelect={() => setPendingTarget(c)}
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 transition-colors text-left disabled:opacity-50 cursor-pointer focus:outline-none focus:bg-zinc-800"
               >
                 <Avatar user={c} size="w-7 h-7" />
@@ -150,5 +157,37 @@ export function TransferableAuthor({
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
+
+    <ConfirmationDialog
+      isOpen={pendingTarget !== null}
+      onClose={() => setPendingTarget(null)}
+      onConfirm={() => {
+        if (pendingTarget) handleTransfer(pendingTarget.id);
+      }}
+      title={t("common.transferTitle")}
+      description={
+        pendingTarget && (
+          <>
+            <span>{t("common.transferDesc", { type: t(`nav.${entityType}`), title: entityTitle })}</span>
+            <div className="flex items-center justify-center gap-4 py-4">
+              <div className="flex flex-col items-center gap-1.5 min-w-0">
+                <Avatar user={user} size="w-10 h-10" />
+                <span className="text-sm font-medium text-zinc-300 truncate max-w-[100px]">{user.name}</span>
+              </div>
+              <ArrowRight className="w-5 h-5 text-zinc-500 flex-shrink-0" />
+              <div className="flex flex-col items-center gap-1.5 min-w-0">
+                <Avatar user={pendingTarget} size="w-10 h-10" />
+                <span className="text-sm font-medium text-zinc-200 truncate max-w-[100px]">{pendingTarget.name}</span>
+              </div>
+            </div>
+          </>
+        )
+      }
+      variant="default"
+      confirmText={t("common.transfer")}
+      confirmInput={entityId}
+      isLoading={isTransferring}
+    />
+    </>
   );
 }

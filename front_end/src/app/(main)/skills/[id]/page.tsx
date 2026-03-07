@@ -235,6 +235,7 @@ export default function SkillDetailPage() {
                canTransfer={!!skill.can_manage}
                entityType="skills"
                entityId={skill.id}
+               entityTitle={skill.title}
                onTransferred={(newOwner) => setSkill(prev => prev ? { ...prev, user_id: newOwner.id, user: newOwner } : prev)}
              />
 

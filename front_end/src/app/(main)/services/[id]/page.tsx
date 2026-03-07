@@ -290,6 +290,7 @@ export default function ServiceDetailsPage() {
                 canTransfer={!!service.can_manage}
                 entityType="services"
                 entityId={service.id}
+                entityTitle={service.name}
                 onTransferred={(newOwner) => setService(prev => prev ? { ...prev, owner_id: newOwner.id, owner: newOwner } : prev)}
                 avatarSize="sm"
               />

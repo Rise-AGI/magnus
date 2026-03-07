@@ -279,6 +279,7 @@ export default function BlueprintDetailsPage() {
                canTransfer={!!blueprint.can_manage}
                entityType="blueprints"
                entityId={blueprint.id}
+               entityTitle={blueprint.title}
                onTransferred={(newOwner) => setBlueprint(prev => prev ? { ...prev, user_id: newOwner.id, user: newOwner } : prev)}
              />
 
