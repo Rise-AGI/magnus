@@ -325,7 +325,7 @@ const translations = {
   "blueprintDetail.copyCode": { zh: "复制代码", en: "Copy Code" },
   "blueprintDetail.configuration": { zh: "配置", en: "Configuration" },
   "blueprintDetail.configureParams": { zh: "配置参数以实例化此任务。", en: "Configure parameters to instantiate this task." },
-  "blueprintDetail.deleteConfirmDesc": { zh: "确定要删除蓝图「{title}」吗？此操作不可撤销。", en: "Are you sure you want to delete blueprint {title}? This action cannot be undone." },
+  "blueprintDetail.deleteConfirmDesc": { zh: "确定要删除蓝图「{title}」吗？", en: "Are you sure you want to delete blueprint \"{title}\"?" },
 
   // ===== Job Detail Page =====
   "jobDetail.cloneJob": { zh: "克隆此任务", en: "Clone this job" },
@@ -880,8 +880,8 @@ def blueprint(
   "skillDetail.noDescription": { zh: "暂无描述", en: "No description" },
   "skillDetail.deleteSkill": { zh: "删除技能", en: "Delete Skill" },
   "skillDetail.deleteConfirmDesc": {
-    zh: "此操作将永久删除技能「{title}」及其所有文件。",
-    en: "This will permanently delete skill \"{title}\" and all its files."
+    zh: "确定要删除技能「{title}」吗？",
+    en: "Are you sure you want to delete skill \"{title}\"?"
   },
   "skillDetail.editClone": { zh: "编辑 / 克隆", en: "Edit / Clone" },
 

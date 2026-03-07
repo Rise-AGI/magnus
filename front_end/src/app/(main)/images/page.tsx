@@ -12,7 +12,7 @@ import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { formatBeijingTime } from "@/lib/utils";
 
-import { ImageTable, CachedImage, formatSize, STATUS_STYLES, STATUS_I18N, isBusy } from "@/components/images/image-table";
+import { ImageTable, CachedImage, formatSize, extractImageName, STATUS_STYLES, STATUS_I18N, isBusy } from "@/components/images/image-table";
 
 export default function ImagesPage() {
   const { t } = useLanguage();
@@ -333,6 +333,7 @@ export default function ImagesPage() {
         confirmText={t("common.delete")}
         variant="danger"
         isLoading={isDeleting}
+        confirmInput={imageToDelete ? extractImageName(imageToDelete.uri) : undefined}
       />
 
       {/* Error Dialog */}

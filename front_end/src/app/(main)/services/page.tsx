@@ -195,6 +195,7 @@ export default function ServicesPage() {
         ),
         variant: "danger" as const,
         confirmText: t("services.deleteTitle"),
+        confirmInput: pendingAction.service.id,
       };
     } else {
       const isStopping = pendingAction.service.is_active;
@@ -351,6 +352,7 @@ export default function ServicesPage() {
         confirmText={dialogConfig.confirmText}
         variant={dialogConfig.variant}
         isLoading={actionLoading}
+        confirmInput={dialogConfig.confirmInput}
       />
 
       <ConfirmationDialog

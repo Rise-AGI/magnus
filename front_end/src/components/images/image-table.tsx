@@ -28,6 +28,13 @@ export function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+/** docker://pytorch/pytorch:2.5.1-cuda12.4 → "pytorch" */
+export function extractImageName(uri: string): string {
+  const stripped = uri.replace(/^docker:\/\//, "");
+  const lastSegment = stripped.split("/").pop() || stripped;
+  return lastSegment.split(":")[0];
+}
+
 export const STATUS_STYLES: Record<string, string> = {
   cached: "bg-green-900/30 text-green-400 border-green-800/50",
   refreshing: "bg-yellow-900/30 text-yellow-400 border-yellow-800/50",
