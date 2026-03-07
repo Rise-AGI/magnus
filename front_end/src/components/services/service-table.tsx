@@ -58,9 +58,9 @@ export function ServiceTable({
         <table className="w-full text-left text-sm whitespace-nowrap table-fixed">
           <thead className="bg-zinc-900/90 text-zinc-500 border-b border-zinc-800 backdrop-blur-md">
             <tr>
-              <th className="px-6 py-4 font-medium w-[25%]">{t("services.table.service")}</th>
-              <th className="px-6 py-4 font-medium w-[45%]">{t("services.table.description")}</th>
-              <th className="px-6 py-4 font-medium w-[15%] text-center">{t("services.table.jobStatus")}</th>
+              <th className="px-6 py-4 font-medium w-[22%]">{t("services.table.service")}</th>
+              <th className="px-6 py-4 font-medium w-[36%]">{t("services.table.description")}</th>
+              <th className="px-6 py-4 font-medium w-[12%] text-center">{t("services.table.jobStatus")}</th>
               <th className="px-6 py-4 font-medium w-[15%]">{t("services.table.manager")}</th>
               <th className="px-6 py-4 font-medium text-right w-[15%]"></th>
             </tr>
