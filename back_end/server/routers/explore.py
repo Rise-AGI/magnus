@@ -508,24 +508,20 @@ async def chat(
     )
     db.add(user_message)
 
-
     context_messages = [
         {"role": msg.role, "content": msg.content}
         for msg in session.messages
     ]
-
-
-    processed_content = process_images_in_content(data.content, context_messages)
-
-
-    messages = context_messages.copy()
-    messages.append({"role": "user", "content": processed_content})
-
-
     is_first_message = len(session.messages) == 0
     session.updated_at = datetime.now(timezone.utc)
     db.commit()
+    db.close()  # 提前释放连接，不等 VLM 处理和 streaming 结束
 
+    # ---- VLM 处理（无 session）----
+    processed_content = process_images_in_content(data.content, context_messages)
+
+    messages = context_messages.copy()
+    messages.append({"role": "user", "content": processed_content})
 
     if is_first_message:
         background_tasks.add_task(
