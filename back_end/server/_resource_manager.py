@@ -253,24 +253,23 @@ class ResourceManager:
             logger.info(f"Image ready: {sif_path} ({elapsed:.1f}s)")
             return True, None
 
-    async def _resolve_default_branch(self, repo_urls: List[str])-> Optional[str]:
+    async def _resolve_default_branch(self, repo_url: str)-> Optional[str]:
         """
         通过 git ls-remote 解析仓库默认分支。
         尝试顺序：解析 HEAD symref → fallback "main" → "master"
         """
-        for url in repo_urls:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "ls-remote", "--symref", url, "HEAD",
-                stdout = asyncio.subprocess.PIPE,
-                stderr = asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode == 0:
-                for line in stdout.decode().strip().splitlines():
-                    if line.startswith("ref:"):
-                        ref = line.split()[1]
-                        return ref.replace("refs/heads/", "")
-                return "main"
+        proc = await asyncio.create_subprocess_exec(
+            "git", "ls-remote", "--symref", repo_url, "HEAD",
+            stdout = asyncio.subprocess.PIPE,
+            stderr = asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode == 0:
+            for line in stdout.decode().strip().splitlines():
+                if line.startswith("ref:"):
+                    ref = line.split()[1]
+                    return ref.replace("refs/heads/", "")
+            return "main"
         return None
 
     async def ensure_repo(
@@ -295,14 +294,11 @@ class ResourceManager:
         if commit_sha is None:
             commit_sha = "HEAD"
 
-        repo_urls = []
-        if shutil.which("ssh"):
-            repo_urls.append(f"git@github.com:{namespace}/{repo_name}.git")
-        repo_urls.append(f"https://github.com/{namespace}/{repo_name}.git")
+        repo_url = f"git@github.com:{namespace}/{repo_name}.git"
 
         # branch=None: 解析仓库默认分支
         if branch is None:
-            branch = await self._resolve_default_branch(repo_urls)
+            branch = await self._resolve_default_branch(repo_url)
             if branch is None:
                 return False, "Failed to determine default branch", None
 
@@ -318,27 +314,22 @@ class ResourceManager:
                 self._evict_lru_repos()
 
                 start_time = time.time()
-                last_error = ""
 
-                for repo_url in repo_urls:
-                    logger.info(f"Cloning repo to cache: {repo_url} -> {cache_path}")
+                logger.info(f"Cloning repo to cache: {repo_url} -> {cache_path}")
 
-                    proc = await asyncio.create_subprocess_exec(
-                        "git", "clone", "--branch", branch, "--single-branch", repo_url, cache_path,
-                        stdout = asyncio.subprocess.DEVNULL,
-                        stderr = asyncio.subprocess.PIPE,
-                    )
-                    _, stderr = await proc.communicate()
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "clone", "--branch", branch, "--single-branch", repo_url, cache_path,
+                    stdout = asyncio.subprocess.DEVNULL,
+                    stderr = asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
 
-                    if proc.returncode == 0:
-                        break
-
-                    last_error = stderr.decode().strip()
-                    logger.warning(f"Clone failed ({repo_url}): {last_error}")
+                if proc.returncode != 0:
+                    clone_error = stderr.decode().strip()
+                    logger.error(f"Clone failed ({repo_url}): {clone_error}")
                     if os.path.exists(cache_path):
                         shutil.rmtree(cache_path, ignore_errors=True)
-                else:
-                    return False, f"git clone failed: {last_error}", None
+                    return False, f"git clone failed: {clone_error}", None
 
                 elapsed = time.time() - start_time
                 logger.info(f"Repo cached: {cache_path} ({elapsed:.1f}s)")
