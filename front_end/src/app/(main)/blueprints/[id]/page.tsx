@@ -336,8 +336,12 @@ export default function BlueprintDetailsPage() {
                  {copiedDesc ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                </button>
              </div>
-             <div className="p-5 overflow-auto custom-scrollbar">
-                <RenderMarkdown content={blueprint.description} />
+             <div className="p-5 overflow-auto custom-scrollbar min-h-[60px]">
+                {blueprint.description.trim() ? (
+                  <RenderMarkdown content={blueprint.description} />
+                ) : (
+                  <p className="text-sm text-zinc-600 italic">{t("blueprintDetail.noDescription")}</p>
+                )}
              </div>
           </div>
 

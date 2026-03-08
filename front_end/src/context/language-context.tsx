@@ -321,6 +321,7 @@ const translations = {
   "blueprintDetail.deleteBlueprint": { zh: "删除蓝图", en: "Delete Blueprint" },
   "blueprintDetail.description": { zh: "描述", en: "Description" },
   "blueprintDetail.copyDescription": { zh: "复制描述", en: "Copy Description" },
+  "blueprintDetail.noDescription": { zh: "暂无描述", en: "No description" },
   "blueprintDetail.implementationLogic": { zh: "实现逻辑", en: "Implementation Logic" },
   "blueprintDetail.copyCode": { zh: "复制代码", en: "Copy Code" },
   "blueprintDetail.configuration": { zh: "配置", en: "Configuration" },
@@ -864,6 +865,7 @@ def blueprint(
   "skills.table.description": { zh: "描述", en: "Description" },
   "skills.table.author": { zh: "作者", en: "Author" },
   "skills.table.files": { zh: "文件", en: "Files" },
+  "skills.table.noDescription": { zh: "暂无描述", en: "No description" },
 
   // Skills Detail
   "skillDetail.backTo": { zh: "返回技能", en: "Back to Skills" },

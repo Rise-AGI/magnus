@@ -90,7 +90,11 @@ export function SkillTable({
                     </div>
                   </td>
                   <td className="px-6 py-4 align-top whitespace-normal">
-                    <p className="text-zinc-400 text-sm leading-relaxed break-words whitespace-pre-line">{skill.description}</p>
+                    {skill.description ? (
+                      <p className="text-zinc-400 text-sm leading-relaxed break-words whitespace-pre-line">{skill.description}</p>
+                    ) : (
+                      <p className="text-zinc-600 text-sm italic">{t("skills.table.noDescription")}</p>
+                    )}
                   </td>
                   <td className="px-6 py-4 align-top">
                     <div>
