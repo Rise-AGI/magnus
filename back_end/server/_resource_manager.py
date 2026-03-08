@@ -52,6 +52,12 @@ def _get_dir_size(path: str)-> int:
 CONTAINER_CACHE_SIZE = _parse_size_string(magnus_config['execution']['resource_cache']['container_cache_size'])
 REPO_CACHE_SIZE = _parse_size_string(magnus_config['execution']['resource_cache']['repo_cache_size'])
 
+# git subprocess 使用的干净环境：禁用交互式认证，剔除 IDE 注入的 credential helper
+_git_env = os.environ.copy()
+_git_env["GIT_TERMINAL_PROMPT"] = "0"
+for _k in ("GIT_ASKPASS", "SSH_ASKPASS"):
+    _git_env.pop(_k, None)
+
 
 def _image_to_sif_filename(image: str)-> str:
     """docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime -> pytorch_pytorch_2.5.1-cuda12.4-cudnn9-runtime.sif"""
@@ -256,20 +262,40 @@ class ResourceManager:
     async def _resolve_default_branch(self, repo_url: str)-> Optional[str]:
         """
         通过 git ls-remote 解析仓库默认分支。
-        尝试顺序：解析 HEAD symref → fallback "main" → "master"
+        带重试（网络瞬断）和超时（SSH 挂起）。
         """
-        proc = await asyncio.create_subprocess_exec(
-            "git", "ls-remote", "--symref", repo_url, "HEAD",
-            stdout = asyncio.subprocess.PIPE,
-            stderr = asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode == 0:
-            for line in stdout.decode().strip().splitlines():
-                if line.startswith("ref:"):
-                    ref = line.split()[1]
-                    return ref.replace("refs/heads/", "")
-            return "main"
+        max_retries = 3
+        timeout_seconds = 15
+
+        for attempt in range(max_retries):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "ls-remote", "--symref", repo_url, "HEAD",
+                    stdout = asyncio.subprocess.PIPE,
+                    stderr = asyncio.subprocess.PIPE,
+                    env = _git_env,
+                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                logger.warning(f"git ls-remote timed out ({timeout_seconds}s), attempt {attempt + 1}/{max_retries}: {repo_url}")
+                proc.kill()
+                await proc.wait()
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                continue
+
+            if proc.returncode == 0:
+                for line in stdout.decode().strip().splitlines():
+                    if line.startswith("ref:"):
+                        ref = line.split()[1]
+                        return ref.replace("refs/heads/", "")
+                return "main"
+
+            error_msg = stderr.decode().strip()
+            logger.warning(f"git ls-remote failed (rc={proc.returncode}), attempt {attempt + 1}/{max_retries}: {repo_url} — {error_msg}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+
         return None
 
     async def ensure_repo(
@@ -321,6 +347,7 @@ class ResourceManager:
                     "git", "clone", "--branch", branch, "--single-branch", repo_url, cache_path,
                     stdout = asyncio.subprocess.DEVNULL,
                     stderr = asyncio.subprocess.PIPE,
+                    env = _git_env,
                 )
                 _, stderr = await proc.communicate()
 
@@ -355,6 +382,7 @@ class ResourceManager:
             cwd = target_dir,
             stdout = asyncio.subprocess.DEVNULL,
             stderr = asyncio.subprocess.PIPE,
+            env = _git_env,
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
@@ -381,6 +409,7 @@ class ResourceManager:
                 cwd = target_dir,
                 stdout = asyncio.subprocess.PIPE,
                 stderr = asyncio.subprocess.DEVNULL,
+                env = _git_env,
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
@@ -406,6 +435,7 @@ class ResourceManager:
             cwd = target_dir,
             stdout = asyncio.subprocess.DEVNULL,
             stderr = asyncio.subprocess.PIPE,
+            env = _git_env,
         )
         _, stderr = await proc.communicate()
 
@@ -421,6 +451,7 @@ class ResourceManager:
             cwd = target_dir,
             stdout = asyncio.subprocess.PIPE,
             stderr = asyncio.subprocess.DEVNULL,
+            env = _git_env,
         )
         stdout, _ = await proc.communicate()
         resolved_sha = stdout.decode().strip() if proc.returncode == 0 else commit_sha
