@@ -105,8 +105,8 @@ class MagnusScheduler:
                 )
                 db.add(snapshot)
                 db.commit()
+                logger.debug(f"Recorded Cluster Snapshot: Total={snapshot.total_gpus}, Used={snapshot.slurm_used_gpus}, Magnus={magnus_usage}")
             self.last_snapshot_time = now
-            logger.debug(f"Recorded Cluster Snapshot: Total={snapshot.total_gpus}, Used={snapshot.slurm_used_gpus}, Magnus={magnus_usage}")
         except Exception as e:
             logger.error(f"Failed to record cluster snapshot: {e}")
 
