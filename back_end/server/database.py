@@ -11,12 +11,17 @@ guarantee_file_exist(magnus_database_path, is_directory=True)
 sqlalchemy_database_url = f"sqlite:///{magnus_database_path}/magnus.db"
 
 
+db_config = magnus_config["server"]["database"]
 engine = create_engine(
     url = sqlalchemy_database_url,
     connect_args = {
         "check_same_thread": False,
         "timeout": 30,
     },
+    pool_size = db_config["pool_size"],
+    max_overflow = db_config["max_overflow"],
+    pool_timeout = db_config["pool_timeout"],
+    pool_recycle = db_config["pool_recycle"],
 )
 
 

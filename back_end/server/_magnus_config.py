@@ -51,6 +51,7 @@ def _validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(server, "front_end_port", int)
     _check_key(server, "back_end_port", int)
     _check_key(server, "root", str)
+    _check_key(server, "database", dict)
     _check_key(server, "auth", dict)
     _check_key(server, "github_client", dict)
     _check_key(server, "scheduler", dict)
@@ -59,8 +60,16 @@ def _validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(server, "explorer", dict)
     _warn_extra_keys(server, {
         "address", "front_end_port", "back_end_port", "root",
-        "auth", "github_client", "scheduler", "service_proxy", "file_custody", "explorer",
+        "database", "auth", "github_client", "scheduler", "service_proxy", "file_custody", "explorer",
     }, "server")
+
+    # database 配置
+    database = server["database"]
+    _check_key(database, "pool_size", int)
+    _check_key(database, "max_overflow", int)
+    _check_key(database, "pool_timeout", int)
+    _check_key(database, "pool_recycle", int)
+    _warn_extra_keys(database, {"pool_size", "max_overflow", "pool_timeout", "pool_recycle"}, "server.database")
 
     # auth 配置
     auth = server["auth"]

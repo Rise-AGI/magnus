@@ -17,6 +17,11 @@ server:
   # job_wrapper_path = f"{job_working_table}/wrapper.py"
   # magnus_uv_cache = f"{server_root}/uv_cache/{user}"
   # file_custody_path = f"{server_root}/file_custody"
+  database:
+    pool_size: 8             # 连接池常驻连接数
+    max_overflow: 16         # 超出 pool_size 的临时连接上限（总上限 = pool_size + max_overflow）
+    pool_timeout: 10         # 等待可用连接的超时秒数
+    pool_recycle: 3600       # 连接回收周期（秒），防止长期不释放
   auth:
     provider: feishu                     # feishu | none
     jwt_signer:
