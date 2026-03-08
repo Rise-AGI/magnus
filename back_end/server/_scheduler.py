@@ -74,112 +74,129 @@ class MagnusScheduler:
     async def tick(self):
         """调度器心跳：同步状态 -> 决策调度"""
         if not self.enabled: return
-        with SessionLocal() as db:
-            try:
-                self._sync_reality(db)
-                await self._make_decisions(db)
-                self._record_snapshot(db)
-            except Exception as e:
-                logger.error(f"Scheduler tick failed: {e}", exc_info=True)
+        try:
+            self._sync_reality()
+            await self._make_decisions()
+            self._record_snapshot()
+        except Exception as e:
+            logger.error(f"Scheduler tick failed: {e}", exc_info=True)
 
 
-    def _record_snapshot(self, db: Session):
+    def _record_snapshot(self):
         now = datetime.now(timezone.utc)
         if (now - self.last_snapshot_time).total_seconds() < \
             magnus_config["server"]["scheduler"]["snapshot_interval"]:
             return
 
         try:
+            # Phase 1 — SLURM 调用（无 session）
             slurm_stats = self.slurm_manager.get_resource_snapshot()
-            running_jobs = db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
-            magnus_usage = sum(job.gpu_count for job in running_jobs)
 
-            snapshot = ClusterSnapshot(
-                total_gpus = slurm_stats["total_gpus"],
-                slurm_used_gpus = slurm_stats["slurm_used_gpus"],
-                magnus_used_gpus = magnus_usage,
-                timestamp = now,
-            )
-            db.add(snapshot)
-            db.commit()
+            # Phase 2 — 写快照（短 session）
+            with SessionLocal() as db:
+                running_jobs = db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
+                magnus_usage = sum(job.gpu_count for job in running_jobs)
+
+                snapshot = ClusterSnapshot(
+                    total_gpus = slurm_stats["total_gpus"],
+                    slurm_used_gpus = slurm_stats["slurm_used_gpus"],
+                    magnus_used_gpus = magnus_usage,
+                    timestamp = now,
+                )
+                db.add(snapshot)
+                db.commit()
             self.last_snapshot_time = now
             logger.debug(f"Recorded Cluster Snapshot: Total={snapshot.total_gpus}, Used={snapshot.slurm_used_gpus}, Magnus={magnus_usage}")
         except Exception as e:
             logger.error(f"Failed to record cluster snapshot: {e}")
 
 
-    def _sync_reality(self, db: Session):
+    def _finalize_completed_job(self, job: Job) -> None:
+        marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
+        if os.path.exists(marker_path):
+            logger.info(f"Job {job.id} completed successfully (Marker Verified).")
+            job.status = JobStatus.SUCCESS
+            result_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_result"
+            job.result = ".magnus_result" if os.path.exists(result_path) else None
+            action_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_action"
+            job.action = ".magnus_action" if os.path.exists(action_path) else None
+        else:
+            logger.warning(f"Job {job.id} completed but NO success marker found. Marking FAILED.")
+            job.status = JobStatus.FAILED
+        job.slurm_job_id = None
+        self._clean_up_working_table(job.id)
+
+
+    def _sync_reality(self):
         """同步 SLURM 真实状态到数据库"""
-        # 同步 QUEUED 任务：检查是否已开始运行
-        queued_jobs = db.query(Job).filter(Job.status == JobStatus.QUEUED).all()
-        for job in queued_jobs:
-            if not job.slurm_job_id:
-                logger.warning(f"Job {job.id} is QUEUED but has no slurm_id. Marking FAILED.")
-                job.status = JobStatus.FAILED
-                continue
+        # Phase 1 — 收集 job 信息（短 session）
+        with SessionLocal() as db:
+            queued_info = [
+                (job.id, job.slurm_job_id)
+                for job in db.query(Job).filter(Job.status == JobStatus.QUEUED).all()
+            ]
+            running_info = [
+                (job.id, job.slurm_job_id)
+                for job in db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
+            ]
 
-            real_status = self.slurm_manager.check_job_status(job.slurm_job_id)
+        # Phase 2 — SLURM 状态检查（无 session）
+        slurm_statuses = {}
+        for job_id, slurm_job_id in queued_info + running_info:
+            if slurm_job_id:
+                slurm_statuses[job_id] = self.slurm_manager.check_job_status(slurm_job_id)
 
-            if real_status == "RUNNING":
-                job.status = JobStatus.RUNNING
-                job.start_time = datetime.now(timezone.utc)
-                logger.info(f"Job {job.id} started running in SLURM (ID: {job.slurm_job_id})")
-            elif real_status == "COMPLETED":
-                marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
-                if os.path.exists(marker_path):
-                    logger.info(f"Job {job.id} completed successfully (Marker Verified).")
-                    job.status = JobStatus.SUCCESS
-                    result_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_result"
-                    job.result = ".magnus_result" if os.path.exists(result_path) else None
-                    action_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_action"
-                    job.action = ".magnus_action" if os.path.exists(action_path) else None
-                else:
-                    logger.warning(f"Job {job.id} completed but NO success marker found. Marking FAILED.")
-                    job.status = JobStatus.FAILED
-                job.slurm_job_id = None
-                self._clean_up_working_table(job.id)
-            elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
-                logger.warning(f"Job {job.id} failed in SLURM queue (Status: {real_status}).")
-                job.status = JobStatus.FAILED
-                job.slurm_job_id = None
-                self._clean_up_working_table(job.id)
-            # PENDING 保持 QUEUED 状态，等待 SLURM 调度
+        # Phase 3 — 批量更新（短 session）
+        with SessionLocal() as db:
+            for job_id, slurm_job_id in queued_info:
+                try:
+                    job = db.query(Job).filter(Job.id == job_id).first()
+                    if not job or job.status != JobStatus.QUEUED:
+                        continue
 
-        db.commit()
+                    if not slurm_job_id:
+                        logger.warning(f"Job {job.id} is QUEUED but has no slurm_id. Marking FAILED.")
+                        job.status = JobStatus.FAILED
+                        continue
 
-        # 同步 RUNNING 任务
-        running_jobs = db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
-        for job in running_jobs:
-            if not job.slurm_job_id:
-                logger.warning(f"Job {job.id} is RUNNING but has no slurm_id. Marking FAILED.")
-                job.status = JobStatus.FAILED
-                continue
+                    real_status = slurm_statuses.get(job_id)
+                    if real_status == "RUNNING":
+                        job.status = JobStatus.RUNNING
+                        job.start_time = datetime.now(timezone.utc)
+                        logger.info(f"Job {job.id} started running in SLURM (ID: {slurm_job_id})")
+                    elif real_status == "COMPLETED":
+                        self._finalize_completed_job(job)
+                    elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
+                        logger.warning(f"Job {job.id} failed in SLURM queue (Status: {real_status}).")
+                        job.status = JobStatus.FAILED
+                        job.slurm_job_id = None
+                        self._clean_up_working_table(job.id)
+                except Exception as e:
+                    logger.error(f"Failed to sync QUEUED job {job_id}: {e}")
 
-            self._harvest_job_metrics(db, job)
-            real_status = self.slurm_manager.check_job_status(job.slurm_job_id)
+            for job_id, slurm_job_id in running_info:
+                try:
+                    job = db.query(Job).filter(Job.id == job_id).first()
+                    if not job or job.status != JobStatus.RUNNING:
+                        continue
 
-            if real_status == "COMPLETED":
-                marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
-                if os.path.exists(marker_path):
-                    logger.info(f"Job {job.id} completed successfully (Marker Verified).")
-                    job.status = JobStatus.SUCCESS
-                    result_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_result"
-                    job.result = ".magnus_result" if os.path.exists(result_path) else None
-                    action_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_action"
-                    job.action = ".magnus_action" if os.path.exists(action_path) else None
-                else:
-                    logger.warning(f"Job {job.id} disappeared from queue but NO success marker found. Marking FAILED.")
-                    job.status = JobStatus.FAILED
-                job.slurm_job_id = None
-                self._clean_up_working_table(job.id)
+                    if not slurm_job_id:
+                        logger.warning(f"Job {job.id} is RUNNING but has no slurm_id. Marking FAILED.")
+                        job.status = JobStatus.FAILED
+                        continue
 
-            elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
-                logger.warning(f"Job {job.id} failed in SLURM (Status: {real_status}).")
-                job.status = JobStatus.FAILED
-                job.slurm_job_id = None
-                self._clean_up_working_table(job.id)
+                    self._harvest_job_metrics(db, job)
+                    real_status = slurm_statuses.get(job_id)
+                    if real_status == "COMPLETED":
+                        self._finalize_completed_job(job)
+                    elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
+                        logger.warning(f"Job {job.id} failed in SLURM (Status: {real_status}).")
+                        job.status = JobStatus.FAILED
+                        job.slurm_job_id = None
+                        self._clean_up_working_table(job.id)
+                except Exception as e:
+                    logger.error(f"Failed to sync RUNNING job {job_id}: {e}")
 
-            # PENDING/RUNNING 保持不变
             db.commit()
 
 
@@ -212,7 +229,7 @@ class MagnusScheduler:
             logger.error(f"Failed to harvest metrics for job {job.id}: {e}")
 
 
-    async def _make_decisions(self, db: Session):
+    async def _make_decisions(self):
         """
         调度决策 - 队头挂号模式
 
@@ -228,116 +245,127 @@ class MagnusScheduler:
         3. 调度器从 Pending 任务中选择队头提交到 SLURM
         4. A 类任务可以抢占 RUNNING 的 B 类任务
         """
-        priority_map = {
-            JobType.A1: 4, JobType.A2: 3,
-            JobType.B1: 2, JobType.B2: 1,
-        }
+        with SessionLocal() as db:
+            priority_map = {
+                JobType.A1: 4, JobType.A2: 3,
+                JobType.B1: 2, JobType.B2: 1,
+            }
 
-        # Phase 1: 启动 Preparing 任务的资源准备
-        preparing_jobs = db.query(Job).filter(Job.status == JobStatus.PREPARING).all()
-        for job in preparing_jobs:
-            if job.id not in self.preparing_jobs:
-                task = asyncio.create_task(self._prepare_job_resources(job.id))
-                self.preparing_jobs[job.id] = task
-                logger.info(f"Job {job.id} started resource preparation")
+            # Phase 1: 启动 Preparing 任务的资源准备
+            preparing_jobs = db.query(Job).filter(Job.status == JobStatus.PREPARING).all()
+            for job in preparing_jobs:
+                if job.id not in self.preparing_jobs:
+                    task = asyncio.create_task(self._prepare_job_resources(job.id))
+                    self.preparing_jobs[job.id] = task
+                    logger.info(f"Job {job.id} started resource preparation")
 
-        # Phase 2: 清理已完成的 preparing tasks
-        done_jobs = [jid for jid, task in self.preparing_jobs.items() if task.done()]
-        for jid in done_jobs:
-            task = self.preparing_jobs.pop(jid)
-            exc = task.exception()
-            if exc is not None:
-                logger.error(f"Job {jid} preparation crashed: {exc}")
-                failed_job = db.query(Job).filter(Job.id == jid).first()
-                if failed_job and failed_job.status == JobStatus.PREPARING:
-                    failed_job.status = JobStatus.FAILED
-                    db.commit()
+            # Phase 2: 清理已完成的 preparing tasks
+            done_jobs = [jid for jid, task in self.preparing_jobs.items() if task.done()]
+            for jid in done_jobs:
+                task = self.preparing_jobs.pop(jid)
+                exc = task.exception()
+                if exc is not None:
+                    logger.error(f"Job {jid} preparation crashed: {exc}")
+                    self._clean_up_working_table(jid)
+                    failed_job = db.query(Job).filter(Job.id == jid).first()
+                    if failed_job and failed_job.status == JobStatus.PREPARING:
+                        failed_job.status = JobStatus.FAILED
+                        db.commit()
 
-        # Phase 3: 调度 Pending 任务（资源已就绪，等待提交到 SLURM）
-        # 获取所有待调度任务（Pending 和 Paused）
-        schedulable_jobs = db.query(Job).filter(
-            Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
-        ).all()
+            # Phase 3: 调度 Pending 任务（资源已就绪，等待提交到 SLURM）
+            # 获取所有待调度任务（Pending 和 Paused）
+            schedulable_jobs = db.query(Job).filter(
+                Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
+            ).all()
 
-        if not schedulable_jobs:
-            return
+            if not schedulable_jobs:
+                return
 
-        # 按优先级排序
-        schedulable_jobs.sort(
-            key = lambda x: (priority_map.get(x.job_type, 0), -x.created_at.timestamp()),
-            reverse = True,
-        )
+            # 按优先级排序
+            schedulable_jobs.sort(
+                key = lambda x: (priority_map.get(x.job_type, 0), -x.created_at.timestamp()),
+                reverse = True,
+            )
 
-        head_job = schedulable_jobs[0]
+            head_job = schedulable_jobs[0]
 
-        # 如果队头是 A 类任务，检查是否需要抢占 RUNNING 的 B 类任务
-        if head_job.job_type in [JobType.A1, JobType.A2]:
-            self._handle_preemption_for_job(db, head_job)
+            # 如果队头是 A 类任务，检查是否需要抢占 RUNNING 的 B 类任务
+            if head_job.job_type in [JobType.A1, JobType.A2]:
+                self._handle_preemption_for_job(db, head_job)
 
-        # 只有当没有任务在 SLURM 队列中等待时，才提交队头
-        slurm_queued_count = db.query(Job).filter(Job.status == JobStatus.QUEUED).count()
+            # 只有当没有任务在 SLURM 队列中等待时，才提交队头
+            slurm_queued_count = db.query(Job).filter(Job.status == JobStatus.QUEUED).count()
 
-        if slurm_queued_count == 0:
-            self._submit_to_slurm(db, head_job)
+            if slurm_queued_count == 0:
+                self._submit_to_slurm(db, head_job)
 
     async def _prepare_job_resources(self, job_id: str):
         """异步准备任务资源：镜像 + 仓库（并行）"""
+        # Phase 1 — 读 job 信息（短 session）
         with SessionLocal() as db:
             job = db.query(Job).filter(Job.id == job_id).first()
             if not job or job.status != JobStatus.PREPARING:
                 return
 
+            container_image = job.container_image
             effective_runner = job.runner or magnus_config["cluster"]["default_runner"]
+            namespace = job.namespace
+            repo_name = job.repo_name
+            branch = job.branch
+            commit_sha = job.commit_sha
+            user_id = job.user_id
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             repo_dir = f"{job_working_table}/repository"
 
-            # 准备工作目录
             guarantee_file_exist(job_working_table, is_directory=True)
 
-            # 并行准备镜像和仓库
-            image_task = resource_manager.ensure_image(job.container_image)
-            repo_task = resource_manager.ensure_repo(
-                namespace = job.namespace,
-                repo_name = job.repo_name,
-                branch = job.branch,
-                commit_sha = job.commit_sha,
+        # Phase 2 — 长 I/O（无 session）
+        (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
+            resource_manager.ensure_image(container_image),
+            resource_manager.ensure_repo(
+                namespace = namespace,
+                repo_name = repo_name,
+                branch = branch,
+                commit_sha = commit_sha,
                 target_dir = repo_dir,
                 runner = effective_runner,
                 job_working_dir = job_working_table,
-            )
+            ),
+        )
 
-            (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(image_task, repo_task)
+        # Phase 3 — 回写状态（短 session）
+        with SessionLocal() as db:
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if not job or job.status != JobStatus.PREPARING:
+                self._clean_up_working_table(job_id)
+                return
 
             if not image_ok:
                 job.status = JobStatus.FAILED
                 job.result = f"Failed to pull image: {image_err}"
                 db.commit()
-                logger.error(f"Job {job.id} failed: {image_err}")
+                logger.error(f"Job {job_id} failed: {image_err}")
                 return
 
-            # 注册镜像到 cached_images（首次拉取者成为 owner）
-            if job.user_id:
-                _register_image_if_needed(db, job.container_image, job.user_id)
+            if user_id:
+                _register_image_if_needed(db, container_image, user_id)
 
             if not repo_ok:
                 job.status = JobStatus.FAILED
                 job.result = f"Failed to clone repo: {repo_result}"
                 db.commit()
-                logger.error(f"Job {job.id} failed: {repo_result}")
+                logger.error(f"Job {job_id} failed: {repo_result}")
                 return
 
-            # 回写解析后的真实 commit SHA（将 HEAD 等符号引用固化）
             assert repo_result is not None
             job.commit_sha = repo_result
 
-            # 回写解析后的 branch（将 None fallback 固化）
             if resolved_branch is not None:
                 job.branch = resolved_branch
 
-            # 资源就绪，进入待调度队列
             job.status = JobStatus.PENDING
             db.commit()
-            logger.info(f"Job {job.id} resources ready, status -> PENDING")
+            logger.info(f"Job {job_id} resources ready, status -> PENDING")
 
     def _handle_preemption_for_job(self, db: Session, job: Job):
         """为指定的 A 类任务处理抢占逻辑"""
