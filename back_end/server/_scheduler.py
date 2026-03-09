@@ -34,28 +34,42 @@ guarantee_file_exist(magnus_uv_cache_path, is_directory=True)
 logger = logging.getLogger(__name__)
 
 
-def _register_image_if_needed(db: Session, image_uri: str, user_id: str) -> None:
-    """Job 拉取镜像后，自动注册到 cached_images（首次拉取者成为 owner）。"""
+def _register_image_pulling(db: Session, image_uri: str, user_id: str) -> None:
+    """Pull 开始前，标记镜像为 pulling（首次见到的 URI 才插入）。"""
     existing = db.query(CachedImage).filter(CachedImage.uri == image_uri).first()
     if existing:
+        if existing.status == "failed":
+            existing.status = "pulling"
+            db.commit()
         return
-    sif_path = os.path.join(magnus_container_cache_path, _image_to_sif_filename(image_uri))
-    try:
-        size = os.stat(sif_path).st_size
-    except OSError:
-        size = 0
     db.add(CachedImage(
         uri=image_uri,
         filename=_image_to_sif_filename(image_uri),
         user_id=user_id,
-        status="cached",
-        size_bytes=size,
+        status="pulling",
+        size_bytes=0,
     ))
-    # 唯一可接受的冲突：API 端已先一步注册了同一 URI（IntegrityError）
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
+
+
+def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
+    """Pull 结束后，更新镜像状态为 cached 或 failed。"""
+    img = db.query(CachedImage).filter(CachedImage.uri == image_uri).first()
+    if not img:
+        return
+    if success:
+        sif_path = os.path.join(magnus_container_cache_path, _image_to_sif_filename(image_uri))
+        try:
+            img.size_bytes = os.stat(sif_path).st_size
+        except OSError:
+            img.size_bytes = 0
+        img.status = "cached"
+    else:
+        img.status = "failed"
+    db.commit()
 
 
 class MagnusScheduler:
@@ -301,7 +315,7 @@ class MagnusScheduler:
 
     async def _prepare_job_resources(self, job_id: str):
         """异步准备任务资源：镜像 + 仓库（并行）"""
-        # Phase 1 — 读 job 信息（短 session）
+        # Phase 1 — 读 job 信息 + 注册 pulling 状态（短 session）
         with SessionLocal() as db:
             job = db.query(Job).filter(Job.id == job_id).first()
             if not job or job.status != JobStatus.PREPARING:
@@ -318,6 +332,9 @@ class MagnusScheduler:
             repo_dir = f"{job_working_table}/repository"
 
             guarantee_file_exist(job_working_table, is_directory=True)
+
+            if user_id:
+                _register_image_pulling(db, container_image, user_id)
 
         # Phase 2 — 长 I/O（无 session）
         (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
@@ -340,15 +357,14 @@ class MagnusScheduler:
                 self._clean_up_working_table(job_id)
                 return
 
+            _finalize_image_status(db, container_image, image_ok)
+
             if not image_ok:
                 job.status = JobStatus.FAILED
                 job.result = f"Failed to pull image: {image_err}"
                 db.commit()
                 logger.error(f"Job {job_id} failed: {image_err}")
                 return
-
-            if user_id:
-                _register_image_if_needed(db, container_image, user_id)
 
             if not repo_ok:
                 job.status = JobStatus.FAILED
