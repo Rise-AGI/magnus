@@ -4,6 +4,7 @@ import { Loader2, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/context/language-context";
 import { FieldSchema } from "./types";
 
 interface DynamicFormProps {
@@ -463,9 +464,10 @@ export function DynamicForm({
   values,
   onChange,
   isLoading = false,
-  emptyMessage = "No parameters required.",
+  emptyMessage,
   errorField = null
 }: DynamicFormProps) {
+  const { t } = useLanguage();
   const [expandedScopes, setExpandedScopes] = useState<Record<string, boolean>>(() => {
     const defaults: Record<string, boolean> = {};
     schema.forEach(f => {
@@ -499,7 +501,7 @@ export function DynamicForm({
   }
 
   if (schema.length === 0) {
-    return <div className="text-center text-zinc-500 py-4">{emptyMessage}</div>;
+    return <div className="text-center text-zinc-500 py-4">{emptyMessage || t("common.noParameters")}</div>;
   }
 
   const mainFields = schema.filter(f => !f.scope);

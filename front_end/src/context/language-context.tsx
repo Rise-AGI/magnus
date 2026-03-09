@@ -34,6 +34,7 @@ const translations = {
   "common.transferDesc": { zh: "确定要转让{type}「{title}」吗？", en: "Are you sure you want to transfer {type} {title}?" },
   "common.allUsers": { zh: "所有用户", en: "All Users" },
   "common.wip": { zh: "施工中", en: "Under Construction" },
+  "common.noParameters": { zh: "无需参数。", en: "No parameters required." },
 
   // ===== Navigation =====
   "nav.explorer": { zh: "启新", en: "Explorer" },
