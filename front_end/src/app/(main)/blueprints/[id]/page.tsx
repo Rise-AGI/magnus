@@ -220,8 +220,8 @@ export default function BlueprintDetailsPage() {
       <NotFound
         title={t("blueprintDetail.notFound")}
         description={t("blueprintDetail.notFoundDesc", { id: decodeURIComponent(blueprintId) })}
-        buttonText={t("blueprintDetail.returnToRegistry")}
-        onBack={() => router.push('/blueprints')}
+        buttonText={backLabel}
+        onBack={goBack}
       />
     );
   }

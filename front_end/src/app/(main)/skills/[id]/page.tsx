@@ -177,8 +177,8 @@ export default function SkillDetailPage() {
       <NotFound
         title={t("skillDetail.notFound")}
         description={t("skillDetail.notFoundDesc", { id: decodeURIComponent(skillId) })}
-        buttonText={t("skillDetail.returnToRegistry")}
-        onBack={() => router.push("/skills")}
+        buttonText={backLabel}
+        onBack={goBack}
       />
     );
   }
