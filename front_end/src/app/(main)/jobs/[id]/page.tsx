@@ -231,8 +231,8 @@ export default function JobDetailsPage() {
       <NotFound
         title={t("jobDetail.notFound")}
         description={t("jobDetail.notFoundDesc", { id: decodeURIComponent(jobId) })}
-        buttonText={t("jobDetail.returnToJobs")}
-        onBack={() => router.push("/jobs")}
+        buttonText={backLabel}
+        onBack={goBack}
       />
     );
   }

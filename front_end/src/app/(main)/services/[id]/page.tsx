@@ -175,8 +175,8 @@ export default function ServiceDetailsPage() {
       <NotFound
         title={t("serviceDetail.notFound")}
         description={t("serviceDetail.notFoundDesc", { id: decodeURIComponent(serviceId) })}
-        buttonText={t("serviceDetail.returnToServices")}
-        onBack={() => router.push("/services")}
+        buttonText={backLabel}
+        onBack={goBack}
       />
     );
   }
