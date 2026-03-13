@@ -18,10 +18,10 @@ server:
   # magnus_uv_cache = f"{server_root}/uv_cache/{user}"
   # file_custody_path = f"{server_root}/file_custody"
   database:
-    pool_size: 8             # 连接池常驻连接数
-    max_overflow: 16         # 超出 pool_size 的临时连接上限（总上限 = pool_size + max_overflow）
-    pool_timeout: 10         # 等待可用连接的超时秒数
-    pool_recycle: 3600       # 连接回收周期（秒），防止长期不释放
+    pool_size: 8             # resident connections in the pool
+    max_overflow: 16         # extra connections beyond pool_size (hard limit = pool_size + max_overflow)
+    pool_timeout: 10         # seconds to wait for an available connection
+    pool_recycle: 3600       # recycle connections after this many seconds to prevent stale handles
   auth:
     provider: feishu                     # feishu | none
     jwt_signer:
@@ -33,7 +33,7 @@ server:
       app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
       admins:                              # open_id list, empty = no admins
         - ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-      refresh_interval: 3600               # 秒，用户信息刷新间隔（头像/姓名等），0 = 禁用
+      refresh_interval: 3600               # seconds between user info refreshes (avatar, name, etc.), 0 = disabled
   github_client:
     token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   scheduler:
