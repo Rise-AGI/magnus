@@ -110,7 +110,7 @@ export default function JobDetailsPage() {
   useEffect(() => {
     if (isSlurmTask) return;
     fetchLogs(-1);
-    if (job && ['Pending', 'Preparing', 'Queued', 'Running'].includes(job.status)) {
+    if (job && ['Pending', 'Preparing', 'Running'].includes(job.status)) {
       setFollowMode(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,7 +119,7 @@ export default function JobDetailsPage() {
   // Follow mode polling (5x slower than POLL_INTERVAL)
   useEffect(() => {
     if (!followMode) return;
-    if (job && !['Pending', 'Preparing', 'Queued', 'Running'].includes(job.status)) {
+    if (job && !['Pending', 'Preparing', 'Running'].includes(job.status)) {
       setFollowMode(false);
       return;
     }
@@ -296,7 +296,7 @@ export default function JobDetailsPage() {
                   job.status === "Failed" ? "text-red-400" :
                   job.status === "Preparing" ? "text-cyan-400" : "text-zinc-300"}`}>
                 {/* status 是运行时动态值，无法满足 TranslationKey 字面量类型 */}
-                {t(`jobStatus.${(job.status === "Queued" ? "pending" : job.status.toLowerCase())}` as any)?.toUpperCase() || job.status.toUpperCase()}
+                {t(`jobStatus.${job.status.toLowerCase()}` as any)?.toUpperCase() || job.status.toUpperCase()}
               </span>
             </div>
             {/* Owner */}
@@ -331,7 +331,7 @@ export default function JobDetailsPage() {
                 <RefreshCw className="w-5 h-5" />
               </button>
               {/* Terminate Button */}
-              {(user?.id === job.user?.id || user?.is_admin) && ["Pending", "Preparing", "Queued", "Running", "Paused"].includes(job.status) && (
+              {(user?.id === job.user?.id || user?.is_admin) && ["Pending", "Preparing", "Running", "Paused"].includes(job.status) && (
                 <button
                   onClick={() => onClickTerminate(job)}
                   className="ml-2 p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
@@ -607,7 +607,7 @@ export default function JobDetailsPage() {
                     <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
                       <Terminal className="w-10 h-10 opacity-20" />
                       <p>
-                        {job && ['Pending', 'Preparing', 'Queued', 'Running'].includes(job.status)
+                        {job && ['Pending', 'Preparing', 'Running'].includes(job.status)
                           ? t("jobDetail.waitingOutput")
                           : t("jobDetail.noOutput")}
                       </p>

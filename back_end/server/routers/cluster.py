@@ -134,7 +134,6 @@ def get_cluster_stats(
     paginated_running = sorted_all_running[running_skip : running_skip + running_limit]
 
     # --- 6. Pending Jobs 处理与分页 ---
-    # QUEUED 在前端显示为 Pending，PREPARING 单独显示
     # 排序：Pending/Queued/Paused 按调度优先级，Preparing 在最后
     # 排除已在 SLURM 中运行的 job，避免因状态延迟导致同一 job 同时出现在两列
     running_job_ids = {job.slurm_job_id for job in magnus_jobs_orm}
@@ -208,7 +207,7 @@ def get_my_active_jobs(
         models.Job.status == JobStatus.RUNNING,
     ).order_by(models.Job.start_time.desc()).all()
 
-    # 获取排队任务 (QUEUED 在前端显示为 Pending，PREPARING 单独显示)
+    # 获取排队任务
     queued_orm = db.query(models.Job).filter(
         models.Job.user_id.in_(user_ids),
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),

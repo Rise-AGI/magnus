@@ -125,6 +125,14 @@ class JobResponse(JobSubmission):
     result: Optional[str] = None
     action: Optional[str] = None
     class Config: from_attributes = True
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _normalize_status(cls, v: Any) -> Any:
+        """QUEUED 是调度器内部状态，API 层简并为 PENDING"""
+        if v == JobStatus.QUEUED or v == "Queued":
+            return JobStatus.PENDING
+        return v
     
     
 class JobMetricResponse(BaseModel):
