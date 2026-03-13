@@ -52,7 +52,7 @@ class ServiceManager:
                     continue
 
                 # 情况 2：Job 正在运行或等待，检查是否需要 Scale Down
-                if job.status in [JobStatus.PENDING, JobStatus.PAUSED]:
+                if job.status in [JobStatus.PENDING, JobStatus.PAUSED, JobStatus.PREPARING]:
                     # Anti-Starvation
                     service.last_activity_time = now
                     db.add(service)

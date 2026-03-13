@@ -185,6 +185,7 @@ class MagnusScheduler:
                         job.status = JobStatus.FAILED
                         job.slurm_job_id = None
                         self._clean_up_working_table(job.id)
+                    # else: SLURM 仍在排队（PD）或状态未知，保持 QUEUED
                 except Exception as e:
                     logger.error(f"Failed to sync QUEUED job {job_id}: {e}")
 
@@ -258,6 +259,7 @@ class MagnusScheduler:
         2. 资源准备完成后变为 Pending
         3. 调度器从 Pending 任务中选择队头提交到 SLURM
         4. A 类任务可以抢占 RUNNING 的 B 类任务
+        5. 被抢占的 B 类任务回到 Preparing 重新准备资源
         """
         with SessionLocal() as db:
             priority_map = {
@@ -286,10 +288,17 @@ class MagnusScheduler:
                         failed_job.status = JobStatus.FAILED
                         db.commit()
 
+            # Phase 2.5: 抢占恢复 — PAUSED 任务重新准备资源（镜像/仓库在抢占时已被清理）
+            paused_jobs = db.query(Job).filter(Job.status == JobStatus.PAUSED).all()
+            for job in paused_jobs:
+                job.status = JobStatus.PREPARING
+                logger.info(f"Job {job.id} re-entering preparation after preemption")
+            if paused_jobs:
+                db.commit()
+
             # Phase 3: 调度 Pending 任务（资源已就绪，等待提交到 SLURM）
-            # 获取所有待调度任务（Pending 和 Paused）
             schedulable_jobs = db.query(Job).filter(
-                Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
+                Job.status == JobStatus.PENDING
             ).all()
 
             if not schedulable_jobs:
@@ -428,6 +437,12 @@ class MagnusScheduler:
         资源（镜像、仓库）已在 Preparing 阶段准备好
         执行流程: wrapper.py → system_entry_command → apptainer exec → epilogue
         """
+        # 乐观锁：防止与 terminate_job（线程池）的竞态
+        db.refresh(job)
+        if job.status != JobStatus.PENDING:
+            logger.info(f"Job {job.id} status changed to {job.status} before submission, skipping")
+            return False
+
         try:
             user_magnus = magnus_config["cluster"]["default_runner"]
             effective_runner = job.runner if job.runner is not None else user_magnus
