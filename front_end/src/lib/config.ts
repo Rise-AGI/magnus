@@ -12,10 +12,14 @@ function requireEnv(value: string | undefined, key: string): string {
 // SDK 和其他客户端只需要配置前端地址即可
 export const API_BASE = "";
 export const DEFAULT_ROUTE = "/explorer";
-export const FEISHU_APP_ID = requireEnv(
-    process.env.NEXT_PUBLIC_FEISHU_APP_ID, 
-    "NEXT_PUBLIC_FEISHU_APP_ID",
-);
+export const AUTH_PROVIDER = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? "feishu";
+export const IS_LOCAL_MODE = AUTH_PROVIDER === "local";
+export const FEISHU_APP_ID = IS_LOCAL_MODE
+    ? ""
+    : requireEnv(
+        process.env.NEXT_PUBLIC_FEISHU_APP_ID,
+        "NEXT_PUBLIC_FEISHU_APP_ID",
+    );
 export const POLL_INTERVAL = parseInt(
   requireEnv(
     process.env.NEXT_PUBLIC_POLL_INTERVAL, 

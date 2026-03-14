@@ -18,8 +18,8 @@ from .database import *
 from ._scheduler import scheduler
 from ._service_manager import service_manager
 from ._file_custody_manager import file_custody_manager
-from ._feishu_client import feishu_client
 from .routers.images import recover_stuck_images
+from ._feishu_client import feishu_client
 
 
 class EndpointFilter(logging.Filter):
@@ -42,7 +42,8 @@ logger = logging.getLogger(__name__)
 
 # ── 系统依赖检查（启动时 fast fail） ──────────────────────────────
 # 新站点部署时，缺什么一目了然
-SYSTEM_DEPENDENCIES = {
+
+HPC_DEPENDENCIES = {
     "SLURM 调度":  ["sbatch", "squeue", "scancel", "sinfo", "scontrol"],
     "容器运行时":   ["apptainer"],
     "版本控制":     ["git"],
@@ -50,20 +51,39 @@ SYSTEM_DEPENDENCIES = {
     "文件权限":     ["setfacl"],
 }
 
+LOCAL_DEPENDENCIES = {
+    "容器运行时 (Docker)": ["docker"],
+    "版本控制":            ["git"],
+}
+
+LOCAL_INSTALL_HINTS = {
+    "docker": "请安装 Docker Desktop: https://docs.docker.com/get-docker/",
+    "git": "请安装 Git: https://git-scm.com/downloads",
+}
+
 def _check_system_dependencies() -> None:
+    deps = LOCAL_DEPENDENCIES if is_local_mode else HPC_DEPENDENCIES
     missing: Dict[str, List[str]] = {}
-    for category, commands in SYSTEM_DEPENDENCIES.items():
+    for category, commands in deps.items():
         not_found = [cmd for cmd in commands if shutil.which(cmd) is None]
         if not_found:
             missing[category] = not_found
 
     if missing:
-        lines = [f"  {cat}: {', '.join(cmds)}" for cat, cmds in missing.items()]
+        lines = []
+        for cat, cmds in missing.items():
+            lines.append(f"  {cat}: {', '.join(cmds)}")
+            if is_local_mode:
+                for cmd in cmds:
+                    hint = LOCAL_INSTALL_HINTS.get(cmd)
+                    if hint:
+                        lines.append(f"    → {hint}")
         msg = "❌ 系统依赖缺失（请安装后重启）:\n" + "\n".join(lines)
         logger.critical(msg)
         raise RuntimeError(msg)
 
-    logger.info("✅ 系统依赖检查通过")
+    mode_label = "LOCAL (Docker)" if is_local_mode else "HPC (SLURM)"
+    logger.info(f"✅ 系统依赖检查通过 ({mode_label})")
 
 _check_system_dependencies()
 
@@ -89,6 +109,9 @@ run_migrations()
 
 
 def _log_admin_status()-> None:
+    if is_local_mode:
+        logger.info("🔑 Admin: 本地模式，所有用户均为管理员")
+        return
     if not admin_open_ids:
         logger.info("🔑 Admin: 未配置管理员")
         return
@@ -103,6 +126,28 @@ def _log_admin_status()-> None:
 
 
 _log_admin_status()
+
+
+# ── 本地模式：自动创建默认用户 ──────────────────────────────
+
+def _ensure_local_user() -> None:
+    if not is_local_mode:
+        return
+    import getpass
+    with SessionLocal() as db:
+        existing = db.query(models.User).first()
+        if existing:
+            logger.info(f"🏠 Local user: {existing.name}")
+            return
+        user = models.User(
+            name=getpass.getuser(),
+            user_type="human",
+        )
+        db.add(user)
+        db.commit()
+        logger.info(f"🏠 Created local user: {user.name}")
+
+_ensure_local_user()
 
 
 async def _refresh_all_user_info() -> None:
@@ -211,14 +256,17 @@ async def lifespan(
     service_manager_task = asyncio.create_task(service_manager.start_background_loop())
     file_custody_task = asyncio.create_task(file_custody_manager.cleanup_loop())
 
-    # 用户信息刷新：首次同步执行（quick fail），然后启动后台循环
-    refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]
+    # 用户信息刷新：本地模式跳过，HPC 模式首次同步执行（quick fail），然后启动后台循环
     user_refresh_task = None
-    if refresh_interval > 0:
-        await _refresh_all_user_info()
-        user_refresh_task = asyncio.create_task(_run_user_info_refresh_loop())
+    if not is_local_mode:
+        refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]
+        if refresh_interval > 0:
+            await _refresh_all_user_info()
+            user_refresh_task = asyncio.create_task(_run_user_info_refresh_loop())
+        else:
+            logger.info("用户信息刷新已禁用 (refresh_interval = 0)")
     else:
-        logger.info("用户信息刷新已禁用 (refresh_interval = 0)")
+        logger.info("🏠 本地模式：跳过飞书用户信息刷新")
 
     yield
 
@@ -263,6 +311,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Magnus Server")
     parser.add_argument("--deliver", action="store_true", help="Run in delivery mode (production)")
+    parser.add_argument("--config", type=str, default=None, help="Path to magnus_config.yaml (consumed by _magnus_config.py)")
     args = parser.parse_args()
     deliver = args.deliver
 

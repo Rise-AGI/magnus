@@ -2,7 +2,7 @@
 
 export interface User {
   id: string; // Hex ID
-  feishu_open_id: string;
+  feishu_open_id?: string | null;
   name: string;
   avatar_url?: string | null;
   email?: string | null;

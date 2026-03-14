@@ -9,9 +9,9 @@ from .. import database
 from .. import models
 from ..models import JobStatus, JobType
 from ..schemas import ClusterStatsResponse, JobResponse, PagedJobResponse, UserInfo
-from .._slurm_manager import SlurmManager
 from .auth import get_current_user
-from .._magnus_config import magnus_config
+from .._magnus_config import magnus_config, is_local_mode
+from .._slurm_manager import SlurmManager
 
 
 _node_name = magnus_config["cluster"]["name"]
@@ -19,6 +19,68 @@ _gpu_model = magnus_config["cluster"]["gpus"][0]["label"] if magnus_config["clus
 
 
 router = APIRouter()
+
+
+def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int, pending_skip: int, pending_limit: int):
+    """Local 模式的集群统计：只看 Magnus 数据库中的任务，资源取宿主机实际值"""
+    import os
+    import shutil
+
+    running_jobs_orm = db.query(models.Job).filter(
+        models.Job.status.in_([JobStatus.RUNNING, JobStatus.QUEUED])
+    ).order_by(models.Job.start_time.desc()).all()
+
+    pending_jobs_orm = db.query(models.Job).filter(
+        models.Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
+    ).all()
+    preparing_jobs_orm = db.query(models.Job).filter(
+        models.Job.status == JobStatus.PREPARING
+    ).all()
+
+    pending_jobs_orm.sort(key=_scheduler_sort_key, reverse=True)
+    preparing_jobs_orm.sort(key=lambda x: x.created_at.timestamp(), reverse=True)
+    all_pending = pending_jobs_orm + preparing_jobs_orm
+
+    running_responses = [JobResponse.model_validate(j) for j in running_jobs_orm]
+    total_running = len(running_responses)
+    paginated_running = running_responses[running_skip:running_skip + running_limit]
+
+    total_pending = len(all_pending)
+    paginated_pending = [JobResponse.model_validate(j) for j in all_pending[pending_skip:pending_skip + pending_limit]]
+
+    # 宿主机实际资源（local 模式不做细粒度资源追踪，显示 total = free）
+    cpu_total = os.cpu_count() or 0
+    try:
+        mem_info = shutil.disk_usage("/")  # fallback
+        # 优先读 /proc/meminfo（Linux）
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    mem_total_mb = int(line.split()[1]) // 1024
+                    break
+            else:
+                mem_total_mb = 0
+    except (FileNotFoundError, PermissionError):
+        # macOS / Windows: 粗略估计
+        mem_total_mb = 0
+
+    return {
+        "resources": {
+            "node": _node_name,
+            "gpu_model": "Local (Docker)",
+            "total": 0,
+            "free": 0,
+            "used": 0,
+            "cpu_total": cpu_total,
+            "cpu_free": cpu_total,
+            "mem_total_mb": mem_total_mb,
+            "mem_free_mb": mem_total_mb,
+        },
+        "running_jobs": paginated_running,
+        "total_running": total_running,
+        "pending_jobs": paginated_pending,
+        "total_pending": total_pending,
+    }
 
 
 def _scheduler_sort_key(job):
@@ -48,6 +110,9 @@ def get_cluster_stats(
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
 ):
+    if is_local_mode:
+        return _get_cluster_stats_local(db, running_skip, running_limit, pending_skip, pending_limit)
+
     # --- 1. 获取 Slurm 真实数据 ---
     # SlurmManager 涉及阻塞 Shell 命令，必须在线程池中运行 (def)
     slurm_manager = SlurmManager()

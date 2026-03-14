@@ -204,6 +204,13 @@ class MagnusClient:
                 "Please re-enter the address with: magnus login"
             )
 
+    def _network_error(self, context: str, error: Exception) -> MagnusError:
+        """构造网络错误，对 localhost 连接失败自动追加诊断提示。"""
+        msg = f"Network error while {context}: {error}"
+        if isinstance(error, httpx.ConnectError) and "127.0.0.1" in self.address:
+            msg += "\n\nConnection refused. Run 'magnus local start' to start the local server."
+        return MagnusError(msg)
+
     _STATUS_EXCEPTIONS: Dict[int, type] = {
         401: AuthenticationError,
         403: ForbiddenError,
@@ -399,7 +406,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while launching blueprint.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while launching blueprint: {e}")
+            raise self._network_error("launching blueprint", e)
 
     async def launch_blueprint_async(
         self,
@@ -657,7 +664,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while submitting job.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while submitting job: {e}")
+            raise self._network_error("submitting job", e)
 
     async def submit_job_async(
         self,
@@ -774,7 +781,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while listing jobs.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while listing jobs: {e}")
+            raise self._network_error("listing jobs", e)
 
     async def list_jobs_async(
         self,
@@ -797,7 +804,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting job info.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while getting job info: {e}")
+            raise self._network_error("getting job info", e)
 
     async def get_job_async(
         self,
@@ -818,7 +825,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting job result.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while getting job result: {e}")
+            raise self._network_error("getting job result", e)
 
     async def get_job_result_async(
         self,
@@ -839,7 +846,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting job action.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while getting job action: {e}")
+            raise self._network_error("getting job action", e)
 
     async def get_job_action_async(
         self,
@@ -860,7 +867,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while terminating job.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while terminating job: {e}")
+            raise self._network_error("terminating job", e)
 
     async def terminate_job_async(
         self,
@@ -882,7 +889,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting job logs.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while getting job logs: {e}")
+            raise self._network_error("getting job logs", e)
 
     async def get_job_logs_async(
         self,
@@ -903,7 +910,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting cluster stats.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while getting cluster stats: {e}")
+            raise self._network_error("getting cluster stats", e)
 
     async def get_cluster_stats_async(
         self,
@@ -928,7 +935,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while listing blueprints.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while listing blueprints: {e}")
+            raise self._network_error("listing blueprints", e)
 
     async def list_blueprints_async(
         self,
@@ -951,7 +958,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting blueprint schema.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while getting blueprint schema: {e}")
+            raise self._network_error("getting blueprint schema", e)
 
     async def get_blueprint_schema_async(
         self,
@@ -972,7 +979,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting blueprint.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while getting blueprint: {e}")
+            raise self._network_error("getting blueprint", e)
 
     async def get_blueprint_async(
         self,
@@ -1002,7 +1009,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while saving blueprint.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while saving blueprint: {e}")
+            raise self._network_error("saving blueprint", e)
 
     async def save_blueprint_async(
         self,
@@ -1027,7 +1034,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while deleting blueprint.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while deleting blueprint: {e}")
+            raise self._network_error("deleting blueprint", e)
 
     async def delete_blueprint_async(
         self,
@@ -1066,7 +1073,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while listing skills.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while listing skills: {e}")
+            raise self._network_error("listing skills", e)
 
     async def list_skills_async(
         self,
@@ -1089,7 +1096,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while getting skill.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while getting skill: {e}")
+            raise self._network_error("getting skill", e)
 
     async def get_skill_async(
         self,
@@ -1120,7 +1127,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while saving skill.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while saving skill: {e}")
+            raise self._network_error("saving skill", e)
 
     async def save_skill_async(
         self,
@@ -1145,7 +1152,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while deleting skill.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while deleting skill: {e}")
+            raise self._network_error("deleting skill", e)
 
     async def delete_skill_async(
         self,
@@ -1171,7 +1178,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while listing images.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while listing images: {e}")
+            raise self._network_error("listing images", e)
 
     async def list_images_async(
         self,
@@ -1192,7 +1199,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while submitting image pull.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while pulling image: {e}")
+            raise self._network_error("pulling image", e)
 
     async def pull_image_async(
         self,
@@ -1213,7 +1220,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while submitting image refresh.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while refreshing image: {e}")
+            raise self._network_error("refreshing image", e)
 
     async def refresh_image_async(
         self,
@@ -1233,7 +1240,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while removing image.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while removing image: {e}")
+            raise self._network_error("removing image", e)
 
     async def remove_image_async(
         self,
@@ -1262,7 +1269,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while listing services.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while listing services: {e}")
+            raise self._network_error("listing services", e)
 
     async def list_services_async(
         self,
@@ -1349,7 +1356,7 @@ class MagnusClient:
         except httpx.TimeoutException:
             raise MagnusError("Request timed out while calling service.")
         except httpx.TransportError as e:
-            raise MagnusError(f"Network error while calling service: {e}")
+            raise self._network_error("calling service", e)
         self._handle_error(resp)
 
         if protocol == "mcp":
