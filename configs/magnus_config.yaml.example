@@ -23,7 +23,7 @@ server:
     pool_timeout: 10         # seconds to wait for an available connection
     pool_recycle: 3600       # recycle connections after this many seconds to prevent stale handles
   auth:
-    provider: feishu                     # feishu | none
+    provider: feishu                     # feishu | local
     jwt_signer:
       secret_key: your-secret-key
       algorithm: HS256
@@ -56,8 +56,8 @@ server:
     api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 execution:
-  backend: slurm                         # slurm | docker
-  container_runtime: apptainer           # apptainer | docker
+  backend: slurm                         # slurm | local
+  container_runtime: apptainer           # apptainer (slurm) | docker (local)
   spy_gpu_interval: 5
   allow_root: false
   resource_cache:

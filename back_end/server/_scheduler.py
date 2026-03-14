@@ -3,16 +3,19 @@ import os
 import json
 import asyncio
 import logging
+import subprocess
 import traceback
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import Any, List, Dict
+import sys
+from typing import Any, List, Dict, Optional
 from pywheels.file_tools import guarantee_file_exist, delete_file
 from .database import SessionLocal
 from .models import *
 from ._slurm_manager import SlurmManager
-from ._magnus_config import magnus_config
+from ._docker_manager import DockerManager
+from ._magnus_config import magnus_config, is_local_mode
 from ._resource_manager import resource_manager
 from ._resource_manager import _image_to_sif_filename
 
@@ -75,21 +78,30 @@ def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
 class MagnusScheduler:
 
     def __init__(self):
-        try:
-            self.slurm_manager = SlurmManager()
+        if is_local_mode:
+            self.docker_manager = DockerManager()
+            self.slurm_manager = None
             self.enabled = True
-        except RuntimeError as e:
-            logger.critical(f"Scheduler disabled due to missing SLURM: {e}")
-            self.enabled = False
+            logger.info("🐳 Scheduler initialized in LOCAL mode (Docker backend)")
+        else:
+            try:
+                self.slurm_manager = SlurmManager()
+                self.enabled = True
+            except RuntimeError as e:
+                logger.critical(f"Scheduler disabled due to missing SLURM: {e}")
+                self.slurm_manager = None
+                self.enabled = False
+            self.docker_manager = None
         self.last_snapshot_time = datetime.min.replace(tzinfo=timezone.utc)
         self.preparing_jobs: Dict[str, asyncio.Task] = {}  # job_id -> Task
+        self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
 
 
     async def tick(self):
-        """调度器心跳：同步状态 -> 决策调度"""
         if not self.enabled: return
         try:
-            self._sync_reality()
+            # subprocess calls (docker logs / slurm queries) run in a thread to avoid blocking the event loop
+            await asyncio.to_thread(self._sync_reality)
             await self._make_decisions()
             self._record_snapshot()
         except Exception as e:
@@ -97,6 +109,9 @@ class MagnusScheduler:
 
 
     def _record_snapshot(self):
+        if is_local_mode:
+            return  # local 模式不需要集群快照
+
         now = datetime.now(timezone.utc)
         if (now - self.last_snapshot_time).total_seconds() < \
             magnus_config["server"]["scheduler"]["snapshot_interval"]:
@@ -125,6 +140,33 @@ class MagnusScheduler:
             logger.error(f"Failed to record cluster snapshot: {e}")
 
 
+    def _dump_docker_logs(self, job_id: str, container_name: str, since: Optional[str] = None) -> Optional[str]:
+        log_path = f"{magnus_workspace_path}/jobs/{job_id}/slurm/output.txt"
+        # Capture cursor BEFORE fetching logs to avoid missing lines emitted during the call
+        new_cursor = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            cmd = ["docker", "logs", container_name]
+            if since:
+                cmd.extend(["--since", since])
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            output = result.stdout
+            if result.stderr:
+                output += result.stderr
+            if output:
+                mode = "a" if since else "w"
+                with open(log_path, mode, encoding="utf-8") as f:
+                    f.write(output)
+            return new_cursor
+        except Exception as e:
+            logger.warning(f"Failed to dump Docker logs for {job_id}: {e}")
+            return since
+
+    def _write_success_marker(self, job_id: str) -> None:
+        """Write success marker from the host side (symmetric with HPC wrapper.py behavior)."""
+        marker_path = f"{magnus_workspace_path}/jobs/{job_id}/.magnus_success"
+        with open(marker_path, "w") as f:
+            f.write("success")
+
     def _finalize_completed_job(self, job: Job) -> None:
         marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
         if os.path.exists(marker_path):
@@ -142,6 +184,98 @@ class MagnusScheduler:
 
 
     def _sync_reality(self):
+        """同步真实状态到数据库（SLURM 或 Docker）"""
+        if is_local_mode:
+            self._sync_reality_docker()
+        else:
+            self._sync_reality_slurm()
+
+    def _sync_reality_docker(self):
+        """同步 Docker 容器状态到数据库（三阶段模式，与 _sync_reality_slurm 对称）"""
+        assert self.docker_manager is not None
+
+        # Phase 1 — 收集 job 信息（短 session）
+        with SessionLocal() as db:
+            active_info = [
+                (job.id, job.status)
+                for job in db.query(Job).filter(
+                    Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])
+                ).all()
+            ]
+
+        if not active_info:
+            return
+
+        # Phase 2 — Docker 状态检查 + 日志抓取（无 session）
+        docker_results: Dict[str, Dict[str, Any]] = {}
+        for job_id, db_status in active_info:
+            container_name = f"magnus-job-{job_id}"
+            try:
+                real_status = self.docker_manager.check_container_status(container_name)
+
+                # 增量日志：RUNNING 状态每次心跳抓取
+                log_since = self._docker_log_cursors.get(job_id)
+                if real_status == "RUNNING" or real_status in ["COMPLETED", "FAILED"]:
+                    new_cursor = self._dump_docker_logs(job_id, container_name, since=log_since)
+                    self._docker_log_cursors[job_id] = new_cursor
+
+                docker_results[job_id] = {
+                    "status": real_status,
+                    "container_name": container_name,
+                    "db_status": db_status,
+                }
+            except Exception as e:
+                logger.error(f"Failed to check Docker job {job_id}: {e}")
+
+        # Phase 3 — 批量更新（短 session）
+        with SessionLocal() as db:
+            for job_id, info in docker_results.items():
+                try:
+                    job = db.query(Job).filter(Job.id == job_id).first()
+                    if not job:
+                        continue
+
+                    real_status = info["status"]
+                    container_name = info["container_name"]
+
+                    if job.status == JobStatus.QUEUED:
+                        if real_status == "RUNNING":
+                            job.status = JobStatus.RUNNING
+                            job.start_time = datetime.now(timezone.utc)
+                            logger.info(f"Job {job.id} started running in Docker")
+                        elif real_status == "COMPLETED":
+                            self._write_success_marker(job.id)
+                            self._finalize_completed_job(job)
+                            self.docker_manager.remove_container(container_name)
+                            self._docker_log_cursors.pop(job_id, None)
+                        elif real_status == "FAILED":
+                            logger.warning(f"Job {job.id} failed in Docker")
+                            job.status = JobStatus.FAILED
+                            job.slurm_job_id = None
+                            self.docker_manager.remove_container(container_name)
+                            self._clean_up_working_table(job.id)
+                            self._docker_log_cursors.pop(job_id, None)
+
+                    elif job.status == JobStatus.RUNNING:
+                        if real_status == "COMPLETED":
+                            self._write_success_marker(job.id)
+                            self._finalize_completed_job(job)
+                            self.docker_manager.remove_container(container_name)
+                            self._docker_log_cursors.pop(job_id, None)
+                        elif real_status in ["FAILED", "UNKNOWN"]:
+                            logger.warning(f"Job {job.id} failed in Docker (Status: {real_status})")
+                            job.status = JobStatus.FAILED
+                            job.slurm_job_id = None
+                            self.docker_manager.remove_container(container_name)
+                            self._clean_up_working_table(job.id)
+                            self._docker_log_cursors.pop(job_id, None)
+
+                except Exception as e:
+                    logger.error(f"Failed to sync Docker job {job_id}: {e}")
+
+            db.commit()
+
+    def _sync_reality_slurm(self):
         """同步 SLURM 真实状态到数据库"""
         # Phase 1 — 收集 job 信息（短 session）
         with SessionLocal() as db:
@@ -313,14 +447,18 @@ class MagnusScheduler:
             head_job = schedulable_jobs[0]
 
             # 如果队头是 A 类任务，检查是否需要抢占 RUNNING 的 B 类任务
-            if head_job.job_type in [JobType.A1, JobType.A2]:
+            if not is_local_mode and head_job.job_type in [JobType.A1, JobType.A2]:
                 self._handle_preemption_for_job(db, head_job)
 
-            # 只有当没有任务在 SLURM 队列中等待时，才提交队头
-            slurm_queued_count = db.query(Job).filter(Job.status == JobStatus.QUEUED).count()
+            if is_local_mode:
+                # local 模式：直接提交，不排队
+                self._submit_to_docker(db, head_job)
+            else:
+                # 只有当没有任务在 SLURM 队列中等待时，才提交队头
+                slurm_queued_count = db.query(Job).filter(Job.status == JobStatus.QUEUED).count()
 
-            if slurm_queued_count == 0:
-                self._submit_to_slurm(db, head_job)
+                if slurm_queued_count == 0:
+                    self._submit_to_slurm(db, head_job)
 
     async def _prepare_job_resources(self, job_id: str):
         """异步准备任务资源：镜像 + 仓库（并行）"""
@@ -522,6 +660,142 @@ class MagnusScheduler:
             db.commit()
             return False
 
+    def _submit_to_docker(self, db: Session, job: Job) -> bool:
+        """
+        提交任务到 Docker 容器（local 模式）。
+        不生成 wrapper.py，直接 docker run。
+        资源属性（gpu_count, memory_demand, cpu_count）在 local 模式下不生效。
+        """
+        assert self.docker_manager is not None
+
+        db.refresh(job)
+        if job.status != JobStatus.PENDING:
+            logger.info(f"Job {job.id} status changed to {job.status} before submission, skipping")
+            return False
+
+        try:
+            job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
+            self._init_job_working_dir(job_working_table)
+
+            user_token = job.user.token or ""
+            magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['back_end_port']}"
+            job_id = str(job.id)
+
+            # 准备用户脚本
+            user_script_path = os.path.join(job_working_table, ".magnus_user_script.sh")
+            with open(user_script_path, "w") as f:
+                f.write("set -e\n")
+                f.write("export HOME=$MAGNUS_HOME\n")
+                f.write(job.entry_command)
+                f.write("\n")
+            os.chmod(user_script_path, 0o755)
+
+            # 构造 bind mounts
+            magnus_home = "/magnus"
+            bind_mounts = [
+                f"{job_working_table}:{magnus_home}/workspace",
+            ]
+
+            # 解析 system_entry_command 中的 APPTAINER_BIND（如有）
+            default_system_entry_command = magnus_config["cluster"]["default_system_entry_command"]
+            base_system_entry_command = job.system_entry_command if job.system_entry_command else default_system_entry_command
+            system_entry_command = base_system_entry_command.strip()
+            if system_entry_command:
+                extra_binds = self._extract_bind_mounts_from_system_entry_command(system_entry_command)
+                bind_mounts.extend(extra_binds)
+
+            # Docker 网络模式：Linux 用 host（容器直接访问 localhost），
+            # Windows/macOS 用 bridge + host.docker.internal
+            if sys.platform == "linux":
+                network_mode = "host"
+                container_magnus_address = magnus_address
+            else:
+                network_mode = None  # Docker Desktop default bridge
+                back_end_port = magnus_config["server"]["back_end_port"]
+                container_magnus_address = f"http://host.docker.internal:{back_end_port}"
+
+            # 环境变量
+            env_vars = {
+                "MAGNUS_TOKEN": user_token,
+                "MAGNUS_ADDRESS": container_magnus_address,
+                "MAGNUS_JOB_ID": job_id,
+                "MAGNUS_HOME": magnus_home,
+                "MAGNUS_RESULT": f"{magnus_home}/workspace/.magnus_result",
+                "MAGNUS_ACTION": f"{magnus_home}/workspace/.magnus_action",
+                "HOME": magnus_home,
+            }
+
+            # 容器内执行命令：运行用户脚本（成功标记由宿主机在检测 exit 0 后写入）
+            container_cmd = f"bash {magnus_home}/workspace/.magnus_user_script.sh"
+
+            container_name = f"magnus-job-{job.id}"
+
+            # GPU: 如果 job 请求了 GPU 且本机有 GPU，尝试启用
+            gpu_enabled = job.gpu_count > 0
+
+            self.docker_manager.run_container(
+                container_name=container_name,
+                image=job.container_image,
+                entry_command=container_cmd,
+                bind_mounts=bind_mounts,
+                env_vars=env_vars,
+                working_dir=f"{magnus_home}/workspace/repository",
+                gpu_enabled=gpu_enabled,
+                network_mode=network_mode,
+            )
+
+            job.status = JobStatus.QUEUED
+            job.slurm_job_id = container_name  # 复用字段存储 container name
+            db.commit()
+
+            logger.info(f"Job {job.id} submitted to Docker (container: {container_name})")
+            return True
+
+        except Exception as error:
+            logger.error(f"Job {job.id} Docker submission error: {error}\n{traceback.format_exc()}")
+            job.status = JobStatus.FAILED
+            db.commit()
+            return False
+
+    def _extract_bind_mounts_from_system_entry_command(self, system_entry_command: str) -> List[str]:
+        """
+        执行 system_entry_command 并提取 APPTAINER_BIND，转换为 Docker -v 格式。
+        返回 ["host:container", ...] 列表。
+
+        注意：这是有损转换——只提取 APPTAINER_BIND 环境变量用于 bind mount，
+        system_entry_command 中设置的其他环境变量（如 LD_LIBRARY_PATH、CUDA_HOME）
+        和副作用（如 module load）会被丢弃。对于典型用法（仅设置 bind mount）足够。
+
+        Windows 上无 bash，跳过执行并返回空列表。
+        """
+        if sys.platform == "win32":
+            if system_entry_command:
+                logger.warning("system_entry_command is not supported on Windows (no bash). Ignoring.")
+            return []
+
+        try:
+            # 在 subprocess 中执行 system_entry_command，然后打印 APPTAINER_BIND
+            script = f'{system_entry_command}\necho "$APPTAINER_BIND"'
+            result = subprocess.run(
+                ["bash", "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=os.environ.copy(),
+            )
+            apptainer_bind = result.stdout.strip().split("\n")[-1]  # 最后一行是 echo 的输出
+            if not apptainer_bind:
+                return []
+
+            binds = []
+            for entry in apptainer_bind.split(","):
+                entry = entry.strip()
+                if entry:
+                    binds.append(entry)
+            return binds
+        except Exception as e:
+            logger.warning(f"Failed to interpret system_entry_command: {e}")
+            return []
 
     def _init_job_working_dir(self, job_working_table: str)-> None:
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
@@ -776,12 +1050,20 @@ if __name__ == "__main__":
             del self.preparing_jobs[job.id]
 
         if job.slurm_job_id:
-            logger.info(f"Terminating job {job.id} (SLURM: {job.slurm_job_id}) by user request.")
-            self.slurm_manager.kill_job(
-                job.slurm_job_id,
-                runner = job.runner if job.runner is not None else "magnus",
-                token = job.user.token if job.user.token is not None else "",
-            )
+            if is_local_mode:
+                assert self.docker_manager is not None
+                container_name = f"magnus-job-{job.id}"
+                logger.info(f"Terminating job {job.id} (Docker: {container_name}) by user request.")
+                self.docker_manager.stop_container(container_name)
+                self.docker_manager.remove_container(container_name)
+            else:
+                assert self.slurm_manager is not None
+                logger.info(f"Terminating job {job.id} (SLURM: {job.slurm_job_id}) by user request.")
+                self.slurm_manager.kill_job(
+                    job.slurm_job_id,
+                    runner = job.runner if job.runner is not None else "magnus",
+                    token = job.user.token if job.user.token is not None else "",
+                )
 
         self._clean_up_working_table(job.id)
         job.status = JobStatus.TERMINATED

@@ -8,7 +8,7 @@ import logging
 import subprocess
 from typing import Dict, List, Optional, Tuple
 from pywheels.file_tools import guarantee_file_exist
-from ._magnus_config import magnus_config
+from ._magnus_config import magnus_config, is_local_mode
 
 
 __all__ = ["resource_manager"]
@@ -161,6 +161,56 @@ class ResourceManager:
                 logger.warning(f"Failed to evict repo {path}: {e}")
 
     async def ensure_image(self, image: str, force: bool = False)-> Tuple[bool, Optional[str]]:
+        """
+        确保镜像可用。返回 (success, error_msg)
+        - 成功：(True, None)
+        - 失败：(False, "error message")
+        force=True 时跳过缓存检查，强制重新拉取。
+        """
+        if is_local_mode:
+            return await self._ensure_image_docker(image, force)
+        return await self._ensure_image_apptainer(image, force)
+
+    async def _ensure_image_docker(self, image: str, force: bool = False) -> Tuple[bool, Optional[str]]:
+        """Docker 模式：使用 docker pull，Docker 自身管理镜像缓存"""
+        docker_image = re.sub(r'^[a-z]+://', '', image)
+
+        if not force:
+            # 检查本地是否已有
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "image", "inspect", docker_image,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            if proc.returncode == 0:
+                return True, None
+
+        logger.info(f"🐳 Pulling Docker image: {docker_image}")
+        start_time = time.time()
+
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "pull", docker_image,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _, stderr = await proc.communicate()
+        except asyncio.CancelledError:
+            proc.terminate()
+            await proc.wait()
+            raise
+
+        if proc.returncode != 0:
+            error_msg = stderr.decode().strip()
+            logger.error(f"❌ Docker pull failed for {docker_image}: {error_msg}")
+            return False, error_msg
+
+        elapsed = time.time() - start_time
+        logger.info(f"✅ Docker image ready: {docker_image} ({elapsed:.1f}s)")
+        return True, None
+
+    async def _ensure_image_apptainer(self, image: str, force: bool = False)-> Tuple[bool, Optional[str]]:
         """
         确保镜像可用。返回 (success, error_msg)
         - 成功：(True, None)
@@ -456,18 +506,19 @@ class ResourceManager:
         stdout, _ = await proc.communicate()
         resolved_sha = stdout.decode().strip() if proc.returncode == 0 else commit_sha
 
-        # Phase 4: 设置 ACL
-        default_runner = magnus_config["cluster"]["default_runner"]
-        try:
-            subprocess.run([
-                "setfacl", "-R",
-                "-m", f"u:{runner}:rwx",
-                "-d", "-m", f"u:{default_runner}:rwx",
-                "-d", "-m", f"u:{runner}:rwx",
-                job_working_dir,
-            ], check=True, capture_output=True)
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            logger.warning(f"setfacl failed: {e}")
+        # Phase 4: 设置 ACL（local 模式下跳过，Docker 容器内不需要 host ACL）
+        if not is_local_mode:
+            default_runner = magnus_config["cluster"]["default_runner"]
+            try:
+                subprocess.run([
+                    "setfacl", "-R",
+                    "-m", f"u:{runner}:rwx",
+                    "-d", "-m", f"u:{default_runner}:rwx",
+                    "-d", "-m", f"u:{runner}:rwx",
+                    job_working_dir,
+                ], check=True, capture_output=True)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                logger.warning(f"setfacl failed: {e}")
 
         elapsed = time.time() - start_time
         logger.info(f"Repo ready: {target_dir} ({elapsed:.1f}s)")

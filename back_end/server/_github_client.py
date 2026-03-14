@@ -8,6 +8,9 @@ __all__ = [
 ]
 
 
-github_client = GitHubClient(
-    token = magnus_config["server"]["github_client"]["token"],
-)
+if is_local_mode:
+    github_client = GitHubClient(token="")
+else:
+    github_client = GitHubClient(
+        token = magnus_config["server"]["github_client"]["token"],
+    )

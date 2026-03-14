@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .. import database
 from .. import models
 from ..schemas import LoginResponse, FeishuLoginRequest, TokenResponse
-from .._magnus_config import magnus_config, admin_open_ids
+from .._magnus_config import magnus_config, admin_open_ids, is_local_mode
 from .._jwt_signer import jwt_signer
 from .._feishu_client import feishu_client
 
@@ -85,6 +85,13 @@ def get_current_user(
     token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(database.get_db)
 )-> models.User:
+    # Local 模式不鉴权：127.0.0.1 only，直接返回唯一用户
+    if is_local_mode:
+        local_user = db.query(models.User).first()
+        if local_user is None:
+            raise HTTPException(status_code=500, detail="No local user found. Server may not have initialized properly.")
+        return local_user
+
     final_token = token
 
     # Manual header check for Proxy scenarios where Depends logic is bypassed (token passed as None)
@@ -159,6 +166,42 @@ def get_current_user(
     return user
 
 
+@router.get("/auth/mode")
+def auth_mode() -> Dict[str, str]:
+    """返回当前认证模式，供前端判断。"""
+    return {"provider": magnus_config["server"]["auth"]["provider"]}
+
+
+@router.post(
+    "/auth/local/login",
+    response_model=LoginResponse,
+)
+def local_login(
+    db: Session = Depends(database.get_db),
+) -> Dict[str, Any]:
+    """本地模式免登录：返回本地用户信息，供前端初始化。"""
+    if not is_local_mode:
+        raise HTTPException(status_code=501, detail="Local login is only available in local mode")
+
+    local_user = db.query(models.User).first()
+    if not local_user:
+        raise HTTPException(status_code=500, detail="Local user not found. Server may not have initialized properly.")
+
+    access_token = jwt_signer.create_access_token(payload={"sub": local_user.id})
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": local_user.id,
+            "name": local_user.name,
+            "avatar_url": local_user.avatar_url,
+            "email": local_user.email,
+            "is_admin": True,
+        },
+    }
+
+
 @router.post(
     "/auth/feishu/login",
     response_model = LoginResponse,
@@ -167,6 +210,9 @@ async def feishu_login(
     req: FeishuLoginRequest,
     db: Session = Depends(database.get_db)
 )-> Dict[str, Any]:
+    if is_local_mode:
+        raise HTTPException(status_code=501, detail="Feishu login is not available in local mode")
+
     try:
         feishu_user = await feishu_client.get_feishu_user(req.code)
     except Exception as e:
@@ -184,7 +230,7 @@ async def feishu_login(
             "name": db_user.name,
             "avatar_url": db_user.avatar_url,
             "email": db_user.email,
-            "is_admin": db_user.feishu_open_id in admin_open_ids,
+            "is_admin": is_local_mode or db_user.feishu_open_id in admin_open_ids,
         },
     }
 

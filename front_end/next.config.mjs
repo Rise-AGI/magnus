@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
-const configPath = path.join(rootDir, 'configs', 'magnus_config.yaml');
+const configPath = process.env.MAGNUS_CONFIG_PATH || path.join(rootDir, 'configs', 'magnus_config.yaml');
 const fileContents = fs.readFileSync(configPath, 'utf8');
 const magnusConfig = yaml.load(fileContents);
 
@@ -27,13 +27,18 @@ const serverAddress = magnusConfig.server.address;
 const serverHost = new URL(serverAddress).host;
 
 
+const authProvider = magnusConfig.server.auth.provider;
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
     NEXT_PUBLIC_FRONT_END_PORT: magnusConfig.server.front_end_port.toString(),
     NEXT_PUBLIC_BACK_END_PORT: magnusConfig.server.back_end_port.toString(),
-    NEXT_PUBLIC_FEISHU_APP_ID: magnusConfig.server.auth.feishu_client.app_id,
-    NEXT_PUBLIC_POLL_INTERVAL: magnusConfig.client.jobs.poll_interval.toString(),
+    NEXT_PUBLIC_AUTH_PROVIDER: authProvider,
+    ...(authProvider !== 'local' && magnusConfig.server.auth.feishu_client
+      ? { NEXT_PUBLIC_FEISHU_APP_ID: magnusConfig.server.auth.feishu_client.app_id }
+      : {}),
+    NEXT_PUBLIC_POLL_INTERVAL: (magnusConfig.client?.jobs?.poll_interval ?? 2).toString(),
     NEXT_PUBLIC_SERVER_ADDRESS: serverAddress,
     NEXT_PUBLIC_CLUSTER_CONFIG: JSON.stringify(magnusConfig.cluster),
   },

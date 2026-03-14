@@ -4,8 +4,9 @@ import logging
 from typing import Any, Dict, Optional
 from pathlib import Path
 
-DEFAULT_ADDRESS = "https://magnus.pkuplasma.com"
-DEFAULT_TOKEN = "sk-" + "1" * 32
+# DEFAULT_ADDRESS = "https://magnus.pkuplasma.com"
+DEFAULT_ADDRESS = "http://127.0.0.1:8017"
+DEFAULT_TOKEN = "local"
 ENV_MAGNUS_TOKEN = "MAGNUS_TOKEN"
 ENV_MAGNUS_ADDRESS = "MAGNUS_ADDRESS"
 CONFIG_DIR = Path.home() / ".magnus"

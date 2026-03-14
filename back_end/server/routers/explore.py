@@ -27,7 +27,7 @@ from ..schemas import (
     ExplorerMessageResponse,
     PagedExplorerSessionResponse,
 )
-from .._magnus_config import magnus_config, admin_open_ids
+from .._magnus_config import magnus_config, is_admin_user
 from .._resource_manager import _parse_size_string
 from .auth import get_current_user
 
@@ -35,11 +35,15 @@ from .auth import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-explorer_config = magnus_config["server"]["explorer"]
-llm_client = OpenAI(
-    api_key=explorer_config["api_key"],
-    base_url=explorer_config["base_url"],
-)
+if "explorer" in magnus_config["server"]:
+    explorer_config = magnus_config["server"]["explorer"]
+    llm_client = OpenAI(
+        api_key=explorer_config["api_key"],
+        base_url=explorer_config["base_url"],
+    )
+else:
+    explorer_config = {}
+    llm_client = None
 
 magnus_root = magnus_config["server"]["root"]
 sessions_workspace = f"{magnus_root}/workspace/sessions"
@@ -52,6 +56,8 @@ _active_generations: Dict[str, Dict[str, Any]] = {}
 def generate_session_title(
     user_message: str,
 ) -> str:
+    if llm_client is None:
+        return "New Session"
     small_model = explorer_config["small_fast_model_name"]
     clean_message = IMAGE_PATTERN.sub("[图片]", user_message)[:500]
 
@@ -97,6 +103,7 @@ def understand_image_with_vlm(
     context_messages: List[Dict[str, Any]],
     current_text: str,
 ) -> str:
+    assert llm_client is not None
     visual_model = explorer_config["visual_model_name"]
     image_url = image_to_base64_url(image_path)
     if not image_url:
@@ -203,7 +210,7 @@ async def upload_file(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+    if session.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     content = await file.read()
@@ -274,8 +281,7 @@ async def get_file(
         raise HTTPException(status_code=404, detail="Session not found")
 
     is_owner = session.user_id == current_user.id
-    is_admin = current_user.feishu_open_id in admin_open_ids
-    if not is_owner and not is_admin and not session.is_shared:
+    if not is_owner and not is_admin_user(current_user) and not session.is_shared:
         raise HTTPException(status_code=403, detail="Access denied")
 
     allowed_dir = (Path(sessions_workspace) / session_id / "files").resolve()
@@ -333,8 +339,7 @@ def get_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     is_owner = session.user_id == current_user.id
-    is_admin = current_user.feishu_open_id in admin_open_ids
-    if not is_owner and not is_admin and not session.is_shared:
+    if not is_owner and not is_admin_user(current_user) and not session.is_shared:
         raise HTTPException(status_code=403, detail="Access denied")
 
     return session
@@ -353,7 +358,7 @@ def share_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+    if session.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     session.is_shared = True
@@ -375,7 +380,7 @@ def unshare_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+    if session.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     session.is_shared = False
@@ -397,7 +402,7 @@ def delete_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+    if session.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     db.delete(session)
@@ -423,7 +428,7 @@ def update_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+    if session.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     if data.title:
@@ -459,6 +464,9 @@ async def transcribe_audio(
     context: str = Form(""),
     current_user: models.User = Depends(get_current_user),
 ) -> Dict[str, str]:
+    if llm_client is None:
+        raise HTTPException(status_code=501, detail="Explorer is not configured. Add server.explorer to your config.")
+
     audio_bytes = await file.read()
     # 统一转为 mp3：单声道 64kbps，体积小且中转站能正确解析时长
     mp3_bytes = _convert_audio_to_mp3(audio_bytes)
@@ -484,6 +492,9 @@ async def chat(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> StreamingResponse:
+    if llm_client is None:
+        raise HTTPException(status_code=501, detail="Explorer is not configured. Add server.explorer to your config.")
+
     session = db.query(models.ExplorerSession).filter(
         models.ExplorerSession.id == session_id,
     ).first()
@@ -491,7 +502,7 @@ async def chat(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+    if session.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     if data.truncate_before is not None:
@@ -600,6 +611,8 @@ def _run_generation_sync(
     full_response = ""
     in_thinking = False
 
+    assert llm_client is not None
+
     try:
         stream = llm_client.chat.completions.create(
             model=str(explorer_config["model_name"]),
@@ -631,7 +644,7 @@ def _run_generation_sync(
 
     except Exception as e:
         logger.error(f"Chat error: {e}")
-        error_msg = f"\n\n[Error: {str(e)}]"
+        error_msg = f"\n\n[Error: LLM request failed ({type(e).__name__})]"
         full_response += error_msg
         gen_state["chunks"].append(error_msg)
 
