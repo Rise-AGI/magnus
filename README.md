@@ -1,6 +1,6 @@
 <!-- README.md -->
 
-# Magnus: Agent-Native Infrastructure for Scientific Discoveries
+# Magnus: An Agentic Infrastructure Automating Scientific Discoveries
 
 **PKU Plasma and Rise-AGI**
 
@@ -197,10 +197,13 @@ Magnus is far from perfect. If you run into rough edges, have ideas for improvem
 or want to contribute code, please open an issue or pull request.
 We appreciate every report, suggestion, and patch.
 
+Reach out directly at parkcai@126.com, we would genuinely love to hear from you.
+
 ## License
 
-This project is licensed under the [Apache License 2.0](LICENSE).
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 ## Acknowledgments
 
-- [Apptainer](https://github.com/apptainer/apptainer) -- container runtime for HPC workloads
+- [Apptainer](https://github.com/apptainer/apptainer) --  Powers Magnus's container execution through its robust runtime for HPC workloads.
+- [croc](https://github.com/schollz/croc) --  Inspired Magnus's file custody feature through its frictionless approach to moving files.
