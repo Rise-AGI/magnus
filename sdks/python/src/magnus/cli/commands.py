@@ -66,7 +66,7 @@ def print_msg(msg: str, end: str = "\n"):
     err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] {msg}", end=end, highlight=False)
 
 def print_error(msg: str):
-    err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] [magnus.error]Error:[/magnus.error] {msg}", highlight=False)
+    err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] [magnus.error]Error:[/magnus.error] {msg or 'Unknown error'}", highlight=False)
 
 
 # === Output Format Helpers ===

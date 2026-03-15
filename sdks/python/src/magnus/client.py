@@ -227,6 +227,9 @@ class MagnusClient:
         except ValueError:
             detail = response.text
 
+        if not detail:
+            detail = f"Server returned HTTP {response.status_code}"
+
         exc_class = self._STATUS_EXCEPTIONS.get(response.status_code)
         if exc_class:
             raise exc_class(detail)

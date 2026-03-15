@@ -370,7 +370,12 @@ class ResourceManager:
         if commit_sha is None:
             commit_sha = "HEAD"
 
-        repo_url = f"git@github.com:{namespace}/{repo_name}.git"
+        # HPC 用 SSH（服务器有部署密钥），local 用 HTTPS（用户机器未必配 SSH key）
+        # 时间紧迫下的最优解；未来应由配置项统一控制 repo URL 协议
+        if is_local_mode:
+            repo_url = f"https://github.com/{namespace}/{repo_name}.git"
+        else:
+            repo_url = f"git@github.com:{namespace}/{repo_name}.git"
 
         # branch=None: 解析仓库默认分支
         if branch is None:
