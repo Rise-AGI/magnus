@@ -802,7 +802,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.124.0" },
     { name = "fastmcp", specifier = ">=2.14.2" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
-    { name = "magnus-sdk", specifier = ">=0.6.6" },
+    { name = "magnus-sdk", specifier = ">=0.6.7" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pypdf", specifier = ">=5.0.0" },
@@ -818,7 +818,7 @@ requires-dist = [
 
 [[package]]
 name = "magnus-sdk"
-version = "0.6.6"
+version = "0.6.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["socks"] },
@@ -828,9 +828,9 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/08/85/702379f9d8ffcf6d40dd00e9df1119fcb027c11cebd344b4b7f2ab1d3c39/magnus_sdk-0.6.6.tar.gz", hash = "sha256:3357099a8121e4dfdb50e5bf49d0149ae55c17a1abd89fcf9746b140a8b87d95", size = 59257, upload-time = "2026-03-15T02:53:15.352Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/85/f31cc03718bed8c78246a59fbce9b198b798f1a97fd26246540d3c293f2b/magnus_sdk-0.6.7.tar.gz", hash = "sha256:c95f6243b70c822b682196dd0e605fc5d796ba87977e1a783da17447bada1b25", size = 59258, upload-time = "2026-03-15T03:31:49.99Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/30/95/652d0b86e1dd88dbba42c42d414729722938115700ad1eed8ffa822759a8/magnus_sdk-0.6.6-py3-none-any.whl", hash = "sha256:d55d05661046ffe52e7605dc7ed52c24c783f9239135ab88649c5a7f06d0ba16", size = 46880, upload-time = "2026-03-15T02:53:16.769Z" },
+    { url = "https://files.pythonhosted.org/packages/24/e9/de9a5056a1072e4d2a59e0f5e240f7d9dfde02870cdce9eab5a43647d0d7/magnus_sdk-0.6.7-py3-none-any.whl", hash = "sha256:dcf3d7babce4cc29b789fb2844bec02288725e150191e7d518c41c144e7b6a43", size = 46892, upload-time = "2026-03-15T03:31:51.209Z" },
 ]
 
 [[package]]
