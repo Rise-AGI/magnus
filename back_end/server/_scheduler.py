@@ -1,6 +1,7 @@
 # back_end/server/_scheduler.py
 import os
 import json
+import re
 import asyncio
 import logging
 import subprocess
@@ -759,43 +760,35 @@ class MagnusScheduler:
 
     def _extract_bind_mounts_from_system_entry_command(self, system_entry_command: str) -> List[str]:
         """
-        执行 system_entry_command 并提取 APPTAINER_BIND，转换为 Docker -v 格式。
+        从 system_entry_command 中提取 bind mount 列表，用于 Docker -v。
         返回 ["host:container", ...] 列表。
 
-        注意：这是有损转换——只提取 APPTAINER_BIND 环境变量用于 bind mount，
-        system_entry_command 中设置的其他环境变量（如 LD_LIBRARY_PATH、CUDA_HOME）
-        和副作用（如 module load）会被丢弃。对于典型用法（仅设置 bind mount）足够。
-
-        Windows 上无 bash，跳过执行并返回空列表。
+        有损转换——约定与局限：
+        1. 只解析 bash array `mounts=(...)` 中的挂载对，忽略一切其他逻辑
+           （环境变量设置、module load、条件分支等在 Docker 模式下丢弃）
+        2. 仅展开 $HOME / ${HOME}（使用 os.path.expanduser，跨平台正确）；
+           不支持 $PWD、命令替换 $(...) 等动态值
+        3. 纯 Python 实现，不依赖 bash，全平台行为一致
         """
-        if sys.platform == "win32":
-            if system_entry_command:
-                logger.warning("system_entry_command is not supported on Windows (no bash). Ignoring.")
+        if not system_entry_command:
             return []
 
-        try:
-            # 在 subprocess 中执行 system_entry_command，然后打印 APPTAINER_BIND
-            script = f'{system_entry_command}\necho "$APPTAINER_BIND"'
-            result = subprocess.run(
-                ["bash", "-c", script],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                env=os.environ.copy(),
-            )
-            apptainer_bind = result.stdout.strip().split("\n")[-1]  # 最后一行是 echo 的输出
-            if not apptainer_bind:
-                return []
-
-            binds = []
-            for entry in apptainer_bind.split(","):
-                entry = entry.strip()
-                if entry:
-                    binds.append(entry)
-            return binds
-        except Exception as e:
-            logger.warning(f"Failed to interpret system_entry_command: {e}")
+        # 提取 mounts=( ... ) 块内的所有双引号字符串
+        # re.DOTALL 让 . 匹配换行，容忍任意 whitespace
+        array_match = re.search(r'mounts\s*=\s*\((.*?)\)', system_entry_command, re.DOTALL)
+        if array_match is None:
             return []
+
+        body = array_match.group(1)
+        entries = re.findall(r'"([^"]+)"', body)
+
+        home = os.path.expanduser("~")
+        binds = []
+        for entry in entries:
+            expanded = entry.replace("${HOME}", home).replace("$HOME", home)
+            if ":" in expanded:
+                binds.append(expanded)
+        return binds
 
     def _init_job_working_dir(self, job_working_table: str)-> None:
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)

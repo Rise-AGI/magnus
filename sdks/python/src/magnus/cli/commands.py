@@ -3026,8 +3026,6 @@ def local_start():
          "Install Git: https://git-scm.com/downloads"),
         ("uv", "Python package manager for the Magnus backend",
          "Install uv: https://docs.astral.sh/uv/getting-started/installation/"),
-        ("node", "JavaScript runtime for the Magnus Web UI",
-         "Install Node.js (LTS): https://nodejs.org/"),
     ]
 
     all_ok = True
@@ -3055,6 +3053,7 @@ def local_start():
         raise typer.Exit(1)
 
     OPTIONAL_TOOLS = [
+        ("node", "JavaScript runtime for the Magnus Web UI"),
         ("ffmpeg", "Audio transcription in Explorer"),
     ]
     for cmd, purpose in OPTIONAL_TOOLS:

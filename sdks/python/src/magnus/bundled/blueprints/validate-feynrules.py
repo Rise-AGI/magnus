@@ -21,7 +21,7 @@ def blueprint(
     # this blueprint needs to mount MMA license in system_entry_command
     system_entry_command = """
 mounts=(
-    "$HOME/.wolfram-container-license:$HOME/.WolframEngine/Licensing"
+    "$HOME/.WolframEngine/Licensing/mathpass:$HOME/.WolframEngine/Licensing/mathpass"
 )
 export APPTAINER_BIND="${APPTAINER_BIND:+$APPTAINER_BIND,}$(IFS=,; echo "${mounts[*]}")"
 """
