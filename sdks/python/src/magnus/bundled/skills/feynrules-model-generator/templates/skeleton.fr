@@ -1,0 +1,110 @@
+(* ::Package:: *)
+
+(* ============================================================ *)
+(* TODO: Replace "MyBSMModel" with your model name              *)
+(* ============================================================ *)
+
+M$ModelName = "MyBSMModel";
+
+M$Information = {
+  Authors      -> {"TODO"},
+  Version      -> "1.0",
+  Date         -> "TODO: DD. MM. YYYY",
+  Institutions -> {"TODO"},
+  Emails       -> {"TODO"},
+  Description  -> "TODO: Brief description of the BSM extension"
+};
+
+(* ============================================================ *)
+(* Index Definitions                                            *)
+(* ============================================================ *)
+
+(* TODO: Add index definitions needed by your particles.        *)
+(* Common examples:                                             *)
+(*   IndexRange[Index[Generation]] = Range[3];                  *)
+(*   IndexStyle[Generation, f];                                 *)
+
+(* ============================================================ *)
+(* Interaction Order Hierarchy                                  *)
+(* ============================================================ *)
+
+M$InteractionOrderHierarchy = {
+  {QCD, 1},
+  {QED, 2},
+  {NP, 2}
+};
+
+(* ============================================================ *)
+(* Gauge Groups                                                 *)
+(* ============================================================ *)
+
+(* NOTE: For BSM extensions loaded on top of the SM .fr file,   *)
+(* M$GaugeGroups is already defined by the SM. Only add this    *)
+(* section if building a standalone model.                      *)
+
+(* ============================================================ *)
+(* Particle Classes                                             *)
+(* ============================================================ *)
+
+(* TODO: Define your BSM particles.                             *)
+(* See feynrules_syntax.md section 5 for F/S/V/T attributes.   *)
+
+M$ClassesDescription = {
+
+  (* TODO: Replace with your particle definition(s). Example:   *)
+  S[100] == {
+    ClassName       -> Xnew,
+    SelfConjugate   -> True,
+    Mass            -> {MXnew, 100},
+    Width           -> {WXnew, 1},
+    PDG             -> 9000001,
+    ParticleName    -> "Xnew",
+    PropagatorLabel -> "Xnew",
+    PropagatorType  -> D,
+    PropagatorArrow -> None,
+    FullName        -> "New Particle X"
+  }
+
+};
+
+(* ============================================================ *)
+(* Parameters                                                   *)
+(* ============================================================ *)
+
+(* WARNING: Do NOT add Mass or Width symbols here.              *)
+(* They are already defined by the particle class above.        *)
+(* See feynrules_syntax.md section 6 for parameter examples.   *)
+
+(* TODO: Define coupling constants and derived parameters.      *)
+
+M$Parameters = {
+
+  (* TODO: Replace with your parameter(s). Example:             *)
+  gNP == {
+    ParameterType    -> External,
+    BlockName        -> NPINPUTS,
+    OrderBlock       -> 1,
+    Value            -> 0.1,
+    InteractionOrder -> {NP, 1},
+    TeX              -> Subscript[g, NP],
+    Description      -> "New physics coupling"
+  }
+
+};
+
+(* ============================================================ *)
+(* Lagrangian                                                   *)
+(* ============================================================ *)
+
+(* TODO: Write interaction terms using explicit * multiplication.*)
+(* Use Block[{indices}, ...] to declare dummy indices.          *)
+(* If the Lagrangian has "+ h.c.", use the Ltmp pattern:        *)
+(*   LNPtmp := Block[{...}, <non-hermitian part>];             *)
+(*   LNP := LNPtmp + HC[LNPtmp];                               *)
+(* If there is NO "+ h.c.", write the Lagrangian directly:      *)
+(*   LNP := Block[{...}, <full expression>];                   *)
+
+LNP := Block[{sp, sp2, ii},
+  (* TODO: Replace with your Lagrangian terms *)
+  -gNP * Xnew
+];
