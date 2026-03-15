@@ -681,9 +681,9 @@ class MagnusScheduler:
             magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['back_end_port']}"
             job_id = str(job.id)
 
-            # 准备用户脚本
+            # 准备用户脚本（强制 LF：脚本在 Linux 容器内执行）
             user_script_path = os.path.join(job_working_table, ".magnus_user_script.sh")
-            with open(user_script_path, "w") as f:
+            with open(user_script_path, "w", newline="\n") as f:
                 f.write("set -e\n")
                 f.write("export HOME=$MAGNUS_HOME\n")
                 f.write(job.entry_command)

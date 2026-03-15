@@ -1,7 +1,9 @@
 # back_end/server/routers/images.py
 import os
+import re
 import asyncio
 import logging
+import subprocess
 import threading
 from typing import Dict, Optional
 from datetime import datetime, timezone
@@ -20,7 +22,7 @@ from ..schemas import (
 )
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
-from .._magnus_config import magnus_config, admin_open_ids
+from .._magnus_config import magnus_config, admin_open_ids, is_local_mode
 from .._resource_manager import resource_manager, _image_to_sif_filename
 
 
@@ -29,6 +31,16 @@ router = APIRouter()
 
 magnus_root = magnus_config['server']['root']
 container_cache_path = f"{magnus_root}/container_cache"
+
+
+def _docker_image_cached(uri: str) -> bool:
+    """local 模式专用：通过 docker image inspect 判断镜像是否已拉取"""
+    docker_image = re.sub(r'^[a-z]+://', '', uri)
+    result = subprocess.run(
+        ["docker", "image", "inspect", docker_image],
+        capture_output=True,
+    )
+    return result.returncode == 0
 
 
 # ─── 进程级状态 ──────────────────────────────────────────────────
@@ -64,7 +76,8 @@ def recover_stuck_images() -> None:
         _recovered = True
 
     # 清理残留的 .tmp 文件（进程异常退出时遗留，或孤儿 apptainer 进程写的）
-    if os.path.isdir(container_cache_path):
+    # local 模式无 .sif 文件，跳过磁盘扫描
+    if not is_local_mode and os.path.isdir(container_cache_path):
         for fname in os.listdir(container_cache_path):
             if fname.endswith(".sif.tmp"):
                 tmp_path = os.path.join(container_cache_path, fname)
@@ -82,17 +95,25 @@ def recover_stuck_images() -> None:
         if not stuck:
             return
         for img in stuck:
-            sif_path = os.path.join(container_cache_path, img.filename)
-            if os.path.exists(sif_path):
-                img.status = "cached"
-                try:
-                    img.size_bytes = os.stat(sif_path).st_size
-                except OSError:
-                    pass
-                logger.info(f"Recovered stuck image → cached: {img.uri}")
+            if is_local_mode:
+                if _docker_image_cached(img.uri):
+                    img.status = "cached"
+                    logger.info(f"Recovered stuck image → cached: {img.uri}")
+                else:
+                    db.delete(img)
+                    logger.info(f"Removed orphan image record: {img.uri}")
             else:
-                db.delete(img)
-                logger.info(f"Removed orphan image record: {img.uri}")
+                sif_path = os.path.join(container_cache_path, img.filename)
+                if os.path.exists(sif_path):
+                    img.status = "cached"
+                    try:
+                        img.size_bytes = os.stat(sif_path).st_size
+                    except OSError:
+                        pass
+                    logger.info(f"Recovered stuck image → cached: {img.uri}")
+                else:
+                    db.delete(img)
+                    logger.info(f"Removed orphan image record: {img.uri}")
         db.commit()
     finally:
         db.close()
@@ -140,7 +161,7 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
             if not img:
                 # 记录已被删除；仅当该 URI 无任何记录时才清理文件，避免误杀并发请求的成果
                 any_exist = db.query(models.CachedImage).filter(models.CachedImage.uri == uri).first()
-                if not any_exist:
+                if not any_exist and not is_local_mode:
                     sif_path = os.path.join(container_cache_path, _image_to_sif_filename(uri))
                     if os.path.exists(sif_path):
                         try:
@@ -150,21 +171,26 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
                             pass
                 return
 
-            sif_path = os.path.join(container_cache_path, img.filename)
-
             if success:
-                try:
-                    img.size_bytes = os.stat(sif_path).st_size
-                except OSError:
-                    img.size_bytes = 0
+                if not is_local_mode:
+                    sif_path = os.path.join(container_cache_path, img.filename)
+                    try:
+                        img.size_bytes = os.stat(sif_path).st_size
+                    except OSError:
+                        img.size_bytes = 0
                 img.status = "cached"
                 img.updated_at = datetime.now(timezone.utc)
                 db.commit()
             else:
                 logger.error(f"Image {'refresh' if is_refresh else 'pull'} failed for {uri}: {error_msg}")
                 if is_refresh:
-                    # 刷新失败：旧文件还在就仍算 cached，否则 missing
-                    img.status = "cached" if os.path.exists(sif_path) else "missing"
+                    # 刷新失败：判断旧镜像是否仍可用
+                    if is_local_mode:
+                        old_available = _docker_image_cached(uri)
+                    else:
+                        sif_path = os.path.join(container_cache_path, img.filename)
+                        old_available = os.path.exists(sif_path)
+                    img.status = "cached" if old_available else "missing"
                     img.updated_at = datetime.now(timezone.utc)
                     db.commit()
                 else:
@@ -272,8 +298,9 @@ def list_images(
     # 2. 防御性扫描：磁盘上有 DB 里没有的 .sif → 标记 "unregistered"
     #    正常情况下不应出现（scheduler 和 API 都会自动注册）。
     #    如果运维看到 unregistered 镜像，说明有异常的镜像落盘路径，应排查。
+    #    local 模式下不扫描 .sif 文件（Docker 自行管理镜像存储）。
     fs_items: list[CachedImageResponse] = []
-    if os.path.isdir(container_cache_path):
+    if not is_local_mode and os.path.isdir(container_cache_path):
         for fname in os.listdir(container_cache_path):
             if not fname.endswith(".sif"):
                 continue
@@ -296,12 +323,19 @@ def list_images(
 
     # 3. 标记文件缺失的 DB 记录
     combined: list[CachedImageResponse] = []
-    for img in db_images:
-        sif_path = os.path.join(container_cache_path, img.filename)
-        resp = CachedImageResponse.model_validate(img)
-        if not os.path.exists(sif_path) and img.status not in ("refreshing", "pulling"):
-            resp.status = "missing"
-        combined.append(resp)
+    if is_local_mode:
+        for img in db_images:
+            resp = CachedImageResponse.model_validate(img)
+            if not _docker_image_cached(img.uri) and img.status not in ("refreshing", "pulling"):
+                resp.status = "missing"
+            combined.append(resp)
+    else:
+        for img in db_images:
+            sif_path = os.path.join(container_cache_path, img.filename)
+            resp = CachedImageResponse.model_validate(img)
+            if not os.path.exists(sif_path) and img.status not in ("refreshing", "pulling"):
+                resp.status = "missing"
+            combined.append(resp)
 
     combined.extend(fs_items)
 

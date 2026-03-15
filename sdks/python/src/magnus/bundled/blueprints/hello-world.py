@@ -20,7 +20,7 @@ def blueprint(
     sleep_seconds: SleepSeconds = 0,
 ):
     safe_msg = message.replace("'", "'\\''")
-    entry_command = f"sleep {sleep_seconds} && echo '{safe_msg}'"
+    entry_command = f"sleep {sleep_seconds} && echo '{safe_msg}' | tee \"$MAGNUS_RESULT\""
 
     submit_job(
         task_name="Hello World",
