@@ -6,27 +6,32 @@
 
 Magnus is an open-source platform that turns HPC clusters into an execution backend
 where both humans and AI agents submit jobs, run containerized toolchains, and
-crystallize validated workflows into reusable artifacts. It is built around three layers --
-execution, sedimentation, and collaboration -- designed so that the platform does not
-distinguish between a human clicking a button and an agent calling an API.
+crystallize validated workflows into reusable artifacts.
+It is built around three layers -- execution, sedimentation, and collaboration --
+and three design commitments:
+
+- **Human-Agent Symmetry** -- unified abstractions with built-in auditability.
+- **Self-Evolving Blueprints** -- skill-supporting computational primitives.
+- **Executable Knowledge Graph** -- linked artifacts for reproducible science.
 
 ## Architecture
-
-Magnus provides a single infrastructure layer
-that humans and AI agents use through the same abstractions -- Blueprints, Skills, and Jobs.
-A researcher can author a Blueprint in the web editor; an agent can author one through the SDK.
-The platform is agnostic to who is operating it.
 
 In our experience, the harder part of computational science is not running code on a cluster,
 but the cycle of *run, evaluate, revise, rerun* that constitutes real research,
 and the sedimentation of hard-won workflows into forms that others -- human or agent --
 can reliably reuse.
 
+Magnus provides a single infrastructure layer
+that humans and AI agents use through the same abstractions -- Blueprints, Skills, and Jobs.
+A researcher can author a Blueprint in the web editor; an agent can author one through the SDK.
+The platform does not distinguish between a human clicking a button and an agent calling an API,
+and every operation is fully auditable.
+
 Magnus is organized around three layers:
 
 - **Execution.** Jobs run inside Apptainer containers on SLURM-managed clusters, with full filesystem isolation, ephemeral writable storage, and automatic image caching. The platform handles scheduling with four priority tiers and preemption.
 
-- **Sedimentation.** Blueprints and Skills form a directed acyclic knowledge graph that connects back to the execution layer. A Blueprint encodes a validated workflow as a typed Python function; a Skill encodes domain expertise as a portable document package. Together they accumulate institutional knowledge in a structure that both humans and agents can traverse, compose, and invoke.
+- **Sedimentation.** Blueprints and Skills form a directed acyclic knowledge graph that connects back to the execution layer. A Blueprint encodes a validated workflow as a typed Python function; a Skill encodes domain expertise as a portable document package. Together they accumulate institutional knowledge in a structure that both humans and agents can traverse, compose, invoke, and revise -- ensuring reproducibility while enabling continuous improvement.
 
 - **Collaboration.** Shared governance and cross-role coordination across the platform -- under active development.
 
@@ -34,9 +39,10 @@ Magnus is organized around three layers:
 
 ### Blueprints
 
-A Blueprint is a typed Python function. Its signature defines parameters;
-its body defines how a job is submitted. The platform introspects the function
-to generate a web form, validate inputs, and execute the workflow.
+A Blueprint is a typed Python function that serves as a computational primitive:
+its signature defines parameters, its body defines how a job is submitted.
+The platform introspects the function to generate a web form, validate inputs,
+and execute the workflow.
 
 The following is a production Blueprint from the
 [ColliderAgent](https://github.com/rise-agi/collider-agent) project.
@@ -82,6 +88,12 @@ def blueprint(
 This function simultaneously serves as a configuration file, a web form schema,
 a CLI entrypoint, and a programmatic API -- the same Blueprint can be launched by
 a researcher through the web UI or by an agent through the SDK.
+
+Blueprints are not static artifacts. Agents create, execute, evaluate, and refine them,
+closing the loop between experimentation and sedimentation. A workflow that starts as
+a one-off experiment can be crystallized into a Blueprint; an agent can later improve it
+based on new results, guided by the domain knowledge encoded in Skills.
+
 See the [Blueprint Crafting Guide](docs/Blueprint_Crafting_Guide.md) for full documentation.
 
 ### Skills
@@ -103,6 +115,8 @@ feynrules-model-generator/
 
 Skills decouple domain expertise from agent implementation.
 You can swap the underlying agent framework without rewriting your domain knowledge.
+Blueprints draw on Skills as their knowledge foundation;
+Skills, in turn, rely on Blueprints as their execution backbone.
 
 ### Jobs and Scheduling
 
@@ -193,7 +207,7 @@ See [Job Runtime Documentation](docs/Magnus_job_runtime.md) for container execut
 
 ## Contributing
 
-Magnus is far from perfect. If you run into rough edges, have ideas for improvement,
+Magnus is actively evolving. If you run into rough edges, have ideas for improvement,
 or want to contribute code, please open an issue or pull request.
 We appreciate every report, suggestion, and patch.
 
