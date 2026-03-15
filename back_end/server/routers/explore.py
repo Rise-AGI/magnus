@@ -442,17 +442,20 @@ def update_session(
 
 def _convert_audio_to_mp3(audio_bytes: bytes) -> bytes:
     """内存管道转码，不落盘。要求系统已安装 ffmpeg。"""
-    result = subprocess.run(
-        [
-            "ffmpeg", "-i", "pipe:0",
-            "-f", "mp3", "-acodec", "libmp3lame",
-            "-ab", "64k", "-ac", "1",
-            "pipe:1",
-        ],
-        input=audio_bytes,
-        capture_output=True,
-        timeout=15,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-i", "pipe:0",
+                "-f", "mp3", "-acodec", "libmp3lame",
+                "-ab", "64k", "-ac", "1",
+                "pipe:1",
+            ],
+            input=audio_bytes,
+            capture_output=True,
+            timeout=15,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("ffmpeg is not installed. Install it to enable audio transcription.")
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg 转码失败: {result.stderr.decode(errors='replace')[:200]}")
     return result.stdout

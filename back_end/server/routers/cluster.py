@@ -24,7 +24,6 @@ router = APIRouter()
 def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int, pending_skip: int, pending_limit: int):
     """Local 模式的集群统计：只看 Magnus 数据库中的任务，资源取宿主机实际值"""
     import os
-    import shutil
 
     running_jobs_orm = db.query(models.Job).filter(
         models.Job.status.in_([JobStatus.RUNNING, JobStatus.QUEUED])
@@ -51,17 +50,12 @@ def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int,
     # 宿主机实际资源（local 模式不做细粒度资源追踪，显示 total = free）
     cpu_total = os.cpu_count() or 0
     try:
-        mem_info = shutil.disk_usage("/")  # fallback
-        # 优先读 /proc/meminfo（Linux）
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    mem_total_mb = int(line.split()[1]) // 1024
-                    break
-            else:
-                mem_total_mb = 0
-    except (FileNotFoundError, PermissionError):
-        # macOS / Windows: 粗略估计
+        # os.sysconf works on Linux and macOS
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        total_pages = os.sysconf("SC_PHYS_PAGES")
+        mem_total_mb = (page_size * total_pages) // (1024 * 1024)
+    except (ValueError, AttributeError, OSError):
+        # Windows: os.sysconf doesn't exist
         mem_total_mb = 0
 
     return {
