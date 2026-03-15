@@ -80,5 +80,8 @@ cluster:
   default_container_image: docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
   default_ephemeral_storage: 10G
   default_system_entry_command: |-
-    export APPTAINER_BIND="/home:/home"
+    mounts=(
+      "/home:/home"
+    )
+    export APPTAINER_BIND=$(IFS=,; echo "${mounts[*]}")
     export UV_CACHE_DIR=/path/to/magnus-data/uv_cache
