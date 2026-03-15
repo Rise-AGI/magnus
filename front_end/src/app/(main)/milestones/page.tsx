@@ -1,7 +1,7 @@
 // front_end/src/app/(main)/milestones/page.tsx
 "use client";
 
-import { Flag, Construction } from "lucide-react";
+import { Compass, Construction } from "lucide-react";
 import { useLanguage } from "@/context/language-context";
 
 export default function MilestonesPage() {
@@ -13,7 +13,7 @@ export default function MilestonesPage() {
         html { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
       <div className="p-6 rounded-full bg-zinc-900/50 border border-zinc-800/50 mb-6">
-        <Flag className="w-12 h-12 text-zinc-600" />
+        <Compass className="w-12 h-12 text-zinc-600" />
       </div>
       <h2 className="text-xl font-semibold text-zinc-300 mb-2">{t("nav.milestones")}</h2>
       <div className="flex items-center gap-2 text-sm text-zinc-600 bg-zinc-900/30 px-3 py-1.5 rounded-full border border-zinc-800/30">
