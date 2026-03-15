@@ -38,6 +38,7 @@ const translations = {
 
   // ===== Navigation =====
   "nav.explorer": { zh: "启新", en: "Explorer" },
+  "nav.milestones": { zh: "明迹", en: "Milestones" },
   "nav.people": { zh: "人事", en: "People" },
   "nav.motions": { zh: "共决", en: "Motions" },
   "nav.jobs": { zh: "任务", en: "Jobs" },
@@ -49,11 +50,13 @@ const translations = {
 
   // ===== Auth =====
   "auth.signInWithFeishu": { zh: "飞书登录", en: "Sign in with Feishu" },
+  "auth.signIn": { zh: "登录", en: "Sign In" },
   "auth.logout": { zh: "退出登录", en: "Log out" },
   "auth.verifyingAccess": { zh: "正在验证权限...", en: "Verifying access..." },
   "auth.required": { zh: "需要登录", en: "Authentication Required" },
   "auth.requiredDesc": { zh: "您需要登录才能访问此资源。", en: "You need to be signed in to access this resource." },
   "auth.pleaseLogin": { zh: "请使用飞书账号登录以继续。", en: "Please login with your Feishu account to continue." },
+  "auth.pleaseLoginLocal": { zh: "请点击登录以继续。", en: "Click sign in to continue." },
   "auth.authenticating": { zh: "正在通过飞书登录...", en: "Authenticating with Feishu..." },
   "auth.loginFailed": { zh: "登录失败", en: "Login Failed" },
   "auth.backToHome": { zh: "返回首页", en: "Back to Home" },

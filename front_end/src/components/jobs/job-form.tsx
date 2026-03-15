@@ -76,7 +76,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   
   const [gpuCount, setGpuCount] = useState(initialData?.gpu_count ?? 0);
   const [gpuType, setGpuType] = useState(
-    initialData?.gpu_type || (initialData?.gpu_count ? PHYSICAL_GPUS[0].value : "cpu")
+    initialData?.gpu_type || (initialData?.gpu_count ? (PHYSICAL_GPUS[0]?.value ?? "cpu") : "cpu")
   );
   
   const [jobType, setJobType] = useState(initialData?.job_type || "A2");

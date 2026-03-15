@@ -18,10 +18,11 @@ import {
   Users,
   Waypoints,
   Container,
+  Flag,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
-import { CLUSTER_CONFIG } from "@/lib/config";
+import { CLUSTER_CONFIG, IS_LOCAL_MODE } from "@/lib/config";
 
 interface NavItem {
   i18nKey: string;
@@ -31,6 +32,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  { i18nKey: "nav.milestones", href: "/milestones", icon: Flag, wip: true },
   { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight },
   { i18nKey: "nav.people", href: "/people", icon: Users },
   { i18nKey: "nav.motions", href: "/motions", icon: Waypoints, wip: true },
@@ -106,7 +108,7 @@ export function Sidebar() {
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all text-sm font-medium bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700"
             >
               <LogIn className="w-4 h-4" />
-              <span>{t("auth.signInWithFeishu")}</span>
+              <span>{IS_LOCAL_MODE ? t("auth.signIn") : t("auth.signInWithFeishu")}</span>
             </button>
           ) : (
             <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 shadow-sm">

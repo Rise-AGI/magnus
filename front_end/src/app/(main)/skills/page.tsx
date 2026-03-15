@@ -45,7 +45,7 @@ export default function SkillsPage() {
 
   const userFilterOptions = useMemo(() => [
       { label: t("common.allUsers"), value: "", icon: "/api/logo" },
-      ...allUsers.map(u => ({ label: u.name, value: u.id, meta: u.email || "", icon: u.avatar_url || undefined }))
+      ...allUsers.map(u => ({ label: u.name, value: u.id, meta: u.email || "", icon: u.avatar_url || undefined, initials: u.name.substring(0, 2).toUpperCase() }))
   ], [allUsers, t]);
 
   useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);

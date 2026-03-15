@@ -101,6 +101,7 @@ export default function ServicesPage() {
         value: u.id,
         meta: u.email || "",
         icon: u.avatar_url || undefined,
+        initials: u.name.substring(0, 2).toUpperCase(),
       })),
     ];
   }, [allUsers, t]);

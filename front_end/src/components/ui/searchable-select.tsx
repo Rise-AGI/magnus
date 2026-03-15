@@ -8,7 +8,7 @@ import * as Popover from "@radix-ui/react-popover";
 interface SearchableSelectProps {
   label?: string;
   value: string;
-  options: { label: string; value: string; meta?: string; icon?: string }[];
+  options: { label: string; value: string; meta?: string; icon?: string; initials?: string }[];
   onChange: (val: string) => void;
   placeholder?: string;
   disabled?: boolean;
@@ -66,7 +66,7 @@ export function SearchableSelect({
   }, [query, options, value]);
 
   const selectedOption = useMemo(() => options.find(o => o.value === value), [value, options]);
-  const showIcon = selectedOption?.icon && !minimal;
+  const showIcon = !minimal && (selectedOption?.icon || selectedOption?.initials);
 
   return (
     <Popover.Root open={isOpen} onOpenChange={handleOpenChange}>
@@ -83,12 +83,18 @@ export function SearchableSelect({
             {/* 选中项的图标 (绝对定位在输入框左侧) */}
             {showIcon && (
               <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center pointer-events-none z-10">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={selectedOption.icon}
-                    alt=""
-                    className="w-5 h-5 rounded-full object-cover border border-zinc-700/50"
-                  />
+                  {selectedOption?.icon ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={selectedOption.icon}
+                      alt=""
+                      className="w-5 h-5 rounded-full object-cover border border-zinc-700/50"
+                    />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold border border-indigo-500/30">
+                      {selectedOption?.initials}
+                    </div>
+                  )}
               </div>
             )}
 
@@ -148,14 +154,18 @@ export function SearchableSelect({
                 `}
               >
                 <div className="flex items-center gap-2 overflow-hidden">
-                  {opt.icon && (
+                  {opt.icon ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={opt.icon}
                       alt="icon"
                       className="w-5 h-5 rounded-full object-cover border border-zinc-700/50 bg-zinc-800 flex-shrink-0"
                     />
-                  )}
+                  ) : opt.initials ? (
+                    <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold border border-indigo-500/30 flex-shrink-0">
+                      {opt.initials}
+                    </div>
+                  ) : null}
                   <div className="text-sm font-medium truncate">{opt.label}</div>
                 </div>
 

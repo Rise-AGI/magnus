@@ -92,7 +92,8 @@ export default function JobsPage() {
         label: u.name,
         value: u.id,
         meta: u.email || "",
-        icon: u.avatar_url || undefined 
+        icon: u.avatar_url || undefined,
+        initials: u.name.substring(0, 2).toUpperCase(),
       }))
     ];
   }, [allUsers, t]);

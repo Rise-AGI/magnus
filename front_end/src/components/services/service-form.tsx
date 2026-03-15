@@ -104,7 +104,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
   // === Resources ===
   const [gpuCount, setGpuCount] = useState(data?.gpu_count ?? 0);
   const [gpuType, setGpuType] = useState(
-    data?.gpu_type || (data?.gpu_count === 0 ? "cpu" : PHYSICAL_GPUS[0].value)
+    data?.gpu_type || (data?.gpu_count ? (PHYSICAL_GPUS[0]?.value ?? "cpu") : "cpu")
   ); 
   const [jobType, setJobType] = useState(data?.job_type || "A2");
 

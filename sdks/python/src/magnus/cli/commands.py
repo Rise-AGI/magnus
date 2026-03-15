@@ -3207,11 +3207,21 @@ def local_start():
     print_msg(f"Site '{LOCAL_SITE_NAME}' registered and set as current.")
 
     # Register bundled blueprints
-    from ..bundled.register import register_bundled_blueprints
+    from ..bundled.register import register_bundled_blueprints, register_bundled_skills
     with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Registering bundled blueprints..."):
-        n = register_bundled_blueprints(local_address, "local")
-    if n > 0:
-        print_msg(f"Registered {n} bundled blueprint(s).")
+        registered = register_bundled_blueprints(local_address, "local")
+    if registered:
+        print_msg(f"Registered {len(registered)} bundled blueprint(s):")
+        for bp_id, bp_title in registered:
+            print_msg(f"  - {bp_title} ({bp_id})")
+
+    # Register bundled skills
+    with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Registering bundled skills..."):
+        registered_skills = register_bundled_skills(local_address, "local")
+    if registered_skills:
+        print_msg(f"Registered {len(registered_skills)} bundled skill(s):")
+        for sk_id, sk_title in registered_skills:
+            print_msg(f"  - {sk_title} ({sk_id})")
 
     print_msg("")
     if frontend_started:
