@@ -25,8 +25,9 @@ def blueprint(
     submit_job(
         task_name="Hello World",
         description=f"Demo: echo '{safe_msg}' after {sleep_seconds}s",
+        repo_name="magnus",
+        namespace="Rise-AGI",
         entry_command=entry_command,
-        job_type=JobType.B2,
-        # ubuntu:24.04 (~30 MB) — pytorch default is overkill for echo
+        job_type=JobType.A2,
         container_image="docker://ubuntu:24.04",
     )
