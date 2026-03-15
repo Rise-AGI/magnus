@@ -2971,7 +2971,10 @@ def _kill_port(port: int) -> bool:
                     continue
     else:
         # lsof works on both macOS and Linux (fuser -k syntax differs across platforms)
-        result = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
+        try:
+            result = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
+        except FileNotFoundError:
+            return False  # lsof not installed on this system
         pids = result.stdout.strip()
         if pids:
             subprocess.run(["kill", "-9"] + pids.split(), capture_output=True)
@@ -2992,7 +2995,7 @@ def _check_port_available(port: int) -> bool:
 def _popen_detached(cmd: List[str], **kwargs) -> subprocess.Popen:
     """Start a detached subprocess, handling cross-platform differences."""
     if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     else:
         kwargs["start_new_session"] = True
     return subprocess.Popen(cmd, **kwargs)
@@ -3106,6 +3109,18 @@ def local_start():
         LOCAL_PREVIOUS_SITE_FILE.write_text(previous_site, encoding="utf-8")
 
     # Start backend server (uv run 使用后端自己的 venv，而非 SDK 的 Python)
+    # uv sync — 先在前台安装依赖，让用户看到进度（类似 npm install）
+    if not (back_end_path / ".venv").exists():
+        print_msg("Installing backend dependencies...")
+        sync_result = subprocess.run(
+            ["uv", "sync"],
+            cwd=str(back_end_path),
+            timeout=300,
+        )
+        if sync_result.returncode != 0:
+            print_error("uv sync failed (see output above)")
+            raise typer.Exit(1)
+
     print_msg("Starting backend server...")
     # Redirect to a log file instead of PIPE — a PIPE with no reader would
     # fill its buffer and block the detached process indefinitely.
@@ -3215,12 +3230,17 @@ def local_stop():
     Examples:
       magnus local stop
     """
+    import time
     stopped_any = False
 
     for port, role in [(LOCAL_FRONT_END_PORT, "Frontend"), (LOCAL_BACK_END_PORT, "Backend")]:
         if not _check_port_available(port):
             _kill_port(port)
-            print_msg(f"{role} stopped (port {port})")
+            time.sleep(0.5)
+            if _check_port_available(port):
+                print_msg(f"{role} stopped (port {port})")
+            else:
+                print_msg(f"[yellow]Warning[/yellow]: Failed to stop {role} on port {port}. Kill it manually.")
             stopped_any = True
 
     if not stopped_any:
