@@ -113,6 +113,12 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
       if (Array.isArray(payload.files)) next.files = payload.files;
       return next;
     });
+    if (Array.isArray(payload.files)) {
+      setActiveFileIdx(0);
+    }
+    setTimeout(() => {
+      actionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
   };
 
   const updateFile = (idx: number, key: "path" | "content", value: string) => {
