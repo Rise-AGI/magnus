@@ -78,7 +78,7 @@ def blueprint(
         commit_sha = "HEAD",
         entry_command = f"python3 scripts/run_feynrules_validation.py"
                         f" --secret '{safe_secret}' --symbol '{safe_symbol}'",
-        container_image = "docker://git.pku.edu.cn/2200011523/mma-het:latest",
+        container_image = "docker://git.pku.edu.cn/het-agi/mma-het:latest",
         job_type = JobType.A2,
         memory_demand = "10G",
         cpu_count = 10,
