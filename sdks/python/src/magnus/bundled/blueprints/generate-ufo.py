@@ -68,7 +68,7 @@ python3 scripts/on_magnus/run_ufo_generation.py --secret '{safe_secret}' --lagra
         commit_sha = "HEAD",
         system_entry_command = system_entry_command,
         entry_command = entry_command,
-        container_image = "docker://git.pku.edu.cn/2200011523/mma-het:latest",
+        container_image = "docker://git.pku.edu.cn/het-agi/mma-het:latest",
         job_type = JobType.A2,
         memory_demand = "10G",
         cpu_count = 10,

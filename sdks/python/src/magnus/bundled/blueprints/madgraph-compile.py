@@ -77,7 +77,7 @@ python3 scripts/on_magnus/run_madgraph_compile.py --process '{safe_process}' --t
         commit_sha = "HEAD",
         system_entry_command = system_entry_command,
         entry_command = entry_command,
-        container_image = "docker://git.pku.edu.cn/2200011523/collider:latest",
+        container_image = "docker://git.pku.edu.cn/het-agi/collider:latest",
         job_type = JobType.A2,
         runner = "magnus",
         cpu_count = 10,
