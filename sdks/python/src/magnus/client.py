@@ -1049,6 +1049,8 @@ class MagnusClient:
     # === Skill Methods ===
 
     _SKILL_MAX_TOTAL_BYTES = 512 * 1024  # 512 KB
+    _SKILL_RESOURCE_MAX_BYTES = 32 * 1024 * 1024  # 32 MB per resource file
+    _SKILL_RESOURCE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
     def _validate_skill_size(self, files: List[Dict[str, str]]) -> None:
         total = sum(len(f.get("content", "").encode("utf-8")) for f in files)
@@ -1163,6 +1165,59 @@ class MagnusClient:
         timeout: float = 10.0,
     ) -> None:
         return await asyncio.to_thread(self.delete_skill, skill_id, timeout)
+
+    def upload_skill_resource(
+        self,
+        skill_id: str,
+        file_path: Path,
+        timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        file_path = Path(file_path)
+        ext = file_path.suffix.lower()
+        if ext not in self._SKILL_RESOURCE_EXTENSIONS:
+            raise MagnusError(f"Unsupported resource type '{ext}'. Allowed: {', '.join(sorted(self._SKILL_RESOURCE_EXTENSIONS))}")
+        if file_path.stat().st_size > self._SKILL_RESOURCE_MAX_BYTES:
+            raise MagnusError(f"Resource file too large ({file_path.stat().st_size:,} bytes). Limit: {self._SKILL_RESOURCE_MAX_BYTES:,} bytes.")
+        try:
+            with open(file_path, "rb") as f:
+                resp = self.http.post(
+                    f"/skills/{skill_id}/resources",
+                    files={"file": (file_path.name, f)},
+                    timeout=timeout,
+                )
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while uploading skill resource.")
+        except httpx.TransportError as e:
+            raise self._network_error("uploading skill resource", e)
+
+    async def upload_skill_resource_async(
+        self,
+        skill_id: str,
+        file_path: Path,
+        timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.upload_skill_resource, skill_id, file_path, timeout)
+
+    def download_skill_resource(
+        self,
+        skill_id: str,
+        resource_path: str,
+        dest: Path,
+        timeout: float = 30.0,
+    ) -> Path:
+        try:
+            resp = self.http.get(f"/skills/{skill_id}/files/{resource_path}", timeout=timeout)
+            self._handle_error(resp)
+            dest = Path(dest)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(resp.content)
+            return dest
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while downloading skill resource.")
+        except httpx.TransportError as e:
+            raise self._network_error("downloading skill resource", e)
 
     # === Image Management ===
 

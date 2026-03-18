@@ -93,17 +93,25 @@ def _discover_skills() -> List[Tuple[str, Path]]:
     return results
 
 
-def _collect_skill_files(source: Path) -> List[Dict[str, str]]:
-    files: List[Dict[str, str]] = []
+_RESOURCE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+def _collect_skill_files(source: Path) -> Tuple[List[Dict[str, str]], List[Path]]:
+    """Returns (text_files, binary_paths). Binary image files are collected separately."""
+    text_files: List[Dict[str, str]] = []
+    binary_paths: List[Path] = []
     for p in sorted(source.rglob("*")):
         if not p.is_file():
+            continue
+        if p.suffix.lower() in _RESOURCE_EXTENSIONS:
+            binary_paths.append(p)
             continue
         try:
             content = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        files.append({"path": str(p.relative_to(source)), "content": content})
-    return files
+        text_files.append({"path": str(p.relative_to(source)), "content": content})
+    return text_files, binary_paths
 
 
 def register_bundled_skills(
@@ -123,8 +131,8 @@ def register_bundled_skills(
     registered: List[Tuple[str, str]] = []
 
     for skill_id, skill_dir in skills:
-        files = _collect_skill_files(skill_dir)
-        if not files:
+        text_files, binary_paths = _collect_skill_files(skill_dir)
+        if not text_files:
             continue
 
         title = skill_id.replace("-", " ").title()
@@ -132,7 +140,7 @@ def register_bundled_skills(
             "id": skill_id,
             "title": title,
             "description": f"Bundled skill: {skill_id}",
-            "files": files,
+            "files": text_files,
         }
 
         for attempt in range(max_retries):
@@ -158,5 +166,23 @@ def register_bundled_skills(
                     time.sleep(retry_delay)
                 else:
                     logger.warning(f"Failed to register skill {skill_id} after {max_retries} retries")
+
+        # Upload binary resources after text save succeeds
+        for bp in binary_paths:
+            rel = str(bp.relative_to(skill_dir))
+            try:
+                with open(bp, "rb") as f:
+                    resp = httpx.post(
+                        f"{address}/api/skills/{skill_id}/resources",
+                        files={"file": (bp.name, f)},
+                        headers=headers,
+                        timeout=timeout,
+                    )
+                if resp.status_code in (200, 201):
+                    logger.info(f"Uploaded resource {rel} for skill {skill_id}")
+                else:
+                    logger.warning(f"Resource {rel} upload returned {resp.status_code}")
+            except (httpx.ConnectError, httpx.TimeoutException):
+                logger.warning(f"Failed to upload resource {rel} for skill {skill_id}")
 
     return registered
