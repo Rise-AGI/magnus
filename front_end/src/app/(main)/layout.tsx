@@ -19,7 +19,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     // 修改点 1: min-h-screen -> h-screen
     // 修改点 2: 添加 w-screen overflow-hidden
     // 这就像给整个页面加了一个不可逾越的"铁框"
-    <div className="h-screen w-screen bg-[#050505] overflow-hidden flex">
+    <div className="h-dvh w-full bg-[#050505] overflow-hidden flex">
       {/* Sidebar - hidden on mobile */}
       <div className="hidden md:flex flex-shrink-0 w-64 h-full border-r border-zinc-800 bg-[#050505]">
          <Sidebar />

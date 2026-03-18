@@ -7,6 +7,7 @@ import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { client } from "@/lib/api";
 import { NotificationsPopover } from "./notifications-popover";
+import { MobileNav } from "./mobile-nav";
 import { LanguageToggle } from "./language-toggle";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -116,7 +117,11 @@ export function Header() {
 
   return (
     <>
-      <header className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur sticky top-0 z-40 flex items-center justify-end px-8 gap-4">
+      <header className="h-16 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur sticky top-0 z-40 flex items-center justify-between px-4 md:px-8 gap-4">
+        <div className="flex items-center">
+          <MobileNav />
+        </div>
+        <div className="flex items-center gap-4">
         <NotificationsPopover />
         <LanguageToggle />
 
@@ -148,7 +153,7 @@ export function Header() {
             </button>
 
             {isOpen && (
-              <div className="absolute top-full right-0 mt-3 w-fit bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl ring-1 ring-white/5 p-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="absolute top-full right-0 mt-3 w-fit max-w-[calc(100vw-2rem)] bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl ring-1 ring-white/5 p-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center gap-1 bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-2 py-1.5">
                   <div className="whitespace-nowrap">
                     <CopyableText
@@ -183,6 +188,7 @@ export function Header() {
             )}
           </div>
         )}
+        </div>
       </header>
 
       {/* Reset Token Dialog — custom layout with hidden "Edit Token" button */}
