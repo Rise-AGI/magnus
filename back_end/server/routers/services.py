@@ -260,7 +260,10 @@ def create_service(
         data["system_entry_command"] = cluster["default_system_entry_command"]
 
     if existing:
-        if existing.owner_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        is_admin = current_user.feishu_open_id in admin_open_ids
+        is_owner = existing.owner_id == current_user.id
+        is_superior = not is_owner and _is_ancestor(db, current_user.id, existing.owner_id)
+        if not (is_admin or is_owner or is_superior):
             raise HTTPException(status_code=403, detail="You cannot modify a service created by another user.")
 
         was_active = existing.is_active

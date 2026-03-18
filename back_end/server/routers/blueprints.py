@@ -119,10 +119,13 @@ def create_blueprint(
         assert_id_available(db, bp.id)
 
     if existing:
-        if existing.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        is_admin = current_user.feishu_open_id in admin_open_ids
+        is_owner = existing.user_id == current_user.id
+        is_superior = not is_owner and _is_ancestor(db, current_user.id, existing.user_id)
+        if not (is_admin or is_owner or is_superior):
             raise HTTPException(
-                status_code = 403,
-                detail = "You cannot modify a blueprint created by another user. Please verify the Blueprint ID.",
+                status_code=403,
+                detail="You cannot modify a blueprint created by another user. Please verify the Blueprint ID.",
             )
 
         # Update existing

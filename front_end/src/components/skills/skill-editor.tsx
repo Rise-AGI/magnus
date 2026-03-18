@@ -8,6 +8,7 @@ import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
 import { SkillEditorHelp } from "@/components/ui/help-content";
 import { CodeEditor } from "@/components/ui/code-editor";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useLanguage } from "@/context/language-context";
 import { client } from "@/lib/api";
@@ -53,7 +54,7 @@ export function SkillEditor({ isOpen, mode, initialData, initialResources, onClo
     formData, setFormData,
     isSaving, errorField, errorMessage,
     clearError, showSaveToast, toastFading,
-    handleButtonSave, guardedClose,
+    handleButtonSave, guardedClose, discardDialogProps,
   } = useEditorState<EditorData>({
     isOpen,
     initialData,
@@ -86,7 +87,9 @@ export function SkillEditor({ isOpen, mode, initialData, initialResources, onClo
       return null;
     },
     labels: {
+      discardTitle: t("editor.unsavedTitle"),
       discardConfirm: t("editor.unsavedChanges"),
+      discardBtn: t("editor.discardBtn"),
       saveFailed: t("editor.saveFailed"),
     },
   });
@@ -340,10 +343,10 @@ export function SkillEditor({ isOpen, mode, initialData, initialResources, onClo
                   onClick={() => imageInputRef.current?.click()}
                   disabled={isUploadingImage}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-900 text-zinc-500 border border-zinc-800 hover:bg-zinc-800 hover:text-zinc-300 transition-colors disabled:opacity-50"
-                  title="Upload image resource"
+                  title={t("skillEditor.addImage")}
                 >
                   {isUploadingImage ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImageIcon className="w-3 h-3" />}
-                  Image
+                  {t("skillEditor.addImage")}
                 </button>
               )}
               <input
@@ -446,6 +449,7 @@ export function SkillEditor({ isOpen, mode, initialData, initialResources, onClo
           </div>
         </div>
       </div>
+      <ConfirmationDialog {...discardDialogProps} />
     </Drawer>
   );
 }

@@ -8,6 +8,7 @@ import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
 import { BlueprintEditorHelp } from "@/components/ui/help-content";
 import { CodeEditor } from "@/components/ui/code-editor";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useLanguage } from "@/context/language-context";
 import { BlueprintImplicitImports } from "@/lib/blueprint-defaults";
@@ -34,7 +35,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
     formData, setFormData,
     isSaving, errorField, errorMessage,
     clearError, showSaveToast, toastFading,
-    handleButtonSave, guardedClose,
+    handleButtonSave, guardedClose, discardDialogProps,
   } = useEditorState<EditorData>({
     isOpen,
     initialData,
@@ -50,7 +51,9 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
       return null;
     },
     labels: {
+      discardTitle: t("editor.unsavedTitle"),
       discardConfirm: t("editor.unsavedChanges"),
+      discardBtn: t("editor.discardBtn"),
       saveFailed: t("editor.saveFailed"),
     },
   });
@@ -216,6 +219,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
           </div>
         </div>
       </div>
+      <ConfirmationDialog {...discardDialogProps} />
     </Drawer>
   );
 }

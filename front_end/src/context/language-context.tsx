@@ -915,9 +915,12 @@ def blueprint(
   "skillEditor.filePathEmpty": { zh: "文件路径不能为空", en: "File path cannot be empty" },
   "skillEditor.filePathUntitled": { zh: "(未命名)", en: "(untitled)" },
   "skillEditor.filePathDuplicate": { zh: "文件路径重复: {v}", en: "Duplicate file path: {v}" },
+  "skillEditor.addImage": { zh: "添加图片/动图", en: "Add Image/GIF" },
 
   // ===== Editor Common =====
+  "editor.unsavedTitle": { zh: "未保存的更改", en: "Unsaved Changes" },
   "editor.unsavedChanges": { zh: "有未保存的更改，确定要关闭吗？", en: "Discard unsaved changes?" },
+  "editor.discardBtn": { zh: "放弃更改", en: "Discard" },
   "editor.saveFailed": { zh: "保存失败", en: "Save failed" },
 
   // ===== Images =====
