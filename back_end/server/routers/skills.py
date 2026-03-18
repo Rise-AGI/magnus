@@ -134,11 +134,7 @@ def create_skill(
         assert_id_available(db, skill.id)
 
     if existing:
-        if existing.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
-            raise HTTPException(
-                status_code=403,
-                detail="You cannot modify a skill created by another user.",
-            )
+        _assert_can_manage(db, existing, current_user)
         existing.title = skill.title
         existing.description = skill.description
         existing.updated_at = datetime.now(timezone.utc)

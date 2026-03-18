@@ -14,8 +14,10 @@ interface UseEditorStateOptions<T> {
   onClose: () => void;
   validate: (data: T) => ValidationError | null;
   labels?: {
-    discardConfirm?: string;   // window.confirm text
-    saveFailed?: string;       // fallback error message
+    discardTitle?: string;
+    discardConfirm?: string;
+    discardBtn?: string;
+    saveFailed?: string;
   };
 }
 
@@ -32,6 +34,15 @@ interface UseEditorStateReturn<T> {
   toastFading: boolean;
   handleButtonSave: () => void;
   guardedClose: () => void;
+  discardDialogProps: {
+    isOpen: boolean;
+    onClose: () => void;
+    onConfirm: () => void;
+    title: string;
+    description: string;
+    confirmText: string;
+    variant: "danger";
+  };
 }
 
 export function useEditorState<T>({
@@ -48,6 +59,7 @@ export function useEditorState<T>({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showSaveToast, setShowSaveToast] = useState(false);
   const [toastFading, setToastFading] = useState(false);
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
 
   const keepOpenRef = useRef(false);
   const handleSubmitRef = useRef<() => void>(() => {});
@@ -65,6 +77,7 @@ export function useEditorState<T>({
       setErrorMessage(null);
       setShowSaveToast(false);
       setToastFading(false);
+      setShowDiscardDialog(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset on open toggle
   }, [isOpen]);
@@ -159,9 +172,22 @@ export function useEditorState<T>({
   }, []);
 
   const guardedClose = useCallback(() => {
-    if (isDirty && !window.confirm(labels?.discardConfirm || "Discard unsaved changes?")) return;
+    if (isDirty) {
+      setShowDiscardDialog(true);
+      return;
+    }
     onClose();
-  }, [isDirty, onClose, labels]);
+  }, [isDirty, onClose]);
+
+  const discardDialogProps = {
+    isOpen: showDiscardDialog,
+    onClose: () => setShowDiscardDialog(false),
+    onConfirm: () => { setShowDiscardDialog(false); onClose(); },
+    title: labels?.discardTitle || "Unsaved Changes",
+    description: labels?.discardConfirm || "Discard unsaved changes?",
+    confirmText: labels?.discardBtn || "Discard",
+    variant: "danger" as const,
+  };
 
   // Clean up timers
   useEffect(() => {
@@ -184,5 +210,6 @@ export function useEditorState<T>({
     toastFading,
     handleButtonSave,
     guardedClose,
+    discardDialogProps,
   };
 }
