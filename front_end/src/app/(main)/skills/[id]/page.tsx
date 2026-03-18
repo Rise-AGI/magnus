@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Clock, Dna, RefreshCw,
-  Trash2, Loader2, FileText, Check, Copy
+  Trash2, Loader2, FileText, Check, Copy, ImageIcon
 } from "lucide-react";
 
 import { client } from "@/lib/api";
@@ -58,7 +58,7 @@ export default function SkillDetailPage() {
         id: mappedData.id,
         title: mappedData.title,
         description: mappedData.description,
-        files: mappedData.files.map(f => ({ path: f.path, content: f.content })),
+        files: mappedData.files.filter(f => !f.is_binary).map(f => ({ path: f.path, content: f.content })),
       });
 
       const skillMd = mappedData.files.find(f => f.path === "SKILL.md");
@@ -168,6 +168,15 @@ export default function SkillDetailPage() {
         </a>
       );
     },
+    img: ({ src, alt, className, ...props }: any) => {
+      const isRelative = src && !src.match(/^(https?:\/\/|data:)/);
+      const token = typeof window !== "undefined" ? localStorage.getItem("magnus_token") : null;
+      const imgSrc = isRelative
+        ? `/api/skills/${skillId}/files/${src}${token ? `?token=${token}` : ""}`
+        : src;
+      // eslint-disable-next-line @next/next/no-img-element
+      return <img src={imgSrc} alt={alt || ""} className={`rounded-md border border-zinc-800 bg-zinc-950 max-w-full h-auto ${className || ""}`} {...props} />;
+    },
   }), [skillId]);
 
   if (loading) return <div className="flex h-[50vh] items-center justify-center text-zinc-500"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
@@ -192,6 +201,7 @@ export default function SkillDetailPage() {
   };
 
   const isMarkdown = activeFile?.path.endsWith(".md");
+  const isImage = !!activeFile?.is_binary;
 
   return (
     <div className="max-w-7xl mx-auto pb-20 px-4 lg:px-0">
@@ -313,7 +323,10 @@ export default function SkillDetailPage() {
                           : "text-zinc-400 hover:bg-zinc-800/50 border-l-2 border-transparent"
                       }`}
                     >
-                      <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                      {file.is_binary
+                        ? <ImageIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                        : <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                      }
                       <span className="truncate font-mono text-xs">{file.path}</span>
                     </button>
                   ))}
@@ -334,15 +347,24 @@ export default function SkillDetailPage() {
                 </div>
                 <button
                   onClick={() => copyToClipboard(activeFile.content, setCopiedFile)}
-                  className="text-zinc-500 hover:text-zinc-200 transition-colors"
+                  className={`text-zinc-500 hover:text-zinc-200 transition-colors ${isImage ? "hidden" : ""}`}
                   title="Copy content"
                 >
                   {copiedFile ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               </div>
               <div className="flex-1 overflow-auto p-5">
-                {isMarkdown ? (
-                  <RenderMarkdown content={activeFile.content} onLinkClick={handleFileLink} />
+                {isImage ? (
+                  <div className="flex items-center justify-center min-h-full">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/skills/${skillId}/files/${activeFile.path}?token=${typeof window !== "undefined" ? localStorage.getItem("magnus_token") || "" : ""}`}
+                      alt={activeFile.path}
+                      className="rounded-md border border-zinc-800 bg-zinc-950 max-w-full max-h-[650px] object-contain"
+                    />
+                  </div>
+                ) : isMarkdown ? (
+                  <RenderMarkdown content={activeFile.content} onLinkClick={handleFileLink} components={magnusLinkComponents} />
                 ) : (
                   <div className="bg-[#1e1e1e] rounded-lg overflow-hidden min-h-full">
                     <CodeEditor
@@ -367,7 +389,8 @@ export default function SkillDetailPage() {
         isOpen={editorOpen}
         mode="clone"
         initialData={editorData}
-        onClose={() => setEditorOpen(false)}
+        initialResources={skill?.files.filter(f => f.is_binary).map(f => ({ path: f.path })) || []}
+        onClose={() => { setEditorOpen(false); fetchSkill(true); }}
         onSave={handleEditorSave}
       />
 

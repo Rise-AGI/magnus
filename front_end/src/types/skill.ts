@@ -4,6 +4,7 @@ import { User } from "@/types/auth";
 export interface SkillFile {
   path: string;
   content: string;
+  is_binary?: boolean;
   updated_at?: string;
 }
 

@@ -356,7 +356,8 @@ class SkillFileCreate(BaseModel):
 class SkillFileResponse(BaseModel):
     path: str
     content: str
-    updated_at: datetime
+    is_binary: bool = False
+    updated_at: Optional[datetime] = None
     class Config: from_attributes = True
 
 

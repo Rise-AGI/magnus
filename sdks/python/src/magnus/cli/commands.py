@@ -2381,27 +2381,40 @@ job_execute_subcmd.__doc__ = (
 # =============================================================================
 
 
-def _collect_skill_files(source: Path) -> List[Dict[str, str]]:
-    """Read files from a directory into the [{path, content}] format."""
-    files: List[Dict[str, str]] = []
+def _collect_skill_files(source: Path) -> Tuple[List[Dict[str, str]], List[Path]]:
+    """Read files from a directory. Returns (text_files, binary_paths).
+    Binary image files (png/jpg/jpeg/webp/gif) are collected separately for resource upload.
+    """
+    _RESOURCE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+    text_files: List[Dict[str, str]] = []
+    binary_paths: List[Path] = []
+
     if source.is_file():
-        files.append({
-            "path": source.name,
-            "content": source.read_text(encoding="utf-8"),
-        })
-        return files
+        ext = source.suffix.lower()
+        if ext in _RESOURCE_EXTENSIONS:
+            binary_paths.append(source)
+        else:
+            text_files.append({
+                "path": source.name,
+                "content": source.read_text(encoding="utf-8"),
+            })
+        return text_files, binary_paths
 
     for p in sorted(source.rglob("*")):
         if not p.is_file():
             continue
         rel = str(p.relative_to(source))
+        ext = p.suffix.lower()
+        if ext in _RESOURCE_EXTENSIONS:
+            binary_paths.append(p)
+            continue
         try:
             content = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             print_error(f"Skipping binary file: {rel}")
             continue
-        files.append({"path": rel, "content": content})
-    return files
+        text_files.append({"path": rel, "content": content})
+    return text_files, binary_paths
 
 
 @skill_app.command(name="list")
@@ -2496,7 +2509,11 @@ def skill_get_cmd(
                     print_error(f"Skipping suspicious path: {f['path']}")
                     continue
                 fp.parent.mkdir(parents=True, exist_ok=True)
-                fp.write_text(f["content"], encoding="utf-8")
+                if f.get("is_binary"):
+                    from .. import default_client
+                    default_client.download_skill_resource(skill_id, f["path"], fp)
+                else:
+                    fp.write_text(f["content"], encoding="utf-8")
                 written += 1
             print_msg(f"Exported {written} file(s) to [cyan]{output_dir}[/cyan]")
             return
@@ -2549,8 +2566,8 @@ def skill_save_cmd(
     Reads all files from SOURCE and uploads them. A SKILL.md file is
     required — it describes what the skill does and how to use it.
 
-    Total file size is capped at 512 KB. Skills are for knowledge and
-    prompts, not large datasets. Binary files are skipped.
+    Text file size is capped at 512 KB. Image resources (png, jpg, jpeg,
+    webp, gif) are uploaded separately, up to 32 MB each.
 
     Examples:
       magnus skill save my-skill ./my_skill/ -t "My Skill"
@@ -2561,12 +2578,12 @@ def skill_save_cmd(
         print_error(f"Source not found: {source}")
         raise typer.Exit(code=1)
 
-    files = _collect_skill_files(source)
-    if not files:
+    text_files, binary_paths = _collect_skill_files(source)
+    if not text_files and not binary_paths:
         print_error("No files found in source.")
         raise typer.Exit(code=1)
 
-    has_skill_md = any(f["path"] == "SKILL.md" for f in files)
+    has_skill_md = any(f["path"] == "SKILL.md" for f in text_files)
     if not has_skill_md:
         print_error("SKILL.md is required. Create a SKILL.md file describing your skill.")
         raise typer.Exit(code=1)
@@ -2576,11 +2593,22 @@ def skill_save_cmd(
             skill_id=skill_id,
             title=title,
             description=description,
-            files=files,
+            files=text_files,
         )
+        file_count = len(text_files)
+
+        # Upload binary resources
+        if binary_paths:
+            from .. import default_client
+            for bp in binary_paths:
+                rel = str(bp.relative_to(source)) if source.is_dir() else bp.name
+                default_client.upload_skill_resource(skill_id, bp)
+                file_count += 1
+                print_msg(f"  Uploaded resource: [cyan]{rel}[/cyan]")
+
         print_msg(
             f"Skill [bold cyan]{result.get('id', skill_id)}[/bold cyan] saved "
-            f"({len(files)} file(s))."
+            f"({file_count} file(s))."
         )
 
     except MagnusError as e:
