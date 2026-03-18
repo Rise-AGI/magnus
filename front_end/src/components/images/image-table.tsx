@@ -109,7 +109,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-zinc-500">{img.updated_at ? formatBeijingTime(img.updated_at) : "-"}</span>
-                {img.can_manage && img.id !== null && (
+                {img.id !== null && (
                   <div className="flex gap-2">
                     <button
                       onClick={() => onView(img)}
@@ -118,14 +118,16 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                     >
                       <RefreshCw className={`w-4 h-4 ${busy ? "animate-spin" : ""}`} />
                     </button>
-                    <button
-                      onClick={() => onDelete(img)}
-                      disabled={busy}
-                      className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 disabled:opacity-30 active:scale-95"
-                      title={t("common.delete")}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {img.can_manage && (
+                      <button
+                        onClick={() => onDelete(img)}
+                        disabled={busy}
+                        className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 disabled:opacity-30 active:scale-95"
+                        title={t("common.delete")}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -198,7 +200,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                   </td>
                   <td className="px-6 py-4 align-middle text-right">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
-                      {img.can_manage && img.id !== null && (
+                      {img.id !== null && (
                         <>
                           <button
                             onClick={() => onView(img)}
@@ -207,14 +209,16 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                           >
                             <RefreshCw className={`w-4 h-4 ${busy ? "animate-spin" : ""}`} />
                           </button>
-                          <button
-                            onClick={() => onDelete(img)}
-                            disabled={busy}
-                            className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title={t("common.delete")}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {img.can_manage && (
+                            <button
+                              onClick={() => onDelete(img)}
+                              disabled={busy}
+                              className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                              title={t("common.delete")}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
