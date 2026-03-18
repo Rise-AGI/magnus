@@ -967,9 +967,6 @@ export default function SessionPage() {
                   )}
                 </button>
               </div>
-              <p className="text-xs text-zinc-600 mt-2 text-center">
-                {t("explorer.privacyNotice")}
-              </p>
             </div>
           </div>
         </div>
@@ -1230,9 +1227,6 @@ export default function SessionPage() {
               </>
             )}
           </div>
-          <p className="text-xs text-zinc-600 mt-2 text-center">
-            {t("explorer.privacyNotice")}
-          </p>
         </div>
       </div>
     </>

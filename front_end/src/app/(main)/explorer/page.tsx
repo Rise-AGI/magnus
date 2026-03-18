@@ -219,9 +219,6 @@ export default function ExplorePage() {
               )}
             </button>
           </div>
-          <p className="text-xs text-zinc-600 mt-2 text-center">
-            {t("explorer.privacyNotice")}
-          </p>
         </div>
       </div>
     </div>

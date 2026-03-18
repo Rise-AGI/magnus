@@ -260,7 +260,6 @@ const translations = {
   "explorer.tagline2": { zh: "赋能科研", en: "Discoveries" },
   "explorer.uploading": { zh: "上传中...", en: "Uploading..." },
   "explorer.inputPlaceholder": { zh: "输入消息，可上传图片和文件", en: "Enter message, can upload images and files" },
-  "explorer.privacyNotice": { zh: "您在 Magnus 平台上的活动记录会被收集并整理为科学语料，请注意隐私保护", en: "Your activity on Magnus Platform may be collected for research purposes. Please be mindful of privacy." },
   "explorer.sessions": { zh: "历史对话", en: "Explorer Sessions" },
   "explorer.noSessions": { zh: "暂无会话", en: "No sessions yet" },
   "explorer.shareSession": { zh: "分享对话", en: "Share Session" },
