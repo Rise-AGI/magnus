@@ -137,7 +137,7 @@ function SessionMobileMenu({
           e.stopPropagation();
           setOpen(!open);
         }}
-        className="p-1 text-zinc-500 hover:text-zinc-300 rounded active:bg-zinc-700"
+        className="p-2.5 text-zinc-500 hover:text-zinc-300 rounded-lg active:bg-zinc-700"
       >
         <MoreHorizontal className="w-4 h-4" />
       </button>
@@ -477,7 +477,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
         <div className="md:hidden flex items-center px-3 py-2 border-b border-zinc-800/50">
           <button
             onClick={() => setMobileSessionsOpen(true)}
-            className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors active:scale-95"
+            className="p-3 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors active:scale-95"
             title={t("explorer.sessions")}
           >
             <PanelLeftOpen className="w-4 h-4" />

@@ -113,7 +113,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                   <div className="flex gap-2">
                     <button
                       onClick={() => onView(img)}
-                      className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
+                      className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
                       title={t("images.refresh")}
                     >
                       <RefreshCw className={`w-4 h-4 ${busy ? "animate-spin" : ""}`} />
@@ -122,7 +122,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                       <button
                         onClick={() => onDelete(img)}
                         disabled={busy}
-                        className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 disabled:opacity-30 active:scale-95"
+                        className="p-3 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 disabled:opacity-30 active:scale-95"
                         title={t("common.delete")}
                       >
                         <Trash2 className="w-4 h-4" />

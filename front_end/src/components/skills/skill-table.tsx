@@ -71,11 +71,11 @@ export function SkillTable({
             <div className="flex items-center justify-between">
               <span className="text-xs text-zinc-500">{formatBeijingTime(skill.updated_at)}</span>
               <div className="flex gap-2">
-                <button onClick={(e) => { e.stopPropagation(); onClone(skill); }} className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95" title={t("skills.clone")}>
+                <button onClick={(e) => { e.stopPropagation(); onClone(skill); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95" title={t("skills.clone")}>
                   <RefreshCw className="w-4 h-4" />
                 </button>
                 {skill.can_manage && (
-                  <button onClick={(e) => { e.stopPropagation(); onDelete(skill); }} className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95" title={t("common.delete")}>
+                  <button onClick={(e) => { e.stopPropagation(); onDelete(skill); }} className="p-3 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95" title={t("common.delete")}>
                     <Trash2 className="w-4 h-4" />
                   </button>
                 )}

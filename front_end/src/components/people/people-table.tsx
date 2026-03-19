@@ -109,21 +109,21 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
                   {canManage(user) && (
                     <button
                       onClick={() => onManage(user)}
-                      className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
+                      className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
                     >
                       <RefreshCw className="w-4 h-4" />
                     </button>
                   )}
                   <button
                     onClick={() => setShowComingSoon(true)}
-                    className="p-2 bg-blue-600/20 text-blue-400 rounded-lg border border-blue-500/30 active:scale-95"
+                    className="p-3 bg-blue-600/20 text-blue-400 rounded-lg border border-blue-500/30 active:scale-95"
                   >
                     <MessageCircle className="w-4 h-4" />
                   </button>
                   {user.user_type === "agent" && (
                     <button
                       onClick={() => onDelete(user)}
-                      className="p-2 bg-red-950/30 text-red-400 rounded-lg border border-red-900/30 active:scale-95"
+                      className="p-3 bg-red-950/30 text-red-400 rounded-lg border border-red-900/30 active:scale-95"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

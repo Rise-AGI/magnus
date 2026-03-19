@@ -87,16 +87,16 @@ export function ServiceTable({
               <div className="flex items-center justify-between">
                 <span className="text-xs text-zinc-500">{formatBeijingTime(svc.updated_at)}</span>
                 <div className="flex gap-2">
-                  <button onClick={(e) => { e.stopPropagation(); onClone(svc); }} className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95">
+                  <button onClick={(e) => { e.stopPropagation(); onClone(svc); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95">
                     <RefreshCw className="w-4 h-4" />
                   </button>
                   {svc.can_manage && (
-                    <button onClick={(e) => { e.stopPropagation(); onToggle(svc); }} className={`p-2 rounded-lg border active:scale-95 ${svc.is_active ? "bg-teal-900/20 text-teal-400 border-teal-500/20" : "bg-zinc-800 text-zinc-500 border-zinc-700/50"}`}>
+                    <button onClick={(e) => { e.stopPropagation(); onToggle(svc); }} className={`p-3 rounded-lg border active:scale-95 ${svc.is_active ? "bg-teal-900/20 text-teal-400 border-teal-500/20" : "bg-zinc-800 text-zinc-500 border-zinc-700/50"}`}>
                       <Power className="w-4 h-4" />
                     </button>
                   )}
                   {svc.can_manage && (
-                    <button onClick={(e) => { e.stopPropagation(); onDelete(svc); }} className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95">
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(svc); }} className="p-3 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}

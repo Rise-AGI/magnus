@@ -88,7 +88,7 @@ export function JobTable({
                 <div className="flex gap-2 flex-shrink-0">
                   <button
                     onClick={(e) => { e.stopPropagation(); onClone(job); }}
-                    className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
+                    className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
                     title={t("jobs.cloneRerun")}
                   >
                     <RefreshCw className="w-4 h-4" />
@@ -96,7 +96,7 @@ export function JobTable({
                   {canTerminate && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onTerminate(job); }}
-                      className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95"
+                      className="p-3 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95"
                       title={t("jobs.terminateJob")}
                     >
                       <SquareX className="w-4 h-4" />

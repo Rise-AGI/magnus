@@ -122,9 +122,10 @@ export function VoiceInputButton({ onTranscript, context, disabled, className }:
     <button
       onClick={handleClick}
       disabled={disabled || isTranscribing}
+      style={{ touchAction: "manipulation" }}
       className={`m-2 p-2 rounded-lg transition-all ${
         isRecording
-          ? "bg-red-600 hover:bg-red-500 text-white animate-pulse"
+          ? "bg-red-600 hover:bg-red-500 text-white animate-recording-pulse"
           : isTranscribing
             ? "bg-zinc-700 text-zinc-400 cursor-wait"
             : "bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200"

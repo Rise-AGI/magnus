@@ -75,7 +75,7 @@ export function MobileNav() {
       {/* Hamburger button - only visible below md */}
       <button
         onClick={toggle}
-        className="md:hidden p-2 text-zinc-400 hover:text-zinc-200 active:scale-95 transition-all rounded-lg"
+        className="md:hidden p-3 text-zinc-400 hover:text-zinc-200 active:scale-95 transition-all rounded-lg"
         aria-label="Toggle navigation"
       >
         <Menu className="w-5 h-5" />
@@ -99,7 +99,7 @@ export function MobileNav() {
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="p-1.5 text-zinc-500 hover:text-zinc-300 active:scale-95 transition-all rounded-lg"
+                className="p-2.5 text-zinc-500 hover:text-zinc-300 active:scale-95 transition-all rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -163,7 +163,7 @@ export function MobileNav() {
                   </div>
                   <button
                     onClick={logout}
-                    className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-colors flex-shrink-0 active:scale-95"
+                    className="p-3 rounded-md text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-colors flex-shrink-0 active:scale-95"
                     title={t("auth.logout")}
                   >
                     <LogOut className="w-4 h-4" />
