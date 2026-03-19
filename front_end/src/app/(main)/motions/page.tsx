@@ -7,7 +7,7 @@ import { useLanguage } from "@/context/language-context";
 export default function MotionsPage() {
   const { t } = useLanguage();
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full min-h-[calc(100vh-4rem)] text-zinc-500 animate-in fade-in duration-500">
+    <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 text-zinc-500 animate-in fade-in duration-500">
       <style jsx global>{`
         ::-webkit-scrollbar { display: none; }
         html { -ms-overflow-style: none; scrollbar-width: none; }

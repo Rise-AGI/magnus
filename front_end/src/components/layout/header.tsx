@@ -155,12 +155,12 @@ export function Header() {
             {isOpen && (
               <div className="absolute top-full right-0 mt-3 w-fit max-w-[calc(100vw-2rem)] bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl ring-1 ring-white/5 p-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center gap-1 bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-2 py-1.5">
-                  <div className="whitespace-nowrap">
+                  <div className="break-all">
                     <CopyableText
                       text={displayToken}
                       copyValue={realToken}
                       variant="id"
-                      className="!text-zinc-400 hover:!text-blue-400 [&>span]:!whitespace-nowrap [&>span]:!overflow-visible"
+                      className="!text-zinc-400 hover:!text-blue-400"
                     />
                   </div>
                   

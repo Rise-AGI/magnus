@@ -136,7 +136,7 @@ export function MobileNav() {
             </nav>
 
             {/* Footer */}
-            <div className="border-t border-zinc-800 bg-zinc-900/20 p-3 flex flex-col gap-3">
+            <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-900/20 p-3 flex flex-col gap-3">
               {isLoading ? (
                 <div className="h-12 animate-pulse bg-zinc-900 rounded-lg border border-zinc-800" />
               ) : !user ? (
