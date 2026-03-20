@@ -122,11 +122,12 @@ def get_jobs(
     query = db.query(models.Job)
 
     if search:
-        search_pattern = f"%{search}%"
+        safe = search.replace("%", r"\%").replace("_", r"\_")
+        search_pattern = f"%{safe}%"
         query = query.filter(
             or_(
-                models.Job.task_name.ilike(search_pattern),
-                models.Job.id.ilike(search_pattern),
+                models.Job.task_name.ilike(search_pattern, escape="\\"),
+                models.Job.id.ilike(search_pattern, escape="\\"),
             )
         )
 

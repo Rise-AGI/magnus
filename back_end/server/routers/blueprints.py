@@ -224,12 +224,13 @@ def list_blueprints(
 
     # 1. 搜索逻辑 (Title, ID, Description)
     if search:
-        search_pattern = f"%{search}%"
+        safe = search.replace("%", r"\%").replace("_", r"\_")
+        search_pattern = f"%{safe}%"
         query = query.filter(
             or_(
-                models.Blueprint.title.ilike(search_pattern),
-                models.Blueprint.id.ilike(search_pattern),
-                models.Blueprint.description.ilike(search_pattern),
+                models.Blueprint.title.ilike(search_pattern, escape="\\"),
+                models.Blueprint.id.ilike(search_pattern, escape="\\"),
+                models.Blueprint.description.ilike(search_pattern, escape="\\"),
             )
         )
 

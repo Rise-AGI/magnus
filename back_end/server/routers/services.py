@@ -372,11 +372,12 @@ def list_services(
     query = db.query(models.Service)
 
     if search:
-        search_pattern = f"%{search}%"
+        safe = search.replace("%", r"\%").replace("_", r"\_")
+        search_pattern = f"%{safe}%"
         query = query.filter(or_(
-            models.Service.name.ilike(search_pattern),
-            models.Service.id.ilike(search_pattern),
-            models.Service.description.ilike(search_pattern),
+            models.Service.name.ilike(search_pattern, escape="\\"),
+            models.Service.id.ilike(search_pattern, escape="\\"),
+            models.Service.description.ilike(search_pattern, escape="\\"),
         ))
 
     if owner_id and owner_id != "all":
