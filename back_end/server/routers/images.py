@@ -415,12 +415,16 @@ async def delete_image(
         if img.status in ("pulling", "refreshing"):
             raise HTTPException(status_code=409, detail="Cannot delete an image that is being pulled/refreshed.")
 
-        sif_path = os.path.join(container_cache_path, img.filename)
-        if os.path.exists(sif_path):
-            try:
-                os.remove(sif_path)
-            except OSError as e:
-                logger.warning(f"Failed to delete SIF file {sif_path}: {e}")
+        if is_local_mode:
+            docker_image = re.sub(r'^[a-z]+://', '', img.uri)
+            subprocess.run(["docker", "rmi", docker_image], capture_output=True)
+        else:
+            sif_path = os.path.join(container_cache_path, img.filename)
+            if os.path.exists(sif_path):
+                try:
+                    os.remove(sif_path)
+                except OSError as e:
+                    logger.warning(f"Failed to delete SIF file {sif_path}: {e}")
 
         db.delete(img)
         db.commit()
