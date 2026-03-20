@@ -22,7 +22,7 @@ from ..schemas import (
 )
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
-from .._magnus_config import magnus_config, admin_open_ids, is_local_mode
+from .._magnus_config import magnus_config, is_local_mode, is_admin_user
 from .._resource_manager import resource_manager, _image_to_sif_filename
 
 
@@ -120,7 +120,7 @@ def recover_stuck_images() -> None:
 
 
 def _is_admin(current_user: models.User) -> bool:
-    return current_user.feishu_open_id in admin_open_ids
+    return is_admin_user(current_user)
 
 
 def _is_admin_or_owner(current_user: models.User, owner_id: str, db: Session) -> bool:
