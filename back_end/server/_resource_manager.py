@@ -5,6 +5,7 @@ import time
 import shutil
 import asyncio
 import logging
+import functools
 import subprocess
 from typing import Dict, List, Optional, Tuple
 from pywheels.file_tools import guarantee_file_exist
@@ -426,7 +427,7 @@ class ResourceManager:
         start_time = time.time()
         loop = asyncio.get_event_loop()
         try:
-            await loop.run_in_executor(None, shutil.copytree, cache_path, target_dir)
+            await loop.run_in_executor(None, functools.partial(shutil.copytree, cache_path, target_dir, symlinks=True))
         except Exception as e:
             logger.error(f"Failed to copy repo cache: {e}")
             return False, f"copy cache failed: {e}", None
