@@ -66,14 +66,14 @@ def blueprint(
 export PYTHONUSERBASE=/tmp/magnus-pip-$MAGNUS_JOB_ID
 export PIP_CACHE_DIR=/tmp/magnus-pip-cache-madgraph-compile
 pip3 install "magnus-sdk>=0.5.5" --quiet
-python3 scripts/on_magnus/run_madgraph_compile.py --process '{safe_process}' --target_path '{safe_target}'{ufo_arg}{model_arg}{definitions_arg}
+python3 scripts/run_madgraph_compile.py --process '{safe_process}' --target_path '{safe_target}'{ufo_arg}{model_arg}{definitions_arg}
 """
 
     submit_job(
         task_name = "[Blueprint] MadGraph Compile",
         description = description,
         namespace = "HET-AGI",
-        repo_name = "Collider-Agent",
+        repo_name = "ColliderAgent",
         commit_sha = "HEAD",
         system_entry_command = system_entry_command,
         entry_command = entry_command,

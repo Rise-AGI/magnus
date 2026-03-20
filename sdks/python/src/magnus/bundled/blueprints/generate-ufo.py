@@ -57,14 +57,14 @@ fi
 uv pip install --python /usr/local/bin/python3 --break-system-packages --quiet "magnus-sdk>=0.5.7"
 
 export PYTHONPATH=$PWD
-python3 scripts/on_magnus/run_ufo_generation.py --secret '{safe_secret}' --lagrangian '{safe_lagrangian}' --target_path '{safe_target}'{restriction_arg}
+python3 scripts/run_ufo_generation.py --secret '{safe_secret}' --lagrangian '{safe_lagrangian}' --target_path '{safe_target}'{restriction_arg}
 """
 
     submit_job(
         task_name = "[Blueprint] Generate UFO",
         description = description,
         namespace = "HET-AGI",
-        repo_name = "Collider-Agent",
+        repo_name = "ColliderAgent",
         commit_sha = "HEAD",
         system_entry_command = system_entry_command,
         entry_command = entry_command,

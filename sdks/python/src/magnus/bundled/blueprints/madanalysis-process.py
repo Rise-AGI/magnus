@@ -47,14 +47,14 @@ def blueprint(
 
     entry_command = f"""
 pip3 install "magnus-sdk>=0.5.5" --quiet
-python3 scripts/on_magnus/run_madanalysis_process.py --events_secret '{safe_events}' --script '{safe_script}' --level '{safe_level}' --target_path '{safe_target}'
+python3 scripts/run_madanalysis_process.py --events_secret '{safe_events}' --script '{safe_script}' --level '{safe_level}' --target_path '{safe_target}'
 """
 
     submit_job(
         task_name = "[Blueprint] MadAnalysis Process",
         description = description,
         namespace = "HET-AGI",
-        repo_name = "Collider-Agent",
+        repo_name = "ColliderAgent",
         commit_sha = "HEAD",
         system_entry_command = system_entry_command,
         entry_command = entry_command,

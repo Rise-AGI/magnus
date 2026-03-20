@@ -37,14 +37,14 @@ fi
 uv pip install --python /usr/local/bin/python3 --break-system-packages --quiet "magnus-sdk>=0.5.7"
 
 export PYTHONPATH=$PWD
-python3 scripts/on_magnus/run_feynrules_validation.py --secret '{safe_secret}' --symbol '{safe_symbol}'
+python3 scripts/run_feynrules_validation.py --secret '{safe_secret}' --symbol '{safe_symbol}'
 """
 
     submit_job(
         task_name = "[Blueprint] Validate FeynRules",
         description = description,
         namespace = "HET-AGI",
-        repo_name = "Collider-Agent",
+        repo_name = "ColliderAgent",
         commit_sha = "HEAD",
         system_entry_command = system_entry_command,
         entry_command = entry_command,
