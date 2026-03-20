@@ -65,7 +65,7 @@ def blueprint(
     entry_command = f"""
 export PYTHONUSERBASE=/tmp/magnus-pip-$MAGNUS_JOB_ID
 export PIP_CACHE_DIR=/tmp/magnus-pip-cache-madgraph-compile
-pip3 install "magnus-sdk>=0.5.5" --quiet
+pip3 install "magnus-sdk>=0.7.3" --quiet
 python3 scripts/run_madgraph_compile.py --process '{safe_process}' --target_path '{safe_target}'{ufo_arg}{model_arg}{definitions_arg}
 """
 

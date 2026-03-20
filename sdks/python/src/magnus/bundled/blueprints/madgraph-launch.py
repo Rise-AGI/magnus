@@ -44,7 +44,7 @@ def blueprint(
     entry_command = f"""
 export PYTHONUSERBASE=/tmp/magnus-pip-$MAGNUS_JOB_ID
 export PIP_CACHE_DIR=/tmp/magnus-pip-cache-madgraph-launch
-pip3 install "magnus-sdk>=0.5.5" --quiet
+pip3 install "magnus-sdk>=0.7.3" --quiet
 python3 scripts/run_madgraph_launch.py --process_secret '{safe_process}' --launch_commands '{safe_commands}' --target_path '{safe_target}'{pdf_arg}
 """
 

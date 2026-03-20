@@ -34,7 +34,7 @@ if [ "$REAL_HOME" != "/root" ] && [ -d /root/.WolframEngine/Applications ]; then
     ln -sf /root/.WolframEngine/Kernel "$REAL_HOME/.WolframEngine/Kernel"
 fi
 
-uv pip install --python /usr/local/bin/python3 --break-system-packages --quiet "magnus-sdk>=0.5.7"
+uv pip install --python /usr/local/bin/python3 --break-system-packages --quiet "magnus-sdk>=0.7.3"
 
 export PYTHONPATH=$PWD
 python3 scripts/run_feynrules_validation.py --secret '{safe_secret}' --symbol '{safe_symbol}'

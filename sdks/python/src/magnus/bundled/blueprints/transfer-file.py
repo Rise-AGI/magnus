@@ -23,7 +23,7 @@ def blueprint(
 """
 
     preamble = """
-time uv pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple/ --system --break-system-packages magnus-sdk
+time uv pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple/ --system --break-system-packages "magnus-sdk>=0.7.3"
 export PATH="/opt/uv/python/cpython-3.14.2-linux-x86_64-gnu/bin:$PATH"
 mkdir -p /tmp/recv && cd /tmp/recv
 """

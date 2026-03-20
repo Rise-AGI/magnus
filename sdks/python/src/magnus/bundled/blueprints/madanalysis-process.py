@@ -46,7 +46,7 @@ def blueprint(
 """
 
     entry_command = f"""
-pip3 install "magnus-sdk>=0.5.5" --quiet
+pip3 install "magnus-sdk>=0.7.3" --quiet
 python3 scripts/run_madanalysis_process.py --events_secret '{safe_events}' --script '{safe_script}' --level '{safe_level}' --target_path '{safe_target}'
 """
 
