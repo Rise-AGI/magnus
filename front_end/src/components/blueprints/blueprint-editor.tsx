@@ -47,7 +47,6 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
     validate: (data) => {
       if (!data.title.trim()) return { field: "title", message: t("blueprintEditor.nameRequired"), scrollTo: "field-title" };
       if (!data.id.trim()) return { field: "id", message: t("blueprintEditor.idRequired"), scrollTo: "field-id" };
-      if (!data.description.trim()) return { field: "description", message: t("blueprintEditor.descriptionRequired"), scrollTo: "field-description" };
       return null;
     },
     labels: {
@@ -157,7 +156,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
 
             <div id="field-description">
               <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'description' ? 'text-red-500' : 'text-zinc-500'}`}>
-                {t("jobForm.description")} <span className="text-red-500">*</span>
+                {t("jobForm.description")} <span className="text-zinc-600 normal-case ml-1">({t("common.optional")})</span>
               </label>
               <textarea
                 ref={descriptionRef}

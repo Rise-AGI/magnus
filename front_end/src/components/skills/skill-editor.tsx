@@ -66,7 +66,6 @@ export function SkillEditor({ isOpen, mode, initialData, initialResources, onClo
     validate: (data) => {
       if (!data.title.trim()) return { field: "title", message: t("skillEditor.nameRequired"), scrollTo: "field-title" };
       if (!data.id.trim()) return { field: "id", message: t("skillEditor.idRequired"), scrollTo: "field-id" };
-      if (!data.description.trim()) return { field: "description", message: t("skillEditor.descriptionRequired"), scrollTo: "field-description" };
 
       const hasSkillMd = data.files.some(f => f.path === "SKILL.md");
       if (!hasSkillMd) return { field: "files", message: t("skillEditor.skillMdRequired") };
@@ -278,7 +277,7 @@ export function SkillEditor({ isOpen, mode, initialData, initialResources, onClo
 
             <div id="field-description">
               <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === "description" ? "text-red-500" : "text-zinc-500"}`}>
-                {t("skills.table.description")} <span className="text-red-500">*</span>
+                {t("skills.table.description")} <span className="text-zinc-600 normal-case ml-1">({t("common.optional")})</span>
               </label>
               <textarea
                 ref={descriptionRef}
