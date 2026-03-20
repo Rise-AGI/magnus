@@ -47,7 +47,7 @@ def _normalize_obj(
     elif isinstance(obj, set):
         try:
             return sorted([_normalize_obj(x) for x in obj], key=lambda x: str(x))
-        except:
+        except Exception:
             return sorted([str(x) for x in obj])
     elif isinstance(obj, float):
         if obj.is_integer():
