@@ -17,17 +17,13 @@ from ..schemas import (
     PagedUserResponse,
     TokenResponse,
 )
-from .._magnus_config import admin_open_ids
+from .._magnus_config import is_admin_user
 from .._file_custody_manager import file_custody_manager
 from .auth import get_current_user, generate_trust_token, MAGNUS_TOKEN_LENGTH
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _is_admin(user: models.User) -> bool:
-    return user.feishu_open_id in admin_open_ids
 
 
 def _is_ancestor(db: Session, ancestor_id: str, descendant_id: str) -> bool:
@@ -60,7 +56,7 @@ def _get_all_subordinate_ids(db: Session, user_id: str) -> List[str]:
 
 def _can_manage(actor: models.User, target: models.User, db: Session) -> bool:
     """actor 是否有权管理 target（递归上级 或 admin）。"""
-    if _is_admin(actor):
+    if is_admin_user(actor):
         return True
     return _is_ancestor(db, actor.id, target.id)
 
@@ -151,7 +147,7 @@ def _build_roster(
             id=u.id,
             name=u.name,
             avatar_url=u.avatar_url,
-            is_admin=_is_admin(u),
+            is_admin=is_admin_user(u),
             user_type=u.user_type,
             parent_id=u.parent_id,
             parent_name=parent_name,
@@ -205,7 +201,7 @@ def get_users(
             name=u.name,
             avatar_url=u.avatar_url,
             email=u.email,
-            is_admin=_is_admin(u),
+            is_admin=is_admin_user(u),
         )
         for u in users
     ]
@@ -216,7 +212,7 @@ def get_transfer_candidates(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> List[UserInfo]:
-    if _is_admin(current_user):
+    if is_admin_user(current_user):
         users = db.query(models.User).order_by(models.User.name).all()
     else:
         subordinate_ids = _get_all_subordinate_ids(db, current_user.id)
@@ -230,7 +226,7 @@ def get_transfer_candidates(
             name=u.name,
             avatar_url=u.avatar_url,
             email=u.email,
-            is_admin=_is_admin(u),
+            is_admin=is_admin_user(u),
         )
         for u in users
     ]

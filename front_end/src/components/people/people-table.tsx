@@ -2,8 +2,9 @@
 "use client";
 
 import { useState } from "react";
-import { MessageCircle, RefreshCw, Trash2, Users, Loader2, Shield, UserX } from "lucide-react";
+import { MessageCircle, RefreshCw, Trash2, Users, Loader2, Shield } from "lucide-react";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { UserDetail } from "@/types/auth";
@@ -16,29 +17,6 @@ interface PeopleTableProps {
   onManage: (user: UserDetail) => void;
   onDelete: (user: UserDetail) => void;
 }
-
-
-function Avatar({ user, size = "sm" }: { user: { name: string; avatar_url?: string | null; user_type: string }; size?: "xs" | "sm" | "lg" }) {
-  const [broken, setBroken] = useState(false);
-  const dim = size === "lg" ? "w-16 h-16" : size === "xs" ? "w-7 h-7" : "w-9 h-9";
-  const textSize = size === "lg" ? "text-xl" : size === "xs" ? "text-[10px]" : "text-xs";
-  const iconSize = size === "lg" ? "w-7 h-7" : size === "xs" ? "w-3 h-3" : "w-4 h-4";
-
-  return (
-    <div className={`${dim} rounded-full bg-zinc-800 border border-zinc-700/50 flex-shrink-0 overflow-hidden flex items-center justify-center`}>
-      {user.avatar_url && !broken ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" onError={() => setBroken(true)} />
-      ) : broken ? (
-        <UserX className={`${iconSize} text-zinc-600`} />
-      ) : (
-        <span className={`${textSize} font-bold text-zinc-400`}>{user.name.substring(0, 1).toUpperCase()}</span>
-      )}
-    </div>
-  );
-}
-
-export { Avatar };
 
 
 export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTableProps) {
@@ -84,7 +62,7 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
               className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4"
             >
               <div className="flex items-center gap-3 mb-3">
-                <Avatar user={user} />
+                <AvatarCircle user={user} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-zinc-200 text-sm truncate">{user.name}</span>
@@ -169,7 +147,7 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <Avatar user={user} />
+                      <AvatarCircle user={user} size="sm" />
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-zinc-200">{user.name}</span>
                         {user.is_admin && (
@@ -184,7 +162,7 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
                   <td className="px-6 py-4 text-zinc-400 text-sm">
                     {user.parent_name ? (
                       <div className="flex items-center gap-1.5">
-                        <Avatar user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null, user_type: "human" }} size="xs" />
+                        <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
                         <span>{user.parent_name}</span>
                       </div>
                     ) : (

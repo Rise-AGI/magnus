@@ -15,6 +15,7 @@ import { Job } from "@/types/job";
 import { formatBeijingTime } from "@/lib/utils";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { useJobOperations } from "@/hooks/use-job-operations";
@@ -304,18 +305,7 @@ export default function JobDetailsPage() {
             {/* Owner */}
             {job.user && (
               <div className="flex items-center gap-3 md:ml-4 md:pl-4 md:border-l border-zinc-700/50">
-                {job.user.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={job.user.avatar_url}
-                    alt={job.user.name}
-                    className="w-8 h-8 rounded-full border border-zinc-700/50 object-cover shadow-sm"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/30">
-                    {job.user.name.substring(0, 2).toUpperCase()}
-                  </div>
-                )}
+                <AvatarCircle user={job.user} size="sm" />
                 <div className="flex flex-col">
                   <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.creator")}</span>
                   <span className="text-sm font-medium text-zinc-200">{job.user.name}</span>

@@ -11,6 +11,7 @@ import type { ExplorerSessionWithMessages, ExplorerMessage, Attachment } from "@
 import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 
 
 function parseThinkingContent(content: string): { thinking: string | null; response: string } {
@@ -356,18 +357,7 @@ function UserMessageWithActions({
           onImageClick={onImageClick}
         />
       </div>
-      {user?.avatar_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={user.avatar_url}
-          alt={user.name}
-          className="w-7 h-7 rounded-full border border-zinc-700 object-cover flex-shrink-0 mt-1"
-        />
-      ) : (
-        <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs font-medium border border-blue-500/30 flex-shrink-0 mt-1">
-          {user?.name?.substring(0, 1) || "U"}
-        </div>
-      )}
+      <AvatarCircle user={user} size="xs" className="mt-1" />
     </div>
   );
 }
@@ -999,18 +989,7 @@ export default function SessionPage() {
                 <div className="bg-blue-600/20 border border-blue-500/30 text-zinc-100 px-4 py-3 rounded-2xl rounded-br-md">
                   <p className="text-sm whitespace-pre-wrap">{pendingUserMessage}</p>
                 </div>
-                {user?.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={user.avatar_url}
-                    alt={user.name}
-                    className="w-7 h-7 rounded-full border border-zinc-700 object-cover flex-shrink-0 mt-1"
-                  />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs font-medium border border-blue-500/30 flex-shrink-0 mt-1">
-                    {user?.name?.substring(0, 1) || "U"}
-                  </div>
-                )}
+                <AvatarCircle user={user} size="xs" className="mt-1" />
               </div>
             </div>
           )}

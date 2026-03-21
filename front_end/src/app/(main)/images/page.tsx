@@ -7,6 +7,7 @@ import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Drawer } from "@/components/ui/drawer";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import { POLL_INTERVAL } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -266,14 +267,7 @@ export default function ImagesPage() {
                 <div className="flex items-center gap-3 mt-1">
                   {viewingImage.user ? (
                     <>
-                      <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700/50 flex-shrink-0 overflow-hidden flex items-center justify-center">
-                        {viewingImage.user.avatar_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={viewingImage.user.avatar_url} alt={viewingImage.user.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-xs font-bold text-zinc-400">{viewingImage.user.name.substring(0, 1).toUpperCase()}</span>
-                        )}
-                      </div>
+                      <AvatarCircle user={viewingImage.user} size="sm" />
                       <span className="text-sm font-medium text-zinc-200">{viewingImage.user.name}</span>
                     </>
                   ) : (

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import { CLUSTER_CONFIG, IS_LOCAL_MODE } from "@/lib/config";
 
 interface NavItem {
@@ -149,14 +150,7 @@ export function MobileNav() {
                 </button>
               ) : (
                 <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800">
-                  <div className="w-9 h-9 rounded-full bg-zinc-800 border border-zinc-700/50 flex-shrink-0 overflow-hidden flex items-center justify-center">
-                    {user.avatar_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-xs font-bold text-zinc-400">{user.name.substring(0, 1).toUpperCase()}</span>
-                    )}
-                  </div>
+                  <AvatarCircle user={user} size="sm" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-zinc-200 truncate leading-none mb-1">{user.name}</p>
                     <p className="text-[10px] text-zinc-500 truncate font-mono">{user.email || ""}</p>

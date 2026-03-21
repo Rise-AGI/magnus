@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import { Eye, EyeOff, PenLine } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import { client } from "@/lib/api";
 import { NotificationsPopover } from "./notifications-popover";
 import { MobileNav } from "./mobile-nav";
@@ -141,14 +142,8 @@ export function Header() {
                 </div>
               </div>
               
-              <div className={`w-8 h-8 rounded-full bg-zinc-800 border flex items-center justify-center text-zinc-400 overflow-hidden shadow-sm transition-all
-                ${isOpen ? "border-blue-500/50 ring-2 ring-blue-500/20" : "border-zinc-700/50 group-hover:border-zinc-600"}`}>
-                {user.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-xs font-bold">{user.name.substring(0, 1).toUpperCase()}</span>
-                )}
+              <div className={`rounded-full transition-all ${isOpen ? "ring-2 ring-blue-500/20" : ""}`}>
+                <AvatarCircle user={user} size="sm" />
               </div>
             </button>
 
