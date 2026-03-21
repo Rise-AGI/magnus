@@ -3276,7 +3276,7 @@ def local_start():
         time.sleep(1)
         if frontend_proc.poll() is None:
             frontend_started = True
-            print_msg(f"Frontend started at http://localhost:{LOCAL_FRONT_END_PORT}")
+            print_msg(f"Frontend started at http://127.0.0.1:{LOCAL_FRONT_END_PORT}")
         else:
             fe_err = LOCAL_FRONTEND_LOG.read_text(encoding="utf-8", errors="replace").strip()
             print_msg(f"Warning: Frontend failed to start (check {LOCAL_FRONTEND_LOG})")
@@ -3307,7 +3307,7 @@ def local_start():
 
     print_msg("")
     if frontend_started:
-        print_msg(f"Open http://localhost:{LOCAL_FRONT_END_PORT} in your browser, or use the CLI:")
+        print_msg(f"Open http://127.0.0.1:{LOCAL_FRONT_END_PORT} in your browser, or use the CLI:")
     else:
         print_msg("Use the CLI:")
     print_msg("  magnus --help            # see all available commands")
@@ -3363,7 +3363,7 @@ def local_status():
         any_alive = True
 
     if not _check_port_available(LOCAL_FRONT_END_PORT):
-        print_msg(f"Frontend running at http://localhost:{LOCAL_FRONT_END_PORT}")
+        print_msg(f"Frontend running at http://127.0.0.1:{LOCAL_FRONT_END_PORT}")
         any_alive = True
 
     if not any_alive:

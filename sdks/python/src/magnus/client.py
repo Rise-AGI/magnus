@@ -229,7 +229,7 @@ class MagnusClient:
             )
 
     def _network_error(self, context: str, error: Exception) -> MagnusError:
-        """构造网络错误，对 localhost 连接失败自动追加诊断提示。"""
+        """构造网络错误，对 127.0.0.1 连接失败自动追加诊断提示。"""
         msg = f"Network error while {context}: {error}"
         if isinstance(error, httpx.ConnectError) and "127.0.0.1" in self.address:
             msg += "\n\nConnection refused. Run 'magnus local start' to start the local server."
