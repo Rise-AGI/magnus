@@ -3,12 +3,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Search, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { PeopleTable } from "@/components/people/people-table";
 import { PeopleDrawer } from "@/components/people/people-drawer";
 import { RecruitDrawer } from "@/components/people/recruit-drawer";
+import { GroupInviteDialog } from "@/components/chat/group-invite-dialog";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { UserDetail } from "@/types/auth";
@@ -16,6 +18,7 @@ import { UserDetail } from "@/types/auth";
 
 export default function PeoplePage() {
   const { t } = useLanguage();
+  const router = useRouter();
   const [users, setUsers] = useState<UserDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalItems, setTotalItems] = useState(0);
@@ -30,6 +33,7 @@ export default function PeoplePage() {
   const [showRecruit, setShowRecruit] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<UserDetail | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [inviteTarget, setInviteTarget] = useState<UserDetail | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -56,6 +60,17 @@ export default function PeoplePage() {
   }, [users]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = Math.ceil(totalItems / pageSize);
+
+  const handleDirectChat = async (user: UserDetail) => {
+    try {
+      const conv = await client("/api/conversations", {
+        json: { type: "p2p", member_ids: [user.id] },
+      });
+      router.push(`/chat/${conv.id}`);
+    } catch (e) {
+      console.error("Failed to create conversation:", e);
+    }
+  };
 
   const handleDeleteAgent = async () => {
     if (!deleteTarget) return;
@@ -108,6 +123,8 @@ export default function PeoplePage() {
         loading={loading}
         onManage={setSelectedUser}
         onDelete={setDeleteTarget}
+        onChat={handleDirectChat}
+        onInviteToGroup={setInviteTarget}
       />
 
       {totalItems > 0 && (
@@ -145,6 +162,13 @@ export default function PeoplePage() {
         confirmText={t("people.drawer.delete")}
         isLoading={isDeleting}
         variant="danger"
+      />
+
+      <GroupInviteDialog
+        isOpen={!!inviteTarget}
+        onClose={() => setInviteTarget(null)}
+        targetUserId={inviteTarget?.id ?? ""}
+        targetUserName={inviteTarget?.name ?? ""}
       />
     </div>
   );

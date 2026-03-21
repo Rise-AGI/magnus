@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Settings, X, Shield } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Settings, X, Shield, Check, Pencil } from "lucide-react";
 import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -51,8 +51,39 @@ export function ConversationSettingsDrawer({
   const [isAdding, setIsAdding] = useState(false);
   const [removingMember, setRemovingMember] = useState<ConversationMember | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState(conversation.name || "");
+  const [isSavingName, setIsSavingName] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const isOwner = conversation.created_by === currentUser?.id;
+  const isGroup = conversation.type === "group";
+
+  useEffect(() => {
+    setNameValue(conversation.name || "");
+  }, [conversation.name]);
+
+  useEffect(() => {
+    if (editingName) nameInputRef.current?.focus();
+  }, [editingName]);
+
+  const handleSaveName = async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed || trimmed === conversation.name || isSavingName) return;
+    setIsSavingName(true);
+    try {
+      const updated = await client(`/api/conversations/${conversation.id}`, {
+        method: "PATCH",
+        json: { name: trimmed },
+      });
+      onUpdate({ ...conversation, name: updated.name });
+      setEditingName(false);
+    } catch (e) {
+      console.error("Failed to rename:", e);
+    } finally {
+      setIsSavingName(false);
+    }
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -133,6 +164,55 @@ export function ConversationSettingsDrawer({
         width="w-[380px]"
       >
         <div className="space-y-6">
+          {/* Group name (owner only) */}
+          {isOwner && isGroup && (
+            <div>
+              <label className="text-[10px] uppercase tracking-widest mb-1.5 block font-semibold text-zinc-600">
+                {t("chat.renameGroup")}
+              </label>
+              <div className="flex items-center gap-2">
+                {editingName ? (
+                  <>
+                    <input
+                      ref={nameInputRef}
+                      value={nameValue}
+                      onChange={(e) => setNameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveName();
+                        if (e.key === "Escape") { setEditingName(false); setNameValue(conversation.name || ""); }
+                      }}
+                      placeholder={t("chat.groupNamePlaceholder")}
+                      className="flex-1 bg-zinc-950 border border-blue-500 ring-1 ring-blue-500/20 px-3 py-2 rounded-lg text-sm text-white outline-none"
+                    />
+                    <button
+                      onClick={handleSaveName}
+                      disabled={isSavingName || !nameValue.trim()}
+                      className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => { setEditingName(false); setNameValue(conversation.name || ""); }}
+                      className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setEditingName(true)}
+                    className="flex-1 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-zinc-900/60 border border-zinc-800/50 hover:border-zinc-700 transition-colors group cursor-pointer"
+                  >
+                    <span className="text-sm text-zinc-200 truncate">
+                      {conversation.name || <span className="text-zinc-600 italic">{t("chat.groupNamePlaceholder")}</span>}
+                    </span>
+                    <Pencil className="w-3.5 h-3.5 text-zinc-600 group-hover:text-zinc-400 flex-shrink-0 transition-colors" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Add member (owner only) */}
           {isOwner && (
             <div>

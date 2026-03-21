@@ -51,6 +51,7 @@ __all__ = [
     "PagedMessageResponse",
     "AddMemberRequest",
     "BotCredentialResponse",
+    "ConversationUpdate",
 ]
 
 
@@ -487,6 +488,10 @@ class PagedMessageResponse(BaseModel):
 
 class AddMemberRequest(BaseModel):
     user_id: str
+
+
+class ConversationUpdate(BaseModel):
+    name: Optional[str] = None
 
 
 class BotCredentialResponse(BaseModel):

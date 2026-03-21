@@ -21,6 +21,7 @@ from ..schemas import (
     MessageResponse,
     PagedMessageResponse,
     AddMemberRequest,
+    ConversationUpdate,
 )
 from .auth import get_current_user
 from .._chat_manager import chat_manager
@@ -321,6 +322,53 @@ def get_conversation(
         .all()
     )
 
+    return ConversationResponse(
+        id=conv.id,
+        type=conv.type,
+        name=conv.name,
+        created_by=conv.created_by,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+        members=[_build_member_response(m) for m in members],
+    )
+
+
+@router.patch(
+    "/conversations/{conversation_id}",
+    response_model=ConversationResponse,
+)
+def update_conversation(
+    conversation_id: str,
+    body: ConversationUpdate,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> ConversationResponse:
+    conv = db.query(models.Conversation).filter(models.Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    member = _ensure_member(db, conversation_id, current_user.id)
+    if member.role != "owner":
+        raise HTTPException(status_code=403, detail="Only the owner can update the conversation")
+    if conv.type != models.ConversationType.GROUP:
+        raise HTTPException(status_code=400, detail="Only group conversations can be renamed")
+
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Conversation name cannot be empty")
+        conv.name = name
+
+    conv.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(conv)
+
+    members = (
+        db.query(models.ConversationMember)
+        .options(joinedload(models.ConversationMember.user))
+        .filter(models.ConversationMember.conversation_id == conv.id)
+        .all()
+    )
     return ConversationResponse(
         id=conv.id,
         type=conv.type,

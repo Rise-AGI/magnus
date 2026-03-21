@@ -1010,6 +1010,17 @@ def blueprint(
   "chat.reconnecting": { zh: "重连中", en: "Reconnecting" },
   "chat.sendFailed": { zh: "发送失败，请重试", en: "Failed to send, please retry" },
   "chat.imageTooLarge": { zh: "图片不能超过 10MB", en: "Image must be under 10MB" },
+  "chat.directMessage": { zh: "发起私聊", en: "Direct Message" },
+  "chat.inviteToGroup": { zh: "邀请进群", en: "Invite to Group" },
+  "chat.inviteToGroupTitle": { zh: "邀请加入群组", en: "Invite to Group" },
+  "chat.inviteToGroupDesc": { zh: "选择要邀请 {name} 加入的群组", en: "Select a group to invite {name} into" },
+  "chat.noGroupConversations": { zh: "暂无群组会话", en: "No group conversations" },
+  "chat.inviteSuccess": { zh: "已邀请加入群组", en: "Invited to group" },
+  "chat.inviteFailed": { zh: "邀请失败", en: "Invite failed" },
+  "chat.alreadyMember": { zh: "已是该群成员", en: "Already a member" },
+  "chat.renameGroup": { zh: "修改群名", en: "Rename Group" },
+  "chat.groupNamePlaceholder": { zh: "输入群名称...", en: "Enter group name..." },
+  "chat.renameSaved": { zh: "已保存", en: "Saved" },
 } as const;
 
 
