@@ -34,13 +34,26 @@ container_cache_path = f"{magnus_root}/container_cache"
 
 
 def _docker_image_cached(uri: str) -> bool:
-    """local 模式专用：通过 docker image inspect 判断镜像是否已拉取"""
+    """local 模式专用（同步）：通过 docker image inspect 判断镜像是否已拉取。
+    仅用于启动恢复 (recover_stuck_images)，热路径禁用。"""
     docker_image = re.sub(r'^[a-z]+://', '', uri)
     result = subprocess.run(
         ["docker", "image", "inspect", docker_image],
         capture_output=True,
     )
     return result.returncode == 0
+
+
+async def _docker_image_cached_async(uri: str) -> bool:
+    """local 模式专用（异步）：不阻塞事件循环的版本"""
+    docker_image = re.sub(r'^[a-z]+://', '', uri)
+    proc = await asyncio.create_subprocess_exec(
+        "docker", "image", "inspect", docker_image,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.communicate()
+    return proc.returncode == 0
 
 
 # ─── 进程级状态 ──────────────────────────────────────────────────
@@ -186,7 +199,7 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
                 if is_refresh:
                     # 刷新失败：判断旧镜像是否仍可用
                     if is_local_mode:
-                        old_available = _docker_image_cached(uri)
+                        old_available = await _docker_image_cached_async(uri)
                     else:
                         sif_path = os.path.join(container_cache_path, img.filename)
                         old_available = os.path.exists(sif_path)
@@ -324,11 +337,11 @@ def list_images(
     # 3. 标记文件缺失的 DB 记录
     combined: list[CachedImageResponse] = []
     if is_local_mode:
+        # local 模式信赖 DB 状态，不逐条 subprocess 验证 Docker 镜像
+        # （Docker daemon 拉大镜像时会串行化 inspect 调用，导致线程池饱和、整个后端卡死）
+        # DB 状态由 _do_pull 生命周期 + recover_stuck_images 启动恢复维护
         for img in db_images:
-            resp = CachedImageResponse.model_validate(img)
-            if not _docker_image_cached(img.uri) and img.status not in ("refreshing", "pulling"):
-                resp.status = "missing"
-            combined.append(resp)
+            combined.append(CachedImageResponse.model_validate(img))
     else:
         for img in db_images:
             sif_path = os.path.join(container_cache_path, img.filename)
@@ -417,7 +430,12 @@ async def delete_image(
 
         if is_local_mode:
             docker_image = re.sub(r'^[a-z]+://', '', img.uri)
-            subprocess.run(["docker", "rmi", docker_image], capture_output=True)
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "rmi", docker_image,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
         else:
             sif_path = os.path.join(container_cache_path, img.filename)
             if os.path.exists(sif_path):
