@@ -111,6 +111,15 @@ def recover_stuck_images() -> None:
             if is_local_mode:
                 if _docker_image_cached(img.uri):
                     img.status = "cached"
+                    try:
+                        result = subprocess.run(
+                            ["docker", "image", "inspect", "--format", "{{.Size}}", img.uri],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        if result.returncode == 0:
+                            img.size_bytes = int(result.stdout.strip())
+                    except (OSError, ValueError, subprocess.TimeoutExpired):
+                        pass
                     logger.info(f"Recovered stuck image → cached: {img.uri}")
                 else:
                     db.delete(img)
@@ -185,7 +194,18 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
                 return
 
             if success:
-                if not is_local_mode:
+                if is_local_mode:
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            "docker", "image", "inspect", "--format", "{{.Size}}", uri,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                        )
+                        stdout, _ = await proc.communicate()
+                        if proc.returncode == 0:
+                            img.size_bytes = int(stdout.strip())
+                    except (OSError, ValueError):
+                        pass
+                else:
                     sif_path = os.path.join(container_cache_path, img.filename)
                     try:
                         img.size_bytes = os.stat(sif_path).st_size
