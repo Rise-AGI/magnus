@@ -78,6 +78,11 @@ def register_bundled_blueprints(
                 elif resp.status_code == 409:
                     registered.append((blueprint_id, title))
                     break
+                elif resp.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"Blueprint {blueprint_id} registration returned {resp.status_code} after {max_retries} retries")
                 else:
                     logger.warning(f"Blueprint {blueprint_id} registration returned {resp.status_code}: {resp.text}")
                     break
@@ -171,6 +176,11 @@ def register_bundled_skills(
                 elif resp.status_code == 409:
                     registered.append((skill_id, payload["title"]))
                     break
+                elif resp.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"Skill {skill_id} registration returned {resp.status_code} after {max_retries} retries")
                 else:
                     logger.warning(f"Skill {skill_id} registration returned {resp.status_code}: {resp.text}")
                     break
