@@ -24,6 +24,7 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [isRecruiting, setIsRecruiting] = useState(false);
+  const [connector, setConnector] = useState<"general" | "openclaw">("general");
 
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -49,6 +50,7 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
     setErrorMessage(null);
     setShowCredentials(false);
     setCredentials(null);
+    setConnector("general");
     onClose();
   };
 
@@ -159,6 +161,29 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
               onKeyDown={(e) => { if (e.key === "Enter") handleRecruit(); }}
             />
           </div>
+
+          {/* Connector selector */}
+          <div>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+              {t("people.recruit.connector")}
+            </label>
+            <div className="flex gap-2">
+              {(["general", "openclaw"] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setConnector(c)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    connector === c
+                      ? "bg-blue-600/20 border-blue-500/50 text-blue-400"
+                      : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                  }`}
+                >
+                  {c === "general" ? t("people.recruit.connectorGeneral") : t("people.recruit.connectorOpenClaw")}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Footer — always at bottom */}
@@ -212,6 +237,21 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
                 <CopyableText text={credentials.app_secret} variant="id" className="!text-zinc-300" />
               </div>
             </div>
+            {connector === "openclaw" && (
+              <div className="mt-4 pt-4 border-t border-zinc-800/50">
+                <p className="text-xs text-zinc-500 mb-2">{t("people.recruit.openclawSetupHint")}</p>
+                <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3 space-y-1.5">
+                  {[
+                    `openclaw config set channels.magnus.appId "${credentials.app_id}"`,
+                    `openclaw config set channels.magnus.appSecret "${credentials.app_secret}"`,
+                    `openclaw config set channels.magnus.magnusUrl "https://your-magnus-server"`,
+                  ].map((cmd, i) => (
+                    <CopyableText key={i} text={cmd} variant="id" className="!text-zinc-300 !text-xs font-mono" />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-4 flex items-start gap-2 bg-amber-900/20 border border-amber-800/30 rounded-lg px-3 py-2">
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-400/80">{t("people.recruit.credentialsSaveWarning")}</p>

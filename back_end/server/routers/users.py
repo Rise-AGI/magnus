@@ -587,3 +587,12 @@ async def upload_avatar(
     logger.info(f"User {current_user.id} updated avatar for user {user_id}")
 
     return {"avatar_url": target.avatar_url}
+
+
+@router.get("/users/self")
+def get_bot_self(app_id: str, app_secret: str, db: Session = Depends(database.get_db)):
+    """供 OpenClaw Magnus 插件启动时获取 bot 自身的 user_id，用于过滤自消息回显。"""
+    user = db.query(models.User).filter(models.User.app_id == app_id).first()
+    if not user or user.app_secret != app_secret:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return {"id": user.id, "name": user.name}
