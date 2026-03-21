@@ -307,6 +307,11 @@ app.add_middleware(
 app.include_router(router, prefix="/api")
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Magnus Server")
