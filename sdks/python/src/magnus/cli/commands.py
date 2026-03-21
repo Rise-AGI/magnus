@@ -3202,26 +3202,25 @@ def local_start():
     log_handle.close()  # child inherited the fd; parent can release
 
     # Wait for backend to be fully ready (lifespan complete, API serving)
-    import httpx as _httpx
-    _health_url = f"http://127.0.0.1:{LOCAL_BACK_END_PORT}/health"
-    _ready_deadline = time.time() + 30
-    _backend_ready = False
-    while time.time() < _ready_deadline:
+    health_url = f"http://127.0.0.1:{LOCAL_BACK_END_PORT}/health"
+    ready_deadline = time.time() + 30
+    backend_ready = False
+    while time.time() < ready_deadline:
         if backend_proc.poll() is not None:
             stderr_output = LOCAL_BACKEND_LOG.read_text(encoding="utf-8", errors="replace").strip()
             error_detail = f":\n{stderr_output}" if stderr_output else f" (check {LOCAL_BACKEND_LOG})"
             print_error(f"Backend failed to start{error_detail}")
             raise typer.Exit(1)
         try:
-            r = _httpx.get(_health_url, timeout=2)
+            r = httpx.get(health_url, timeout=2)
             if r.status_code == 200:
-                _backend_ready = True
+                backend_ready = True
                 break
-        except (_httpx.ConnectError, _httpx.TimeoutException):
+        except (httpx.ConnectError, httpx.TimeoutException):
             pass
         time.sleep(0.5)
 
-    if not _backend_ready:
+    if not backend_ready:
         print_error(f"Backend did not become ready within 30s (check {LOCAL_BACKEND_LOG})")
         raise typer.Exit(1)
 
