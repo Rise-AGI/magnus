@@ -3,7 +3,6 @@ import os
 import re
 import json
 import time
-import torch
 import httpx
 import uvicorn
 import random
@@ -49,7 +48,6 @@ __all__ = [
     "time",
     "Path",
     "tqdm",
-    "torch",
     "httpx",
     "sleep",
     "random",

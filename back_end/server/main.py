@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from library import *
 from .routers import *
+from .routers.ws_chat import ws_router
 from ._github_client import *
 from ._magnus_config import *
 from . import models
@@ -103,6 +104,15 @@ def run_migrations()-> None:
             conn.execute(text("ALTER TABLE explorer_sessions ADD COLUMN is_shared BOOLEAN DEFAULT 0"))
             conn.commit()
         logger.info("✅ Migration completed.")
+
+    user_columns = [col["name"] for col in inspector.get_columns("users")]
+    if "app_id" not in user_columns:
+        logger.info("🔧 Adding app_id and app_secret columns to users table...")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN app_id VARCHAR UNIQUE"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN app_secret VARCHAR"))
+            conn.commit()
+        logger.info("✅ Chat credentials migration completed.")
 
 
 run_migrations()
@@ -305,6 +315,7 @@ app.add_middleware(
 
 
 app.include_router(router, prefix="/api")
+app.include_router(ws_router)
 
 
 if __name__ == "__main__":

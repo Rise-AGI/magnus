@@ -19,6 +19,7 @@ import {
   Waypoints,
   Container,
   Compass,
+  MessageCircle,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
@@ -34,6 +35,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { i18nKey: "nav.milestones", href: "/milestones", icon: Compass, wip: true },
   { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight },
+  { i18nKey: "nav.chat", href: "/chat", icon: MessageCircle },
   { i18nKey: "nav.people", href: "/people", icon: Users },
   { i18nKey: "nav.motions", href: "/motions", icon: Waypoints, wip: true },
   { i18nKey: "nav.jobs", href: "/jobs", icon: Rocket },

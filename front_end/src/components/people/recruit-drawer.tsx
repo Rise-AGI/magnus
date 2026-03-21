@@ -2,9 +2,10 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Plus, Camera, Loader2 } from "lucide-react";
+import { Plus, Camera, Loader2, AlertTriangle } from "lucide-react";
 import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
+import { CopyableText } from "@/components/ui/copyable-text";
 import { useLanguage } from "@/context/language-context";
 
 
@@ -27,6 +28,10 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Post-create credentials display
+  const [showCredentials, setShowCredentials] = useState(false);
+  const [credentials, setCredentials] = useState<{ token: string; app_id: string; app_secret: string } | null>(null);
+
   const clearError = (field: string) => {
     if (errorField === field) { setErrorField(null); setErrorMessage(null); }
   };
@@ -42,6 +47,8 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
     setAvatarPreview(null);
     setErrorField(null);
     setErrorMessage(null);
+    setShowCredentials(false);
+    setCredentials(null);
     onClose();
   };
 
@@ -85,8 +92,13 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
         }
       }
 
-      onSuccess();
-      resetAndClose();
+      // Show credentials dialog instead of closing
+      setCredentials({
+        token: res.token,
+        app_id: res.app_id,
+        app_secret: res.app_secret,
+      });
+      setShowCredentials(true);
     } catch (e) {
       console.error(e);
     } finally {
@@ -95,6 +107,7 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
   };
 
   return (
+    <>
     <Drawer
       isOpen={isOpen}
       onClose={() => !isRecruiting && resetAndClose()}
@@ -175,5 +188,49 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
         </div>
       </div>
     </Drawer>
+
+    {/* Credentials dialog — shown after successful agent creation */}
+    {showCredentials && credentials && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
+        <div className="relative bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div className="p-6">
+            <h3 className="text-base font-semibold text-zinc-100 mb-4">
+              {t("people.recruit.credentialsTitle")}
+            </h3>
+            <div className="space-y-3">
+              <div className="bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-3 py-2">
+                <span className="text-[10px] text-zinc-600 font-medium block mb-1">Token</span>
+                <CopyableText text={credentials.token} variant="id" className="!text-zinc-300" />
+              </div>
+              <div className="bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-3 py-2">
+                <span className="text-[10px] text-zinc-600 font-medium block mb-1">App ID</span>
+                <CopyableText text={credentials.app_id} variant="id" className="!text-zinc-300" />
+              </div>
+              <div className="bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-3 py-2">
+                <span className="text-[10px] text-zinc-600 font-medium block mb-1">App Secret</span>
+                <CopyableText text={credentials.app_secret} variant="id" className="!text-zinc-300" />
+              </div>
+            </div>
+            <div className="mt-4 flex items-start gap-2 bg-amber-900/20 border border-amber-800/30 rounded-lg px-3 py-2">
+              <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-400/80">{t("people.recruit.credentialsSaveWarning")}</p>
+            </div>
+          </div>
+          <div className="bg-zinc-900/50 px-6 py-4 flex justify-end border-t border-zinc-800/50">
+            <button
+              onClick={() => {
+                onSuccess();
+                resetAndClose();
+              }}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg transition-all"
+            >
+              {t("common.gotIt")}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
