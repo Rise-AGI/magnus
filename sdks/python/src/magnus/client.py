@@ -59,6 +59,30 @@ def strip_imports(code: str) -> str:
     return "".join(result)
 
 
+def parse_blueprint_yaml(path: Path) -> Dict[str, str]:
+    """Parse a YAML blueprint file into {title, description, code}."""
+    from ruamel.yaml import YAML
+    yaml = YAML()
+    data = yaml.load(path.read_text(encoding="utf-8"))
+    result: Dict[str, str] = {}
+    for key in ("title", "description", "code"):
+        if key in data:
+            result[key] = str(data[key])
+    return result
+
+
+def serialize_blueprint_yaml(title: str, description: str, code: str) -> str:
+    """Serialize blueprint fields to YAML format."""
+    from ruamel.yaml import YAML
+    from ruamel.yaml.scalarstring import LiteralScalarString
+    from io import StringIO
+    yaml = YAML()
+    yaml.default_flow_style = False
+    stream = StringIO()
+    yaml.dump({"title": title, "description": description, "code": LiteralScalarString(code)}, stream)
+    return stream.getvalue()
+
+
 def _format_schema_hint(schema: List[Dict[str, Any]]) -> str:
     lines = ["Blueprint parameters:"]
     for param in schema:

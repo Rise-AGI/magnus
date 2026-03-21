@@ -1,0 +1,66 @@
+title: Transfer File
+description: 通过 Magnus 传输密钥跨节点传输文件，支持中转托管和指定目标路径
+code: |
+  from magnus import submit_job, JobType, FileSecret
+  from typing import Annotated, Optional
+
+  Source = Annotated[FileSecret, {
+      "placeholder": "114514-apple-banana-cat",
+      "description": "文件的传输密钥（远端可直接输入机上路径）",
+  }]
+
+  Target = Annotated[Optional[str], {
+      "placeholder": "e.g. processed.pdf, results/",
+      "description": "文件的输出路径（仅远端调用时生效，web 端调用时不生效）",
+      "allow_empty": False,
+  }]
+
+  def blueprint(
+      source: Source,
+      target: Target = None,
+  ):
+      safe_secret = source.replace("'", "'\\''")
+
+      description = f"""## 文件流测试
+  """
+
+      preamble = """
+  time uv pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple/ --system --break-system-packages "magnus-sdk>=0.7.3"
+  export PATH="/opt/uv/python/cpython-3.14.2-linux-x86_64-gnu/bin:$PATH"
+  mkdir -p /tmp/recv && cd /tmp/recv
+  """
+
+      system_entry_command = """
+  # No system entry command needed.
+  """
+
+      if target is None:
+          entry_command = preamble + f"""
+  time magnus receive '{safe_secret}'
+  FNAME=$(ls -1 | head -n 1)
+  SIZE=$(stat -c%s "$FNAME")
+  SHA=$(sha256sum "$FNAME" | cut -c1-16)
+  SECRET=$(time magnus custody "$FNAME" 2>&1 | grep -o 'magnus-secret:[^ ]*')
+  printf '文件已托管，请在接收端运行：\nmagnus receive %s [--output <target_path>]\n' "$SECRET" > "$MAGNUS_RESULT"
+  """
+      else:
+          safe_target = target.replace("'", "'\\''")
+          entry_command = preamble + f"""
+  time magnus receive '{safe_secret}'
+  FNAME=$(ls -1 | head -n 1)
+  SECRET=$(time magnus custody "$FNAME" 2>&1 | grep -o 'magnus-secret:[^ ]*')
+  echo "magnus receive $SECRET --output '{safe_target}'" > "$MAGNUS_ACTION"
+  """
+
+      submit_job(
+          task_name = "[Blueprint] Transfer File",
+          description = description,
+          namespace = "pypa",
+          repo_name = "sampleproject",
+          system_entry_command = system_entry_command,
+          entry_command = entry_command,
+          container_image = "docker://parkcai/uv-runtime:latest",
+          gpu_count = 0,
+          gpu_type = "cpu",
+          job_type = JobType.A2,
+      )

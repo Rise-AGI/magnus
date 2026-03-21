@@ -1702,21 +1702,33 @@ def blueprint_get_cmd(
     blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
     code_file: Optional[Path] = typer.Option(None, "--code-file", "-c", help="Export code to a .py file"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Export as YAML blueprint file"),
 ):
     """
     Show blueprint details including code.
 
-    Displays the blueprint's title, description, creator, last update time,
-    and full source code. Use -c to export the code to a .py file for
-    local editing.
+    Use -o to export as a YAML blueprint file (title/description/code),
+    or -c to export code only to a .py file.
 
     Examples:
       magnus blueprint get my-bp
+      magnus blueprint get my-bp -o blueprint.yaml
       magnus blueprint get my-bp -c my_bp.py
       magnus blueprint get my-bp -f yaml
     """
     try:
         bp = api_get_blueprint(blueprint_id)
+
+        if output is not None:
+            from ..client import serialize_blueprint_yaml
+            yaml_str = serialize_blueprint_yaml(
+                title=bp.get("title", ""),
+                description=bp.get("description", ""),
+                code=bp.get("code", ""),
+            )
+            output.write_text(yaml_str, encoding="utf-8")
+            print_msg(f"Blueprint exported to [cyan]{output}[/cyan]")
+            return
 
         if code_file is not None:
             code = bp.get("code", "")
@@ -1782,35 +1794,64 @@ def blueprint_schema_cmd(
 @blueprint_app.command(name="save")
 def blueprint_save_cmd(
     blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
-    title: str = typer.Option(..., "--title", "-t", help="Blueprint title"),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="Blueprint title"),
     description: str = typer.Option("", "--description", "--desc", "-d", help="Blueprint description"),
-    code_file: Path = typer.Option(..., "--code-file", "-c", help="Path to Python source file"),
+    code_file: Optional[Path] = typer.Option(None, "--code-file", "-c", help="Path to Python source file"),
+    file: Optional[Path] = typer.Option(None, "--file", help="Path to YAML blueprint file (title/description/code)"),
 ):
     """
     Create or update a blueprint (upsert).
 
-    If the blueprint ID already exists, it is overwritten (update). Otherwise
-    a new blueprint is created. The code is read from a local .py file.
+    Two modes:
 
-    Import lines (import / from-import) are automatically stripped before
-    upload — the backend sandbox provides all necessary symbols (Annotated,
-    Optional, List, JobType, submit_job, etc.). This means your .py file can
-    include real imports for local IDE support, linting, and testing.
+    1. Code-file mode: pass --code-file (-c) with a .py file and --title (-t).
+    2. YAML mode: pass --file with a .yaml file containing title, description, code.
+       --title and --description can override YAML values.
+
+    Import lines are automatically stripped before upload.
 
     Examples:
       magnus blueprint save my-bp -t "My Blueprint" -c bp.py
-      magnus blueprint save my-bp -t "Updated" -d "New desc" -c bp.py
+      magnus blueprint save my-bp --file blueprint.yaml
+      magnus blueprint save my-bp --file bp.yaml -t "Override Title"
     """
-    if not code_file.exists():
-        print_error(f"Code file not found: {code_file}")
+    from ..client import parse_blueprint_yaml
+
+    if file is not None and code_file is not None:
+        print_error("Cannot use both --file and --code-file")
+        raise typer.Exit(code=1)
+
+    if file is not None:
+        if not file.exists():
+            print_error(f"File not found: {file}")
+            raise typer.Exit(code=1)
+        meta = parse_blueprint_yaml(file)
+        code = meta.get("code", "")
+        final_title = title if title is not None else meta.get("title", "")
+        final_description = description or meta.get("description", "")
+    elif code_file is not None:
+        if not code_file.exists():
+            print_error(f"Code file not found: {code_file}")
+            raise typer.Exit(code=1)
+        if title is None:
+            print_error("--title (-t) is required when using --code-file")
+            raise typer.Exit(code=1)
+        code = code_file.read_text(encoding="utf-8")
+        final_title = title
+        final_description = description
+    else:
+        print_error("Either --file or --code-file (-c) is required")
+        raise typer.Exit(code=1)
+
+    if not final_title:
+        print_error("Title is required (via --title or YAML title field)")
         raise typer.Exit(code=1)
 
     try:
-        code = code_file.read_text(encoding="utf-8")
         result = api_save_blueprint(
             blueprint_id=blueprint_id,
-            title=title,
-            description=description,
+            title=final_title,
+            description=final_description,
             code=code,
         )
         print_msg(f"Blueprint [bold cyan]{result.get('id', blueprint_id)}[/bold cyan] saved.")

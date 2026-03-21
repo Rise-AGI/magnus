@@ -1,0 +1,2 @@
+title: UFO Generator
+description: 从 FeynRules .fr 模型文件生成 UFO 标准输出，供 MadGraph5 使用

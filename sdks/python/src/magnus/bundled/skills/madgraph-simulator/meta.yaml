@@ -1,0 +1,2 @@
+title: MadGraph Simulator
+description: 基于 MadGraph5 运行蒙特卡洛事件生成，支持 Pythia8 parton shower 与 Delphes 探测器模拟
