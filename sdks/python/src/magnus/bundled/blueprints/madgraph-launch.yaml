@@ -21,12 +21,17 @@ code: |+
       "description": "LHAPDF PDF 集名称（可选，从 CERN 下载安装）",
   }]
 
+  Interactive = Annotated[Optional[bool], {
+      "description": "使用 MG5 launch -i 模式，对已有事例文件执行后续处理（如 Pythia/Delphes）",
+  }]
+
 
   def blueprint(
       process: Process,
       commands: Commands,
       output: Output,
       pdf: Pdf = None,
+      interactive: Interactive = None,
   ):
 
       description = "## MadGraph5 事件生成任务"
@@ -40,6 +45,10 @@ code: |+
           safe_pdf = pdf.replace("'", "'\\''")
           pdf_arg = f" --pdf '{safe_pdf}'"
 
+      interactive_arg = ""
+      if interactive:
+          interactive_arg = " --interactive"
+
       system_entry_command = """
   # No system entry command needed.
   """
@@ -48,7 +57,7 @@ code: |+
   export PYTHONUSERBASE=/tmp/magnus-pip-$MAGNUS_JOB_ID
   export PIP_CACHE_DIR=/tmp/magnus-pip-cache-madgraph-launch
   pip3 install "magnus-sdk>=0.7.3" --quiet
-  python3 scripts/run_madgraph_launch.py --process_secret '{safe_process}' --launch_commands '{safe_commands}' --target_path '{safe_target}'{pdf_arg}
+  python3 scripts/run_madgraph_launch.py --process_secret '{safe_process}' --launch_commands '{safe_commands}' --target_path '{safe_target}'{pdf_arg}{interactive_arg}
   """
 
       submit_job(
