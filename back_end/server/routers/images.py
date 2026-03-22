@@ -112,8 +112,9 @@ def recover_stuck_images() -> None:
                 if _docker_image_cached(img.uri):
                     img.status = "cached"
                     try:
+                        docker_image = re.sub(r'^[a-z]+://', '', img.uri)
                         result = subprocess.run(
-                            ["docker", "image", "inspect", "--format", "{{.Size}}", img.uri],
+                            ["docker", "image", "inspect", "--format", "{{.Size}}", docker_image],
                             capture_output=True, text=True, timeout=10,
                         )
                         if result.returncode == 0:
@@ -196,8 +197,9 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
             if success:
                 if is_local_mode:
                     try:
+                        docker_image = re.sub(r'^[a-z]+://', '', uri)
                         proc = await asyncio.create_subprocess_exec(
-                            "docker", "image", "inspect", "--format", "{{.Size}}", uri,
+                            "docker", "image", "inspect", "--format", "{{.Size}}", docker_image,
                             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
                         )
                         stdout, _ = await proc.communicate()

@@ -25,7 +25,7 @@ from ..schemas import (
 from .._id_registry import assert_id_available
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
-from .._magnus_config import magnus_config, admin_open_ids
+from .._magnus_config import magnus_config, is_admin_user
 
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ def _assert_can_manage(
     skill: models.Skill,
     current_user: models.User,
 ) -> None:
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     is_owner = skill.user_id == current_user.id
     is_superior = not is_owner and _is_ancestor(db, current_user.id, skill.user_id)
     if not (is_admin or is_owner or is_superior):
@@ -195,7 +195,7 @@ def transfer_skill(
     new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
     if not new_owner:
         raise HTTPException(status_code=404, detail="Target user not found")
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
         raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
 
@@ -239,7 +239,7 @@ def list_skills(
                  .order_by(human_first, models.Skill.updated_at.desc())\
                  .offset(skip).limit(limit).all()
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     result = []
     for skill in items:
@@ -265,7 +265,7 @@ def get_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     can_manage = is_admin or skill.user_id == current_user.id or _is_ancestor(db, current_user.id, skill.user_id)
     return _enrich_response(skill, can_manage)
 

@@ -12,7 +12,7 @@ from .. import database
 from .. import models
 from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
-from .._magnus_config import magnus_config, admin_open_ids
+from .._magnus_config import magnus_config, is_admin_user
 from .._resource_manager import _parse_size_string
 from .._scheduler import scheduler
 from .auth import get_current_user
@@ -342,7 +342,7 @@ def terminate_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if job.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+    if job.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Not authorized to terminate this job")
 
     try:

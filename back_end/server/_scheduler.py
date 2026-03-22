@@ -265,6 +265,7 @@ class MagnusScheduler:
                             job.status = JobStatus.FAILED
                             job.result = "Container disappeared while queued (may have been removed externally)"
                             job.slurm_job_id = None
+                            self.docker_manager.remove_container(container_name)
                             self._clean_up_working_table(job.id)
                             self._docker_log_cursors.pop(job_id, None)
 
