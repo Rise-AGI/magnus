@@ -21,7 +21,7 @@ from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse, TransferRequest
 from .._service_manager import service_manager
 from .._id_registry import assert_id_available
-from .._magnus_config import magnus_config, admin_open_ids
+from .._magnus_config import magnus_config, is_admin_user
 from .._scheduler import scheduler
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
@@ -260,7 +260,7 @@ def create_service(
         data["system_entry_command"] = cluster["default_system_entry_command"]
 
     if existing:
-        is_admin = current_user.feishu_open_id in admin_open_ids
+        is_admin = is_admin_user(current_user)
         is_owner = existing.owner_id == current_user.id
         is_superior = not is_owner and _is_ancestor(db, current_user.id, existing.owner_id)
         if not (is_admin or is_owner or is_superior):
@@ -311,7 +311,7 @@ def delete_service(
     if not svc:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     is_owner = svc.owner_id == current_user.id
     is_superior = not is_owner and _is_ancestor(db, current_user.id, svc.owner_id)
 
@@ -338,7 +338,7 @@ def transfer_service(
     if not svc:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     is_owner = svc.owner_id == current_user.id
     is_superior = not is_owner and _is_ancestor(db, current_user.id, svc.owner_id)
 
@@ -394,7 +394,7 @@ def list_services(
                  .order_by(human_first, secondary)\
                  .offset(skip).limit(limit).all()
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     result = []
     for svc in items:
@@ -416,7 +416,7 @@ def get_service(
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     resp = ServiceResponse.model_validate(service)
     resp.can_manage = is_admin or service.owner_id == current_user.id or _is_ancestor(db, current_user.id, service.owner_id)
     return resp
