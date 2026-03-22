@@ -790,7 +790,8 @@ class MagnusScheduler:
         有损转换——约定与局限：
         1. 只解析 bash array `mounts=(...)` 中的挂载对，忽略一切其他逻辑
            （环境变量设置、module load、条件分支等在 Docker 模式下丢弃）
-        2. 仅展开 $HOME / ${HOME}（使用 os.path.expanduser，跨平台正确）；
+        2. 仅展开 $HOME / ${HOME}；host 侧使用 os.path.expanduser，
+           container 侧硬编码 /root（Docker 容器默认以 root 运行）；
            不支持 $PWD、命令替换 $(...) 等动态值
         3. 纯 Python 实现，不依赖 bash，全平台行为一致
         4. Windows 盘符（C:\）会被转为 Docker mount 格式（/c/），
@@ -808,7 +809,8 @@ class MagnusScheduler:
         body = array_match.group(1)
         entries = re.findall(r'"([^"]+)"', body)
 
-        home = os.path.expanduser("~")
+        host_home = os.path.expanduser("~")
+        container_home = "/root"  # Docker 容器默认以 root 运行
         binds = []
         for entry in entries:
             # 展开前拆分：raw entry 里只有 1 个冒号（mount 分隔符），
@@ -816,8 +818,8 @@ class MagnusScheduler:
             if ":" not in entry:
                 continue
             host_raw, container_raw = entry.split(":", 1)
-            host_path = host_raw.replace("${HOME}", home).replace("$HOME", home)
-            container_path = container_raw.replace("${HOME}", home).replace("$HOME", home)
+            host_path = host_raw.replace("${HOME}", host_home).replace("$HOME", host_home)
+            container_path = container_raw.replace("${HOME}", container_home).replace("$HOME", container_home)
             # Windows 盘符转 Docker mount 格式（C:\Users\... → /c/Users/...）
             # 仅 host 侧需要；container 侧是容器内 Linux 路径
             if len(host_path) >= 2 and host_path[1] == ":":
