@@ -150,6 +150,8 @@ class MagnusScheduler:
             if since:
                 cmd.extend(["--since", since])
             result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                return since  # container gone or docker error, skip
             output = result.stdout
             if result.stderr:
                 output += result.stderr
@@ -256,6 +258,13 @@ class MagnusScheduler:
                             job.result = "Container exited with non-zero status while starting"
                             job.slurm_job_id = None
                             self.docker_manager.remove_container(container_name)
+                            self._clean_up_working_table(job.id)
+                            self._docker_log_cursors.pop(job_id, None)
+                        elif real_status in ["UNKNOWN"]:
+                            logger.warning(f"Job {job.id} container not found while QUEUED")
+                            job.status = JobStatus.FAILED
+                            job.result = "Container disappeared while queued (may have been removed externally)"
+                            job.slurm_job_id = None
                             self._clean_up_working_table(job.id)
                             self._docker_log_cursors.pop(job_id, None)
 
