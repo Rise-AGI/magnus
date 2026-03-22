@@ -65,11 +65,23 @@ def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
     if not img:
         return
     if success:
-        sif_path = os.path.join(magnus_container_cache_path, _image_to_sif_filename(image_uri))
-        try:
-            img.size_bytes = os.stat(sif_path).st_size
-        except OSError:
-            img.size_bytes = 0
+        if is_local_mode:
+            try:
+                docker_image = re.sub(r'^[a-z]+://', '', image_uri)
+                result = subprocess.run(
+                    ["docker", "image", "inspect", "--format", "{{.Size}}", docker_image],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0:
+                    img.size_bytes = int(result.stdout.strip())
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass
+        else:
+            sif_path = os.path.join(magnus_container_cache_path, _image_to_sif_filename(image_uri))
+            try:
+                img.size_bytes = os.stat(sif_path).st_size
+            except OSError:
+                img.size_bytes = 0
         img.status = "cached"
     else:
         img.status = "failed"
