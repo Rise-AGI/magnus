@@ -793,6 +793,8 @@ class MagnusScheduler:
         2. 仅展开 $HOME / ${HOME}（使用 os.path.expanduser，跨平台正确）；
            不支持 $PWD、命令替换 $(...) 等动态值
         3. 纯 Python 实现，不依赖 bash，全平台行为一致
+        4. Windows 盘符（C:\）会被转为 Docker mount 格式（/c/），
+           仅转换 host 侧；container 侧是容器内 Linux 路径，不转换
         """
         if not system_entry_command:
             return []
@@ -809,9 +811,18 @@ class MagnusScheduler:
         home = os.path.expanduser("~")
         binds = []
         for entry in entries:
-            expanded = entry.replace("${HOME}", home).replace("$HOME", home)
-            if ":" in expanded:
-                binds.append(expanded)
+            # 展开前拆分：raw entry 里只有 1 个冒号（mount 分隔符），
+            # 展开后 Windows 盘符会引入额外冒号，所以必须先拆再展开
+            if ":" not in entry:
+                continue
+            host_raw, container_raw = entry.split(":", 1)
+            host_path = host_raw.replace("${HOME}", home).replace("$HOME", home)
+            container_path = container_raw.replace("${HOME}", home).replace("$HOME", home)
+            # Windows 盘符转 Docker mount 格式（C:\Users\... → /c/Users/...）
+            # 仅 host 侧需要；container 侧是容器内 Linux 路径
+            if len(host_path) >= 2 and host_path[1] == ":":
+                host_path = "/" + host_path[0].lower() + host_path[2:].replace("\\", "/")
+            binds.append(f"{host_path}:{container_path}")
         return binds
 
     def _init_job_working_dir(self, job_working_table: str)-> None:
