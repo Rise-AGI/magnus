@@ -1,17 +1,17 @@
 title: MadGraph Compile
 description: 输入 UFO 标准输出和散射过程，枚举费曼图、计算矩阵元，编译生成 MadGraph5 process directory
 code: |+
-  Process = Annotated[str, {
+  Process = Annotated[Optional[str], {
       "placeholder": "p p > t t~",
-      "description": "过程定义，每行一个。第一行为 generate，其余为 add process",
+      "description": "过程定义，每行一个。第一行为 generate，其余为 add process。留空则仅验证模型能否被 MG5 正确导入",
       "allow_empty": False,
       "multi_line": True,
       "min_lines": 5,
   }]
 
-  Output = Annotated[str, {
+  Output = Annotated[Optional[str], {
       "placeholder": "e.g. tmp/pp_ttbar",
-      "description": "MadGraph5 process directory 的输出路径（仅远端调用时生效）",
+      "description": "MadGraph5 process directory 的输出路径（仅编译模式需要）",
       "allow_empty": False,
   }]
 
@@ -35,8 +35,8 @@ code: |+
 
 
   def blueprint(
-      process: Process,
-      output: Output,
+      process: Process = None,
+      output: Output = None,
       ufo: UFO = None,
       model: Model = None,
       definitions: Definitions = None,
@@ -44,8 +44,15 @@ code: |+
 
       description = "## MadGraph5 过程编译任务"
 
-      safe_process = process.replace("'", "'\\''")
-      safe_target = output.replace("'", "'\\''")
+      process_arg = ""
+      if process is not None and process.strip():
+          safe_process = process.replace("'", "'\\''")
+          process_arg = f" --process '{safe_process}'"
+
+      target_arg = ""
+      if output is not None and output.strip():
+          safe_target = output.replace("'", "'\\''")
+          target_arg = f" --target_path '{safe_target}'"
 
       definitions_arg = ""
       if definitions is not None and definitions.strip():
@@ -69,7 +76,7 @@ code: |+
   export PYTHONUSERBASE=/tmp/magnus-pip-$MAGNUS_JOB_ID
   export PIP_CACHE_DIR=/tmp/magnus-pip-cache-madgraph-compile
   pip3 install "magnus-sdk>=0.7.3" --quiet
-  python3 scripts/run_madgraph_compile.py --process '{safe_process}' --target_path '{safe_target}'{ufo_arg}{model_arg}{definitions_arg}
+  python3 scripts/run_madgraph_compile.py{process_arg}{target_arg}{ufo_arg}{model_arg}{definitions_arg}
   """
 
       submit_job(
