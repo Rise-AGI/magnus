@@ -28,8 +28,15 @@ export function SearchableSelect({
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
+  const prevValueRef = useRef(value);
 
   useEffect(() => {
+    const valueChanged = prevValueRef.current !== value;
+    prevValueRef.current = value;
+
+    // When options load but value is still empty, don't wipe the user's typed query
+    if (!valueChanged && !value) return;
+
     const selectedOption = options.find(o => o.value === value);
     if (selectedOption) {
         setQuery(selectedOption.label);
@@ -148,7 +155,7 @@ export function SearchableSelect({
             {filteredOptions.map((opt) => (
               <div
                 key={opt.value}
-                onClick={() => { onChange(opt.value); setQuery(opt.label); setIsOpen(false); }}
+                onClick={() => { onChange(opt.value); setQuery(""); setIsOpen(false); }}
                 className={`px-3 py-2 cursor-pointer border-b border-zinc-800/50 last:border-0 hover:bg-blue-500/10 transition-colors flex items-center justify-between
                   ${opt.value === value ? 'bg-blue-500/20 text-blue-400' : 'text-zinc-300'}
                 `}

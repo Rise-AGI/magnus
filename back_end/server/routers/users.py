@@ -1,5 +1,6 @@
 # back_end/server/routers/users.py
 import io
+import secrets
 import logging
 from typing import List, Optional, Dict, Any
 
@@ -16,6 +17,7 @@ from ..schemas import (
     HeadcountUpdate,
     PagedUserResponse,
     TokenResponse,
+    BotCredentialResponse,
 )
 from .._magnus_config import is_admin_user
 from .._file_custody_manager import file_custody_manager
@@ -283,12 +285,14 @@ def create_agent(
             )
 
     token = generate_trust_token()
+    app_secret = secrets.token_urlsafe(32)
     agent = models.User(
         name=body.name,
         user_type="agent",
         parent_id=current_user.id,
         headcount=0,
         token=token,
+        app_secret=app_secret,
     )
     db.add(agent)
     db.commit()
@@ -300,6 +304,7 @@ def create_agent(
         "id": agent.id,
         "name": agent.name,
         "token": token,
+        "app_secret": app_secret,
     }
 
 
@@ -475,6 +480,56 @@ def set_user_token(
     return {"magnus_token": token}
 
 
+# ─── Bot 凭证 ─────────────────────────────────────────────────────────
+
+@router.get(
+    "/users/{user_id}/bot-credentials",
+    response_model=BotCredentialResponse,
+)
+def get_bot_credentials(
+    user_id: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> BotCredentialResponse:
+    target = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.user_type != "agent":
+        raise HTTPException(status_code=400, detail="Only agent users have bot credentials")
+    if not _can_manage(current_user, target, db):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if not target.app_secret:
+        raise HTTPException(status_code=404, detail="Bot credentials not generated yet")
+    return BotCredentialResponse(app_secret=target.app_secret)
+
+
+@router.post(
+    "/users/{user_id}/bot-credentials/refresh",
+    response_model=BotCredentialResponse,
+)
+def refresh_bot_credentials(
+    user_id: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> BotCredentialResponse:
+    target = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.user_type != "agent":
+        raise HTTPException(status_code=400, detail="Only agent users have bot credentials")
+    if not _can_manage(current_user, target, db):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    target.app_secret = secrets.token_urlsafe(32)
+    db.commit()
+    db.refresh(target)
+
+    logger.info(f"User {current_user.id} refreshed bot credentials for agent {user_id}")
+
+    assert target.app_secret is not None
+    return BotCredentialResponse(app_secret=target.app_secret)
+
+
 # ─── 头像管理 ───────────────────────────────────────────────────────────
 
 _ALLOWED_AVATAR_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
@@ -523,3 +578,12 @@ async def upload_avatar(
     logger.info(f"User {current_user.id} updated avatar for user {user_id}")
 
     return {"avatar_url": target.avatar_url}
+
+
+@router.get("/users/self")
+def get_bot_self(app_secret: str, db: Session = Depends(database.get_db)):
+    """供 OpenClaw Magnus 插件启动时获取 bot 自身的 user_id，用于过滤自消息回显。"""
+    user = db.query(models.User).filter(models.User.app_secret == app_secret).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return {"id": user.id, "name": user.name}

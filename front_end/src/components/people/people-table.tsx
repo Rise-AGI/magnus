@@ -2,9 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { MessageCircle, RefreshCw, Trash2, Users, Loader2, Shield } from "lucide-react";
-import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
-import { AvatarCircle } from "@/components/ui/user-avatar";
+import { MessageCircle, RefreshCw, Trash2, Users, Loader2, Shield, UserX, UserPlus } from "lucide-react";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { UserDetail } from "@/types/auth";
@@ -16,14 +14,37 @@ interface PeopleTableProps {
   loading: boolean;
   onManage: (user: UserDetail) => void;
   onDelete: (user: UserDetail) => void;
+  onChat?: (user: UserDetail) => void;
+  onInviteToGroup?: (user: UserDetail) => void;
 }
 
 
-export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTableProps) {
+function Avatar({ user, size = "sm" }: { user: { name: string; avatar_url?: string | null; user_type: string }; size?: "xs" | "sm" | "lg" }) {
+  const [broken, setBroken] = useState(false);
+  const dim = size === "lg" ? "w-16 h-16" : size === "xs" ? "w-7 h-7" : "w-9 h-9";
+  const textSize = size === "lg" ? "text-xl" : size === "xs" ? "text-[10px]" : "text-xs";
+  const iconSize = size === "lg" ? "w-7 h-7" : size === "xs" ? "w-3 h-3" : "w-4 h-4";
+
+  return (
+    <div className={`${dim} rounded-full bg-zinc-800 border border-zinc-700/50 flex-shrink-0 overflow-hidden flex items-center justify-center`}>
+      {user.avatar_url && !broken ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" onError={() => setBroken(true)} />
+      ) : broken ? (
+        <UserX className={`${iconSize} text-zinc-600`} />
+      ) : (
+        <span className={`${textSize} font-bold text-zinc-400`}>{user.name.substring(0, 1).toUpperCase()}</span>
+      )}
+    </div>
+  );
+}
+
+export { Avatar };
+
+
+export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInviteToGroup }: PeopleTableProps) {
   const { t } = useLanguage();
   const { user: currentUser } = useAuth();
-  const [showComingSoon, setShowComingSoon] = useState(false);
-  const isMobile = useIsMobile();
 
   const canManage = (row: UserDetail) =>
     currentUser?.is_admin || row.id === currentUser?.id || row.parent_id === currentUser?.id;
@@ -186,13 +207,24 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
                           <RefreshCw className="w-4 h-4" />
                         </button>
                       )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setShowComingSoon(true); }}
-                        className="p-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 hover:text-blue-300 rounded-lg transition-colors border border-blue-500/30"
-                        title="Chat"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                      </button>
+                      {user.id !== currentUser?.id && (
+                        <>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onChat?.(user); }}
+                            className="p-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 hover:text-blue-300 rounded-lg transition-colors border border-blue-500/30 cursor-pointer"
+                            title={t("chat.directMessage")}
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onInviteToGroup?.(user); }}
+                            className="p-2 bg-violet-600/20 hover:bg-violet-600/40 text-violet-400 hover:text-violet-300 rounded-lg transition-colors border border-violet-500/30 cursor-pointer"
+                            title={t("chat.inviteToGroup")}
+                          >
+                            <UserPlus className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                       {user.user_type === "agent" && (
                         <button
                           onClick={(e) => { e.stopPropagation(); onDelete(user); }}
@@ -211,15 +243,6 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
         </div>
       </div>
 
-      <ConfirmationDialog
-        isOpen={showComingSoon}
-        onClose={() => setShowComingSoon(false)}
-        title={t("jobDetail.comingSoon")}
-        description={t("jobDetail.comingSoon")}
-        confirmText={t("common.ok")}
-        mode="alert"
-        variant="info"
-      />
     </>
   );
 }

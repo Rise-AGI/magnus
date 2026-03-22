@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Users, Shield, Eye, EyeOff, PenLine, RefreshCw, Trash2, Camera, Check, X } from "lucide-react";
+import { Users, Shield, Eye, EyeOff, PenLine, RefreshCw, Trash2, Camera, Check, X, Bot } from "lucide-react";
 import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
 import { CopyableText } from "@/components/ui/copyable-text";
@@ -56,6 +56,12 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
   // Error
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Bot credentials
+  const [botAppSecret, setBotAppSecret] = useState("");
+  const [showAppSecret, setShowAppSecret] = useState(false);
+  const [showRefreshCredsDialog, setShowRefreshCredsDialog] = useState(false);
+  const [isRefreshingCreds, setIsRefreshingCreds] = useState(false);
+
   // Reset all state when user changes
   useEffect(() => {
     if (!user) return;
@@ -76,6 +82,16 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
     if (hasTokenAccess) {
       client(`/api/users/${user.id}/token`)
         .then((res) => setDrawerToken(res.magnus_token || ""))
+        .catch(() => {});
+    }
+
+    // Fetch bot credentials for agent users
+    setBotAppSecret("");
+    setShowAppSecret(false);
+    setShowRefreshCredsDialog(false);
+    if (user.user_type === "agent" && hasTokenAccess) {
+      client(`/api/users/${user.id}/bot-credentials`)
+        .then((res) => { setBotAppSecret(res.app_secret || ""); })
         .catch(() => {});
     }
   }, [user?.id]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -177,7 +193,22 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
     }
   };
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleRefreshBotCredentials = async () => {
+    if (!user) return;
+    setIsRefreshingCreds(true);
+    try {
+      const res = await client(`/api/users/${user.id}/bot-credentials/refresh`, { method: "POST" });
+      setBotAppSecret(res.app_secret);
+      setShowAppSecret(false);
+      setShowRefreshCredsDialog(false);
+    } catch (e: any) {
+      setErrorMessage(e.message || "Failed to refresh credentials");
+    } finally {
+      setIsRefreshingCreds(false);
+    }
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
     setIsUploadingAvatar(true);
@@ -276,6 +307,44 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
                   >
                     <PenLine className="w-3.5 h-3.5" />
                   </button>
+                </div>
+              </div>
+              )}
+
+              {/* Bot Credentials — only for agent users */}
+              {user.user_type === "agent" && canAccessToken && botAppSecret && (
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Bot className="w-3.5 h-3.5 text-zinc-500" />
+                  <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t("people.drawer.botCredentials")}</span>
+                </div>
+                <div className="space-y-1.5">
+                  {/* App Secret */}
+                  <div className="flex items-center gap-1 bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-2 py-1.5">
+                    <span className="text-[10px] text-zinc-600 font-medium shrink-0 w-14">{t("people.drawer.appSecret")}</span>
+                    <div className="flex-1 min-w-0">
+                      <CopyableText
+                        text={showAppSecret ? botAppSecret : "\u2022".repeat(24)}
+                        copyValue={botAppSecret}
+                        variant="id"
+                        className="!text-zinc-400"
+                      />
+                    </div>
+                    <div className="w-px h-3.5 bg-zinc-800 mx-1" />
+                    <button
+                      onClick={() => setShowAppSecret(!showAppSecret)}
+                      className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-all"
+                    >
+                      {showAppSecret ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      onClick={() => setShowRefreshCredsDialog(true)}
+                      className="p-1.5 text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-md transition-all"
+                      title={t("people.drawer.refreshCredentials")}
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
               )}
@@ -462,6 +531,18 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
         description={t("people.drawer.deleteConfirm")}
         confirmText={t("people.drawer.delete")}
         isLoading={isDeleting}
+        variant="danger"
+      />
+
+      {/* Refresh Bot Credentials Confirmation */}
+      <ConfirmationDialog
+        isOpen={showRefreshCredsDialog}
+        onClose={() => setShowRefreshCredsDialog(false)}
+        onConfirm={handleRefreshBotCredentials}
+        title={t("people.drawer.refreshCredentialsTitle")}
+        description={t("people.drawer.refreshCredentialsDesc")}
+        confirmText={t("people.drawer.refreshCredentials")}
+        isLoading={isRefreshingCreds}
         variant="danger"
       />
 

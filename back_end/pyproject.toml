@@ -18,8 +18,6 @@ dependencies = [
     "pywheels==0.8.3.2",
     "ruamel-yaml>=0.18.16",
     "sqlalchemy>=2.0.44",
-    "torch>=2.9.1",
-    "torchvision>=0.24.1",
     "uvicorn>=0.38.0",
 ]
 
