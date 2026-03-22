@@ -253,9 +253,14 @@ def get_job_logs_paginated(
         if not os.path.exists(log_path):
             msg = ""
             if job.status == JobStatus.FAILED:
-                msg = "Job failed. Log file missing.\n"
+                if job.result and job.result != ".magnus_result":
+                    msg = f"[System] {job.result}\n"
+                else:
+                    msg = "Job failed. No output was produced.\n"
             elif job.status in [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING]:
                 msg = "Waiting for output stream...\n"
+            elif job.status == JobStatus.PREPARING:
+                msg = "Preparing resources...\n"
             return {"logs": msg, "page": 0, "total_pages": 1}
 
         file_size = os.path.getsize(log_path)
