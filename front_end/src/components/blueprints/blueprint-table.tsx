@@ -8,6 +8,7 @@ import { CopyableText } from "@/components/ui/copyable-text";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useLanguage } from "@/context/language-context";
 import { Blueprint } from "@/types/blueprint";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 interface BlueprintTableProps {
   data: Blueprint[];
@@ -31,6 +32,7 @@ export function BlueprintTable({
 
   const router = useRouter();
   const { t } = useLanguage();
+  const isMobile = useIsMobile();
 
   if (loading) {
     return (
@@ -46,6 +48,46 @@ export function BlueprintTable({
       <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 min-h-[400px]">
         <FileCode className="w-10 h-10 opacity-20 mb-3" />
         <p className="text-base font-medium text-zinc-400">{emptyMessage || t("blueprints.noFound")}</p>
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {data.map((bp) => (
+          <div
+            key={bp.id}
+            onClick={() => router.push(`/blueprints/${bp.id}`)}
+            className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-zinc-200 text-sm truncate">{bp.title}</p>
+                <CopyableText text={bp.id} className="text-[10px] tracking-wider" />
+              </div>
+            </div>
+            {bp.description && (
+              <p className="text-zinc-400 text-xs leading-relaxed line-clamp-2 mb-3">{bp.description}</p>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-zinc-500">{formatBeijingTime(bp.updated_at)}</span>
+              <div className="flex gap-2">
+                <button onClick={(e) => { e.stopPropagation(); onClone(bp); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95" title={t("blueprints.clone")}>
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); onRun(bp); }} className="p-3 bg-blue-900/20 hover:bg-blue-600 text-blue-500 rounded-lg border border-blue-500/20 active:scale-95" title={t("blueprints.run")}>
+                  <Play className="w-4 h-4 fill-current" />
+                </button>
+                {bp.can_manage && (
+                  <button onClick={(e) => { e.stopPropagation(); onDelete(bp); }} className="p-3 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95" title={t("common.delete")}>
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }

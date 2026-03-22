@@ -150,6 +150,8 @@ class MagnusScheduler:
             if since:
                 cmd.extend(["--since", since])
             result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                return since  # container gone or docker error, skip
             output = result.stdout
             if result.stderr:
                 output += result.stderr
@@ -180,6 +182,7 @@ class MagnusScheduler:
         else:
             logger.warning(f"Job {job.id} completed but NO success marker found. Marking FAILED.")
             job.status = JobStatus.FAILED
+            job.result = "Job process exited but did not report success (no success marker found)"
         job.slurm_job_id = None
         self._clean_up_working_table(job.id)
 
@@ -252,6 +255,15 @@ class MagnusScheduler:
                         elif real_status == "FAILED":
                             logger.warning(f"Job {job.id} failed in Docker")
                             job.status = JobStatus.FAILED
+                            job.result = "Container exited with non-zero status while starting"
+                            job.slurm_job_id = None
+                            self.docker_manager.remove_container(container_name)
+                            self._clean_up_working_table(job.id)
+                            self._docker_log_cursors.pop(job_id, None)
+                        elif real_status in ["UNKNOWN"]:
+                            logger.warning(f"Job {job.id} container not found while QUEUED")
+                            job.status = JobStatus.FAILED
+                            job.result = "Container disappeared while queued (may have been removed externally)"
                             job.slurm_job_id = None
                             self.docker_manager.remove_container(container_name)
                             self._clean_up_working_table(job.id)
@@ -266,6 +278,7 @@ class MagnusScheduler:
                         elif real_status in ["FAILED", "UNKNOWN"]:
                             logger.warning(f"Job {job.id} failed in Docker (Status: {real_status})")
                             job.status = JobStatus.FAILED
+                            job.result = f"Container {real_status} during execution"
                             job.slurm_job_id = None
                             self.docker_manager.remove_container(container_name)
                             self._clean_up_working_table(job.id)
@@ -306,6 +319,7 @@ class MagnusScheduler:
                     if not slurm_job_id:
                         logger.warning(f"Job {job.id} is QUEUED but has no slurm_id. Marking FAILED.")
                         job.status = JobStatus.FAILED
+                        job.result = "Internal error: job entered QUEUED state without a scheduler job ID"
                         continue
 
                     real_status = slurm_statuses.get(job_id)
@@ -318,6 +332,7 @@ class MagnusScheduler:
                     elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
                         logger.warning(f"Job {job.id} failed in SLURM queue (Status: {real_status}).")
                         job.status = JobStatus.FAILED
+                        job.result = f"Scheduler reported {real_status} while job was queued"
                         job.slurm_job_id = None
                         self._clean_up_working_table(job.id)
                     # else: SLURM 仍在排队（PD）或状态未知，保持 QUEUED
@@ -333,6 +348,7 @@ class MagnusScheduler:
                     if not slurm_job_id:
                         logger.warning(f"Job {job.id} is RUNNING but has no slurm_id. Marking FAILED.")
                         job.status = JobStatus.FAILED
+                        job.result = "Internal error: job entered RUNNING state without a scheduler job ID"
                         continue
 
                     self._harvest_job_metrics(db, job)
@@ -342,6 +358,7 @@ class MagnusScheduler:
                     elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
                         logger.warning(f"Job {job.id} failed in SLURM (Status: {real_status}).")
                         job.status = JobStatus.FAILED
+                        job.result = f"Scheduler reported {real_status} during execution"
                         job.slurm_job_id = None
                         self._clean_up_working_table(job.id)
                 except Exception as e:
@@ -421,6 +438,7 @@ class MagnusScheduler:
                     failed_job = db.query(Job).filter(Job.id == jid).first()
                     if failed_job and failed_job.status == JobStatus.PREPARING:
                         failed_job.status = JobStatus.FAILED
+                        failed_job.result = f"Resource preparation crashed: {exc}"
                         db.commit()
 
             # Phase 2.5: 抢占恢复 — PAUSED 任务重新准备资源（镜像/仓库在抢占时已被清理）
@@ -600,6 +618,7 @@ class MagnusScheduler:
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}\nTraceback:\n{traceback.format_exc()}")
             job.status = JobStatus.FAILED
+            job.result = f"Job submission setup failed: {error}"
             db.commit()
             return False
 
@@ -632,6 +651,9 @@ class MagnusScheduler:
                 f.write(wrapper_content)
         except IOError as e:
             logger.error(f"Failed to write wrapper script for Job {job.id}: {e}")
+            job.status = JobStatus.FAILED
+            job.result = f"Failed to write wrapper script: {e}"
+            db.commit()
             return False
 
         try:
@@ -658,6 +680,7 @@ class MagnusScheduler:
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}")
             job.status = JobStatus.FAILED
+            job.result = f"Job submission to scheduler failed: {error}"
             db.commit()
             return False
 
@@ -755,6 +778,7 @@ class MagnusScheduler:
         except Exception as error:
             logger.error(f"Job {job.id} Docker submission error: {error}\n{traceback.format_exc()}")
             job.status = JobStatus.FAILED
+            job.result = f"Docker container launch failed: {error}"
             db.commit()
             return False
 
@@ -769,6 +793,8 @@ class MagnusScheduler:
         2. 仅展开 $HOME / ${HOME}（使用 os.path.expanduser，跨平台正确）；
            不支持 $PWD、命令替换 $(...) 等动态值
         3. 纯 Python 实现，不依赖 bash，全平台行为一致
+        4. Windows 盘符（C:\）会被转为 Docker mount 格式（/c/），
+           仅转换 host 侧；container 侧是容器内 Linux 路径，不转换
         """
         if not system_entry_command:
             return []
@@ -785,9 +811,18 @@ class MagnusScheduler:
         home = os.path.expanduser("~")
         binds = []
         for entry in entries:
-            expanded = entry.replace("${HOME}", home).replace("$HOME", home)
-            if ":" in expanded:
-                binds.append(expanded)
+            # 展开前拆分：raw entry 里只有 1 个冒号（mount 分隔符），
+            # 展开后 Windows 盘符会引入额外冒号，所以必须先拆再展开
+            if ":" not in entry:
+                continue
+            host_raw, container_raw = entry.split(":", 1)
+            host_path = host_raw.replace("${HOME}", home).replace("$HOME", home)
+            container_path = container_raw.replace("${HOME}", home).replace("$HOME", home)
+            # Windows 盘符转 Docker mount 格式（C:\Users\... → /c/Users/...）
+            # 仅 host 侧需要；container 侧是容器内 Linux 路径
+            if len(host_path) >= 2 and host_path[1] == ":":
+                host_path = "/" + host_path[0].lower() + host_path[2:].replace("\\", "/")
+            binds.append(f"{host_path}:{container_path}")
         return binds
 
     def _init_job_working_dir(self, job_working_table: str)-> None:

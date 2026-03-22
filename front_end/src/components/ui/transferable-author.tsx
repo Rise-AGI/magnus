@@ -7,6 +7,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { client } from "@/lib/api";
 import { useLanguage } from "@/context/language-context";
 import { ConfirmationDialog } from "./confirmation-dialog";
+import { AvatarCircle } from "./user-avatar";
 import type { User } from "@/types/auth";
 
 
@@ -20,25 +21,6 @@ interface TransferableAuthorProps {
   entityTitle: string;
   onTransferred: (newOwner: User) => void;
   avatarSize?: "sm" | "md";
-}
-
-
-function Avatar({ user, size }: { user: User; size: string }) {
-  if (user.avatar_url) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={user.avatar_url}
-        alt={user.name}
-        className={`${size} rounded-full border border-zinc-700/50 object-cover shadow-sm`}
-      />
-    );
-  }
-  return (
-    <div className={`${size} rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/30`}>
-      {user.name.substring(0, 2).toUpperCase()}
-    </div>
-  );
 }
 
 
@@ -77,7 +59,6 @@ export function TransferableAuthor({
     }
   };
 
-  const size = avatarSize === "sm" ? "w-8 h-8" : "w-10 h-10";
   const nameClass = avatarSize === "sm"
     ? "text-sm font-medium text-zinc-200"
     : "text-base font-bold tracking-wide text-zinc-200";
@@ -90,7 +71,7 @@ export function TransferableAuthor({
   if (!canTransfer) {
     return (
       <div className="flex items-center gap-3">
-        <Avatar user={user} size={size} />
+        <AvatarCircle user={user} size={avatarSize} />
         <div className="flex flex-col">
           {label && <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{label}</span>}
           <span className={nameClass}>{user.name}</span>
@@ -110,7 +91,7 @@ export function TransferableAuthor({
           onClick={(e) => e.stopPropagation()}
           className="flex items-center gap-3 cursor-pointer rounded-lg -m-1.5 p-1.5 hover:bg-zinc-800/50 transition-colors focus:outline-none"
         >
-          <Avatar user={user} size={size} />
+          <AvatarCircle user={user} size={avatarSize} />
           <div className="flex flex-col text-left">
             {label && <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{label}</span>}
             <span className={nameClass}>{user.name}</span>
@@ -148,7 +129,7 @@ export function TransferableAuthor({
                 onSelect={() => setPendingTarget(c)}
                 className="w-full flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 transition-colors text-left disabled:opacity-50 cursor-pointer focus:outline-none focus:bg-zinc-800"
               >
-                <Avatar user={c} size="w-7 h-7" />
+                <AvatarCircle user={c} size="xs" />
                 <span className="text-sm text-zinc-300 truncate">{c.name}</span>
                 {isTransferring && <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-500 ml-auto" />}
               </DropdownMenu.Item>
@@ -171,12 +152,12 @@ export function TransferableAuthor({
             <span>{t("common.transferDesc", { type: t(`nav.${entityType}`), title: entityTitle })}</span>
             <div className="flex items-center justify-center gap-4 py-4">
               <div className="flex flex-col items-center gap-1.5 min-w-0">
-                <Avatar user={user} size="w-10 h-10" />
+                <AvatarCircle user={user} size="md" />
                 <span className="text-sm font-medium text-zinc-300 truncate max-w-[100px]">{user.name}</span>
               </div>
               <ArrowRight className="w-5 h-5 text-zinc-500 flex-shrink-0" />
               <div className="flex flex-col items-center gap-1.5 min-w-0">
-                <Avatar user={pendingTarget} size="w-10 h-10" />
+                <AvatarCircle user={pendingTarget} size="md" />
                 <span className="text-sm font-medium text-zinc-200 truncate max-w-[100px]">{pendingTarget.name}</span>
               </div>
             </div>

@@ -1,0 +1,2 @@
+title: FeynRules Validator
+description: 验证 FeynRules .fr 模型文件的物理自洽性（厄米性、质量项对角化、动能项归一化）

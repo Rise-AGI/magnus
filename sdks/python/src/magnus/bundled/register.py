@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from ..client import strip_imports
+from ..client import strip_imports, parse_blueprint_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -13,15 +13,25 @@ BLUEPRINTS_DIR = BUNDLED_DIR / "blueprints"
 SKILLS_DIR = BUNDLED_DIR / "skills"
 
 
+def _load_yaml_meta(path: Path) -> Dict[str, str]:
+    if not path.exists():
+        return {}
+    from ruamel.yaml import YAML
+    yaml = YAML()
+    data = yaml.load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items()}
+
+
 def _discover_blueprints() -> List[Tuple[str, Path]]:
     results = []
     if not BLUEPRINTS_DIR.exists():
         return results
-    for bp_path in sorted(BLUEPRINTS_DIR.glob("*.py")):
-        if bp_path.name.startswith("_") or bp_path.name == "__init__.py":
+    for bp_path in sorted(BLUEPRINTS_DIR.glob("*.yaml")):
+        if bp_path.name.startswith("_"):
             continue
-        blueprint_id = bp_path.stem
-        results.append((blueprint_id, bp_path))
+        results.append((bp_path.stem, bp_path))
     return results
 
 
@@ -42,14 +52,14 @@ def register_bundled_blueprints(
     registered: List[Tuple[str, str]] = []
 
     for blueprint_id, bp_path in blueprints:
-        # Reuse the AST-based stripper from client.py — handles multi-line / parenthesized imports
-        code = strip_imports(bp_path.read_text(encoding="utf-8"))
+        meta = parse_blueprint_yaml(bp_path)
+        code = strip_imports(meta.get("code", ""))
+        title = meta.get("title", blueprint_id.replace("-", " ").title())
 
-        title = blueprint_id.replace("-", " ").title()
         payload = {
             "id": blueprint_id,
             "title": title,
-            "description": f"Bundled blueprint: {blueprint_id}",
+            "description": meta.get("description", ""),
             "code": code,
         }
 
@@ -68,6 +78,11 @@ def register_bundled_blueprints(
                 elif resp.status_code == 409:
                     registered.append((blueprint_id, title))
                     break
+                elif resp.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"Blueprint {blueprint_id} registration returned {resp.status_code} after {max_retries} retries")
                 else:
                     logger.warning(f"Blueprint {blueprint_id} registration returned {resp.status_code}: {resp.text}")
                     break
@@ -93,17 +108,27 @@ def _discover_skills() -> List[Tuple[str, Path]]:
     return results
 
 
-def _collect_skill_files(source: Path) -> List[Dict[str, str]]:
-    files: List[Dict[str, str]] = []
+_RESOURCE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+def _collect_skill_files(source: Path) -> Tuple[List[Dict[str, str]], List[Path]]:
+    """Returns (text_files, binary_paths). Binary image files are collected separately."""
+    text_files: List[Dict[str, str]] = []
+    binary_paths: List[Path] = []
     for p in sorted(source.rglob("*")):
         if not p.is_file():
+            continue
+        if p.name == "meta.yaml":
+            continue
+        if p.suffix.lower() in _RESOURCE_EXTENSIONS:
+            binary_paths.append(p)
             continue
         try:
             content = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        files.append({"path": str(p.relative_to(source)), "content": content})
-    return files
+        text_files.append({"path": str(p.relative_to(source)), "content": content})
+    return text_files, binary_paths
 
 
 def register_bundled_skills(
@@ -123,16 +148,17 @@ def register_bundled_skills(
     registered: List[Tuple[str, str]] = []
 
     for skill_id, skill_dir in skills:
-        files = _collect_skill_files(skill_dir)
-        if not files:
+        text_files, binary_paths = _collect_skill_files(skill_dir)
+        if not text_files:
             continue
 
-        title = skill_id.replace("-", " ").title()
+        meta = _load_yaml_meta(skill_dir / "meta.yaml")
+
         payload = {
             "id": skill_id,
-            "title": title,
-            "description": f"Bundled skill: {skill_id}",
-            "files": files,
+            "title": meta.get("title", skill_id.replace("-", " ").title()),
+            "description": meta.get("description", ""),
+            "files": text_files,
         }
 
         for attempt in range(max_retries):
@@ -144,12 +170,17 @@ def register_bundled_skills(
                     timeout=timeout,
                 )
                 if resp.status_code in (200, 201):
-                    registered.append((skill_id, title))
+                    registered.append((skill_id, payload["title"]))
                     logger.info(f"Registered skill: {skill_id}")
                     break
                 elif resp.status_code == 409:
-                    registered.append((skill_id, title))
+                    registered.append((skill_id, payload["title"]))
                     break
+                elif resp.status_code >= 500:
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"Skill {skill_id} registration returned {resp.status_code} after {max_retries} retries")
                 else:
                     logger.warning(f"Skill {skill_id} registration returned {resp.status_code}: {resp.text}")
                     break
@@ -158,5 +189,23 @@ def register_bundled_skills(
                     time.sleep(retry_delay)
                 else:
                     logger.warning(f"Failed to register skill {skill_id} after {max_retries} retries")
+
+        # Upload binary resources after text save succeeds
+        for bp in binary_paths:
+            rel = str(bp.relative_to(skill_dir))
+            try:
+                with open(bp, "rb") as f:
+                    resp = httpx.post(
+                        f"{address}/api/skills/{skill_id}/resources",
+                        files={"file": (bp.name, f)},
+                        headers=headers,
+                        timeout=timeout,
+                    )
+                if resp.status_code in (200, 201):
+                    logger.info(f"Uploaded resource {rel} for skill {skill_id}")
+                else:
+                    logger.warning(f"Resource {rel} upload returned {resp.status_code}")
+            except (httpx.ConnectError, httpx.TimeoutException):
+                logger.warning(f"Failed to upload resource {rel} for skill {skill_id}")
 
     return registered

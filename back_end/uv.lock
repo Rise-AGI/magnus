@@ -679,7 +679,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.124.0" },
     { name = "fastmcp", specifier = ">=2.14.2" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
-    { name = "magnus-sdk", specifier = ">=0.7.0" },
+    { name = "magnus-sdk", specifier = ">=0.7.6" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pypdf", specifier = ">=5.0.0" },
@@ -693,8 +693,8 @@ requires-dist = [
 
 [[package]]
 name = "magnus-sdk"
-version = "0.7.1"
-source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+version = "0.7.6"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["socks"] },
     { name = "pydantic" },
@@ -703,9 +703,9 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/1e/5c/92652c0393bd6d6f07220ed2dff7813dd56abef732467c8fb2da4aec3b8f/magnus_sdk-0.7.1.tar.gz", hash = "sha256:331d10b4ab7bd7865dccf9dea0f1c202b7a4f7e89b3a265e3c0efeb9be5bbead", size = 93588, upload-time = "2026-03-18T08:18:12.946Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/28/b1/92d321dab7d17faef3085a079fca7f6432422e0d0f7b560513c981f5dc3c/magnus_sdk-0.7.6.tar.gz", hash = "sha256:4c1aaeaa60a4414098bd371324e229973a370d244597060f4d0549ab183e95d5", size = 96106, upload-time = "2026-03-22T04:02:54.196Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e5/40/1025194e08b876ff9ff580ec56bd4c628b271ed6a36c67a76dfaf4f509d9/magnus_sdk-0.7.1-py3-none-any.whl", hash = "sha256:1c5f67714faf384b99503c205aa9001a5c6cfb912d070965f5ecd6f8ec74132f", size = 95194, upload-time = "2026-03-18T08:18:11.396Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/f2/aed1f0ea8025c7ef7d36e26049fdd5699f99d59bf990dec5d01aa16c477b/magnus_sdk-0.7.6-py3-none-any.whl", hash = "sha256:2e53645ffe25ad7fa049ad34d518f6e4dcf1dbc40336a90a3ee17ef4e0fc82ad", size = 98987, upload-time = "2026-03-22T04:02:52.432Z" },
 ]
 
 [[package]]

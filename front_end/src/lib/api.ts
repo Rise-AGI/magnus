@@ -15,9 +15,14 @@ export async function client(endpoint: string, { json, body, ...customConfig }: 
   // 1. 处理 Token
   const token = typeof window !== "undefined" ? localStorage.getItem("magnus_token") : null;
   
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-  };
+  const headers: HeadersInit = {};
+
+  // FormData needs the browser to auto-set Content-Type with boundary
+  if (json) {
+    (headers as any)["Content-Type"] = "application/json";
+  } else if (!(body instanceof FormData)) {
+    (headers as any)["Content-Type"] = "application/json";
+  }
 
   if (token) {
     (headers as any)["Authorization"] = `Bearer ${token}`; 
@@ -45,14 +50,11 @@ export async function client(endpoint: string, { json, body, ...customConfig }: 
   // 3. 拼接 URL (处理 endpoint 开头的斜杠问题)
   const url = `${API_BASE}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
-  console.log(`📡 Request: ${config.method} ${url}`);
-
   try {
     const response = await fetch(url, config);
 
     // 4. 全局 401 (未授权/Token过期) 拦截
     if (response.status === 401) {
-      console.warn("🔒 Token expired or unauthorized. Logging out...");
       if (typeof window !== "undefined") {
         localStorage.removeItem("magnus_token");
         localStorage.removeItem("magnus_user");
@@ -73,7 +75,7 @@ export async function client(endpoint: string, { json, body, ...customConfig }: 
     return response.json();
     
   } catch (error) {
-    console.error("❌ API Request Failed:", error);
+    console.error("API Request Failed:", error);
     throw error;
   }
 }

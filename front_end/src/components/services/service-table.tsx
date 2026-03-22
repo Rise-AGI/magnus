@@ -9,6 +9,7 @@ import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { formatBeijingTime } from "@/lib/utils";
 import { useLanguage } from "@/context/language-context";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 interface ServiceTableProps {
   services: Service[];
@@ -33,6 +34,7 @@ export function ServiceTable({
 }: ServiceTableProps) {
   const { t } = useLanguage();
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   if (loading) {
     return (
@@ -48,6 +50,61 @@ export function ServiceTable({
       <div className={`border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 min-h-[400px] ${className}`}>
         <Box className="w-10 h-10 opacity-20 mb-3" />
         <p className="text-base font-medium text-zinc-400">{emptyMessage || t("services.noFound")}</p>
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <div className={`space-y-3 ${className}`}>
+        {services.map((svc) => {
+          const isJobAlive = svc.current_job?.status && ["Pending", "Preparing", "Running", "Paused"].includes(svc.current_job.status);
+
+          return (
+            <div
+              key={svc.id}
+              onClick={() => router.push(`/services/${svc.id}`)}
+              className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-zinc-200 text-sm truncate">{svc.name}</p>
+                  <CopyableText text={svc.id} className="text-[10px] tracking-wider" />
+                </div>
+                <div className="flex-shrink-0">
+                  {!svc.is_active ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-500 border border-zinc-700">{t("services.inactive")}</span>
+                  ) : isJobAlive ? (
+                    <div className="scale-90"><JobStatusBadge status={svc.current_job!.status} /></div>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20">{t("services.idle")}</span>
+                  )}
+                </div>
+              </div>
+              {svc.description && (
+                <p className="text-zinc-400 text-xs leading-relaxed line-clamp-2 mb-3">{svc.description}</p>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-500">{formatBeijingTime(svc.updated_at)}</span>
+                <div className="flex gap-2">
+                  <button onClick={(e) => { e.stopPropagation(); onClone(svc); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95">
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  {svc.can_manage && (
+                    <button onClick={(e) => { e.stopPropagation(); onToggle(svc); }} className={`p-3 rounded-lg border active:scale-95 ${svc.is_active ? "bg-teal-900/20 text-teal-400 border-teal-500/20" : "bg-zinc-800 text-zinc-500 border-zinc-700/50"}`}>
+                      <Power className="w-4 h-4" />
+                    </button>
+                  )}
+                  {svc.can_manage && (
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(svc); }} className="p-3 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }

@@ -6,6 +6,7 @@ import { MessageCircle, RefreshCw, Trash2, Users, Loader2, Shield, UserX, UserPl
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { UserDetail } from "@/types/auth";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 
 interface PeopleTableProps {
@@ -72,6 +73,79 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
     );
   }
 
+  if (isMobile) {
+    return (
+      <>
+        <div className="space-y-3">
+          {data.map((user) => (
+            <div
+              key={user.id}
+              className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <AvatarCircle user={user} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-zinc-200 text-sm truncate">{user.name}</span>
+                    {user.is_admin && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50">
+                        <Shield className="w-2.5 h-2.5" />
+                        {t("people.role.admin")}
+                      </span>
+                    )}
+                  </div>
+                  {user.parent_name && (
+                    <span className="text-xs text-zinc-500">{t("people.table.leader")}: {user.parent_name}</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex gap-3 text-xs text-zinc-500">
+                  <span>{t("people.table.bpSvc")}: {user.blueprint_count}/{user.service_count}</span>
+                  <span>{t("people.table.headcount")}: {headcountDisplay(user)}</span>
+                </div>
+                <div className="flex gap-2">
+                  {canManage(user) && (
+                    <button
+                      onClick={() => onManage(user)}
+                      className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowComingSoon(true)}
+                    className="p-3 bg-blue-600/20 text-blue-400 rounded-lg border border-blue-500/30 active:scale-95"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                  </button>
+                  {user.user_type === "agent" && (
+                    <button
+                      onClick={() => onDelete(user)}
+                      className="p-3 bg-red-950/30 text-red-400 rounded-lg border border-red-900/30 active:scale-95"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <ConfirmationDialog
+          isOpen={showComingSoon}
+          onClose={() => setShowComingSoon(false)}
+          title={t("jobDetail.comingSoon")}
+          description={t("jobDetail.comingSoon")}
+          confirmText={t("common.ok")}
+          mode="alert"
+          variant="info"
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col overflow-hidden min-h-[400px]">
@@ -94,7 +168,7 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <Avatar user={user} />
+                      <AvatarCircle user={user} size="sm" />
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-zinc-200">{user.name}</span>
                         {user.is_admin && (
@@ -109,7 +183,7 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                   <td className="px-6 py-4 text-zinc-400 text-sm">
                     {user.parent_name ? (
                       <div className="flex items-center gap-1.5">
-                        <Avatar user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null, user_type: "human" }} size="xs" />
+                        <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
                         <span>{user.parent_name}</span>
                       </div>
                     ) : (

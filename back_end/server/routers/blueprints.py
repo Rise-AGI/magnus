@@ -25,7 +25,7 @@ from .._id_registry import assert_id_available
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
 from .jobs import create_job
-from .._magnus_config import admin_open_ids
+from .._magnus_config import is_admin_user
 from library import *
 
 
@@ -47,7 +47,7 @@ def _normalize_obj(
     elif isinstance(obj, set):
         try:
             return sorted([_normalize_obj(x) for x in obj], key=lambda x: str(x))
-        except:
+        except Exception:
             return sorted([str(x) for x in obj])
     elif isinstance(obj, float):
         if obj.is_integer():
@@ -119,10 +119,13 @@ def create_blueprint(
         assert_id_available(db, bp.id)
 
     if existing:
-        if existing.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+        is_admin = is_admin_user(current_user)
+        is_owner = existing.user_id == current_user.id
+        is_superior = not is_owner and _is_ancestor(db, current_user.id, existing.user_id)
+        if not (is_admin or is_owner or is_superior):
             raise HTTPException(
-                status_code = 403,
-                detail = "You cannot modify a blueprint created by another user. Please verify the Blueprint ID.",
+                status_code=403,
+                detail="You cannot modify a blueprint created by another user. Please verify the Blueprint ID.",
             )
 
         # Update existing
@@ -159,7 +162,7 @@ def delete_blueprint(
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     is_owner = bp.user_id == current_user.id
     is_superior = not is_owner and _is_ancestor(db, current_user.id, bp.user_id)
 
@@ -182,7 +185,7 @@ def transfer_blueprint(
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     is_owner = bp.user_id == current_user.id
     is_superior = not is_owner and _is_ancestor(db, current_user.id, bp.user_id)
 
@@ -221,12 +224,13 @@ def list_blueprints(
 
     # 1. 搜索逻辑 (Title, ID, Description)
     if search:
-        search_pattern = f"%{search}%"
+        safe = search.replace("%", r"\%").replace("_", r"\_")
+        search_pattern = f"%{safe}%"
         query = query.filter(
             or_(
-                models.Blueprint.title.ilike(search_pattern),
-                models.Blueprint.id.ilike(search_pattern),
-                models.Blueprint.description.ilike(search_pattern),
+                models.Blueprint.title.ilike(search_pattern, escape="\\"),
+                models.Blueprint.id.ilike(search_pattern, escape="\\"),
+                models.Blueprint.description.ilike(search_pattern, escape="\\"),
             )
         )
 
@@ -242,7 +246,7 @@ def list_blueprints(
                  .order_by(human_first, models.Blueprint.updated_at.desc())\
                  .offset(skip).limit(limit).all()
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     result = []
     for bp in items:
@@ -270,7 +274,7 @@ def get_blueprint(
     if not blueprint:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     resp = BlueprintResponse.model_validate(blueprint)
     resp.can_manage = is_admin or blueprint.user_id == current_user.id or _is_ancestor(db, current_user.id, blueprint.user_id)
     return resp

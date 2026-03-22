@@ -8,6 +8,7 @@ import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
 import { BlueprintEditorHelp } from "@/components/ui/help-content";
 import { CodeEditor } from "@/components/ui/code-editor";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useLanguage } from "@/context/language-context";
 import { BlueprintImplicitImports } from "@/lib/blueprint-defaults";
@@ -34,7 +35,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
     formData, setFormData,
     isSaving, errorField, errorMessage,
     clearError, showSaveToast, toastFading,
-    handleButtonSave, guardedClose,
+    handleButtonSave, guardedClose, discardDialogProps,
   } = useEditorState<EditorData>({
     isOpen,
     initialData,
@@ -46,11 +47,12 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
     validate: (data) => {
       if (!data.title.trim()) return { field: "title", message: t("blueprintEditor.nameRequired"), scrollTo: "field-title" };
       if (!data.id.trim()) return { field: "id", message: t("blueprintEditor.idRequired"), scrollTo: "field-id" };
-      if (!data.description.trim()) return { field: "description", message: t("blueprintEditor.descriptionRequired"), scrollTo: "field-description" };
       return null;
     },
     labels: {
+      discardTitle: t("editor.unsavedTitle"),
       discardConfirm: t("editor.unsavedChanges"),
+      discardBtn: t("editor.discardBtn"),
       saveFailed: t("editor.saveFailed"),
     },
   });
@@ -154,7 +156,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
 
             <div id="field-description">
               <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'description' ? 'text-red-500' : 'text-zinc-500'}`}>
-                {t("jobForm.description")} <span className="text-red-500">*</span>
+                {t("jobForm.description")} <span className="text-zinc-600 normal-case ml-1">({t("common.optional")})</span>
               </label>
               <textarea
                 ref={descriptionRef}
@@ -216,6 +218,7 @@ export function BlueprintEditor({ isOpen, mode, initialData, onClose, onSave }: 
           </div>
         </div>
       </div>
+      <ConfirmationDialog {...discardDialogProps} />
     </Drawer>
   );
 }

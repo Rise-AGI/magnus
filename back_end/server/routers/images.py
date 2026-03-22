@@ -22,7 +22,7 @@ from ..schemas import (
 )
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
-from .._magnus_config import magnus_config, admin_open_ids, is_local_mode
+from .._magnus_config import magnus_config, is_local_mode, is_admin_user
 from .._resource_manager import resource_manager, _image_to_sif_filename
 
 
@@ -34,13 +34,26 @@ container_cache_path = f"{magnus_root}/container_cache"
 
 
 def _docker_image_cached(uri: str) -> bool:
-    """local 模式专用：通过 docker image inspect 判断镜像是否已拉取"""
+    """local 模式专用（同步）：通过 docker image inspect 判断镜像是否已拉取。
+    仅用于启动恢复 (recover_stuck_images)，热路径禁用。"""
     docker_image = re.sub(r'^[a-z]+://', '', uri)
     result = subprocess.run(
         ["docker", "image", "inspect", docker_image],
         capture_output=True,
     )
     return result.returncode == 0
+
+
+async def _docker_image_cached_async(uri: str) -> bool:
+    """local 模式专用（异步）：不阻塞事件循环的版本"""
+    docker_image = re.sub(r'^[a-z]+://', '', uri)
+    proc = await asyncio.create_subprocess_exec(
+        "docker", "image", "inspect", docker_image,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.communicate()
+    return proc.returncode == 0
 
 
 # ─── 进程级状态 ──────────────────────────────────────────────────
@@ -98,6 +111,16 @@ def recover_stuck_images() -> None:
             if is_local_mode:
                 if _docker_image_cached(img.uri):
                     img.status = "cached"
+                    try:
+                        docker_image = re.sub(r'^[a-z]+://', '', img.uri)
+                        result = subprocess.run(
+                            ["docker", "image", "inspect", "--format", "{{.Size}}", docker_image],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        if result.returncode == 0:
+                            img.size_bytes = int(result.stdout.strip())
+                    except (OSError, ValueError, subprocess.TimeoutExpired):
+                        pass
                     logger.info(f"Recovered stuck image → cached: {img.uri}")
                 else:
                     db.delete(img)
@@ -120,7 +143,7 @@ def recover_stuck_images() -> None:
 
 
 def _is_admin(current_user: models.User) -> bool:
-    return current_user.feishu_open_id in admin_open_ids
+    return is_admin_user(current_user)
 
 
 def _is_admin_or_owner(current_user: models.User, owner_id: str, db: Session) -> bool:
@@ -172,7 +195,19 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
                 return
 
             if success:
-                if not is_local_mode:
+                if is_local_mode:
+                    try:
+                        docker_image = re.sub(r'^[a-z]+://', '', uri)
+                        proc = await asyncio.create_subprocess_exec(
+                            "docker", "image", "inspect", "--format", "{{.Size}}", docker_image,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                        )
+                        stdout, _ = await proc.communicate()
+                        if proc.returncode == 0:
+                            img.size_bytes = int(stdout.strip())
+                    except (OSError, ValueError):
+                        pass
+                else:
                     sif_path = os.path.join(container_cache_path, img.filename)
                     try:
                         img.size_bytes = os.stat(sif_path).st_size
@@ -186,7 +221,7 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
                 if is_refresh:
                     # 刷新失败：判断旧镜像是否仍可用
                     if is_local_mode:
-                        old_available = _docker_image_cached(uri)
+                        old_available = await _docker_image_cached_async(uri)
                     else:
                         sif_path = os.path.join(container_cache_path, img.filename)
                         old_available = os.path.exists(sif_path)
@@ -324,11 +359,11 @@ def list_images(
     # 3. 标记文件缺失的 DB 记录
     combined: list[CachedImageResponse] = []
     if is_local_mode:
+        # local 模式信赖 DB 状态，不逐条 subprocess 验证 Docker 镜像
+        # （Docker daemon 拉大镜像时会串行化 inspect 调用，导致线程池饱和、整个后端卡死）
+        # DB 状态由 _do_pull 生命周期 + recover_stuck_images 启动恢复维护
         for img in db_images:
-            resp = CachedImageResponse.model_validate(img)
-            if not _docker_image_cached(img.uri) and img.status not in ("refreshing", "pulling"):
-                resp.status = "missing"
-            combined.append(resp)
+            combined.append(CachedImageResponse.model_validate(img))
     else:
         for img in db_images:
             sif_path = os.path.join(container_cache_path, img.filename)
@@ -415,12 +450,21 @@ async def delete_image(
         if img.status in ("pulling", "refreshing"):
             raise HTTPException(status_code=409, detail="Cannot delete an image that is being pulled/refreshed.")
 
-        sif_path = os.path.join(container_cache_path, img.filename)
-        if os.path.exists(sif_path):
-            try:
-                os.remove(sif_path)
-            except OSError as e:
-                logger.warning(f"Failed to delete SIF file {sif_path}: {e}")
+        if is_local_mode:
+            docker_image = re.sub(r'^[a-z]+://', '', img.uri)
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "rmi", docker_image,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+        else:
+            sif_path = os.path.join(container_cache_path, img.filename)
+            if os.path.exists(sif_path):
+                try:
+                    os.remove(sif_path)
+                except OSError as e:
+                    logger.warning(f"Failed to delete SIF file {sif_path}: {e}")
 
         db.delete(img)
         db.commit()

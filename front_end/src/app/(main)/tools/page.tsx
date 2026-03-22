@@ -5,7 +5,7 @@ import { Wrench, Construction } from "lucide-react";
 
 export default function ToolsPage() {
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full min-h-[calc(100vh-4rem)] text-zinc-500 animate-in fade-in duration-500">
+    <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 text-zinc-500 animate-in fade-in duration-500">
       <style jsx global>{`
           .prism-editor textarea { outline: none !important; }
           code[class*="language-"], pre[class*="language-"] { text-shadow: none !important; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important; }

@@ -74,7 +74,7 @@ def blueprint(
     submit_job(
         task_name = "[Blueprint] Validate FeynRules",
         namespace = "HET-AGI",
-        repo_name = "Collider-Agent",
+        repo_name = "ColliderAgent",
         commit_sha = "HEAD",
         entry_command = f"python3 scripts/run_feynrules_validation.py"
                         f" --secret '{safe_secret}' --symbol '{safe_symbol}'",

@@ -288,8 +288,6 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
     if (!name.trim()) { setErrorField("name"); setErrorMessage("⚠️ Service Name is required"); scrollToError("field-name"); return; }
     if (!serviceId.trim()) { setErrorField("serviceId"); setErrorMessage("⚠️ Service ID is required"); scrollToError("field-serviceId"); return; }
     if (!/^[a-z0-9-]+$/.test(serviceId)) { setErrorField("serviceId"); setErrorMessage("⚠️ Service ID must be lowercase slug"); scrollToError("field-serviceId"); return; }
-    if (!description?.trim()) { setErrorField("description"); setErrorMessage("⚠️ Description is required"); scrollToError("field-description"); return; }
-    
     // Repo Validations
     if (!namespace.trim() || !repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo required"); return; }
     if (!hasScanned) { setErrorMessage("⚠️ Please Scan Repo"); return; }
@@ -386,7 +384,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
 
         <div className="mb-4" id="field-description">
           <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'description' ? 'text-red-500' : 'text-zinc-500'}`}>
-            {t("serviceForm.description")} <span className="text-red-500">*</span>
+            {t("serviceForm.description")} <span className="text-zinc-600 normal-case ml-1">({t("common.optional")})</span>
           </label>
           <input
             className={inputClass(errorField === 'description')}

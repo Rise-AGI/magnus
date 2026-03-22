@@ -96,7 +96,7 @@ class Job(Base):
     status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PREPARING)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.A2)
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    runner: Mapped[str | None] = mapped_column(String, nullable=None)
+    runner: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)

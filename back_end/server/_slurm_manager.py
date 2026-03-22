@@ -344,7 +344,7 @@ class SlurmManager:
                 logger.warning(f"🧹 Cleaning up job {job_id} due to unexpected error...")
                 try:
                     self.kill_job(job_id, runner, token)
-                except:
+                except Exception:
                     pass
             raise SlurmError(f"Unexpected error: {e}")
 

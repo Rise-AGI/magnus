@@ -1702,21 +1702,33 @@ def blueprint_get_cmd(
     blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: yaml, json"),
     code_file: Optional[Path] = typer.Option(None, "--code-file", "-c", help="Export code to a .py file"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Export as YAML blueprint file"),
 ):
     """
     Show blueprint details including code.
 
-    Displays the blueprint's title, description, creator, last update time,
-    and full source code. Use -c to export the code to a .py file for
-    local editing.
+    Use -o to export as a YAML blueprint file (title/description/code),
+    or -c to export code only to a .py file.
 
     Examples:
       magnus blueprint get my-bp
+      magnus blueprint get my-bp -o blueprint.yaml
       magnus blueprint get my-bp -c my_bp.py
       magnus blueprint get my-bp -f yaml
     """
     try:
         bp = api_get_blueprint(blueprint_id)
+
+        if output is not None:
+            from ..client import serialize_blueprint_yaml
+            yaml_str = serialize_blueprint_yaml(
+                title=bp.get("title", ""),
+                description=bp.get("description", ""),
+                code=bp.get("code", ""),
+            )
+            output.write_text(yaml_str, encoding="utf-8")
+            print_msg(f"Blueprint exported to [cyan]{output}[/cyan]")
+            return
 
         if code_file is not None:
             code = bp.get("code", "")
@@ -1782,35 +1794,64 @@ def blueprint_schema_cmd(
 @blueprint_app.command(name="save")
 def blueprint_save_cmd(
     blueprint_id: str = typer.Argument(..., help="Blueprint ID"),
-    title: str = typer.Option(..., "--title", "-t", help="Blueprint title"),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="Blueprint title"),
     description: str = typer.Option("", "--description", "--desc", "-d", help="Blueprint description"),
-    code_file: Path = typer.Option(..., "--code-file", "-c", help="Path to Python source file"),
+    code_file: Optional[Path] = typer.Option(None, "--code-file", "-c", help="Path to Python source file"),
+    file: Optional[Path] = typer.Option(None, "--file", help="Path to YAML blueprint file (title/description/code)"),
 ):
     """
     Create or update a blueprint (upsert).
 
-    If the blueprint ID already exists, it is overwritten (update). Otherwise
-    a new blueprint is created. The code is read from a local .py file.
+    Two modes:
 
-    Import lines (import / from-import) are automatically stripped before
-    upload — the backend sandbox provides all necessary symbols (Annotated,
-    Optional, List, JobType, submit_job, etc.). This means your .py file can
-    include real imports for local IDE support, linting, and testing.
+    1. Code-file mode: pass --code-file (-c) with a .py file and --title (-t).
+    2. YAML mode: pass --file with a .yaml file containing title, description, code.
+       --title and --description can override YAML values.
+
+    Import lines are automatically stripped before upload.
 
     Examples:
       magnus blueprint save my-bp -t "My Blueprint" -c bp.py
-      magnus blueprint save my-bp -t "Updated" -d "New desc" -c bp.py
+      magnus blueprint save my-bp --file blueprint.yaml
+      magnus blueprint save my-bp --file bp.yaml -t "Override Title"
     """
-    if not code_file.exists():
-        print_error(f"Code file not found: {code_file}")
+    from ..client import parse_blueprint_yaml
+
+    if file is not None and code_file is not None:
+        print_error("Cannot use both --file and --code-file")
+        raise typer.Exit(code=1)
+
+    if file is not None:
+        if not file.exists():
+            print_error(f"File not found: {file}")
+            raise typer.Exit(code=1)
+        meta = parse_blueprint_yaml(file)
+        code = meta.get("code", "")
+        final_title = title if title is not None else meta.get("title", "")
+        final_description = description or meta.get("description", "")
+    elif code_file is not None:
+        if not code_file.exists():
+            print_error(f"Code file not found: {code_file}")
+            raise typer.Exit(code=1)
+        if title is None:
+            print_error("--title (-t) is required when using --code-file")
+            raise typer.Exit(code=1)
+        code = code_file.read_text(encoding="utf-8")
+        final_title = title
+        final_description = description
+    else:
+        print_error("Either --file or --code-file (-c) is required")
+        raise typer.Exit(code=1)
+
+    if not final_title:
+        print_error("Title is required (via --title or YAML title field)")
         raise typer.Exit(code=1)
 
     try:
-        code = code_file.read_text(encoding="utf-8")
         result = api_save_blueprint(
             blueprint_id=blueprint_id,
-            title=title,
-            description=description,
+            title=final_title,
+            description=final_description,
             code=code,
         )
         print_msg(f"Blueprint [bold cyan]{result.get('id', blueprint_id)}[/bold cyan] saved.")
@@ -2381,27 +2422,40 @@ job_execute_subcmd.__doc__ = (
 # =============================================================================
 
 
-def _collect_skill_files(source: Path) -> List[Dict[str, str]]:
-    """Read files from a directory into the [{path, content}] format."""
-    files: List[Dict[str, str]] = []
+def _collect_skill_files(source: Path) -> Tuple[List[Dict[str, str]], List[Path]]:
+    """Read files from a directory. Returns (text_files, binary_paths).
+    Binary image files (png/jpg/jpeg/webp/gif) are collected separately for resource upload.
+    """
+    _RESOURCE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+    text_files: List[Dict[str, str]] = []
+    binary_paths: List[Path] = []
+
     if source.is_file():
-        files.append({
-            "path": source.name,
-            "content": source.read_text(encoding="utf-8"),
-        })
-        return files
+        ext = source.suffix.lower()
+        if ext in _RESOURCE_EXTENSIONS:
+            binary_paths.append(source)
+        else:
+            text_files.append({
+                "path": source.name,
+                "content": source.read_text(encoding="utf-8"),
+            })
+        return text_files, binary_paths
 
     for p in sorted(source.rglob("*")):
         if not p.is_file():
             continue
         rel = str(p.relative_to(source))
+        ext = p.suffix.lower()
+        if ext in _RESOURCE_EXTENSIONS:
+            binary_paths.append(p)
+            continue
         try:
             content = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             print_error(f"Skipping binary file: {rel}")
             continue
-        files.append({"path": rel, "content": content})
-    return files
+        text_files.append({"path": rel, "content": content})
+    return text_files, binary_paths
 
 
 @skill_app.command(name="list")
@@ -2496,7 +2550,11 @@ def skill_get_cmd(
                     print_error(f"Skipping suspicious path: {f['path']}")
                     continue
                 fp.parent.mkdir(parents=True, exist_ok=True)
-                fp.write_text(f["content"], encoding="utf-8")
+                if f.get("is_binary"):
+                    from .. import default_client
+                    default_client.download_skill_resource(skill_id, f["path"], fp)
+                else:
+                    fp.write_text(f["content"], encoding="utf-8")
                 written += 1
             print_msg(f"Exported {written} file(s) to [cyan]{output_dir}[/cyan]")
             return
@@ -2549,8 +2607,8 @@ def skill_save_cmd(
     Reads all files from SOURCE and uploads them. A SKILL.md file is
     required — it describes what the skill does and how to use it.
 
-    Total file size is capped at 512 KB. Skills are for knowledge and
-    prompts, not large datasets. Binary files are skipped.
+    Text file size is capped at 512 KB. Image resources (png, jpg, jpeg,
+    webp, gif) are uploaded separately, up to 32 MB each.
 
     Examples:
       magnus skill save my-skill ./my_skill/ -t "My Skill"
@@ -2561,12 +2619,12 @@ def skill_save_cmd(
         print_error(f"Source not found: {source}")
         raise typer.Exit(code=1)
 
-    files = _collect_skill_files(source)
-    if not files:
+    text_files, binary_paths = _collect_skill_files(source)
+    if not text_files and not binary_paths:
         print_error("No files found in source.")
         raise typer.Exit(code=1)
 
-    has_skill_md = any(f["path"] == "SKILL.md" for f in files)
+    has_skill_md = any(f["path"] == "SKILL.md" for f in text_files)
     if not has_skill_md:
         print_error("SKILL.md is required. Create a SKILL.md file describing your skill.")
         raise typer.Exit(code=1)
@@ -2576,11 +2634,22 @@ def skill_save_cmd(
             skill_id=skill_id,
             title=title,
             description=description,
-            files=files,
+            files=text_files,
         )
+        file_count = len(text_files)
+
+        # Upload binary resources
+        if binary_paths:
+            from .. import default_client
+            for bp in binary_paths:
+                rel = str(bp.relative_to(source)) if source.is_dir() else bp.name
+                default_client.upload_skill_resource(skill_id, bp)
+                file_count += 1
+                print_msg(f"  Uploaded resource: [cyan]{rel}[/cyan]")
+
         print_msg(
             f"Skill [bold cyan]{result.get('id', skill_id)}[/bold cyan] saved "
-            f"({len(files)} file(s))."
+            f"({file_count} file(s))."
         )
 
     except MagnusError as e:
@@ -3132,13 +3201,27 @@ def local_start():
     )
     log_handle.close()  # child inherited the fd; parent can release
 
-    # Wait briefly to see if it crashes immediately
-    time.sleep(2)
+    # Wait for backend to be fully ready (lifespan complete, API serving)
+    health_url = f"http://127.0.0.1:{LOCAL_BACK_END_PORT}/health"
+    ready_deadline = time.time() + 30
+    backend_ready = False
+    while time.time() < ready_deadline:
+        if backend_proc.poll() is not None:
+            stderr_output = LOCAL_BACKEND_LOG.read_text(encoding="utf-8", errors="replace").strip()
+            error_detail = f":\n{stderr_output}" if stderr_output else f" (check {LOCAL_BACKEND_LOG})"
+            print_error(f"Backend failed to start{error_detail}")
+            raise typer.Exit(1)
+        try:
+            r = httpx.get(health_url, timeout=2)
+            if r.status_code == 200:
+                backend_ready = True
+                break
+        except (httpx.ConnectError, httpx.TimeoutException):
+            pass
+        time.sleep(0.5)
 
-    if backend_proc.poll() is not None:
-        stderr_output = LOCAL_BACKEND_LOG.read_text(encoding="utf-8", errors="replace").strip()
-        error_detail = f":\n{stderr_output}" if stderr_output else f" (check {LOCAL_BACKEND_LOG})"
-        print_error(f"Backend failed to start{error_detail}")
+    if not backend_ready:
+        print_error(f"Backend did not become ready within 30s (check {LOCAL_BACKEND_LOG})")
         raise typer.Exit(1)
 
     print_msg(f"Backend started at http://127.0.0.1:{LOCAL_BACK_END_PORT}")
@@ -3193,7 +3276,7 @@ def local_start():
         time.sleep(1)
         if frontend_proc.poll() is None:
             frontend_started = True
-            print_msg(f"Frontend started at http://localhost:{LOCAL_FRONT_END_PORT}")
+            print_msg(f"Frontend started at http://127.0.0.1:{LOCAL_FRONT_END_PORT}")
         else:
             fe_err = LOCAL_FRONTEND_LOG.read_text(encoding="utf-8", errors="replace").strip()
             print_msg(f"Warning: Frontend failed to start (check {LOCAL_FRONTEND_LOG})")
@@ -3224,7 +3307,7 @@ def local_start():
 
     print_msg("")
     if frontend_started:
-        print_msg(f"Open http://localhost:{LOCAL_FRONT_END_PORT} in your browser, or use the CLI:")
+        print_msg(f"Open http://127.0.0.1:{LOCAL_FRONT_END_PORT} in your browser, or use the CLI:")
     else:
         print_msg("Use the CLI:")
     print_msg("  magnus --help            # see all available commands")
@@ -3280,7 +3363,7 @@ def local_status():
         any_alive = True
 
     if not _check_port_available(LOCAL_FRONT_END_PORT):
-        print_msg(f"Frontend running at http://localhost:{LOCAL_FRONT_END_PORT}")
+        print_msg(f"Frontend running at http://127.0.0.1:{LOCAL_FRONT_END_PORT}")
         any_alive = True
 
     if not any_alive:

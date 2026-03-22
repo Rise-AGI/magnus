@@ -12,6 +12,7 @@ import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { UserAvatar } from "@/components/ui/user-avatar";
 import { formatBeijingTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 interface JobTableProps {
   jobs: Job[];
@@ -35,6 +36,7 @@ export function JobTable({
   const router = useRouter();
   const { user: currentUser } = useAuth();
   const { t } = useLanguage();
+  const isMobile = useIsMobile();
 
   if (loading) {
     return (
@@ -50,6 +52,61 @@ export function JobTable({
       <div className={cn("border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500", className)}>
         <Box className="w-10 h-10 opacity-20 mb-3" />
         <p className="text-base font-medium text-zinc-400">{emptyMessage || t("jobs.noJobsFound")}</p>
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <div className={cn("space-y-3", className)}>
+        {jobs.map((job) => {
+          const isActive = ["Pending", "Preparing", "Running", "Paused"].includes(job.status);
+          const isOwner = currentUser?.id === job.user?.id;
+          const canTerminate = (isOwner || currentUser?.is_admin) && isActive;
+
+          return (
+            <div
+              key={job.id}
+              onClick={() => router.push(`/jobs/${job.id}?from=${fromSource}`)}
+              className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-zinc-200 text-sm truncate">{job.task_name}</p>
+                  <CopyableText text={job.id} className="text-[10px] tracking-wider" />
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <JobPriorityBadge type={job.job_type} />
+                  <JobStatusBadge status={job.status} />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mt-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <UserAvatar user={job.user} subText={formatBeijingTime(job.created_at)} />
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onClone(job); }}
+                    className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
+                    title={t("jobs.cloneRerun")}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  {canTerminate && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onTerminate(job); }}
+                      className="p-3 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 active:scale-95"
+                      title={t("jobs.terminateJob")}
+                    >
+                      <SquareX className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }

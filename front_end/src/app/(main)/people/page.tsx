@@ -93,7 +93,7 @@ export default function PeoplePage() {
         html { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">{t("nav.people")}</h1>
           <p className="text-zinc-500 text-sm mt-1">{t("people.subtitle")}</p>

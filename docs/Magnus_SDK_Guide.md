@@ -536,6 +536,7 @@ for param in schema:
 ```python
 import magnus
 
+# 从代码字符串
 bp = magnus.save_blueprint(
     blueprint_id="my-new-blueprint",
     title="My Blueprint",
@@ -987,6 +988,7 @@ magnus job kill <ref>             # = magnus kill
 
 magnus blueprint list             # = magnus list
 magnus blueprint get <id>         # 查看蓝图详情（含代码）
+magnus blueprint get <id> -o bp.yaml  # 导出为 YAML 蓝图文件
 magnus blueprint get <id> -c bp.py  # 导出代码到文件
 magnus blueprint schema <id>      # 查看参数 Schema
 magnus blueprint save <id> ...    # 创建/更新蓝图
@@ -1170,18 +1172,26 @@ magnus blueprint list -f yaml            # YAML 输出
 ```bash
 magnus blueprint get <blueprint-id>
 magnus blueprint get my-blueprint -f yaml
-magnus blueprint get my-blueprint -c bp.py   # 导出代码到文件
+magnus blueprint get my-blueprint -o bp.yaml    # 导出为 YAML 蓝图文件
+magnus blueprint get my-blueprint -c bp.py      # 导出代码到文件
 ```
 
 **选项**：
 - `-f, --format`: 输出格式 (yaml/json)，默认人类可读
+- `-o, --output`: 导出为 YAML 蓝图文件（含 title/description/code）
 - `-c, --code-file`: 导出代码到指定 .py 文件
 
-`--code-file` 与 `save --code-file` 对称，形成完整的 inspect → edit → save 闭环：
+`--output` 与 `save --file` 对称，`--code-file` 与 `save --code-file` 对称，形成完整闭环：
 
 ```bash
-magnus blueprint get my-bp -c bp.py   # 导出
-$EDITOR bp.py                          # 编辑
+# YAML 流
+magnus blueprint get my-bp -o bp.yaml    # 导出
+$EDITOR bp.yaml                           # 编辑
+magnus blueprint save my-bp --file bp.yaml  # 上传
+
+# .py 流
+magnus blueprint get my-bp -c bp.py      # 导出代码
+$EDITOR bp.py                             # 编辑
 magnus blueprint save my-bp -t "My BP" -c bp.py  # 上传
 ```
 
@@ -1199,9 +1209,14 @@ magnus blueprint schema my-blueprint -f yaml
 
 #### magnus blueprint save
 
-创建或更新蓝图（upsert 语义）。
+创建或更新蓝图（upsert 语义）。支持两种模式：
 
 ```bash
+# 模式一：YAML 蓝图文件（推荐）
+magnus blueprint save my-bp --file blueprint.yaml
+magnus blueprint save my-bp --file bp.yaml -t "Override Title"
+
+# 模式二：Python 代码文件
 magnus blueprint save <id> --title "标题" --code-file blueprint.py
 magnus blueprint save my-bp -t "My BP" -d "描述" -c ./src/bp.py
 ```
@@ -1210,9 +1225,27 @@ magnus blueprint save my-bp -t "My BP" -d "描述" -c ./src/bp.py
 - `<id>`: 蓝图 ID
 
 **选项**：
-- `-t, --title`: 标题 (必填)
+- `--file`: YAML 蓝图文件路径（含 title/description/code，与 `--code-file` 互斥）
+- `-t, --title`: 标题（YAML 模式下可选，覆盖 YAML 值；代码文件模式下必填）
 - `-d, --description, --desc`: 描述，默认空
-- `-c, --code-file`: Python 源文件路径 (必填)
+- `-c, --code-file`: Python 源文件路径（与 `--file` 互斥）
+
+YAML 蓝图文件格式：
+
+```yaml
+title: My Blueprint
+description: 蓝图描述
+code: |
+  from magnus import submit_job, JobType
+  from typing import Annotated
+
+  Param = Annotated[str, {"description": "参数说明"}]
+
+  def blueprint(param: Param):
+      submit_job(...)
+```
+
+代码中的 import 语句会在上传时自动去除。
 
 #### magnus blueprint delete
 

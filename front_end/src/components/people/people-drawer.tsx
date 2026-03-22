@@ -7,7 +7,7 @@ import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
-import { Avatar } from "./people-table";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { formatBeijingTime } from "@/lib/utils";
@@ -252,7 +252,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <div key={avatarKey}>
-                    <Avatar user={user} size="lg" />
+                    <AvatarCircle user={user} size="lg" />
                   </div>
                   <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     {isUploadingAvatar ? (
@@ -356,7 +356,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
                   <span className="text-sm font-medium text-zinc-300 shrink-0">{t("people.table.leader")}</span>
                   {user.parent_name ? (
                     <div className="flex items-center gap-1.5">
-                      <Avatar user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null, user_type: "human" }} size="xs" />
+                      <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
                       <span className="text-sm text-zinc-400">{user.parent_name}</span>
                     </div>
                   ) : (

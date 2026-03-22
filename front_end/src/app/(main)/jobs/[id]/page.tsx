@@ -15,6 +15,7 @@ import { Job } from "@/types/job";
 import { formatBeijingTime } from "@/lib/utils";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { useJobOperations } from "@/hooks/use-job-operations";
@@ -286,34 +287,25 @@ export default function JobDetailsPage() {
           </div>
 
           {/* Status Card */}
-          <div className="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
-            <JobStatusBadge status={job.status} size="md" />
-            <div className="flex flex-col">
-              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.status")}</span>
-              <span className={`text-base font-bold tracking-wide
-                ${job.status === "Running" ? "text-blue-400" :
-                  job.status === "Success" ? "text-green-400" :
-                  job.status === "Failed" ? "text-red-400" :
-                  job.status === "Preparing" ? "text-cyan-400" : "text-zinc-300"}`}>
-                {/* status 是运行时动态值，无法满足 TranslationKey 字面量类型 */}
-                {t(`jobStatus.${job.status.toLowerCase()}` as any)?.toUpperCase() || job.status.toUpperCase()}
-              </span>
+          <div className="flex flex-col md:flex-row md:items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-4 md:px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
+            <div className="flex items-center gap-4">
+              <JobStatusBadge status={job.status} size="md" />
+              <div className="flex flex-col">
+                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.status")}</span>
+                <span className={`text-base font-bold tracking-wide
+                  ${job.status === "Running" ? "text-blue-400" :
+                    job.status === "Success" ? "text-green-400" :
+                    job.status === "Failed" ? "text-red-400" :
+                    job.status === "Preparing" ? "text-cyan-400" : "text-zinc-300"}`}>
+                  {/* status 是运行时动态值，无法满足 TranslationKey 字面量类型 */}
+                  {t(`jobStatus.${job.status.toLowerCase()}` as any)?.toUpperCase() || job.status.toUpperCase()}
+                </span>
+              </div>
             </div>
             {/* Owner */}
             {job.user && (
-              <div className="ml-4 pl-4 border-l border-zinc-700/50 flex items-center gap-3">
-                {job.user.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={job.user.avatar_url}
-                    alt={job.user.name}
-                    className="w-8 h-8 rounded-full border border-zinc-700/50 object-cover shadow-sm"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/30">
-                    {job.user.name.substring(0, 2).toUpperCase()}
-                  </div>
-                )}
+              <div className="flex items-center gap-3 md:ml-4 md:pl-4 md:border-l border-zinc-700/50">
+                <AvatarCircle user={job.user} size="sm" />
                 <div className="flex flex-col">
                   <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.creator")}</span>
                   <span className="text-sm font-medium text-zinc-200">{job.user.name}</span>
@@ -321,7 +313,7 @@ export default function JobDetailsPage() {
               </div>
             )}
 
-            <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center">
+            <div className="flex items-center gap-2 md:ml-4 md:pl-4 md:border-l border-zinc-700/50">
               {/* Clone Button */}
               <button
                 onClick={() => handleCloneJob(job)}
@@ -373,12 +365,12 @@ export default function JobDetailsPage() {
                   </a>
                 </div>
 
-                <div className="flex items-center gap-2 text-sm text-zinc-200 bg-zinc-950 px-3 py-1.5 rounded-lg border border-zinc-800/50 shadow-inner">
+                <div className="flex items-center gap-2 text-sm text-zinc-200 bg-zinc-950 px-3 py-1.5 rounded-lg border border-zinc-800/50 shadow-inner break-all">
                   <Box className="w-4 h-4 text-zinc-500 flex-shrink-0" />
                   <CopyableText
                     text={`${job.namespace}/${job.repo_name}`}
                     variant="text"
-                    className="text-zinc-200 font-mono"
+                    className="text-zinc-200 font-mono break-all"
                   />
                 </div>
               </div>
@@ -402,11 +394,11 @@ export default function JobDetailsPage() {
                       <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">{t("jobDetail.branch")}</span>
                     )}
                   </div>
-                  <div className="text-sm font-mono text-zinc-300 bg-zinc-950/50 px-2 py-1.5 rounded border border-zinc-800/50">
+                  <div className="text-sm font-mono text-zinc-300 bg-zinc-950/50 px-2 py-1.5 rounded border border-zinc-800/50 break-all">
                     <CopyableText
                       text={job.branch ?? "TBD"}
                       variant="id"
-                      className="text-zinc-300"
+                      className="text-zinc-300 break-all"
                     />
                   </div>
                 </div>
@@ -429,11 +421,12 @@ export default function JobDetailsPage() {
                       <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">{t("jobDetail.commitSha")}</span>
                     )}
                   </div>
-                  <div className="text-sm font-mono text-zinc-400 bg-zinc-950/50 px-2 py-1.5 rounded border border-zinc-800/50">
+                  <div className="text-sm font-mono text-zinc-400 bg-zinc-950/50 px-2 py-1.5 rounded border border-zinc-800/50 break-all">
                     <CopyableText
                       text={job.commit_sha ?? "TBD"}
                       copyValue={job.commit_sha ?? ""}
                       variant="id"
+                      className="break-all"
                     />
                   </div>
                 </div>

@@ -116,7 +116,7 @@ export default function JobsPage() {
       `}</style>
       
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             {t("nav.jobs")}
@@ -143,8 +143,8 @@ export default function JobsPage() {
              className="w-full bg-transparent border-none py-2.5 pl-9 pr-4 text-sm text-zinc-200 focus:outline-none focus:ring-0 placeholder-zinc-600"
            />
         </div>
-        <div className="h-6 w-px bg-zinc-800"></div>
-        <div className="w-56">
+        <div className="h-6 w-px bg-zinc-800 hidden sm:block"></div>
+        <div className="w-full sm:w-56">
           <SearchableSelect
              value={selectedUserId}
              onChange={setSelectedUserId}

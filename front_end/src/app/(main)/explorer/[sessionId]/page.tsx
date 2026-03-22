@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowUp, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check } from "lucide-react";
+import { ArrowUp, ArrowDown, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check, Paperclip } from "lucide-react";
 import { client } from "@/lib/api";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { NotFound } from "@/components/ui/not-found";
@@ -11,6 +11,7 @@ import type { ExplorerSessionWithMessages, ExplorerMessage, Attachment } from "@
 import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 
 
 function parseThinkingContent(content: string): { thinking: string | null; response: string } {
@@ -251,7 +252,7 @@ function MessageActions({ content, onRegenerate, alwaysShow = false }: { content
   };
 
   return (
-    <div className={`flex items-center gap-1 mt-2 ml-9 ${alwaysShow ? "" : "opacity-0 group-hover:opacity-100"} transition-opacity`}>
+    <div className={`flex items-center gap-1 mt-2 ml-9 ${alwaysShow ? "" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"} transition-opacity`}>
       <button
         onClick={() => setLiked(liked === true ? null : true)}
         className={`p-2 rounded-md transition-colors ${
@@ -325,7 +326,7 @@ function UserMessageWithActions({
 
   return (
     <div className="group flex items-start gap-2">
-      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity mt-2">
+      <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100 flex items-center gap-0.5 transition-opacity mt-2">
         {isLastUserMessage && (
           <button
             onClick={onEdit}
@@ -356,18 +357,7 @@ function UserMessageWithActions({
           onImageClick={onImageClick}
         />
       </div>
-      {user?.avatar_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={user.avatar_url}
-          alt={user.name}
-          className="w-7 h-7 rounded-full border border-zinc-700 object-cover flex-shrink-0 mt-1"
-        />
-      ) : (
-        <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs font-medium border border-blue-500/30 flex-shrink-0 mt-1">
-          {user?.name?.substring(0, 1) || "U"}
-        </div>
-      )}
+      <AvatarCircle user={user} size="xs" className="mt-1" />
     </div>
   );
 }
@@ -397,9 +387,11 @@ export default function SessionPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isUserNearBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageProcessedRef = useRef(false);
   const currentUserMessageRef = useRef<ExplorerMessage | null>(null);
@@ -576,7 +568,9 @@ export default function SessionPage() {
 
     const { scrollTop, scrollHeight, clientHeight } = container;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    isUserNearBottomRef.current = distanceFromBottom < 100;
+    const nearBottom = distanceFromBottom < 100;
+    isUserNearBottomRef.current = nearBottom;
+    setShowScrollToBottom(!nearBottom);
   }, []);
 
 
@@ -647,6 +641,30 @@ export default function SessionPage() {
     }
 
     setIsUploading(false);
+  };
+
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    for (let i = 0; i < files.length; i++) {
+      const attachment = await uploadFile(files[i]);
+      if (attachment) {
+        setAttachments((prev) => [...prev, attachment]);
+      }
+    }
+    setIsUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+
+  const scrollToBottom = () => {
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    }
   };
 
 
@@ -820,6 +838,9 @@ export default function SessionPage() {
       e.preventDefault();
       stopStreaming();
     } else if (e.key === "Enter" && !e.shiftKey && !isStreaming) {
+      // On touch devices, Enter = newline (no hardware keyboard typically)
+      const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+      if (isTouchDevice) return;
       e.preventDefault();
       sendMessage();
     }
@@ -915,7 +936,7 @@ export default function SessionPage() {
                   onPaste={handlePaste}
                   placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
                   rows={1}
-                  className="custom-scrollbar flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
+                  className="custom-scrollbar flex-1 bg-transparent text-base md:text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
                   style={{ minHeight: "48px", maxHeight: "192px" }}
                   disabled={isUploading}
                 />
@@ -927,7 +948,7 @@ export default function SessionPage() {
                 <button
                   onClick={() => sendMessage()}
                   disabled={(!input.trim() && attachments.length === 0) || isUploading}
-                  className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                  className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors active:scale-95"
                 >
                   {isUploading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -936,9 +957,6 @@ export default function SessionPage() {
                   )}
                 </button>
               </div>
-              <p className="text-xs text-zinc-600 mt-2 text-center">
-                {t("explorer.privacyNotice")}
-              </p>
             </div>
           </div>
         </div>
@@ -963,7 +981,7 @@ export default function SessionPage() {
         onScroll={handleMessagesScroll}
         className="flex-1 min-h-0 overflow-y-auto px-4 py-6 explorer-scroll"
       >
-        <div className="max-w-3xl mx-auto space-y-6 pb-32 min-w-0">
+        <div className="max-w-3xl mx-auto space-y-6 pb-20 md:pb-32 min-w-0">
           {/* Show pending user message only if it's not yet in session.messages */}
           {pendingUserMessage && !session.messages.some(m => m.role === "user" && m.content === pendingUserMessage) && (
             <div className="flex justify-end">
@@ -971,18 +989,7 @@ export default function SessionPage() {
                 <div className="bg-blue-600/20 border border-blue-500/30 text-zinc-100 px-4 py-3 rounded-2xl rounded-br-md">
                   <p className="text-sm whitespace-pre-wrap">{pendingUserMessage}</p>
                 </div>
-                {user?.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={user.avatar_url}
-                    alt={user.name}
-                    className="w-7 h-7 rounded-full border border-zinc-700 object-cover flex-shrink-0 mt-1"
-                  />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs font-medium border border-blue-500/30 flex-shrink-0 mt-1">
-                    {user?.name?.substring(0, 1) || "U"}
-                  </div>
-                )}
+                <AvatarCircle user={user} size="xs" className="mt-1" />
               </div>
             </div>
           )}
@@ -1097,8 +1104,31 @@ export default function SessionPage() {
 
       {/* Input */}
       <div className="relative px-4 pb-4 pt-2">
-        <div className="absolute inset-x-0 bottom-full h-24 bg-gradient-to-t from-zinc-950 to-transparent pointer-events-none" />
+        <div className="absolute inset-x-0 bottom-full h-12 md:h-24 bg-gradient-to-t from-zinc-950 to-transparent pointer-events-none" />
+
+        {/* Scroll to bottom */}
+        {showScrollToBottom && (
+          <div className="absolute inset-x-0 bottom-full flex justify-center pb-2 pointer-events-none">
+            <button
+              onClick={scrollToBottom}
+              className="pointer-events-auto p-2 bg-zinc-800 border border-zinc-700 rounded-full shadow-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-all active:scale-95"
+            >
+              <ArrowDown className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <div className="max-w-3xl mx-auto">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,.txt,.md,.py,.json,.csv,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.tsx,.jsx"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+
           {/* Attachments Preview */}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -1115,7 +1145,7 @@ export default function SessionPage() {
                   <span className="text-zinc-300 max-w-32 truncate">{att.filename}</span>
                   <button
                     onClick={() => removeAttachment(index)}
-                    className="text-zinc-500 hover:text-zinc-300"
+                    className="text-zinc-500 hover:text-zinc-300 active:scale-95"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -1125,22 +1155,30 @@ export default function SessionPage() {
           )}
 
           <div className="relative flex items-end bg-zinc-900 border border-zinc-700 rounded-xl focus-within:border-zinc-600 transition-colors">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="m-2 mr-0 p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 active:scale-95"
+              title={t("explorer.inputPlaceholder")}
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={isUploading ? "上传中..." : "输入消息，可上传图片和文件"}
+              placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
               rows={1}
-              className="custom-scrollbar flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
+              className="custom-scrollbar flex-1 bg-transparent text-base md:text-sm text-zinc-100 placeholder-zinc-500 px-3 py-3 resize-none focus:outline-none overflow-y-auto"
               style={{ minHeight: "48px", maxHeight: "192px" }}
               disabled={isUploading}
             />
             {isStreaming ? (
               <button
                 onClick={stopStreaming}
-                className="m-2 p-2 bg-red-900/30 hover:bg-red-800/40 text-red-400 rounded-lg transition-colors"
+                className="m-2 p-2 bg-red-900/30 hover:bg-red-800/40 text-red-400 rounded-lg transition-colors active:scale-95"
               >
                 <Square className="w-3.5 h-3.5 fill-current" />
               </button>
@@ -1157,7 +1195,7 @@ export default function SessionPage() {
                 <button
                   onClick={() => sendMessage()}
                   disabled={(!input.trim() && attachments.length === 0) || isUploading}
-                  className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                  className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors active:scale-95"
                 >
                   {isUploading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -1168,9 +1206,6 @@ export default function SessionPage() {
               </>
             )}
           </div>
-          <p className="text-xs text-zinc-600 mt-2 text-center">
-            您在 Magnus 平台上的活动记录会被收集并整理为科学语料，请注意隐私保护
-          </p>
         </div>
       </div>
     </>

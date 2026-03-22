@@ -12,7 +12,7 @@ from .. import database
 from .. import models
 from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
-from .._magnus_config import magnus_config, admin_open_ids
+from .._magnus_config import magnus_config, is_admin_user
 from .._resource_manager import _parse_size_string
 from .._scheduler import scheduler
 from .auth import get_current_user
@@ -122,11 +122,12 @@ def get_jobs(
     query = db.query(models.Job)
 
     if search:
-        search_pattern = f"%{search}%"
+        safe = search.replace("%", r"\%").replace("_", r"\_")
+        search_pattern = f"%{safe}%"
         query = query.filter(
             or_(
-                models.Job.task_name.ilike(search_pattern),
-                models.Job.id.ilike(search_pattern),
+                models.Job.task_name.ilike(search_pattern, escape="\\"),
+                models.Job.id.ilike(search_pattern, escape="\\"),
             )
         )
 
@@ -252,9 +253,14 @@ def get_job_logs_paginated(
         if not os.path.exists(log_path):
             msg = ""
             if job.status == JobStatus.FAILED:
-                msg = "Job failed. Log file missing.\n"
+                if job.result and job.result != ".magnus_result":
+                    msg = f"[System] {job.result}\n"
+                else:
+                    msg = "Job failed. No output was produced.\n"
             elif job.status in [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING]:
                 msg = "Waiting for output stream...\n"
+            elif job.status == JobStatus.PREPARING:
+                msg = "Preparing resources...\n"
             return {"logs": msg, "page": 0, "total_pages": 1}
 
         file_size = os.path.getsize(log_path)
@@ -336,7 +342,7 @@ def terminate_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if job.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
+    if job.user_id != current_user.id and not is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Not authorized to terminate this job")
 
     try:

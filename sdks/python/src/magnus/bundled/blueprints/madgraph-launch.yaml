@@ -1,0 +1,78 @@
+title: MadGraph Launch
+description: 基于已编译的 MadGraph5 process directory 运行蒙特卡洛事件生成，产出对撞事件与散射截面数据
+code: |+
+  Process = Annotated[FileSecret, {
+      "placeholder": "114514-apple-banana-cat",
+      "description": "已编译 process 目录的传输密钥（madgraph-compile 的产出）",
+  }]
+
+  Commands = Annotated[str, {
+      "placeholder": "done\nset nevents 1000\ndone",
+      "description": "MG5 launch body（state machine 格式）",
+  }]
+
+  Output = Annotated[str, {
+      "placeholder": "path/to/output",
+      "description": "输出目录路径",
+  }]
+
+  Pdf = Annotated[Optional[str], {
+      "placeholder": "LUXlep-NNPDF31_nlo_as_0118_luxqed",
+      "description": "LHAPDF PDF 集名称（可选，从 CERN 下载安装）",
+  }]
+
+  Interactive = Annotated[Optional[bool], {
+      "description": "使用 MG5 launch -i 模式，对已有事例文件执行后续处理（如 Pythia/Delphes）",
+  }]
+
+
+  def blueprint(
+      process: Process,
+      commands: Commands,
+      output: Output,
+      pdf: Pdf = None,
+      interactive: Interactive = None,
+  ):
+
+      description = "## MadGraph5 事件生成任务"
+
+      safe_process = process.replace("'", "'\\''")
+      safe_commands = commands.replace("'", "'\\''")
+      safe_target = output.replace("'", "'\\''")
+
+      pdf_arg = ""
+      if pdf is not None:
+          safe_pdf = pdf.replace("'", "'\\''")
+          pdf_arg = f" --pdf '{safe_pdf}'"
+
+      interactive_arg = ""
+      if interactive:
+          interactive_arg = " --interactive"
+
+      system_entry_command = """
+  # No system entry command needed.
+  """
+
+      entry_command = f"""
+  export PYTHONUSERBASE=/tmp/magnus-pip-$MAGNUS_JOB_ID
+  export PIP_CACHE_DIR=/tmp/magnus-pip-cache-madgraph-launch
+  pip3 install "magnus-sdk>=0.7.3" --quiet
+  python3 scripts/run_madgraph_launch.py --process_secret '{safe_process}' --launch_commands '{safe_commands}' --target_path '{safe_target}'{pdf_arg}{interactive_arg}
+  """
+
+      submit_job(
+          task_name = "[Blueprint] MadGraph Launch",
+          description = description,
+          namespace = "HET-AGI",
+          repo_name = "ColliderAgent",
+          commit_sha = "HEAD",
+          system_entry_command = system_entry_command,
+          entry_command = entry_command,
+          container_image = "docker://git.pku.edu.cn/het-agi/collider:latest",
+          job_type = JobType.A2,
+          runner = "magnus",
+          cpu_count = 10,
+          memory_demand = "64G",
+      )
+
+...

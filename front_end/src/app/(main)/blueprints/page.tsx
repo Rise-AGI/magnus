@@ -123,7 +123,7 @@ export default function BlueprintsPage() {
           html { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">{t("nav.blueprints")}</h1>
           <p className="text-zinc-500 text-sm mt-1">{t("blueprints.subtitle")}</p>
@@ -138,8 +138,8 @@ export default function BlueprintsPage() {
            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t("blueprints.searchPlaceholder")} className="w-full bg-transparent border-none py-2.5 pl-9 pr-4 text-sm text-zinc-200 focus:outline-none focus:ring-0 placeholder-zinc-600" />
         </div>
-        <div className="h-6 w-px bg-zinc-800"></div>
-        <div className="w-56">
+        <div className="h-6 w-px bg-zinc-800 hidden sm:block"></div>
+        <div className="w-full sm:w-56">
           <SearchableSelect value={selectedUserId} onChange={setSelectedUserId} options={userFilterOptions} placeholder={t("blueprints.filterByUser")} className="mb-0 border-none bg-transparent" />
         </div>
       </div>

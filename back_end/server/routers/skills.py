@@ -1,9 +1,13 @@
 # back_end/server/routers/skills.py
 import logging
+import shutil
+import mimetypes
+from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import or_, case
@@ -13,6 +17,7 @@ from .. import models
 from ..schemas import (
     SkillCreate,
     SkillFileCreate,
+    SkillFileResponse,
     SkillResponse,
     PagedSkillResponse,
     TransferRequest,
@@ -20,13 +25,45 @@ from ..schemas import (
 from .._id_registry import assert_id_available
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
-from .._magnus_config import admin_open_ids
+from .._magnus_config import magnus_config, is_admin_user
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-SKILL_MAX_TOTAL_BYTES = 512 * 1024  # 512 KB
+SKILL_TEXT_MAX_TOTAL_BYTES = 512 * 1024  # 512 KB for text files
+SKILL_RESOURCE_MAX_BYTES = 32 * 1024 * 1024  # 32 MB per resource file
+ALLOWED_RESOURCE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+RESOURCE_MIME_MAP = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
+
+def _skill_resources_dir(skill_id: str) -> Path:
+    return Path(magnus_config["server"]["root"]) / "skill_resources" / skill_id
+
+
+def _discover_resource_files(skill_id: str) -> List[SkillFileResponse]:
+    """扫描文件系统，发现 skill 的二进制资源文件。"""
+    resources_dir = _skill_resources_dir(skill_id)
+    if not resources_dir.exists():
+        return []
+    results: List[SkillFileResponse] = []
+    for p in sorted(resources_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = str(p.relative_to(resources_dir))
+        results.append(SkillFileResponse(
+            path=rel,
+            content="",
+            is_binary=True,
+            updated_at=datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc),
+        ))
+    return results
 
 
 def _sync_files(
@@ -45,6 +82,35 @@ def _sync_files(
         ))
 
 
+def _cleanup_skill_resources(skill_id: str) -> None:
+    resources_dir = _skill_resources_dir(skill_id)
+    if resources_dir.exists():
+        shutil.rmtree(resources_dir, ignore_errors=True)
+
+
+def _assert_can_manage(
+    db: Session,
+    skill: models.Skill,
+    current_user: models.User,
+) -> None:
+    is_admin = is_admin_user(current_user)
+    is_owner = skill.user_id == current_user.id
+    is_superior = not is_owner and _is_ancestor(db, current_user.id, skill.user_id)
+    if not (is_admin or is_owner or is_superior):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
+def _enrich_response(skill: models.Skill, can_manage: bool) -> SkillResponse:
+    """将 ORM 对象转为 response，附带文件系统上的 resource 文件。"""
+    resp = SkillResponse.model_validate(skill)
+    resp.can_manage = can_manage
+    resp.files.extend(_discover_resource_files(skill.id))
+    return resp
+
+
+# ── CRUD ──────────────────────────────────────────────────────────────────────
+
+
 @router.post("/skills", response_model=SkillResponse)
 def create_skill(
     skill: SkillCreate,
@@ -56,10 +122,10 @@ def create_skill(
         raise HTTPException(status_code=400, detail="SKILL.md is required")
 
     total_bytes = sum(len(f.content.encode("utf-8")) for f in skill.files)
-    if total_bytes > SKILL_MAX_TOTAL_BYTES:
+    if total_bytes > SKILL_TEXT_MAX_TOTAL_BYTES:
         raise HTTPException(
             status_code=400,
-            detail=f"Total file size ({total_bytes:,} bytes) exceeds {SKILL_MAX_TOTAL_BYTES:,} byte limit.",
+            detail=f"Total file size ({total_bytes:,} bytes) exceeds {SKILL_TEXT_MAX_TOTAL_BYTES:,} byte limit.",
         )
 
     existing = db.query(models.Skill).filter(models.Skill.id == skill.id).first()
@@ -68,18 +134,14 @@ def create_skill(
         assert_id_available(db, skill.id)
 
     if existing:
-        if existing.user_id != current_user.id and current_user.feishu_open_id not in admin_open_ids:
-            raise HTTPException(
-                status_code=403,
-                detail="You cannot modify a skill created by another user.",
-            )
+        _assert_can_manage(db, existing, current_user)
         existing.title = skill.title
         existing.description = skill.description
         existing.updated_at = datetime.now(timezone.utc)
         _sync_files(db, existing, skill.files)
         db.commit()
         db.refresh(existing)
-        return existing
+        return _enrich_response(existing, can_manage=True)
 
     db_skill = models.Skill(
         id=skill.id,
@@ -96,7 +158,7 @@ def create_skill(
     _sync_files(db, db_skill, skill.files)
     db.commit()
     db.refresh(db_skill)
-    return db_skill
+    return _enrich_response(db_skill, can_manage=True)
 
 
 @router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -109,15 +171,11 @@ def delete_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
-    is_owner = skill.user_id == current_user.id
-    is_superior = not is_owner and _is_ancestor(db, current_user.id, skill.user_id)
-
-    if not (is_admin or is_owner or is_superior):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    _assert_can_manage(db, skill, current_user)
 
     db.delete(skill)
     db.commit()
+    _cleanup_skill_resources(skill_id)
 
 
 @router.post("/skills/{skill_id}/transfer", response_model=SkillResponse)
@@ -132,16 +190,12 @@ def transfer_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
-    is_owner = skill.user_id == current_user.id
-    is_superior = not is_owner and _is_ancestor(db, current_user.id, skill.user_id)
-
-    if not (is_admin or is_owner or is_superior):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    _assert_can_manage(db, skill, current_user)
 
     new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
     if not new_owner:
         raise HTTPException(status_code=404, detail="Target user not found")
+    is_admin = is_admin_user(current_user)
     if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
         raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
 
@@ -185,12 +239,13 @@ def list_skills(
                  .order_by(human_first, models.Skill.updated_at.desc())\
                  .offset(skip).limit(limit).all()
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
+    is_admin = is_admin_user(current_user)
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     result = []
     for skill in items:
+        can_manage = is_admin or skill.user_id == current_user.id or skill.user_id in subordinate_ids
         resp = SkillResponse.model_validate(skill)
-        resp.can_manage = is_admin or skill.user_id == current_user.id or skill.user_id in subordinate_ids
+        resp.can_manage = can_manage
         result.append(resp)
 
     return {"total": total, "items": result}
@@ -210,9 +265,108 @@ def get_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    is_admin = current_user.feishu_open_id in admin_open_ids
-    resp = SkillResponse.model_validate(skill)
-    resp.can_manage = is_admin or skill.user_id == current_user.id or _is_ancestor(db, current_user.id, skill.user_id)
-    return resp
+    is_admin = is_admin_user(current_user)
+    can_manage = is_admin or skill.user_id == current_user.id or _is_ancestor(db, current_user.id, skill.user_id)
+    return _enrich_response(skill, can_manage)
 
 
+# ── Resource (binary) file management ─────────────────────────────────────────
+
+
+@router.post("/skills/{skill_id}/resources")
+def upload_skill_resource(
+    skill_id: str,
+    file: UploadFile,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    skill = db.query(models.Skill).filter(models.Skill.id == skill_id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    _assert_can_manage(db, skill, current_user)
+
+    filename = file.filename or ""
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_RESOURCE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_RESOURCE_EXTENSIONS))}",
+        )
+
+    content = file.file.read()
+    if len(content) > SKILL_RESOURCE_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File size ({len(content):,} bytes) exceeds {SKILL_RESOURCE_MAX_BYTES:,} byte limit.",
+        )
+
+    rel_path = filename.strip().replace("\\", "/")
+    if not rel_path or rel_path.startswith("/") or ".." in rel_path.split("/"):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    resources_dir = _skill_resources_dir(skill_id)
+    dest = resources_dir / rel_path
+    if not dest.resolve().is_relative_to(resources_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(content)
+
+    skill.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"path": rel_path, "size": len(content)}
+
+
+@router.delete("/skills/{skill_id}/resources/{path:path}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_skill_resource(
+    skill_id: str,
+    path: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> None:
+    skill = db.query(models.Skill).filter(models.Skill.id == skill_id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    _assert_can_manage(db, skill, current_user)
+
+    resources_dir = _skill_resources_dir(skill_id)
+    file_path = resources_dir / path
+    if not file_path.resolve().is_relative_to(resources_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Resource not found")
+    file_path.unlink()
+
+    skill.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+
+@router.get("/skills/{skill_id}/files/{path:path}")
+def serve_skill_file(
+    skill_id: str,
+    path: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # 先查文件系统（二进制资源）
+    resources_dir = _skill_resources_dir(skill_id)
+    resource_path = resources_dir / path
+    if not resource_path.resolve().is_relative_to(resources_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    if resource_path.exists() and resource_path.is_file():
+        ext = Path(path).suffix.lower()
+        media_type = RESOURCE_MIME_MAP.get(ext) or mimetypes.guess_type(path)[0] or "application/octet-stream"
+        return FileResponse(resource_path, media_type=media_type, filename=Path(path).name)
+
+    # 再查数据库（文本文件）
+    skill_file = db.query(models.SkillFile).filter(
+        models.SkillFile.skill_id == skill_id,
+        models.SkillFile.path == path,
+    ).first()
+
+    if not skill_file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return PlainTextResponse(skill_file.content, media_type="text/plain; charset=utf-8")

@@ -2,14 +2,16 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Loader2, Dna, RefreshCw, Save, Check, Plus, Trash2, FileText } from "lucide-react";
+import { Loader2, Dna, RefreshCw, Save, Check, Plus, Trash2, FileText, ImageIcon } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { ConfigClipboard } from "@/components/ui/config-clipboard";
 import { HelpButton } from "@/components/ui/help-button";
 import { SkillEditorHelp } from "@/components/ui/help-content";
 import { CodeEditor } from "@/components/ui/code-editor";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useLanguage } from "@/context/language-context";
+import { client } from "@/lib/api";
 
 interface SkillFileInput {
   path: string;
@@ -27,6 +29,7 @@ interface SkillEditorProps {
   isOpen: boolean;
   mode: "create" | "clone";
   initialData: EditorData;
+  initialResources?: { path: string }[];
   onClose: () => void;
   onSave: (data: EditorData) => Promise<void>;
 }
@@ -43,7 +46,7 @@ export const DEFAULT_EDITOR_DATA: EditorData = {
   files: [{ path: "SKILL.md", content: DEFAULT_SKILL_MD }],
 };
 
-export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: SkillEditorProps) {
+export function SkillEditor({ isOpen, mode, initialData, initialResources, onClose, onSave }: SkillEditorProps) {
   const { t } = useLanguage();
   const [activeFileIdx, setActiveFileIdx] = useState(0);
 
@@ -51,7 +54,7 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
     formData, setFormData,
     isSaving, errorField, errorMessage,
     clearError, showSaveToast, toastFading,
-    handleButtonSave, guardedClose,
+    handleButtonSave, guardedClose, discardDialogProps,
   } = useEditorState<EditorData>({
     isOpen,
     initialData,
@@ -63,7 +66,6 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
     validate: (data) => {
       if (!data.title.trim()) return { field: "title", message: t("skillEditor.nameRequired"), scrollTo: "field-title" };
       if (!data.id.trim()) return { field: "id", message: t("skillEditor.idRequired"), scrollTo: "field-id" };
-      if (!data.description.trim()) return { field: "description", message: t("skillEditor.descriptionRequired"), scrollTo: "field-description" };
 
       const hasSkillMd = data.files.some(f => f.path === "SKILL.md");
       if (!hasSkillMd) return { field: "files", message: t("skillEditor.skillMdRequired") };
@@ -84,14 +86,21 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
       return null;
     },
     labels: {
+      discardTitle: t("editor.unsavedTitle"),
       discardConfirm: t("editor.unsavedChanges"),
+      discardBtn: t("editor.discardBtn"),
       saveFailed: t("editor.saveFailed"),
     },
   });
 
-  // Reset activeFileIdx on open
+  // Reset active states on open
   useEffect(() => {
-    if (isOpen) setActiveFileIdx(0);
+    if (isOpen) {
+      setActiveFileIdx(0);
+      setActiveResourcePath(null);
+      setResources(initialResources || []);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const isOriginalId = mode === "clone" && formData.id === initialData.id;
@@ -136,6 +145,7 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
       files: [...prev.files, { path: "", content: "" }],
     }));
     setActiveFileIdx(newIdx);
+    setActiveResourcePath(null);
   };
 
   const removeFile = (idx: number) => {
@@ -145,10 +155,56 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
       files: prev.files.filter((_, i) => i !== idx),
     }));
     setActiveFileIdx(0);
+    setActiveResourcePath(null);
   };
 
   const actionRef = useRef<HTMLDivElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [resources, setResources] = useState<{ path: string }[]>([]);
+  const [activeResourcePath, setActiveResourcePath] = useState<string | null>(null);
+  const [isDeletingResource, setIsDeletingResource] = useState(false);
+
+  const ALLOWED_IMAGE_EXTENSIONS = ".png,.jpg,.jpeg,.webp,.gif";
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    const skillId = formData.id.trim();
+    if (!skillId) return;
+
+    setIsUploadingImage(true);
+    try {
+      const formPayload = new FormData();
+      formPayload.append("file", file);
+      await client(`/api/skills/${skillId}/resources`, { method: "POST", body: formPayload });
+      setResources(prev => prev.some(r => r.path === file.name) ? prev : [...prev, { path: file.name }]);
+      setActiveResourcePath(file.name);
+    } catch (err: any) {
+      console.error("Image upload failed:", err);
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleDeleteResource = async (path: string) => {
+    const skillId = formData.id.trim();
+    if (!skillId) return;
+
+    setIsDeletingResource(true);
+    try {
+      await client(`/api/skills/${skillId}/resources/${path}`, { method: "DELETE" });
+      setResources(prev => prev.filter(r => r.path !== path));
+      if (activeResourcePath === path) setActiveResourcePath(null);
+    } catch (err: any) {
+      console.error("Resource delete failed:", err);
+    } finally {
+      setIsDeletingResource(false);
+    }
+  };
 
   useEffect(() => {
     if (descriptionRef.current) {
@@ -221,7 +277,7 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
 
             <div id="field-description">
               <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === "description" ? "text-red-500" : "text-zinc-500"}`}>
-                {t("skills.table.description")} <span className="text-red-500">*</span>
+                {t("skills.table.description")} <span className="text-zinc-600 normal-case ml-1">({t("common.optional")})</span>
               </label>
               <textarea
                 ref={descriptionRef}
@@ -249,15 +305,29 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
               {formData.files.map((file, idx) => (
                 <button
                   key={idx}
-                  onClick={() => setActiveFileIdx(idx)}
+                  onClick={() => { setActiveFileIdx(idx); setActiveResourcePath(null); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    idx === activeFileIdx
+                    idx === activeFileIdx && !activeResourcePath
                       ? "bg-blue-600/10 text-blue-400 border border-blue-600/20"
                       : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:bg-zinc-800"
                   }`}
                 >
                   <FileText className="w-3 h-3" />
                   {file.path || <span className="text-red-400 italic">{t("skillEditor.filePathUntitled")}</span>}
+                </button>
+              ))}
+              {resources.map(r => (
+                <button
+                  key={`res-${r.path}`}
+                  onClick={() => setActiveResourcePath(r.path)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    activeResourcePath === r.path
+                      ? "bg-blue-600/10 text-blue-400 border border-blue-600/20"
+                      : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:bg-zinc-800"
+                  }`}
+                >
+                  <ImageIcon className="w-3 h-3" />
+                  {r.path}
                 </button>
               ))}
               <button
@@ -267,10 +337,55 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
                 <Plus className="w-3 h-3" />
                 {t("skillEditor.addFile")}
               </button>
+              {isOriginalId && (
+                <button
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={isUploadingImage}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-900 text-zinc-500 border border-zinc-800 hover:bg-zinc-800 hover:text-zinc-300 transition-colors disabled:opacity-50"
+                  title={t("skillEditor.addImage")}
+                >
+                  {isUploadingImage ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImageIcon className="w-3 h-3" />}
+                  {t("skillEditor.addImage")}
+                </button>
+              )}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept={ALLOWED_IMAGE_EXTENSIONS}
+                onChange={handleImageUpload}
+                className="hidden"
+              />
             </div>
 
-            {/* Active File Editor */}
-            {formData.files[activeFileIdx] && (
+            {/* Active File Editor or Resource Preview */}
+            {activeResourcePath ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs uppercase tracking-wider mb-1 block font-medium text-zinc-500">{t("skillEditor.fileName")}</label>
+                    <div className="w-full bg-zinc-950 border border-zinc-800 px-4 py-2 rounded-lg text-zinc-400 text-sm font-mono">
+                      {activeResourcePath}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteResource(activeResourcePath)}
+                    disabled={isDeletingResource}
+                    className="mt-5 p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30 disabled:opacity-50"
+                    title={t("common.delete")}
+                  >
+                    {isDeletingResource ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div className="rounded-xl overflow-hidden border border-zinc-800 bg-[#0c0c0e] min-h-[300px] flex items-center justify-center p-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/skills/${formData.id}/files/${activeResourcePath}?token=${typeof window !== "undefined" ? localStorage.getItem("magnus_token") || "" : ""}`}
+                    alt={activeResourcePath}
+                    className="rounded-md max-w-full max-h-[500px] object-contain"
+                  />
+                </div>
+              </div>
+            ) : formData.files[activeFileIdx] && (
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
@@ -333,6 +448,7 @@ export function SkillEditor({ isOpen, mode, initialData, onClose, onSave }: Skil
           </div>
         </div>
       </div>
+      <ConfirmationDialog {...discardDialogProps} />
     </Drawer>
   );
 }

@@ -7,6 +7,7 @@ import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { useLanguage } from "@/context/language-context";
 import { User } from "@/types/auth";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 
 export interface CachedImage {
   id: number | null;
@@ -63,6 +64,7 @@ interface ImageTableProps {
 
 export function ImageTable({ data, loading, onView, onDelete, onRefresh }: ImageTableProps) {
   const { t } = useLanguage();
+  const isMobile = useIsMobile();
 
   if (loading) {
     return (
@@ -78,6 +80,60 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
       <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 min-h-[400px]">
         <Container className="w-10 h-10 opacity-20 mb-3" />
         <p className="text-base font-medium text-zinc-400">{t("images.noFound")}</p>
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {data.map((img, idx) => {
+          const busy = isBusy(img.status);
+          const statusKey = STATUS_I18N[img.status] as any;
+          const statusLabel = statusKey ? t(statusKey) : img.status;
+
+          return (
+            <div
+              key={img.id ?? `fs-${idx}`}
+              className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4"
+            >
+              <div className="mb-2">
+                <p className="font-semibold text-zinc-200 text-sm break-all leading-snug">{img.uri}</p>
+              </div>
+              <div className="flex items-center justify-between mb-3">
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${STATUS_STYLES[img.status] || "bg-zinc-800 text-zinc-400 border-zinc-700"}`}>
+                  {busy && <Loader2 className="w-3 h-3 animate-spin" />}
+                  {statusLabel}
+                </span>
+                <span className="text-xs text-zinc-500 font-mono">{formatSize(img.size_bytes)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-500">{img.updated_at ? formatBeijingTime(img.updated_at) : "-"}</span>
+                {img.id !== null && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => onView(img)}
+                      className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
+                      title={t("images.refresh")}
+                    >
+                      <RefreshCw className={`w-4 h-4 ${busy ? "animate-spin" : ""}`} />
+                    </button>
+                    {img.can_manage && (
+                      <button
+                        onClick={() => onDelete(img)}
+                        disabled={busy}
+                        className="p-3 bg-red-950/30 hover:bg-red-900/50 text-red-400 rounded-lg border border-red-900/30 disabled:opacity-30 active:scale-95"
+                        title={t("common.delete")}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -144,7 +200,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                   </td>
                   <td className="px-6 py-4 align-middle text-right">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
-                      {img.can_manage && img.id !== null && (
+                      {img.id !== null && (
                         <>
                           <button
                             onClick={() => onView(img)}
@@ -153,14 +209,16 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                           >
                             <RefreshCw className={`w-4 h-4 ${busy ? "animate-spin" : ""}`} />
                           </button>
-                          <button
-                            onClick={() => onDelete(img)}
-                            disabled={busy}
-                            className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title={t("common.delete")}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {img.can_manage && (
+                            <button
+                              onClick={() => onDelete(img)}
+                              disabled={busy}
+                              className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                              title={t("common.delete")}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </>
                       )}
                     </div>

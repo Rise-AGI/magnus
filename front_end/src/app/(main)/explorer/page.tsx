@@ -152,11 +152,11 @@ export default function ExplorePage() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-4">
+    <div className="flex-1 flex flex-col items-center justify-center px-4 py-8">
       <div className="w-full max-w-3xl">
         {/* Title */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold mb-2">
+        <div className="text-center mb-12">
+          <h1 className="text-3xl md:text-4xl font-bold mb-2">
             <span className="text-zinc-100">{t("explorer.tagline1")}</span>
             <span className="text-blue-500">{t("explorer.tagline2")}</span>
           </h1>
@@ -164,7 +164,7 @@ export default function ExplorePage() {
         </div>
 
         {/* Input */}
-        <div className="mb-16">
+        <div>
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
               {attachments.map((att, idx) => (
@@ -219,9 +219,6 @@ export default function ExplorePage() {
               )}
             </button>
           </div>
-          <p className="text-xs text-zinc-600 mt-2 text-center">
-            {t("explorer.privacyNotice")}
-          </p>
         </div>
       </div>
     </div>

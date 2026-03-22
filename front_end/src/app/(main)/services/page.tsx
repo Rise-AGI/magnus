@@ -234,7 +234,7 @@ export default function ServicesPage() {
       `}</style>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             {t("nav.services")}
@@ -266,10 +266,10 @@ export default function ServicesPage() {
           />
         </div>
 
-        <div className="h-6 w-px bg-zinc-800"></div>
+        <div className="h-6 w-px bg-zinc-800 hidden sm:block"></div>
 
         {/* 2. User Filter */}
-        <div className="w-48">
+        <div className="w-full sm:w-48">
           <SearchableSelect
             value={selectedUserId}
             onChange={setSelectedUserId}
@@ -279,7 +279,7 @@ export default function ServicesPage() {
           />
         </div>
 
-        <div className="h-6 w-px bg-zinc-800"></div>
+        <div className="h-6 w-px bg-zinc-800 hidden sm:block"></div>
 
         {/* 3. Sort Order [Magnus Update] */}
         <div className="w-44">
@@ -292,7 +292,7 @@ export default function ServicesPage() {
            />
         </div>
 
-        <div className="h-6 w-px bg-zinc-800"></div>
+        <div className="h-6 w-px bg-zinc-800 hidden sm:block"></div>
 
         {/* 4. Active Only Toggle [Magnus Update] */}
         <button

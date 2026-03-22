@@ -1,0 +1,97 @@
+title: MadGraph Compile
+description: 输入 UFO 标准输出和散射过程，枚举费曼图、计算矩阵元，编译生成 MadGraph5 process directory
+code: |+
+  Process = Annotated[Optional[str], {
+      "placeholder": "p p > t t~",
+      "description": "过程定义，每行一个。第一行为 generate，其余为 add process。留空则仅验证模型能否被 MG5 正确导入",
+      "allow_empty": False,
+      "multi_line": True,
+      "min_lines": 5,
+  }]
+
+  Output = Annotated[Optional[str], {
+      "placeholder": "e.g. tmp/pp_ttbar",
+      "description": "MadGraph5 process directory 的输出路径（仅编译模式需要）",
+      "allow_empty": False,
+  }]
+
+
+  UFO = Annotated[Optional[FileSecret], {
+      "placeholder": "114514-apple-banana-cat",
+      "description": "UFO 标准输出的传输密钥（自定义模型时提供，与 model 二选一）",
+  }]
+
+
+  Model = Annotated[Optional[str], {
+      "placeholder": "e.g. sm",
+      "description": "MG5 内置模型名称（如 sm、mssm 等，与 UFO 二选一）",
+  }]
+
+  Definitions = Annotated[Optional[str], {
+      "placeholder": "e.g. l+ = e+ mu+",
+      "description": "多粒子定义，每行一个（不含 define 前缀，可选）",
+      "multi_line": True,
+  }]
+
+
+  def blueprint(
+      process: Process = None,
+      output: Output = None,
+      ufo: UFO = None,
+      model: Model = None,
+      definitions: Definitions = None,
+  ):
+
+      description = "## MadGraph5 过程编译任务"
+
+      process_arg = ""
+      if process is not None and process.strip():
+          safe_process = process.replace("'", "'\\''")
+          process_arg = f" --process '{safe_process}'"
+
+      target_arg = ""
+      if output is not None and output.strip():
+          safe_target = output.replace("'", "'\\''")
+          target_arg = f" --target_path '{safe_target}'"
+
+      definitions_arg = ""
+      if definitions is not None and definitions.strip():
+          safe_definitions = definitions.replace("'", "'\\''")
+          definitions_arg = f" --definitions '{safe_definitions}'"
+
+      ufo_arg = ""
+      model_arg = ""
+      if ufo is not None:
+          safe_ufo = ufo.replace("'", "'\\''")
+          ufo_arg = f" --ufo_secret '{safe_ufo}'"
+      elif model is not None and model.strip():
+          safe_model = model.replace("'", "'\\''")
+          model_arg = f" --model '{safe_model}'"
+
+      system_entry_command = """
+  # No system entry command needed.
+  """
+
+      entry_command = f"""
+  export PYTHONUSERBASE=/tmp/magnus-pip-$MAGNUS_JOB_ID
+  export PIP_CACHE_DIR=/tmp/magnus-pip-cache-madgraph-compile
+  pip3 install "magnus-sdk>=0.7.3" --quiet
+  python3 scripts/run_madgraph_compile.py{process_arg}{target_arg}{ufo_arg}{model_arg}{definitions_arg}
+  """
+
+      submit_job(
+          task_name = "[Blueprint] MadGraph Compile",
+          description = description,
+          namespace = "HET-AGI",
+          repo_name = "ColliderAgent",
+          commit_sha = "HEAD",
+          system_entry_command = system_entry_command,
+          entry_command = entry_command,
+          container_image = "docker://git.pku.edu.cn/het-agi/collider:latest",
+          job_type = JobType.A2,
+          runner = "magnus",
+          cpu_count = 10,
+          memory_demand = "64G",
+      )
+
+...

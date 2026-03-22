@@ -7,6 +7,7 @@ import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Drawer } from "@/components/ui/drawer";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import { POLL_INTERVAL } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -141,7 +142,7 @@ export default function ImagesPage() {
         html { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">{t("nav.images")}</h1>
           <p className="text-zinc-500 text-sm mt-1">{t("images.subtitle")}</p>
@@ -266,14 +267,7 @@ export default function ImagesPage() {
                 <div className="flex items-center gap-3 mt-1">
                   {viewingImage.user ? (
                     <>
-                      <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700/50 flex-shrink-0 overflow-hidden flex items-center justify-center">
-                        {viewingImage.user.avatar_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={viewingImage.user.avatar_url} alt={viewingImage.user.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-xs font-bold text-zinc-400">{viewingImage.user.name.substring(0, 1).toUpperCase()}</span>
-                        )}
-                      </div>
+                      <AvatarCircle user={viewingImage.user} size="sm" />
                       <span className="text-sm font-medium text-zinc-200">{viewingImage.user.name}</span>
                     </>
                   ) : (
@@ -311,7 +305,7 @@ export default function ImagesPage() {
                 <button onClick={closeDetail} disabled={isRefreshing} className="flex-1 sm:flex-none px-4 py-2.5 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50">{t("common.cancel")}</button>
                 <button
                   onClick={handleRefresh}
-                  disabled={isRefreshing || detailBusy}
+                  disabled={isRefreshing || detailBusy || !viewingImage.can_manage}
                   className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isRefreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
