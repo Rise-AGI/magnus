@@ -2934,6 +2934,7 @@ LOCAL_PREVIOUS_SITE_FILE = LOCAL_MAGNUS_DIR / "local_previous_site"
 LOCAL_SITE_NAME = "local"
 LOCAL_BACK_END_PORT = 8017
 LOCAL_FRONT_END_PORT = 3011
+LOCAL_OPERATION_TIMEOUT = 600  # 10 minutes; generous for slow networks / cold starts
 
 
 def _generate_local_config() -> Path:
@@ -3151,7 +3152,7 @@ def local_start():
             ["git", "clone", "https://github.com/rise-agi/magnus.git", str(repo_target)],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=LOCAL_OPERATION_TIMEOUT,
         )
         if clone_result.returncode != 0:
             print_error(f"git clone failed:\n{clone_result.stderr}")
@@ -3183,7 +3184,7 @@ def local_start():
         sync_result = subprocess.run(
             ["uv", "sync"],
             cwd=str(back_end_path),
-            timeout=300,
+            timeout=LOCAL_OPERATION_TIMEOUT,
         )
         if sync_result.returncode != 0:
             print_error("uv sync failed (see output above)")
@@ -3203,25 +3204,39 @@ def local_start():
 
     # Wait for backend to be fully ready (lifespan complete, API serving)
     health_url = f"http://127.0.0.1:{LOCAL_BACK_END_PORT}/health"
-    ready_deadline = time.time() + 30
+    ready_deadline = time.time() + LOCAL_OPERATION_TIMEOUT
     backend_ready = False
-    while time.time() < ready_deadline:
-        if backend_proc.poll() is not None:
-            stderr_output = LOCAL_BACKEND_LOG.read_text(encoding="utf-8", errors="replace").strip()
-            error_detail = f":\n{stderr_output}" if stderr_output else f" (check {LOCAL_BACKEND_LOG})"
-            print_error(f"Backend failed to start{error_detail}")
-            raise typer.Exit(1)
-        try:
-            r = httpx.get(health_url, timeout=2)
-            if r.status_code == 200:
-                backend_ready = True
+    with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Waiting for backend..."):
+        while time.time() < ready_deadline:
+            if backend_proc.poll() is not None:
                 break
-        except (httpx.ConnectError, httpx.TimeoutException):
-            pass
-        time.sleep(0.5)
+            try:
+                r = httpx.get(health_url, timeout=2)
+                if r.status_code == 200:
+                    backend_ready = True
+                    break
+            except (httpx.ConnectError, httpx.TimeoutException):
+                pass
+            time.sleep(0.5)
+
+    if backend_proc.poll() is not None and not backend_ready:
+        stderr_output = LOCAL_BACKEND_LOG.read_text(encoding="utf-8", errors="replace").strip()
+        error_detail = f":\n{stderr_output}" if stderr_output else f" (check {LOCAL_BACKEND_LOG})"
+        print_error(f"Backend failed to start{error_detail}")
+        raise typer.Exit(1)
 
     if not backend_ready:
-        print_error(f"Backend did not become ready within 30s (check {LOCAL_BACKEND_LOG})")
+        # Kill the detached backend to prevent port leak on next start
+        try:
+            backend_proc.terminate()
+            backend_proc.wait(timeout=5)
+        except (subprocess.TimeoutExpired, OSError):
+            try:
+                backend_proc.kill()
+            except OSError:
+                pass
+        _kill_port(LOCAL_BACK_END_PORT)
+        print_error(f"Backend did not become ready within {LOCAL_OPERATION_TIMEOUT}s (check {LOCAL_BACKEND_LOG})")
         raise typer.Exit(1)
 
     print_msg(f"Backend started at http://127.0.0.1:{LOCAL_BACK_END_PORT}")
@@ -3242,7 +3257,7 @@ def local_start():
             install_result = subprocess.run(
                 [npm_cmd, "install"],
                 cwd=str(front_end_path),
-                timeout=300,
+                timeout=LOCAL_OPERATION_TIMEOUT,
             )
             if install_result.returncode != 0:
                 print_error("npm install failed (see output above)")
@@ -3256,7 +3271,7 @@ def local_start():
                 [npx_cmd, "next", "build"],
                 cwd=str(front_end_path),
                 env=frontend_env,
-                timeout=300,
+                timeout=LOCAL_OPERATION_TIMEOUT,
             )
             if build_result.returncode != 0:
                 print_error("next build failed (see output above)")
@@ -3273,13 +3288,23 @@ def local_start():
             env=frontend_env,
         )
         fe_log.close()
-        time.sleep(1)
-        if frontend_proc.poll() is None:
-            frontend_started = True
+        fe_deadline = time.time() + LOCAL_OPERATION_TIMEOUT
+        with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Waiting for frontend..."):
+            while time.time() < fe_deadline:
+                if frontend_proc.poll() is not None:
+                    break
+                try:
+                    httpx.get(f"http://127.0.0.1:{LOCAL_FRONT_END_PORT}", timeout=2)
+                    frontend_started = True
+                    break
+                except (httpx.ConnectError, httpx.TimeoutException):
+                    pass
+                time.sleep(0.5)
+        if frontend_started:
             print_msg(f"Frontend started at http://127.0.0.1:{LOCAL_FRONT_END_PORT}")
         else:
             fe_err = LOCAL_FRONTEND_LOG.read_text(encoding="utf-8", errors="replace").strip()
-            print_msg(f"Warning: Frontend failed to start (check {LOCAL_FRONTEND_LOG})")
+            print_msg(f"Warning: Frontend failed to start within {LOCAL_OPERATION_TIMEOUT}s (check {LOCAL_FRONTEND_LOG})")
             if fe_err:
                 print_msg(fe_err[:500])
 
