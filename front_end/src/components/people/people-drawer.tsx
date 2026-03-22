@@ -57,7 +57,6 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Bot credentials
-  const [botAppId, setBotAppId] = useState("");
   const [botAppSecret, setBotAppSecret] = useState("");
   const [showAppSecret, setShowAppSecret] = useState(false);
   const [showRefreshCredsDialog, setShowRefreshCredsDialog] = useState(false);
@@ -87,13 +86,12 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
     }
 
     // Fetch bot credentials for agent users
-    setBotAppId("");
     setBotAppSecret("");
     setShowAppSecret(false);
     setShowRefreshCredsDialog(false);
     if (user.user_type === "agent" && hasTokenAccess) {
       client(`/api/users/${user.id}/bot-credentials`)
-        .then((res) => { setBotAppId(res.app_id || ""); setBotAppSecret(res.app_secret || ""); })
+        .then((res) => { setBotAppSecret(res.app_secret || ""); })
         .catch(() => {});
     }
   }, [user?.id]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -200,7 +198,6 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
     setIsRefreshingCreds(true);
     try {
       const res = await client(`/api/users/${user.id}/bot-credentials/refresh`, { method: "POST" });
-      setBotAppId(res.app_id);
       setBotAppSecret(res.app_secret);
       setShowAppSecret(false);
       setShowRefreshCredsDialog(false);
@@ -315,20 +312,13 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
               )}
 
               {/* Bot Credentials — only for agent users */}
-              {user.user_type === "agent" && canAccessToken && botAppId && (
+              {user.user_type === "agent" && canAccessToken && botAppSecret && (
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <Bot className="w-3.5 h-3.5 text-zinc-500" />
                   <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t("people.drawer.botCredentials")}</span>
                 </div>
                 <div className="space-y-1.5">
-                  {/* App ID */}
-                  <div className="flex items-center gap-1 bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-2 py-1.5">
-                    <span className="text-[10px] text-zinc-600 font-medium shrink-0 w-14">{t("people.drawer.appId")}</span>
-                    <div className="flex-1 min-w-0">
-                      <CopyableText text={botAppId} variant="id" className="!text-zinc-400" />
-                    </div>
-                  </div>
                   {/* App Secret */}
                   <div className="flex items-center gap-1 bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-2 py-1.5">
                     <span className="text-[10px] text-zinc-600 font-medium shrink-0 w-14">{t("people.drawer.appSecret")}</span>

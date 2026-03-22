@@ -495,5 +495,4 @@ class ConversationUpdate(BaseModel):
 
 
 class BotCredentialResponse(BaseModel):
-    app_id: str
     app_secret: str

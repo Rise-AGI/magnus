@@ -14,15 +14,17 @@ const fileContents = fs.readFileSync(configPath, 'utf8');
 const magnusConfig = yaml.load(fileContents);
 
 const PORT = magnusConfig.server.front_end_port + 2;
+const BACK_END_PORT = magnusConfig.server.back_end_port + 2;
 
 console.log(`[Magnus Dev] Starting development server on port ${PORT}...`);
 
 const cmd = 'next';
 const args = ['dev', '-p', PORT, '-H', '0.0.0.0'];
 
-const child = spawn(cmd, args, { 
+const child = spawn(cmd, args, {
     stdio: 'inherit',
     shell: true,
+    env: { ...process.env, NEXT_PUBLIC_BACK_END_PORT: String(BACK_END_PORT) },
 });
 
 child.on('close', (code) => {

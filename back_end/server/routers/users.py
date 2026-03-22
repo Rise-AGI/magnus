@@ -289,7 +289,6 @@ def create_agent(
             )
 
     token = generate_trust_token()
-    app_id = f"bot_{secrets.token_hex(8)}"
     app_secret = secrets.token_urlsafe(32)
     agent = models.User(
         name=body.name,
@@ -297,7 +296,6 @@ def create_agent(
         parent_id=current_user.id,
         headcount=0,
         token=token,
-        app_id=app_id,
         app_secret=app_secret,
     )
     db.add(agent)
@@ -310,7 +308,6 @@ def create_agent(
         "id": agent.id,
         "name": agent.name,
         "token": token,
-        "app_id": app_id,
         "app_secret": app_secret,
     }
 
@@ -505,9 +502,9 @@ def get_bot_credentials(
         raise HTTPException(status_code=400, detail="Only agent users have bot credentials")
     if not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
-    if not target.app_id or not target.app_secret:
+    if not target.app_secret:
         raise HTTPException(status_code=404, detail="Bot credentials not generated yet")
-    return BotCredentialResponse(app_id=target.app_id, app_secret=target.app_secret)
+    return BotCredentialResponse(app_secret=target.app_secret)
 
 
 @router.post(
@@ -527,16 +524,14 @@ def refresh_bot_credentials(
     if not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
-    if not target.app_id:
-        target.app_id = f"bot_{secrets.token_hex(8)}"
     target.app_secret = secrets.token_urlsafe(32)
     db.commit()
     db.refresh(target)
 
     logger.info(f"User {current_user.id} refreshed bot credentials for agent {user_id}")
 
-    assert target.app_id is not None and target.app_secret is not None
-    return BotCredentialResponse(app_id=target.app_id, app_secret=target.app_secret)
+    assert target.app_secret is not None
+    return BotCredentialResponse(app_secret=target.app_secret)
 
 
 # ─── 头像管理 ───────────────────────────────────────────────────────────
@@ -590,9 +585,9 @@ async def upload_avatar(
 
 
 @router.get("/users/self")
-def get_bot_self(app_id: str, app_secret: str, db: Session = Depends(database.get_db)):
+def get_bot_self(app_secret: str, db: Session = Depends(database.get_db)):
     """供 OpenClaw Magnus 插件启动时获取 bot 自身的 user_id，用于过滤自消息回显。"""
-    user = db.query(models.User).filter(models.User.app_id == app_id).first()
-    if not user or user.app_secret != app_secret:
+    user = db.query(models.User).filter(models.User.app_secret == app_secret).first()
+    if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {"id": user.id, "name": user.name}

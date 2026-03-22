@@ -33,12 +33,10 @@ def _check_rate_limit(user_id: str) -> bool:
     return True
 
 
-def _authenticate_bot(app_id: str, app_secret: str) -> models.User | None:
+def _authenticate_bot(app_secret: str) -> models.User | None:
     with SessionLocal() as db:
-        user = db.query(models.User).filter(models.User.app_id == app_id).first()
+        user = db.query(models.User).filter(models.User.app_secret == app_secret).first()
         if not user:
-            return None
-        if user.app_secret != app_secret:
             return None
         db.expunge(user)
         return user
@@ -66,20 +64,19 @@ def _authenticate_token(token: str) -> models.User | None:
 
 @ws_router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
-    app_id = websocket.query_params.get("app_id", "")
     app_secret = websocket.query_params.get("app_secret", "")
     token = websocket.query_params.get("token", "")
 
     user: models.User | None = None
 
-    if app_id and app_secret:
-        user = _authenticate_bot(app_id, app_secret)
+    if app_secret:
+        user = _authenticate_bot(app_secret)
     elif token:
         user = _authenticate_token(token)
 
     if not user:
         logger.warning(
-            f"WebSocket auth failed: app_id={'*' if app_id else ''}, token={'*' if token else ''}, "
+            f"WebSocket auth failed: app_secret={'*' if app_secret else ''}, token={'*' if token else ''}, "
             f"ip={websocket.client.host if websocket.client else 'unknown'}"
         )
         await websocket.accept()

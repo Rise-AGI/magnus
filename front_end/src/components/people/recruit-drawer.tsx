@@ -31,7 +31,7 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
 
   // Post-create credentials display
   const [showCredentials, setShowCredentials] = useState(false);
-  const [credentials, setCredentials] = useState<{ token: string; app_id: string; app_secret: string } | null>(null);
+  const [credentials, setCredentials] = useState<{ token: string; app_secret: string } | null>(null);
 
   const clearError = (field: string) => {
     if (errorField === field) { setErrorField(null); setErrorMessage(null); }
@@ -97,7 +97,6 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
       // Show credentials dialog instead of closing
       setCredentials({
         token: res.token,
-        app_id: res.app_id,
         app_secret: res.app_secret,
       });
       setShowCredentials(true);
@@ -229,10 +228,6 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
                 <CopyableText text={credentials.token} variant="id" className="!text-zinc-300" />
               </div>
               <div className="bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-3 py-2">
-                <span className="text-[10px] text-zinc-600 font-medium block mb-1">App ID</span>
-                <CopyableText text={credentials.app_id} variant="id" className="!text-zinc-300" />
-              </div>
-              <div className="bg-zinc-900/50 rounded-lg border border-zinc-800/50 px-3 py-2">
                 <span className="text-[10px] text-zinc-600 font-medium block mb-1">App Secret</span>
                 <CopyableText text={credentials.app_secret} variant="id" className="!text-zinc-300" />
               </div>
@@ -242,7 +237,6 @@ export function RecruitDrawer({ isOpen, onClose, onSuccess }: RecruitDrawerProps
                 <p className="text-xs text-zinc-500 mb-2">{t("people.recruit.openclawSetupHint")}</p>
                 <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3 space-y-1.5">
                   {[
-                    `openclaw config set channels.magnus.appId "${credentials.app_id}"`,
                     `openclaw config set channels.magnus.appSecret "${credentials.app_secret}"`,
                     `openclaw config set channels.magnus.magnusUrl "https://your-magnus-server"`,
                   ].map((cmd, i) => (

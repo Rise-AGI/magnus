@@ -978,7 +978,6 @@ def blueprint(
   "people.recruit.connectorOpenClaw": { zh: "OpenClaw", en: "OpenClaw" },
   "people.recruit.openclawSetupHint": { zh: "在 OpenClaw 中运行以下命令以接入此 Agent：", en: "Run these commands in OpenClaw to connect this agent:" },
   "people.drawer.botCredentials": { zh: "Bot 凭证", en: "Bot Credentials" },
-  "people.drawer.appId": { zh: "App ID", en: "App ID" },
   "people.drawer.appSecret": { zh: "App Secret", en: "App Secret" },
   "people.drawer.refreshCredentials": { zh: "刷新凭证", en: "Refresh Credentials" },
   "people.drawer.refreshCredentialsTitle": { zh: "刷新 Bot 凭证", en: "Refresh Bot Credentials" },
