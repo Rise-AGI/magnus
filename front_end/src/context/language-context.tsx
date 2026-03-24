@@ -38,9 +38,7 @@ const translations = {
 
   // ===== Navigation =====
   "nav.explorer": { zh: "启新", en: "Explorer" },
-  "nav.milestones": { zh: "明迹", en: "Milestones" },
   "nav.people": { zh: "人事", en: "People" },
-  "nav.motions": { zh: "共决", en: "Motions" },
   "nav.jobs": { zh: "任务", en: "Jobs" },
   "nav.blueprints": { zh: "蓝图", en: "Blueprints" },
   "nav.services": { zh: "服务", en: "Services" },
