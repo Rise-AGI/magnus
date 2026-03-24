@@ -3035,7 +3035,7 @@ def _kill_port(port: int) -> bool:
                 parts = line.split()
                 try:
                     pid = int(parts[-1])
-                    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
                     return True
                 except (ValueError, IndexError):
                     continue
