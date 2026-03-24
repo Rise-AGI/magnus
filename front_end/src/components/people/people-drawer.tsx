@@ -336,7 +336,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
                 {/* BP / Svc */}
                 <div className="flex items-baseline gap-5">
                   <span className="text-sm font-medium text-zinc-300 shrink-0">{t("people.table.bpSvc")}</span>
-                  <span className="text-sm text-zinc-400 font-mono">{user.blueprint_count} / {user.service_count}</span>
+                  <span className="text-sm text-zinc-400 font-mono">{user.blueprint_count} / {user.service_count} / {user.skill_count}</span>
                 </div>
 
                 {/* Joined */}

@@ -78,6 +78,26 @@ def _get_occupied_headcount(db: Session, user_id: str) -> int:
     return int(child_count) + int(child_hc_sum)
 
 
+def _compute_depth_map(users: List[models.User]) -> Dict[str, int]:
+    """按 parent 链计算每个用户的层级深度（root=0）。"""
+    user_map = {u.id: u for u in users}
+    depth_map: Dict[str, int] = {}
+
+    def _depth(uid: str) -> int:
+        if uid in depth_map:
+            return depth_map[uid]
+        u = user_map.get(uid)
+        if not u or not u.parent_id or u.parent_id not in user_map:
+            depth_map[uid] = 0
+        else:
+            depth_map[uid] = _depth(u.parent_id) + 1
+        return depth_map[uid]
+
+    for u in users:
+        _depth(u.id)
+    return depth_map
+
+
 def _build_roster(
     db: Session,
 ) -> List[UserDetail]:
@@ -96,6 +116,12 @@ def _build_roster(
         .group_by(models.Service.owner_id)
         .all()
     }
+    skill_counts: Dict[str, int] = {
+        uid: cnt for uid, cnt in
+        db.query(models.Skill.user_id, func.count())
+        .group_by(models.Skill.user_id)
+        .all()
+    }
 
     user_map: Dict[str, models.User] = {u.id: u for u in all_users}
     children_map: Dict[str, List[str]] = {}
@@ -103,21 +129,25 @@ def _build_roster(
         if u.parent_id:
             children_map.setdefault(u.parent_id, []).append(u.id)
 
-    # 递归汇总 blueprint / service 计数
+    # 递归汇总 blueprint / service / skill 计数
     agg_bp: Dict[str, int] = {}
     agg_svc: Dict[str, int] = {}
+    agg_skill: Dict[str, int] = {}
 
     def _aggregate(uid: str) -> None:
         if uid in agg_bp:
             return
         own_bp = bp_counts.get(uid, 0)
         own_svc = svc_counts.get(uid, 0)
+        own_skill = skill_counts.get(uid, 0)
         for cid in children_map.get(uid, []):
             _aggregate(cid)
             own_bp += agg_bp[cid]
             own_svc += agg_svc[cid]
+            own_skill += agg_skill[cid]
         agg_bp[uid] = own_bp
         agg_svc[uid] = own_svc
+        agg_skill[uid] = own_skill
 
     for u in all_users:
         _aggregate(u.id)
@@ -156,28 +186,14 @@ def _build_roster(
             available_headcount=available,
             blueprint_count=agg_bp.get(u.id, 0),
             service_count=agg_svc.get(u.id, 0),
+            skill_count=agg_skill.get(u.id, 0),
             created_at=u.created_at,
         ))
 
-    # 排序：先按层级深度（BFS），同层内 human 在 agent 前，再按 name
-    depth_map: Dict[str, int] = {}
-
-    def _depth(uid: str) -> int:
-        if uid in depth_map:
-            return depth_map[uid]
-        u = user_map.get(uid)
-        if not u or not u.parent_id or u.parent_id not in user_map:
-            depth_map[uid] = 0
-        else:
-            depth_map[uid] = _depth(u.parent_id) + 1
-        return depth_map[uid]
-
-    for u in all_users:
-        _depth(u.id)
-
+    depth_map = _compute_depth_map(all_users)
     result.sort(key=lambda d: (
-        0 if d.user_type == "human" else 1,
         depth_map.get(d.id, 0),
+        0 if d.user_type == "human" else 1,
         d.name,
     ))
     return result
@@ -194,7 +210,9 @@ def get_users(
     _: models.User = Depends(get_current_user),
 ) -> List[UserInfo]:
     """轻量用户列表，保持向后兼容（jobs/blueprints/skills 筛选器在用）。"""
-    users = db.query(models.User).order_by(models.User.name).all()
+    users = db.query(models.User).all()
+    depth_map = _compute_depth_map(users)
+    users.sort(key=lambda u: (depth_map.get(u.id, 0), u.name))
     return [
         UserInfo(
             id=u.id,

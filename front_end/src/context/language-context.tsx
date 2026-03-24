@@ -958,7 +958,7 @@ def blueprint(
   "people.searchPlaceholder": { zh: "搜索成员...", en: "Search members..." },
   "people.table.member": { zh: "成员", en: "Member" },
   "people.table.leader": { zh: "直属上级", en: "+1 Leader" },
-  "people.table.bpSvc": { zh: "蓝图 / 服务", en: "Blueprints / Services" },
+  "people.table.bpSvc": { zh: "蓝图 / 服务 / 技能", en: "BP / Svc / Skill" },
   "people.table.headcount": { zh: "属额", en: "Headcount" },
   "people.role.admin": { zh: "管理员", en: "Admin" },
   "people.leader.void": { zh: "无", en: "void" },

@@ -80,7 +80,7 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex gap-3 text-xs text-zinc-500">
-                  <span>{t("people.table.bpSvc")}: {user.blueprint_count}/{user.service_count}</span>
+                  <span>{t("people.table.bpSvc")}: {user.blueprint_count}/{user.service_count}/{user.skill_count}</span>
                   <span>{t("people.table.headcount")}: {headcountDisplay(user)}</span>
                 </div>
                 <div className="flex gap-2">
@@ -170,7 +170,7 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
                     )}
                   </td>
                   <td className="px-6 py-4 text-center text-zinc-400 text-sm">
-                    {user.blueprint_count} / {user.service_count}
+                    {user.blueprint_count} / {user.service_count} / {user.skill_count}
                   </td>
                   <td className="px-6 py-4 text-center text-zinc-400 text-sm">
                     {headcountDisplay(user)}

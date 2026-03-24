@@ -22,6 +22,7 @@ export interface UserDetail {
   available_headcount?: number | null;
   blueprint_count: number;
   service_count: number;
+  skill_count: number;
   created_at: string;
 }
 

@@ -70,6 +70,7 @@ class UserDetail(BaseModel):
     available_headcount: Optional[int] = None
     blueprint_count: int = 0
     service_count: int = 0
+    skill_count: int = 0
     created_at: datetime
     class Config: from_attributes = True
 
