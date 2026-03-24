@@ -1,7 +1,7 @@
 // front_end/src/app/(main)/jobs/[id]/page.tsx
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
@@ -30,6 +30,17 @@ const ansiUp = new AnsiUp();
 function processCarriageReturns(text: string): string {
   return text.replaceAll("\r", "\n");
 }
+
+// Memo 组件：父组件因 job 轮询 re-render 时，不会重建 <pre> DOM 节点，保护文本选区
+const LogContent = React.memo(function LogContent({ logs }: { logs: string }) {
+  const html = useMemo(() => ansiUp.ansi_to_html(processCarriageReturns(logs)), [logs]);
+  return (
+    <pre
+      className="text-zinc-300 whitespace-pre-wrap break-all pb-10"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+});
 
 export default function JobDetailsPage() {
   const { user } = useAuth();
@@ -592,10 +603,7 @@ export default function JobDetailsPage() {
                   className="absolute inset-0 overflow-auto p-5 custom-scrollbar font-mono text-xs leading-5"
                 >
                   {logs ? (
-                    <pre
-                      className="text-zinc-300 whitespace-pre-wrap break-all pb-10"
-                      dangerouslySetInnerHTML={{ __html: ansiUp.ansi_to_html(processCarriageReturns(logs)) }}
-                    />
+                    <LogContent logs={logs} />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
                       <Terminal className="w-10 h-10 opacity-20" />
