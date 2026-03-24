@@ -509,7 +509,8 @@ export default function ConversationPage() {
             const nextMsg = idx < messages.length - 1 ? messages[idx + 1] : null;
             const isMe = msg.sender_id === currentUser?.id;
             const showTime = shouldShowTimestamp(msg, prevMsg);
-            const showAvatar = !isMe && isGroup && shouldShowAvatar(msg, nextMsg);
+            const showAvatar = !isMe && shouldShowAvatar(msg, nextMsg);
+            const showMyAvatar = isMe && shouldShowAvatar(msg, nextMsg);
             const showSenderName = !isMe && isGroup && (
               !prevMsg || prevMsg.sender_id !== msg.sender_id || shouldShowTimestamp(msg, prevMsg)
             );
@@ -527,9 +528,9 @@ export default function ConversationPage() {
                   </div>
                 )}
 
-                <div className={`flex mb-0.5 ${isMe ? "justify-end" : "justify-start"} ${isFirstInRun ? "mt-2" : ""}`}>
-                  {/* Left spacer / Avatar (others in group) */}
-                  {!isMe && isGroup && (
+                <div className={`flex mb-1 ${isMe ? "justify-end" : "justify-start"} ${isFirstInRun ? "mt-3" : ""}`}>
+                  {/* Left avatar (others) */}
+                  {!isMe && (
                     <div className="w-7 flex-shrink-0 mr-2 self-end mb-0.5">
                       {showAvatar ? (
                         <Avatar
@@ -572,6 +573,20 @@ export default function ConversationPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Right avatar (my messages) */}
+                  {isMe && (
+                    <div className="w-7 flex-shrink-0 ml-2 self-end mb-0.5">
+                      {showMyAvatar ? (
+                        <Avatar
+                          name={currentUser?.name}
+                          avatarUrl={currentUser?.avatar_url}
+                          userId={currentUser?.id}
+                          size="sm"
+                        />
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               </div>
             );
