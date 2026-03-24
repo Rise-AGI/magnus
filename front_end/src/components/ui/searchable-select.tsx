@@ -88,10 +88,10 @@ export function SearchableSelect({
                     <img
                       src={selectedOption.icon}
                       alt=""
-                      className="w-5 h-5 rounded-full object-cover border border-zinc-700/50"
+                      className="w-6 h-6 rounded-full object-cover border border-zinc-700/50"
                     />
                   ) : (
-                    <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold border border-indigo-500/30">
+                    <div className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold border border-indigo-500/30 overflow-hidden">
                       {selectedOption?.initials}
                     </div>
                   )}
@@ -159,10 +159,10 @@ export function SearchableSelect({
                     <img
                       src={opt.icon}
                       alt="icon"
-                      className="w-5 h-5 rounded-full object-cover border border-zinc-700/50 bg-zinc-800 flex-shrink-0"
+                      className="w-6 h-6 rounded-full object-cover border border-zinc-700/50 bg-zinc-800 flex-shrink-0"
                     />
                   ) : opt.initials ? (
-                    <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold border border-indigo-500/30 flex-shrink-0">
+                    <div className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold border border-indigo-500/30 flex-shrink-0 overflow-hidden">
                       {opt.initials}
                     </div>
                   ) : null}
