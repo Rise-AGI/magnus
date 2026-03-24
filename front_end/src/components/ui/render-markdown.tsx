@@ -168,33 +168,37 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
       const { children, className, node, ...rest } = props;
       const match = /language-(\w+)/.exec(className || "");
       const codeString = String(children).replace(/\n$/, "");
+      const isBlock = match || codeString.includes("\n");
 
-      return match ? (
-        <div className="relative group mt-4 rounded-lg overflow-hidden border border-zinc-800 max-w-full">
-          <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800">
-            <span className="text-xs font-mono text-zinc-400">
-              {match[1]}
-            </span>
-            <CopyableText
-              text="Copy"
-              copyValue={codeString}
-              variant="id"
-              className="text-zinc-500 hover:text-zinc-300"
-            />
+      if (isBlock) {
+        const language = match ? match[1] : "text";
+        return (
+          <div className="relative group mt-4 rounded-lg overflow-hidden border border-zinc-800 max-w-full">
+            <div className="flex items-center justify-end px-4 py-2 bg-zinc-900 border-b border-zinc-800">
+              {match && <span className="text-xs font-mono text-zinc-400 mr-auto">{match[1]}</span>}
+              <CopyableText
+                text="Copy"
+                copyValue={codeString}
+                variant="id"
+                className="text-zinc-500 hover:text-zinc-300"
+              />
+            </div>
+            <div className="custom-scrollbar overflow-x-auto">
+              <SyntaxHighlighter
+                {...rest}
+                PreTag="div"
+                language={language}
+                style={vscDarkPlus}
+                customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', background: '#09090b' }}
+              >
+                {codeString}
+              </SyntaxHighlighter>
+            </div>
           </div>
-          <div className="custom-scrollbar overflow-x-auto">
-            <SyntaxHighlighter
-              {...rest}
-              PreTag="div"
-              language={match[1]}
-              style={vscDarkPlus}
-              customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', background: '#09090b' }}
-            >
-              {codeString}
-            </SyntaxHighlighter>
-          </div>
-        </div>
-      ) : (
+        );
+      }
+
+      return (
         <code
           {...rest}
           className={cn(
