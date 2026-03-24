@@ -1,9 +1,7 @@
 // front_end/src/components/people/people-table.tsx
 "use client";
 
-import { useState } from "react";
-import { MessageCircle, RefreshCw, Trash2, Users, Loader2, Shield } from "lucide-react";
-import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { MessageCircle, RefreshCw, Trash2, Users, Loader2, Shield, UserPlus } from "lucide-react";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
@@ -16,13 +14,14 @@ interface PeopleTableProps {
   loading: boolean;
   onManage: (user: UserDetail) => void;
   onDelete: (user: UserDetail) => void;
+  onChat?: (user: UserDetail) => void;
+  onInviteToGroup?: (user: UserDetail) => void;
 }
 
 
-export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTableProps) {
+export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInviteToGroup }: PeopleTableProps) {
   const { t } = useLanguage();
   const { user: currentUser } = useAuth();
-  const [showComingSoon, setShowComingSoon] = useState(false);
   const isMobile = useIsMobile();
 
   const canManage = (row: UserDetail) =>
@@ -93,10 +92,16 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
                     </button>
                   )}
                   <button
-                    onClick={() => setShowComingSoon(true)}
+                    onClick={() => onChat?.(user)}
                     className="p-3 bg-blue-600/20 text-blue-400 rounded-lg border border-blue-500/30 active:scale-95"
                   >
                     <MessageCircle className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => onInviteToGroup?.(user)}
+                    className="p-3 bg-violet-600/20 text-violet-400 rounded-lg border border-violet-500/30 active:scale-95"
+                  >
+                    <UserPlus className="w-4 h-4" />
                   </button>
                   {user.user_type === "agent" && (
                     <button
@@ -111,16 +116,6 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
             </div>
           ))}
         </div>
-
-        <ConfirmationDialog
-          isOpen={showComingSoon}
-          onClose={() => setShowComingSoon(false)}
-          title={t("jobDetail.comingSoon")}
-          description={t("jobDetail.comingSoon")}
-          confirmText={t("common.ok")}
-          mode="alert"
-          variant="info"
-        />
       </>
     );
   }
@@ -186,13 +181,24 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
                           <RefreshCw className="w-4 h-4" />
                         </button>
                       )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setShowComingSoon(true); }}
-                        className="p-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 hover:text-blue-300 rounded-lg transition-colors border border-blue-500/30"
-                        title="Chat"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                      </button>
+                      {user.id !== currentUser?.id && (
+                        <>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onChat?.(user); }}
+                            className="p-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 hover:text-blue-300 rounded-lg transition-colors border border-blue-500/30 cursor-pointer"
+                            title={t("chat.directMessage")}
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onInviteToGroup?.(user); }}
+                            className="p-2 bg-violet-600/20 hover:bg-violet-600/40 text-violet-400 hover:text-violet-300 rounded-lg transition-colors border border-violet-500/30 cursor-pointer"
+                            title={t("chat.inviteToGroup")}
+                          >
+                            <UserPlus className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                       {user.user_type === "agent" && (
                         <button
                           onClick={(e) => { e.stopPropagation(); onDelete(user); }}
@@ -210,16 +216,6 @@ export function PeopleTable({ data, loading, onManage, onDelete }: PeopleTablePr
           </table>
         </div>
       </div>
-
-      <ConfirmationDialog
-        isOpen={showComingSoon}
-        onClose={() => setShowComingSoon(false)}
-        title={t("jobDetail.comingSoon")}
-        description={t("jobDetail.comingSoon")}
-        confirmText={t("common.ok")}
-        mode="alert"
-        variant="info"
-      />
     </>
   );
 }

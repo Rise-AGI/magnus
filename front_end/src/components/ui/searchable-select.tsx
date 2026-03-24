@@ -28,8 +28,15 @@ export function SearchableSelect({
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
+  const prevValueRef = useRef(value);
 
   useEffect(() => {
+    const valueChanged = prevValueRef.current !== value;
+    prevValueRef.current = value;
+
+    // When options load but value is still empty, don't wipe the user's typed query
+    if (!valueChanged && !value) return;
+
     const selectedOption = options.find(o => o.value === value);
     if (selectedOption) {
         setQuery(selectedOption.label);

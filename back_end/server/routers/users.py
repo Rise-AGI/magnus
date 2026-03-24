@@ -201,6 +201,24 @@ def _build_roster(
 
 # ─── 列表 ───────────────────────────────────────────────────────────────
 
+@router.get("/users/self", response_model=UserInfo)
+def get_bot_self(
+    app_secret: str,
+    db: Session = Depends(database.get_db),
+) -> UserInfo:
+    """供 OpenClaw 等外部插件通过 app_secret（实际为 MAGNUS_TOKEN）获取自身 user info。"""
+    user = db.query(models.User).filter(models.User.token == app_secret).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid app_secret")
+    return UserInfo(
+        id=user.id,
+        name=user.name,
+        avatar_url=user.avatar_url,
+        email=user.email,
+        is_admin=is_admin_user(user),
+    )
+
+
 @router.get(
     "/users",
     response_model=List[UserInfo],

@@ -12,10 +12,13 @@ from . import files
 from . import skills
 from . import images
 from . import users
+from . import chat
+from .ws_chat import ws_router
 
 
 __all__ = [
     "router",
+    "ws_router",
 ]
 
 
@@ -32,3 +35,4 @@ router.include_router(explore.router, tags=["Explore"])
 router.include_router(files.router, tags=["Files"])
 router.include_router(skills.router, tags=["Skills"])
 router.include_router(images.router, tags=["Images"])
+router.include_router(chat.router, tags=["Chat"])

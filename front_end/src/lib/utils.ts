@@ -103,6 +103,21 @@ function stableJsonStringify(obj: any): string {
   return '{' + parts.join(',') + '}';
 }
 
+export function formatRelativeTime(isoString: string | undefined | null): string {
+  if (!isoString) return "";
+  const date = new Date(isoString.endsWith("Z") ? isoString : `${isoString}Z`);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "now";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay}d`;
+  return formatBeijingTime(isoString);
+}
+
 export async function computeStableHash(data: any): Promise<string> {
   try {
     const str = stableJsonStringify(data);

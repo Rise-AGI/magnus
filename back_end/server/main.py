@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from library import *
 from .routers import *
+from .routers.ws_chat import ws_router
 from ._github_client import *
 from ._magnus_config import *
 from . import models
@@ -305,6 +306,7 @@ app.add_middleware(
 
 
 app.include_router(router, prefix="/api")
+app.include_router(ws_router)
 
 
 @app.get("/health")
