@@ -454,7 +454,7 @@ export default function ExplorerLayout({ children }: { children: React.ReactNode
   return (
     <div className="flex h-full w-full bg-zinc-950 overflow-hidden">
       {/* Desktop session sidebar */}
-      <div className="hidden md:flex w-56 flex-shrink-0 border-r border-zinc-800 flex-col">
+      <div className="hidden md:flex w-60 flex-shrink-0 border-r border-zinc-800 flex-col">
         {sessionListContent(false)}
       </div>
 
