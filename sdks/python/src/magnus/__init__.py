@@ -229,11 +229,11 @@ def save_blueprint(blueprint_id: str, title: str, description: str, code: str, t
 async def save_blueprint_async(blueprint_id: str, title: str, description: str, code: str, timeout: float = 10.0) -> Dict[str, Any]:
     return await default_client.save_blueprint_async(blueprint_id, title, description, code, timeout)
 
-def delete_blueprint(blueprint_id: str, timeout: float = 10.0) -> Dict[str, Any]:
-    return default_client.delete_blueprint(blueprint_id, timeout)
+def delete_blueprint(blueprint_id: str, timeout: float = 10.0) -> None:
+    default_client.delete_blueprint(blueprint_id, timeout)
 
-async def delete_blueprint_async(blueprint_id: str, timeout: float = 10.0) -> Dict[str, Any]:
-    return await default_client.delete_blueprint_async(blueprint_id, timeout)
+async def delete_blueprint_async(blueprint_id: str, timeout: float = 10.0) -> None:
+    await default_client.delete_blueprint_async(blueprint_id, timeout)
 
 def list_services(limit: int = 20, skip: int = 0, search: Optional[str] = None, active_only: bool = False, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_services(limit, skip, search, active_only, timeout)
@@ -265,11 +265,11 @@ def save_skill(skill_id: str, title: str, description: str, files: List[Dict[str
 async def save_skill_async(skill_id: str, title: str, description: str, files: List[Dict[str, str]], timeout: float = 10.0) -> Dict[str, Any]:
     return await default_client.save_skill_async(skill_id, title, description, files, timeout)
 
-def delete_skill(skill_id: str, timeout: float = 10.0) -> Dict[str, Any]:
-    return default_client.delete_skill(skill_id, timeout)
+def delete_skill(skill_id: str, timeout: float = 10.0) -> None:
+    default_client.delete_skill(skill_id, timeout)
 
-async def delete_skill_async(skill_id: str, timeout: float = 10.0) -> Dict[str, Any]:
-    return await default_client.delete_skill_async(skill_id, timeout)
+async def delete_skill_async(skill_id: str, timeout: float = 10.0) -> None:
+    await default_client.delete_skill_async(skill_id, timeout)
 
 def list_images(search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_images(search, timeout)
@@ -289,8 +289,8 @@ def refresh_image(image_id: int, timeout: float = 30.0) -> Dict[str, Any]:
 async def refresh_image_async(image_id: int, timeout: float = 30.0) -> Dict[str, Any]:
     return await default_client.refresh_image_async(image_id, timeout)
 
-def remove_image(image_id: int, timeout: float = 10.0) -> Dict[str, Any]:
-    return default_client.remove_image(image_id, timeout)
+def remove_image(image_id: int, timeout: float = 10.0) -> None:
+    default_client.remove_image(image_id, timeout)
 
-async def remove_image_async(image_id: int, timeout: float = 10.0) -> Dict[str, Any]:
-    return await default_client.remove_image_async(image_id, timeout)
+async def remove_image_async(image_id: int, timeout: float = 10.0) -> None:
+    await default_client.remove_image_async(image_id, timeout)

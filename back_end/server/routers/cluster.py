@@ -198,11 +198,11 @@ def get_cluster_stats(
     running_job_ids = {job.slurm_job_id for job in magnus_jobs_orm}
     pending_jobs_orm = db.query(models.Job).filter(
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
-        ~models.Job.slurm_job_id.in_(running_job_ids) if running_job_ids else True,
+        *([ ~models.Job.slurm_job_id.in_(running_job_ids) ] if running_job_ids else []),
     ).all()
     preparing_jobs_orm = db.query(models.Job).filter(
         models.Job.status == JobStatus.PREPARING,
-        ~models.Job.slurm_job_id.in_(running_job_ids) if running_job_ids else True,
+        *([ ~models.Job.slurm_job_id.in_(running_job_ids) ] if running_job_ids else []),
     ).all()
 
     # Pending/Queued/Paused 按调度器排序

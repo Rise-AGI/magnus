@@ -160,7 +160,10 @@ async def _refresh_all_user_info() -> None:
 
     with SessionLocal() as db:
         users = db.query(models.User).filter(models.User.feishu_open_id.isnot(None)).all()
-        user_map = {u.feishu_open_id: u for u in users}
+        user_map: Dict[str, models.User] = {}
+        for u in users:
+            if u.feishu_open_id is not None:
+                user_map[u.feishu_open_id] = u
 
     if not user_map:
         logger.info("用户信息刷新：数据库中无飞书用户，跳过")

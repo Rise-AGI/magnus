@@ -318,6 +318,7 @@ class ResourceManager:
         max_retries = 3
         timeout_seconds = 15
 
+        proc: Optional[asyncio.subprocess.Process] = None
         for attempt in range(max_retries):
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -329,8 +330,9 @@ class ResourceManager:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
             except asyncio.TimeoutError:
                 logger.warning(f"git ls-remote timed out ({timeout_seconds}s), attempt {attempt + 1}/{max_retries}: {repo_url}")
-                proc.kill()
-                await proc.wait()
+                if proc is not None:
+                    proc.kill()
+                    await proc.wait()
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                 continue

@@ -132,6 +132,7 @@ class MagnusScheduler:
 
         try:
             # Phase 1 — SLURM 调用（无 session）
+            assert self.slurm_manager is not None
             slurm_stats = self.slurm_manager.get_resource_snapshot()
 
             # Phase 2 — 写快照（短 session）
@@ -318,6 +319,7 @@ class MagnusScheduler:
         slurm_statuses = {}
         for job_id, slurm_job_id in queued_info + running_info:
             if slurm_job_id:
+                assert self.slurm_manager is not None
                 slurm_statuses[job_id] = self.slurm_manager.check_job_status(slurm_job_id)
 
         # Phase 3 — 批量更新（短 session）
@@ -563,6 +565,7 @@ class MagnusScheduler:
 
     def _handle_preemption_for_job(self, db: Session, job: Job):
         """为指定的 A 类任务处理抢占逻辑"""
+        assert self.slurm_manager is not None
         free_gpus = self.slurm_manager.get_cluster_free_gpus()
 
         if free_gpus >= job.gpu_count:
@@ -669,6 +672,7 @@ class MagnusScheduler:
             return False
 
         try:
+            assert self.slurm_manager is not None
             slurm_id = self.slurm_manager.submit_job_simple(
                 entry_command = f"python3 {wrapper_path}",
                 gpus = job.gpu_count,
@@ -806,7 +810,7 @@ class MagnusScheduler:
            container 侧硬编码 /root（Docker 容器默认以 root 运行）；
            不支持 $PWD、命令替换 $(...) 等动态值
         3. 纯 Python 实现，不依赖 bash，全平台行为一致
-        4. Windows 盘符（C:\）会被转为 Docker mount 格式（/c/），
+        4. Windows 盘符（C:\\）会被转为 Docker mount 格式（/c/），
            仅转换 host 侧；container 侧是容器内 Linux 路径，不转换
         """
         if not system_entry_command:
@@ -1068,6 +1072,7 @@ if __name__ == "__main__":
         """Kill SLURM job and mark as PAUSED for preemption"""
         if job.slurm_job_id:
             logger.info(f"Killing victim job {job.id} (SLURM: {job.slurm_job_id})")
+            assert self.slurm_manager is not None
             self.slurm_manager.kill_job(
                 job.slurm_job_id,
                 runner = job.runner if job.runner is not None else "magnus",
