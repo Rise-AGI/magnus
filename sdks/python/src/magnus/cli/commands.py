@@ -3277,11 +3277,11 @@ def local_start():
                 print_error("next build failed (see output above)")
                 raise typer.Exit(1)
 
-        # next start — 生产模式，日志写文件
+        # npm run start → server.mjs (Next.js + WS proxy)，生产模式，日志写文件
         print_msg("Starting frontend...")
         fe_log = open(LOCAL_FRONTEND_LOG, "w")
         frontend_proc = _popen_detached(
-            [npx_cmd, "next", "start", "-p", str(LOCAL_FRONT_END_PORT)],
+            [npm_cmd, "run", "start", "--", "-p", str(LOCAL_FRONT_END_PORT)],
             cwd=str(front_end_path),
             stdout=fe_log,
             stderr=fe_log,
