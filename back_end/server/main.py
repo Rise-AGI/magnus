@@ -302,7 +302,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins = ["*"],
+    allow_origins = magnus_config["server"]["cors_origins"],
     allow_methods = ["*"],
     allow_headers = ["*"],
 )

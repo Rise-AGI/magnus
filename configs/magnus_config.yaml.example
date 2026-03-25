@@ -9,6 +9,9 @@ server:
   # during development, back_end_port += 2
   # redirect_uri = f"{address}:{front_end_port}/auth/callback"
   root: /path/to/magnus-data
+  cors_origins:
+    - http://your-server-ip:3011       # production frontend
+    - http://localhost:3013            # dev frontend (port+2)
   # magnus_database_path = f"{server_root}/database"
   # sqlalchemy_database_url = f"sqlite:///{magnus_database_path}/magnus.db"
   # magnus_workspace_path = f"{server_root}/workspace"

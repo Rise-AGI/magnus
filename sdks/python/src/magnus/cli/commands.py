@@ -2956,6 +2956,8 @@ server:
   front_end_port: {LOCAL_FRONT_END_PORT}
   back_end_port: {LOCAL_BACK_END_PORT}
   root: {root_posix}
+  cors_origins:
+    - "*"
   database:
     pool_size: 4
     max_overflow: 8
