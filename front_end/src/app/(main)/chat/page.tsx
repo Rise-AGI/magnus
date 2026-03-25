@@ -7,6 +7,7 @@ import { client } from "@/lib/api";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { ColorAvatar } from "@/components/ui/color-avatar";
 import type { ConversationType, PagedConversationResponse } from "@/types/chat";
 
 interface UserOption {
@@ -15,17 +16,6 @@ interface UserOption {
   meta?: string;
   icon?: string;
   initials?: string;
-}
-
-const AVATAR_COLORS = [
-  "bg-blue-500", "bg-violet-500", "bg-emerald-500", "bg-amber-500",
-  "bg-rose-500", "bg-cyan-500", "bg-orange-500", "bg-teal-500",
-];
-
-function getAvatarColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) & 0xffffffff;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
 
@@ -200,20 +190,12 @@ export default function ChatPage() {
         {selectedMembers.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {selectedMembers.map((member) => {
-              const colorClass = getAvatarColor(member.value);
               return (
                 <div
                   key={member.value}
                   className="flex items-center gap-1.5 bg-zinc-800/80 border border-zinc-700/50 rounded-full pl-1 pr-2 py-1"
                 >
-                  {member.icon ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={member.icon} alt="" className="w-4 h-4 rounded-full object-cover" />
-                  ) : (
-                    <div className={`w-4 h-4 rounded-full ${colorClass} flex items-center justify-center text-[8px] font-bold text-white`}>
-                      {member.initials}
-                    </div>
-                  )}
+                  <ColorAvatar name={member.label} avatarUrl={member.icon || null} userId={member.value} size="xs" />
                   <span className="text-xs text-zinc-300">{member.label}</span>
                   {type === "group" && (
                     <button

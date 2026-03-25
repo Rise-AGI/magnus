@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowUp, Loader2, X, FileText, Image as ImageIcon } from "lucide-react";
 import { client } from "@/lib/api";
 import { API_BASE } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
-import { VoiceInputButton } from "@/components/ui/voice-input-button";
+import { MessageInput } from "@/components/ui/message-input";
 import type { ExplorerSession, Attachment } from "@/types/explore";
 
 
@@ -17,33 +16,6 @@ export default function ExplorePage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-
-  const adjustTextareaHeight = useCallback(() => {
-    const textarea = inputRef.current;
-    if (!textarea) return;
-
-    textarea.style.height = "auto";
-    const lineHeight = 24;
-    const maxLines = 8;
-    const maxHeight = lineHeight * maxLines;
-    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
-    textarea.style.height = `${newHeight}px`;
-  }, []);
-
-
-  useEffect(() => {
-    adjustTextareaHeight();
-  }, [input, adjustTextareaHeight]);
-
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !isSending) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
 
 
   const handlePaste = async (e: React.ClipboardEvent) => {
@@ -165,60 +137,16 @@ export default function ExplorePage() {
 
         {/* Input */}
         <div>
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {attachments.map((att, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
-                >
-                  {att.type === "image" ? (
-                    <ImageIcon className="w-4 h-4 text-zinc-400" />
-                  ) : (
-                    <FileText className="w-4 h-4 text-zinc-400" />
-                  )}
-                  <span className="text-zinc-300 max-w-32 truncate">{att.filename}</span>
-                  <button
-                    onClick={() => removeAttachment(idx)}
-                    className="text-zinc-500 hover:text-zinc-300"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="relative flex items-end bg-zinc-900 border border-zinc-700 rounded-xl focus-within:border-zinc-600 transition-colors">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
-              rows={1}
-              className="custom-scrollbar flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
-              style={{ minHeight: "48px", maxHeight: "192px" }}
-              disabled={isUploading || isSending}
-            />
-            <VoiceInputButton
-              onTranscript={(text) => setInput((prev) => prev + text)}
-              context={input}
-              disabled={isUploading || isSending}
-            />
-            <button
-              onClick={sendMessage}
-              disabled={(!input.trim() && attachments.length === 0) || isUploading || isSending}
-              className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-            >
-              {isUploading || isSending ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <ArrowUp className="w-5 h-5" />
-              )}
-            </button>
-          </div>
+          <MessageInput
+            value={input}
+            onChange={setInput}
+            onSend={sendMessage}
+            attachments={attachments}
+            onRemoveAttachment={removeAttachment}
+            onPaste={handlePaste}
+            disabled={isUploading || isSending}
+            placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
+          />
         </div>
       </div>
     </div>

@@ -8,28 +8,12 @@ import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { formatRelativeTime } from "@/lib/utils";
+import { ColorAvatar } from "@/components/ui/color-avatar";
 import type { ConversationListItem, PagedConversationResponse } from "@/types/chat";
 
 const PAGE_SIZE = 20;
 
-const AVATAR_COLORS = [
-  "bg-blue-500",
-  "bg-violet-500",
-  "bg-emerald-500",
-  "bg-amber-500",
-  "bg-rose-500",
-  "bg-cyan-500",
-  "bg-orange-500",
-  "bg-teal-500",
-];
-
-function getAvatarColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) & 0xffffffff;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
-function ConvAvatar({ conv, currentUserId }: { conv: ConversationListItem; currentUserId?: string }) {
+function ConvAvatar({ conv }: { conv: ConversationListItem }) {
   if (conv.type === "group") {
     return (
       <div className="w-9 h-9 rounded-full bg-zinc-700 border border-zinc-600/50 flex items-center justify-center flex-shrink-0">
@@ -38,22 +22,13 @@ function ConvAvatar({ conv, currentUserId }: { conv: ConversationListItem; curre
     );
   }
   const other = conv.other_user;
-  if (other?.avatar_url) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={other.avatar_url}
-        alt={other.name}
-        className="w-9 h-9 rounded-full object-cover flex-shrink-0 border border-zinc-700/50"
-      />
-    );
-  }
-  const name = other?.name || "?";
-  const colorClass = getAvatarColor(other?.id || conv.id);
   return (
-    <div className={`w-9 h-9 rounded-full ${colorClass} flex items-center justify-center flex-shrink-0 text-white text-sm font-semibold`}>
-      {name.charAt(0).toUpperCase()}
-    </div>
+    <ColorAvatar
+      name={other?.name || "?"}
+      avatarUrl={other?.avatar_url}
+      userId={other?.id || conv.id}
+      size="md"
+    />
   );
 }
 
@@ -182,7 +157,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                 }`}
                 onClick={() => router.push(`/chat/${conv.id}`)}
               >
-                <ConvAvatar conv={conv} currentUserId={currentUser?.id} />
+                <ConvAvatar conv={conv} />
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline justify-between gap-1">

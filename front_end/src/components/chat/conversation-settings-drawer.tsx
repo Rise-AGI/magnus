@@ -8,6 +8,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
+import { getAvatarColor } from "@/components/ui/color-avatar";
 import type { ConversationDetail, ConversationMember } from "@/types/chat";
 
 interface UserOption {
@@ -23,17 +24,6 @@ interface ConversationSettingsDrawerProps {
   onClose: () => void;
   conversation: ConversationDetail;
   onUpdate: (conv: ConversationDetail) => void;
-}
-
-const AVATAR_COLORS = [
-  "bg-blue-500", "bg-violet-500", "bg-emerald-500", "bg-amber-500",
-  "bg-rose-500", "bg-cyan-500", "bg-orange-500", "bg-teal-500",
-];
-
-function getAvatarColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) & 0xffffffff;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
 

@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowUp, ArrowDown, Loader2, Pencil, ChevronDown, ChevronRight, Square, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check, Paperclip } from "lucide-react";
+import { ArrowDown, Loader2, Pencil, ChevronDown, ChevronRight, X, FileText, Image as ImageIcon, ThumbsUp, ThumbsDown, RotateCcw, Copy, Check } from "lucide-react";
 import { client } from "@/lib/api";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { NotFound } from "@/components/ui/not-found";
-import { VoiceInputButton } from "@/components/ui/voice-input-button";
+import { MessageInput } from "@/components/ui/message-input";
 import type { ExplorerSessionWithMessages, ExplorerMessage, Attachment } from "@/types/explore";
 import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
@@ -390,8 +390,6 @@ export default function SessionPage() {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isUserNearBottomRef = useRef(true);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const pendingMessageProcessedRef = useRef(false);
   const currentUserMessageRef = useRef<ExplorerMessage | null>(null);
@@ -574,24 +572,6 @@ export default function SessionPage() {
   }, []);
 
 
-  const adjustTextareaHeight = useCallback(() => {
-    const textarea = inputRef.current;
-    if (!textarea) return;
-
-    textarea.style.height = "auto";
-    const lineHeight = 24;
-    const maxLines = 8;
-    const maxHeight = lineHeight * maxLines;
-    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
-    textarea.style.height = `${newHeight}px`;
-  }, []);
-
-
-  useEffect(() => {
-    adjustTextareaHeight();
-  }, [input, adjustTextareaHeight]);
-
-
   const uploadFile = async (file: File): Promise<Attachment | null> => {
     const formData = new FormData();
     formData.append("file", file);
@@ -645,18 +625,17 @@ export default function SessionPage() {
 
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
     setIsUploading(true);
-    for (let i = 0; i < files.length; i++) {
-      const attachment = await uploadFile(files[i]);
+    for (const file of files) {
+      const attachment = await uploadFile(file);
       if (attachment) {
         setAttachments((prev) => [...prev, attachment]);
       }
     }
     setIsUploading(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
 
@@ -833,20 +812,6 @@ export default function SessionPage() {
   };
 
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Escape" && isStreaming) {
-      e.preventDefault();
-      stopStreaming();
-    } else if (e.key === "Enter" && !e.shiftKey && !isStreaming) {
-      // On touch devices, Enter = newline (no hardware keyboard typically)
-      const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-      if (isTouchDevice) return;
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-
   const startEditingMessage = (index: number, content: string) => {
     setEditingMessageIndex(index);
     setEditingMessageContent(content);
@@ -903,60 +868,17 @@ export default function SessionPage() {
 
             {/* Input */}
             <div className="mb-16">
-              {attachments.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {attachments.map((att, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
-                    >
-                      {att.type === "image" ? (
-                        <ImageIcon className="w-4 h-4 text-zinc-400" />
-                      ) : (
-                        <FileText className="w-4 h-4 text-zinc-400" />
-                      )}
-                      <span className="text-zinc-300 max-w-32 truncate">{att.filename}</span>
-                      <button
-                        onClick={() => removeAttachment(idx)}
-                        className="text-zinc-500 hover:text-zinc-300"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="relative flex items-end bg-zinc-900 border border-zinc-700 rounded-xl focus-within:border-zinc-600 transition-colors">
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  onPaste={handlePaste}
-                  placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
-                  rows={1}
-                  className="custom-scrollbar flex-1 bg-transparent text-base md:text-sm text-zinc-100 placeholder-zinc-500 px-4 py-3 resize-none focus:outline-none overflow-y-auto"
-                  style={{ minHeight: "48px", maxHeight: "192px" }}
-                  disabled={isUploading}
-                />
-                <VoiceInputButton
-                  onTranscript={(text) => setInput((prev) => prev + text)}
-                  context={input}
-                  disabled={isUploading}
-                />
-                <button
-                  onClick={() => sendMessage()}
-                  disabled={(!input.trim() && attachments.length === 0) || isUploading}
-                  className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors active:scale-95"
-                >
-                  {isUploading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <ArrowUp className="w-5 h-5" />
-                  )}
-                </button>
-              </div>
+              <MessageInput
+                value={input}
+                onChange={setInput}
+                onSend={() => sendMessage()}
+                attachments={attachments}
+                onRemoveAttachment={removeAttachment}
+                onPaste={handlePaste}
+                onFileSelect={handleFileSelect}
+                disabled={isUploading}
+                placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
+              />
             </div>
           </div>
         </div>
@@ -1119,93 +1041,23 @@ export default function SessionPage() {
         )}
 
         <div className="max-w-3xl mx-auto">
-          {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept="image/*,.txt,.md,.py,.json,.csv,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.tsx,.jsx"
-            className="hidden"
-            onChange={handleFileSelect}
+          <MessageInput
+            value={input}
+            onChange={setInput}
+            onSend={() => sendMessage()}
+            attachments={attachments}
+            onRemoveAttachment={removeAttachment}
+            onPaste={handlePaste}
+            onFileSelect={handleFileSelect}
+            isStreaming={isStreaming}
+            onStopStreaming={stopStreaming}
+            voiceContext={
+              (session?.messages.slice(-6).map((m) => m.content).join("\n") || "") +
+              (input ? "\n" + input : "")
+            }
+            disabled={isUploading}
+            placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
           />
-
-          {/* Attachments Preview */}
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {attachments.map((att, index) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm"
-                >
-                  {att.type === "image" ? (
-                    <ImageIcon className="w-4 h-4 text-zinc-400" />
-                  ) : (
-                    <FileText className="w-4 h-4 text-zinc-400" />
-                  )}
-                  <span className="text-zinc-300 max-w-32 truncate">{att.filename}</span>
-                  <button
-                    onClick={() => removeAttachment(index)}
-                    className="text-zinc-500 hover:text-zinc-300 active:scale-95"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="relative flex items-end bg-zinc-900 border border-zinc-700 rounded-xl focus-within:border-zinc-600 transition-colors">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="m-2 mr-0 p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50 active:scale-95"
-              title={t("explorer.inputPlaceholder")}
-            >
-              <Paperclip className="w-4 h-4" />
-            </button>
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
-              rows={1}
-              className="custom-scrollbar flex-1 bg-transparent text-base md:text-sm text-zinc-100 placeholder-zinc-500 px-3 py-3 resize-none focus:outline-none overflow-y-auto"
-              style={{ minHeight: "48px", maxHeight: "192px" }}
-              disabled={isUploading}
-            />
-            {isStreaming ? (
-              <button
-                onClick={stopStreaming}
-                className="m-2 p-2 bg-red-900/30 hover:bg-red-800/40 text-red-400 rounded-lg transition-colors active:scale-95"
-              >
-                <Square className="w-3.5 h-3.5 fill-current" />
-              </button>
-            ) : (
-              <>
-                <VoiceInputButton
-                  onTranscript={(text) => setInput((prev) => prev + text)}
-                  context={
-                    (session?.messages.slice(-6).map((m) => m.content).join("\n") || "") +
-                    (input ? "\n" + input : "")
-                  }
-                  disabled={isUploading}
-                />
-                <button
-                  onClick={() => sendMessage()}
-                  disabled={(!input.trim() && attachments.length === 0) || isUploading}
-                  className="m-2 ml-0 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors active:scale-95"
-                >
-                  {isUploading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <ArrowUp className="w-5 h-5" />
-                  )}
-                </button>
-              </>
-            )}
-          </div>
         </div>
       </div>
     </>
