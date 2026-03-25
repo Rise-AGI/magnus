@@ -129,7 +129,7 @@ wheels = [
 
 [[package]]
 name = "magnus-sdk"
-version = "0.7.7"
+version = "0.7.8"
 source = { editable = "." }
 dependencies = [
     { name = "httpx", extra = ["socks"] },
