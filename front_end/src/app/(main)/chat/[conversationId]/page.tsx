@@ -386,10 +386,9 @@ export default function ConversationPage() {
     return new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() > TIME_GAP_MS;
   };
 
-  // Whether to show avatar for a message (first in consecutive run from same sender)
-  const shouldShowAvatar = (msg: OptimisticChatMessage, nextMsg: OptimisticChatMessage | null): boolean => {
-    if (!nextMsg) return true;
-    return nextMsg.sender_id !== msg.sender_id;
+  const shouldShowAvatar = (msg: OptimisticChatMessage, prevMsg: OptimisticChatMessage | null): boolean => {
+    if (!prevMsg) return true;
+    return prevMsg.sender_id !== msg.sender_id || shouldShowTimestamp(msg, prevMsg);
   };
 
   const isGroup = conversation?.type === "group";
@@ -466,11 +465,10 @@ export default function ConversationPage() {
 
           {messages.map((msg, idx) => {
             const prevMsg = idx > 0 ? messages[idx - 1] : null;
-            const nextMsg = idx < messages.length - 1 ? messages[idx + 1] : null;
             const isMe = msg.sender_id === currentUser?.id;
             const showTime = shouldShowTimestamp(msg, prevMsg);
-            const showAvatar = !isMe && shouldShowAvatar(msg, nextMsg);
-            const showMyAvatar = isMe && shouldShowAvatar(msg, nextMsg);
+            const showAvatar = !isMe && shouldShowAvatar(msg, prevMsg);
+            const showMyAvatar = isMe && shouldShowAvatar(msg, prevMsg);
             const showSenderName = !isMe && isGroup && (
               !prevMsg || prevMsg.sender_id !== msg.sender_id || shouldShowTimestamp(msg, prevMsg)
             );
@@ -491,7 +489,7 @@ export default function ConversationPage() {
                 <div className={`flex mb-1 ${isMe ? "justify-end" : "justify-start"} ${isFirstInRun ? "mt-3" : ""}`}>
                   {/* Left avatar (others) */}
                   {!isMe && (
-                    <div className="w-7 flex-shrink-0 mr-2 self-end mb-0.5">
+                    <div className="w-7 flex-shrink-0 mr-2 self-start mt-0.5">
                       {showAvatar ? (
                         <ColorAvatar
                           name={msg.sender?.name}
@@ -536,7 +534,7 @@ export default function ConversationPage() {
 
                   {/* Right avatar (my messages) */}
                   {isMe && (
-                    <div className="w-7 flex-shrink-0 ml-2 self-end mb-0.5">
+                    <div className="w-7 flex-shrink-0 ml-2 self-start mt-0.5">
                       {showMyAvatar ? (
                         <ColorAvatar
                           name={currentUser?.name}
