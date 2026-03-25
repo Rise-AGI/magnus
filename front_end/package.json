@@ -7,7 +7,7 @@
     "clean": "rimraf .next",
     "build": "export MAGNUS_DELIVER=TRUE && npm run clean && next build",
     "deliver": "python3 ../scripts/deploy.py",
-    "start": "next start",
+    "start": "node server.mjs",
     "lint": "next lint"
   },
   "dependencies": {

@@ -127,10 +127,10 @@ export default function ConversationPage() {
     if (!token) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const yamlBackEndPort = "8019";
-    const backendPort = process.env.NEXT_PUBLIC_BACK_END_PORT ?? yamlBackEndPort;
-    const host = window.location.hostname;
-    const wsUrl = `${protocol}//${host}:${backendPort}/ws/chat?token=${encodeURIComponent(token)}`;
+    const wsHost = process.env.NODE_ENV === "development"
+      ? `${window.location.hostname}:${process.env.NEXT_PUBLIC_BACK_END_PORT}`
+      : window.location.host;
+    const wsUrl = `${protocol}//${wsHost}/ws/chat?token=${encodeURIComponent(token)}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

@@ -6,7 +6,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 function getBackendPort(): string {
-  return process.env.NEXT_PUBLIC_BACK_END_PORT ?? "8019";
+  const port = process.env.NEXT_PUBLIC_BACK_END_PORT;
+  if (!port) throw new Error("❌ NEXT_PUBLIC_BACK_END_PORT is not set");
+  return port;
 }
 
 const BACKEND_BASE = `http://127.0.0.1:${getBackendPort()}`;
