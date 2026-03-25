@@ -63,6 +63,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(server, "front_end_port", int)
     _check_key(server, "back_end_port", int)
     _check_key(server, "root", str)
+    _check_key(server, "cors_origins", list)
     _check_key(server, "database", dict)
     _check_key(server, "auth", dict)
     _check_key(server, "scheduler", dict)
@@ -72,6 +73,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     expected_server_keys = {
         "address", "front_end_port", "back_end_port", "root",
         "database", "auth", "scheduler", "service_proxy", "file_custody",
+        "cors_origins",
     }
     if not is_local:
         _check_key(server, "github_client", dict)
