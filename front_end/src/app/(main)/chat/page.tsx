@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MessageCircle, Users, X, Loader2 } from "lucide-react";
 import { client } from "@/lib/api";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import type { ConversationType } from "@/types/chat";
+import type { ConversationType, PagedConversationResponse } from "@/types/chat";
 
 interface UserOption {
   label: string;
@@ -31,8 +31,27 @@ function getAvatarColor(id: string): string {
 
 export default function ChatPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useLanguage();
   const { user: currentUser } = useAuth();
+
+  // UX 设计：点击 sidebar "消息" → /chat → 自动跳转到最近会话；
+  //         点击 "+" → /chat?new → 显示新建会话表单
+  const isNewMode = searchParams.has("new");
+  const [redirectChecked, setRedirectChecked] = useState(isNewMode);
+
+  useEffect(() => {
+    if (isNewMode) return;
+    client("/api/conversations?page=1&page_size=1")
+      .then((data: PagedConversationResponse) => {
+        if (data.items.length > 0) {
+          router.replace(`/chat/${data.items[0].id}`);
+        } else {
+          setRedirectChecked(true);
+        }
+      })
+      .catch(() => setRedirectChecked(true));
+  }, [isNewMode, router]);
 
   const [type, setType] = useState<ConversationType>("p2p");
   const [groupName, setGroupName] = useState("");
@@ -103,6 +122,14 @@ export default function ChatPage() {
   );
 
   const canCreate = selectedMembers.length > 0 && (type === "p2p" || type === "group");
+
+  if (!redirectChecked) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 className="w-5 h-5 animate-spin text-zinc-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex items-center justify-center p-6">

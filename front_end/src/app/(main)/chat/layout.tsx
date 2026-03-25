@@ -150,7 +150,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
         <div className="px-4 py-3.5 flex items-center justify-between border-b border-zinc-800/50">
           <h3 className="text-sm font-semibold text-zinc-300 tracking-wide">{t("chat.conversations")}</h3>
           <button
-            onClick={() => router.push("/chat")}
+            onClick={() => router.push("/chat?new")}
             title={t("chat.newConversation")}
             className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
           >
