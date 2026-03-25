@@ -258,6 +258,7 @@ const translations = {
   "explorer.tagline2": { zh: "赋能科研", en: "Discoveries" },
   "explorer.uploading": { zh: "上传中...", en: "Uploading..." },
   "explorer.inputPlaceholder": { zh: "输入消息，可上传图片和文件", en: "Enter message, can upload images and files" },
+  "explorer.newSessionPlaceholder": { zh: "输入消息，会话内可上传图片和文件", en: "Enter message, upload images & files in session" },
   "explorer.sessions": { zh: "历史对话", en: "Explorer Sessions" },
   "explorer.noSessions": { zh: "暂无会话", en: "No sessions yet" },
   "explorer.shareSession": { zh: "分享对话", en: "Share Session" },

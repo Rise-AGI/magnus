@@ -145,7 +145,7 @@ export default function ExplorePage() {
             onRemoveAttachment={removeAttachment}
             onPaste={handlePaste}
             disabled={isUploading || isSending}
-            placeholder={isUploading ? t("explorer.uploading") : t("explorer.inputPlaceholder")}
+            placeholder={isUploading ? t("explorer.uploading") : t("explorer.newSessionPlaceholder")}
           />
         </div>
       </div>
