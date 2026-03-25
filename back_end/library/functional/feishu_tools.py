@@ -8,7 +8,7 @@ __all__ = [
 
 class FeishuClient:
 
-    TOKEN_CACHE_TTL = 6000  # 100 分钟，飞书 tenant_access_token TTL 为 2 小时
+    TOKEN_CACHE_MARGIN = 600  # 缓存提前 10 分钟过期，留安全余量
 
     def __init__(
         self,
@@ -21,18 +21,19 @@ class FeishuClient:
         self.host = "https://open.feishu.cn"
         self.verbose = verbose
         self._cached_token: str = ""
-        self._cached_token_at: float = 0
+        self._cached_token_expires_at: float = 0  # monotonic 时刻，token 过期时刻
 
 
     async def _get_tenant_access_token(
         self,
-        client: httpx.AsyncClient
+        client: httpx.AsyncClient,
     )-> str:
         """
         获取应用维度的凭证 (Tenant Access Token)，带本地缓存。
+        缓存 TTL 基于飞书返回的 expire 字段动态设置，留 TOKEN_CACHE_MARGIN 余量。
         """
         now = time.monotonic()
-        if self._cached_token and now - self._cached_token_at < self.TOKEN_CACHE_TTL:
+        if self._cached_token and now < self._cached_token_expires_at:
             return self._cached_token
 
         url = f"{self.host}/open-apis/auth/v3/tenant_access_token/internal"
@@ -51,8 +52,9 @@ class FeishuClient:
                 raise RuntimeError(f"Step 1 Failed (App Token): {data}")
 
             token = data["tenant_access_token"]
+            expire = int(data.get("expire", 7200))
             self._cached_token = token
-            self._cached_token_at = time.monotonic()
+            self._cached_token_expires_at = time.monotonic() + expire - self.TOKEN_CACHE_MARGIN
             return token
 
         except Exception as e:
@@ -60,15 +62,19 @@ class FeishuClient:
             raise e
 
 
+    def _invalidate_token_cache(self) -> None:
+        self._cached_token = ""
+        self._cached_token_expires_at = 0
+
     async def get_feishu_user(
-        self, 
+        self,
         code: str,
     )-> Dict[str, Any]:
         """
         标准三步走流程：Code -> User Info
         """
         async with httpx.AsyncClient() as client:
-            
+
             app_token = await self._get_tenant_access_token(client)
             url_step2 = f"{self.host}/open-apis/authen/v1/access_token"
             headers_app = {
@@ -83,7 +89,16 @@ class FeishuClient:
             if self.verbose: print(f"📡 [Feishu Step 2] Exchanging Code for User Token...")
             resp_step2 = await client.post(url_step2, json=payload_step2, headers=headers_app)
             data_step2 = resp_step2.json()
-            
+
+            if data_step2.get("code") != 0:
+                # 兜底：若 token 被飞书侧失效，清缓存重试一次
+                if "invalid" in str(data_step2.get("msg", "")).lower() and "token" in str(data_step2.get("msg", "")).lower():
+                    self._invalidate_token_cache()
+                    app_token = await self._get_tenant_access_token(client)
+                    headers_app["Authorization"] = f"Bearer {app_token}"
+                    resp_step2 = await client.post(url_step2, json=payload_step2, headers=headers_app)
+                    data_step2 = resp_step2.json()
+
             if data_step2.get("code") != 0:
                 if self.verbose: print(f"📩 [Feishu Step 2] Response: {data_step2}")
                 raise RuntimeError(f"Step 2 Failed (User Token): {data_step2.get('msg')}")
