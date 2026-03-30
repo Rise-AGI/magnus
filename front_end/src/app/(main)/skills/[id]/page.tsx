@@ -158,10 +158,12 @@ export default function SkillDetailPage() {
           </Link>
         );
       }
+      const isRelative = href && !href.match(/^(https?:\/\/|#|mailto:)/);
       return (
         <a
-          href={href}
-          className="font-medium underline underline-offset-4 text-blue-400 hover:text-blue-300 transition-all"
+          href={isRelative ? undefined : href}
+          className={`font-medium underline underline-offset-4 text-blue-400 hover:text-blue-300 transition-all${isRelative ? " cursor-pointer" : ""}`}
+          onClick={isRelative ? (e: React.MouseEvent) => { e.preventDefault(); handleFileLink(href); } : undefined}
           {...props}
         >
           {children}
@@ -177,7 +179,7 @@ export default function SkillDetailPage() {
       // eslint-disable-next-line @next/next/no-img-element
       return <img src={imgSrc} alt={alt || ""} className={`rounded-md border border-zinc-800 bg-zinc-950 max-w-full h-auto ${className || ""}`} {...props} />;
     },
-  }), [skillId]);
+  }), [skillId, handleFileLink]);
 
   if (loading) return <div className="flex h-[50vh] items-center justify-center text-zinc-500"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
@@ -364,7 +366,7 @@ export default function SkillDetailPage() {
                     />
                   </div>
                 ) : isMarkdown ? (
-                  <RenderMarkdown content={activeFile.content} onLinkClick={handleFileLink} components={magnusLinkComponents} />
+                  <RenderMarkdown content={activeFile.content} components={magnusLinkComponents} />
                 ) : (
                   <div className="bg-[#1e1e1e] rounded-lg overflow-hidden min-h-full">
                     <CodeEditor
