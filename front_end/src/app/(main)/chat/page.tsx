@@ -7,7 +7,7 @@ import { client } from "@/lib/api";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { ColorAvatar } from "@/components/ui/color-avatar";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import type { ConversationType, PagedConversationResponse } from "@/types/chat";
 
 interface UserOption {
@@ -60,7 +60,7 @@ export default function ChatPage() {
             value: u.id,
             meta: u.email || undefined,
             icon: u.avatar_url || undefined,
-            initials: u.name.substring(0, 1).toUpperCase(),
+            initials: u.name.substring(0, 2).toUpperCase(),
           }))
       );
     }).catch(() => {});
@@ -195,7 +195,7 @@ export default function ChatPage() {
                   key={member.value}
                   className="flex items-center gap-1.5 bg-zinc-800/80 border border-zinc-700/50 rounded-full pl-1 pr-2 py-1"
                 >
-                  <ColorAvatar name={member.label} avatarUrl={member.icon || null} userId={member.value} size="xs" />
+                  <AvatarCircle user={{ name: member.label, avatar_url: member.icon || null }} size="xs" />
                   <span className="text-xs text-zinc-300">{member.label}</span>
                   {type === "group" && (
                     <button

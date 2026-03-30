@@ -8,7 +8,7 @@ import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { formatRelativeTime } from "@/lib/utils";
-import { ColorAvatar } from "@/components/ui/color-avatar";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import type { ConversationListItem, PagedConversationResponse } from "@/types/chat";
 
 const PAGE_SIZE = 20;
@@ -16,18 +16,16 @@ const PAGE_SIZE = 20;
 function ConvAvatar({ conv }: { conv: ConversationListItem }) {
   if (conv.type === "group") {
     return (
-      <div className="w-9 h-9 rounded-full bg-zinc-700 border border-zinc-600/50 flex items-center justify-center flex-shrink-0">
+      <div className="w-8 h-8 rounded-full bg-zinc-700 border border-zinc-600/50 flex items-center justify-center flex-shrink-0">
         <Users className="w-4 h-4 text-zinc-400" />
       </div>
     );
   }
   const other = conv.other_user;
   return (
-    <ColorAvatar
-      name={other?.name || "?"}
-      avatarUrl={other?.avatar_url}
-      userId={other?.id || conv.id}
-      size="md"
+    <AvatarCircle
+      user={other ? { name: other.name || "?", avatar_url: other.avatar_url } : null}
+      size="sm"
     />
   );
 }

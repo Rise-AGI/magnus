@@ -8,7 +8,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
-import { getAvatarColor } from "@/components/ui/color-avatar";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import type { ConversationDetail, ConversationMember } from "@/types/chat";
 
 interface UserOption {
@@ -87,7 +87,7 @@ export function ConversationSettingsDrawer({
             value: u.id,
             meta: u.email || undefined,
             icon: u.avatar_url || undefined,
-            initials: u.name.substring(0, 1).toUpperCase(),
+            initials: u.name.substring(0, 2).toUpperCase(),
           }))
       );
     }).catch(() => {});
@@ -132,7 +132,7 @@ export function ConversationSettingsDrawer({
             label: removed.user!.name,
             value: removed.user_id,
             icon: removed.user!.avatar_url || undefined,
-            initials: removed.user!.name.substring(0, 1).toUpperCase(),
+            initials: removed.user!.name.substring(0, 2).toUpperCase(),
           },
         ]);
       }
@@ -227,7 +227,6 @@ export function ConversationSettingsDrawer({
             <div className="space-y-1">
               {conversation.members.map((member) => {
                 const name = member.user?.name || "?";
-                const colorClass = getAvatarColor(member.user_id);
                 const canRemove = isOwner && member.role !== "owner";
 
                 return (
@@ -235,21 +234,7 @@ export function ConversationSettingsDrawer({
                     key={member.user_id}
                     className="flex items-center gap-3 px-3 py-2 rounded-lg bg-zinc-900/60 border border-zinc-800/50 group hover:border-zinc-700/50 transition-colors"
                   >
-                    {/* Avatar */}
-                    <div className={`w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center ${member.user?.avatar_url ? "" : colorClass}`}>
-                      {member.user?.avatar_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={member.user.avatar_url}
-                          alt={name}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <span className="text-xs font-bold text-white">
-                          {name.charAt(0).toUpperCase()}
-                        </span>
-                      )}
-                    </div>
+                    <AvatarCircle user={member.user ? { name, avatar_url: member.user.avatar_url } : null} size="sm" />
 
                     {/* Name */}
                     <div className="flex-1 min-w-0">
