@@ -9,7 +9,7 @@ import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { formatBeijingTime } from "@/lib/utils";
 import { ConversationSettingsDrawer } from "@/components/chat/conversation-settings-drawer";
-import { ColorAvatar } from "@/components/ui/color-avatar";
+import { AvatarCircle } from "@/components/ui/user-avatar";
 import type { ConversationDetail, PagedMessageResponse, OptimisticChatMessage } from "@/types/chat";
 
 const MESSAGE_PAGE_SIZE = 50;
@@ -491,12 +491,7 @@ export default function ConversationPage() {
                   {!isMe && (
                     <div className="w-7 flex-shrink-0 mr-2 self-start mt-0.5">
                       {showAvatar ? (
-                        <ColorAvatar
-                          name={msg.sender?.name}
-                          avatarUrl={msg.sender?.avatar_url}
-                          userId={msg.sender_id}
-                          size="sm"
-                        />
+                        <AvatarCircle user={msg.sender} size="xs" />
                       ) : null}
                     </div>
                   )}
@@ -536,12 +531,7 @@ export default function ConversationPage() {
                   {isMe && (
                     <div className="w-7 flex-shrink-0 ml-2 self-start mt-0.5">
                       {showMyAvatar ? (
-                        <ColorAvatar
-                          name={currentUser?.name}
-                          avatarUrl={currentUser?.avatar_url}
-                          userId={currentUser?.id}
-                          size="sm"
-                        />
+                        <AvatarCircle user={currentUser} size="xs" />
                       ) : null}
                     </div>
                   )}
