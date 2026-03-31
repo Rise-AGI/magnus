@@ -121,7 +121,7 @@ def register(
 
     invite = db.query(models.InviteCode).filter(
         models.InviteCode.code == body.invite_code,
-        models.InviteCode.is_active == True,
+        models.InviteCode.is_active.is_(True),
     ).first()
 
     if not invite:
