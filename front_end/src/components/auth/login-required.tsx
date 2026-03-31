@@ -5,10 +5,19 @@ import { Lock, LogIn } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { IS_LOCAL_MODE } from "@/lib/config";
+import { AuthForm } from "./auth-form";
 
 export function LoginRequired() {
   const { login } = useAuth();
   const { t } = useLanguage();
+
+  if (!IS_LOCAL_MODE) {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center min-h-[60vh]">
+        <AuthForm />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full w-full flex flex-col items-center justify-center min-h-[60vh] text-center">
@@ -22,7 +31,7 @@ export function LoginRequired() {
 
       <p className="text-zinc-500 max-w-sm mb-8 text-sm leading-relaxed">
         {t("auth.requiredDesc")} <br/>
-        {IS_LOCAL_MODE ? t("auth.pleaseLoginLocal") : t("auth.pleaseLogin")}
+        {t("auth.pleaseLoginLocal")}
       </p>
 
       <button
@@ -30,7 +39,7 @@ export function LoginRequired() {
         className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-[0.98]"
       >
         <LogIn className="w-4 h-4" />
-        {IS_LOCAL_MODE ? t("auth.signIn") : t("auth.signInWithFeishu")}
+        {t("auth.signIn")}
       </button>
     </div>
   );

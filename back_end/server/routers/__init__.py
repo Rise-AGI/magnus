@@ -13,6 +13,7 @@ from . import skills
 from . import images
 from . import users
 from . import chat
+from . import invite
 from .ws_chat import ws_router
 
 
@@ -36,3 +37,4 @@ router.include_router(files.router, tags=["Files"])
 router.include_router(skills.router, tags=["Skills"])
 router.include_router(images.router, tags=["Images"])
 router.include_router(chat.router, tags=["Chat"])
+router.include_router(invite.router, tags=["Invite"])

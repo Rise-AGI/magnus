@@ -105,6 +105,14 @@ def run_migrations()-> None:
             conn.commit()
         logger.info("✅ Migration completed.")
 
+    user_columns = [col["name"] for col in inspector.get_columns("users")]
+    if "password_hash" not in user_columns:
+        logger.info("🔧 Adding password_hash column to users table...")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
+            conn.commit()
+        logger.info("✅ Migration completed: users.password_hash")
+
 
 run_migrations()
 

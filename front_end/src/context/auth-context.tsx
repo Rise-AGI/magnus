@@ -12,6 +12,8 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   login: () => void;
+  loginWithPassword: (name: string, password: string) => Promise<void>;
+  register: (inviteCode: string, name: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -105,6 +107,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = FEISHU_AUTH_URL;
   };
 
+  const loginWithPassword = async (name: string, password: string) => {
+    const resp = await fetch(`${API_BASE}/api/auth/password/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, password }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: "Login failed" }));
+      throw new Error(err.detail || "Login failed");
+    }
+    const data = await resp.json();
+    localStorage.setItem("magnus_token", data.access_token);
+    localStorage.setItem("magnus_user", JSON.stringify(data.user));
+    setUser(data.user);
+    window.dispatchEvent(new Event("magnus-auth-change"));
+  };
+
+  const register = async (inviteCode: string, name: string, password: string) => {
+    const resp = await fetch(`${API_BASE}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ invite_code: inviteCode, name, password }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: "Registration failed" }));
+      throw new Error(err.detail || "Registration failed");
+    }
+    const data = await resp.json();
+    localStorage.setItem("magnus_token", data.access_token);
+    localStorage.setItem("magnus_user", JSON.stringify(data.user));
+    setUser(data.user);
+    window.dispatchEvent(new Event("magnus-auth-change"));
+  };
+
   const logout = () => {
     localStorage.removeItem("magnus_token");
     localStorage.removeItem("magnus_user");
@@ -113,7 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, loginWithPassword, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

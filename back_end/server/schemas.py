@@ -51,6 +51,11 @@ __all__ = [
     "PagedMessageResponse",
     "AddMemberRequest",
     "ConversationUpdate",
+    "InviteCodeCreate",
+    "InviteCodeResponse",
+    "PagedInviteCodeResponse",
+    "RegisterRequest",
+    "PasswordLoginRequest",
 ]
 
 
@@ -493,3 +498,39 @@ class AddMemberRequest(BaseModel):
 
 class ConversationUpdate(BaseModel):
     name: Optional[str] = None
+
+
+# ─── Invite Code ──────────────────────────────────────────────────────
+
+class InviteCodeCreate(BaseModel):
+    max_uses: Optional[int] = None
+    expires_at: Optional[datetime] = None
+
+
+class InviteCodeResponse(BaseModel):
+    id: str
+    code: str
+    created_by: str
+    creator: Optional[UserInfo] = None
+    max_uses: Optional[int] = None
+    use_count: int = 0
+    expires_at: Optional[datetime] = None
+    is_active: bool = True
+    created_at: datetime
+    class Config: from_attributes = True
+
+
+class PagedInviteCodeResponse(BaseModel):
+    total: int
+    items: List[InviteCodeResponse]
+
+
+class RegisterRequest(BaseModel):
+    invite_code: str
+    name: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordLoginRequest(BaseModel):
+    name: str
+    password: str

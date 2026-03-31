@@ -27,6 +27,7 @@ __all__ = [
     "Conversation",
     "ConversationMember",
     "Message",
+    "InviteCode",
 ]
 
 
@@ -62,6 +63,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     token: Mapped[str | None] = mapped_column(String, nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     user_type: Mapped[str] = mapped_column(String, default="human")
     parent_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
     headcount: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -70,6 +72,19 @@ class User(Base):
     blueprints: Mapped[list["Blueprint"]] = relationship(back_populates="user")
     parent: Mapped["User | None"] = relationship("User", remote_side=[id], foreign_keys=[parent_id])
     children: Mapped[list["User"]] = relationship("User", foreign_keys=[parent_id])
+
+
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_hex_id)
+    code: Mapped[str] = mapped_column(String, unique=True, index=True)
+    created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    creator: Mapped["User"] = relationship("User")
+    max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Job(Base):
