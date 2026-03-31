@@ -259,13 +259,30 @@ def blueprint(data: InputData):
 
 ### 使用方式
 
-- **Web 端**：用户输入文件凭证（`magnus-secret:` 前缀已预填）
+- **Web 端**：用户既可以手动输入文件凭证，也可以在蓝图表单里直接上传单文件或小型文件夹。文件夹会先打包成 `.tar.gz`，再上传并回填 `magnus-secret:...`
 - **SDK 端**：直接传文件路径，SDK 自动上传到服务器并转换为 secret
 - **缓存行为**：FileSecret 与其他参数一样参与缓存预填（注意 secret 会过期）
 
 FileSecret 与其他基本类型一样，天然支持 `Optional` 和 `List` 包装（参见 Section 4）。
 
 SDK/CLI 的特殊行为：对 FileSecret 参数，SDK 自动将本地路径上传为 secret；列表中逐个上传，已是 `magnus-secret:` 的跳过。CLI 用重复 flag 传多文件：`--batch-files a.csv --batch-files b.csv`。
+
+### Web 端文件输出约定
+
+如果蓝图任务把文件产物重新托管为新的 `magnus-secret`，推荐：
+
+```bash
+echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
+```
+
+当前 Web 端不会执行任意 shell，只会识别安全白名单形式的 `magnus receive ...`，并映射成浏览器下载。
+
+兼容旧蓝图时还有一个补充规则：
+
+- 如果 `MAGNUS_ACTION` 为空，但 `MAGNUS_RESULT` 文本里包含 `magnus-secret:...`
+- Web 也会从结果文本中提取 secret，并提供下载按钮
+
+这主要是为了兼容旧版 `transfer_file` 一类蓝图：它们在 `target` 为空时只写 `MAGNUS_RESULT`，不写 `MAGNUS_ACTION`。
 
 ---
 
