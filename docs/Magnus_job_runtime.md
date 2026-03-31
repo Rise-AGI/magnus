@@ -109,6 +109,13 @@ ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
 ${MAGNUS_HOME}/.tmp/                         SDK 文件中转目录 (容器可写层, 自动创建)
 ```
 
+`MAGNUS_ACTION` 只是一个普通文本文件，运行时不会在后端自动执行。当前各客户端的行为是：
+
+- SDK / CLI：默认读取并执行 `MAGNUS_ACTION`
+- Web：不执行任意 shell，只对白名单形式 `magnus receive <secret> [--output/-o <target>]` 做浏览器下载映射
+
+因此在 Web 场景里，`--output/-o <target>` 的语义不是“写入浏览器本地指定路径”，而是“建议下载名”。
+
 容器文件系统是只读 squashfs (SIF)。可写层取决于隔离模式：
 
 | 模式 | 可写层 | 容量限制 | 说明 |

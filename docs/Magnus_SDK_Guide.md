@@ -638,6 +638,37 @@ print(f"运行中: {stats['total_running']}, 排队: {stats['total_pending']}")
 
 蓝图中使用 `FileSecret` 类型声明文件参数，SDK 自动处理上传；蓝图代码中使用 `download_file` 接收。
 
+文件流分成两层：
+
+1. **Job 工作区**：每个任务都有独立的临时工作目录，代码仓库会出现在容器内的 `$MAGNUS_HOME/workspace/repository/`。
+2. **File Custody 中转层**：用户上传的本地文件或目录不会直接“挂载”进容器，而是先上传到服务端文件代管，再以 `magnus-secret:...` 的形式传给任务；任务运行时再显式下载。
+
+这意味着 Magnus 的文件协议更接近“对象传递”而不是“共享盘挂载”：
+
+- **输入**：本地路径 -> 上传 -> `FileSecret`
+- **任务内**：`FileSecret` -> 下载到容器内本地路径
+- **输出**：任务产物 -> 再次代管 -> 新的 `FileSecret`
+
+#### 什么时候用 FileSecret，什么时候不用
+
+`FileSecret` 适合：
+
+- 单次实验输入
+- 需要跟随一次任务一起传输的文件或目录
+- 中小规模结果回传
+
+不适合：
+
+- 长期复用的大模型权重目录
+- 数百 GB 级别的大数据集
+- 需要长期保留的共享资产
+
+对于长期复用的大文件，更推荐：
+
+- 将基础模型放在集群共享存储 / 对象存储
+- 将数据集放在持久数据盘
+- 蓝图只传“路径、版本、manifest 或对象存储 URI”
+
 #### FileSecret 参数 - 自动上传
 
 当蓝图参数类型为 `FileSecret` 时，`launch_blueprint` / `run_blueprint` 会自动检测本地文件路径并上传，将路径替换为 file secret。`FileSecret` 支持 `Optional` 和 `List` 包装。
@@ -664,6 +695,68 @@ job_id = magnus.launch_blueprint(
 )
 ```
 
+自动上传细节：
+
+- 传入普通文件路径时，SDK 直接上传文件内容
+- 传入目录路径时，SDK 会先将目录打成 `tar.gz` 再上传
+- 服务端返回 `magnus-secret:xxxx`，蓝图运行时看到的是这个字符串
+- 上传后的文件受 TTL 和下载次数限制控制，默认 `expire_minutes=60`，`max_downloads=1`
+
+如果你只是想先拿到一个 secret，而不是立即跑蓝图，也可以先手动调用 `custody_file()`，再把返回的 secret 填进蓝图参数。
+
+#### Web 界面上传与下载
+
+如果你是从 Magnus Web 界面使用文件功能，而不是从本地 SDK/CLI 发起任务，现在有两个入口：
+
+1. **蓝图运行器中的 `FileSecret` 字段**：支持直接选择单个文件，或选择一个小型文件夹上传；上传成功后自动回填 `magnus-secret:...`
+2. **左侧导航中的 `Files` 页面**：适合先单独上传文件 / 文件夹拿到 secret，或根据已有 secret 在浏览器里下载文件
+
+这个 Web 入口的边界需要明确：
+
+- 文件会直接上传；**文件夹会先在浏览器里打成 `.tar.gz` 再上传**
+- 浏览器下载一个“目录 secret”时，拿到的是这个归档文件本身
+- 如果目录 secret 是在任务环境中通过 `download_file()` 或 `magnus receive` 接收，SDK/CLI 会自动解包
+- 更适合配置文件、样例数据、小型结果目录这类**小文件、小目录和临时文件**
+- 不适合大模型权重、大数据集、超大目录和长期复用资产
+
+如果你在浏览器里拿到了 `magnus-secret:...`，后续可以：
+
+- 直接填入蓝图参数
+- 在 `Files` 页面里再次下载
+- 在任务中用 `download_file()` 或 `magnus receive` 下载到运行目录
+
+对于 LLM 训练、后训练这类场景，Web 上传更建议只作为“临时便捷入口”；基础模型、数据集和 checkpoint 的主路径仍应放在共享存储、对象存储或服务器路径上。
+
+#### 蓝图中如何声明文件参数
+
+```python
+from magnus import submit_job, JobType, FileSecret
+from typing import Annotated
+
+BaseModel = Annotated[FileSecret, {
+    "label": "Base Model",
+    "description": "基础模型目录或压缩包",
+}]
+
+Dataset = Annotated[FileSecret, {
+    "label": "Dataset",
+    "description": "训练数据目录或数据文件",
+}]
+
+def blueprint(
+    base_model: BaseModel,
+    dataset: Dataset,
+):
+    submit_job(
+        task_name="llm-sft",
+        repo_name="my-trainer",
+        entry_command="bash scripts/train.sh",
+        gpu_type="A100",
+        gpu_count=4,
+        job_type=JobType.A2,
+    )
+```
+
 #### download_file - 接收文件
 
 在任务执行环境中接收文件。
@@ -687,6 +780,169 @@ download_file(file_secret, "data/input.csv")  # 相对路径
 - `MagnusError`: 文件不存在、已过期、传输失败
 
 `download_file_async` 为异步版本，参数相同。
+
+行为说明：
+
+- `file_secret` 可以带 `magnus-secret:` 前缀，也可以只传 token 本体
+- 如果下载对象是目录，SDK 会自动解压到目标路径
+- 如果下载对象是文件，SDK 会直接写成该文件
+- 任务内临时解压/下载的中转文件优先放在 `$MAGNUS_HOME/.tmp/`
+
+#### 任务内推荐的接收模式
+
+大多数情况下，建议在 `entry_command` 对应的训练脚本里先将所有输入下载到本地工作目录，再启动训练：
+
+```python
+from magnus import download_file
+
+download_file(base_model_secret, "/tmp/base_model")
+download_file(dataset_secret, "/tmp/dataset")
+```
+
+或者使用 CLI：
+
+```bash
+magnus receive "$BASE_MODEL_SECRET" --output /tmp/base_model
+magnus receive "$DATASET_SECRET" --output /tmp/dataset
+```
+
+这样做的好处是：
+
+- 训练脚本面对的是真实本地路径，不需要知道 `FileSecret`
+- 目录解压和路径组织由 SDK/CLI 统一处理
+- 模型训练框架（Transformers, DeepSpeed, Megatron 等）可以直接读取本地目录
+
+#### 任务结果的两种返回方式
+
+任务完成后，结果通常分两类：
+
+1. **小文本结果**：写入 `MAGNUS_RESULT`
+2. **大文件/目录结果**：先代管，再把下载命令写入 `MAGNUS_ACTION`
+
+`MAGNUS_RESULT` 适合：
+
+- 训练是否成功
+- checkpoint 路径摘要
+- 指标 JSON
+- 评测报告摘要
+
+`MAGNUS_ACTION` 适合：
+
+- checkpoint 目录
+- LoRA adapter 目录
+- 导出的 tokenizer / config
+- 评测产物目录
+
+示例：
+
+```bash
+echo '{"success": true, "best_step": 1200}' > "$MAGNUS_RESULT"
+
+SECRET=$(magnus custody ./outputs/checkpoint-1200)
+echo "magnus receive $SECRET --output ./checkpoint-1200" > "$MAGNUS_ACTION"
+```
+
+当你使用 `magnus run` / `magnus blueprint run` 时，客户端默认会自动执行 `MAGNUS_ACTION`，把产物下载回本地。
+
+#### `MAGNUS_RESULT` / `MAGNUS_ACTION` 的后端真实逻辑
+
+这两个约定本质上都只是 **Job 工作目录中的标记文件**：
+
+- `MAGNUS_RESULT` 对应宿主机上的 `{magnus_root}/workspace/jobs/{job_id}/.magnus_result`
+- `MAGNUS_ACTION` 对应宿主机上的 `{magnus_root}/workspace/jobs/{job_id}/.magnus_action`
+
+调度器在启动任务时会把这两个路径注入到容器环境变量中。任务执行时，用户脚本负责写入它们；后端不会主动解析业务语义，只会在 Job API 中惰性读取并返回其内容。
+
+也就是说：
+
+- 后端**不会自动下载产物**
+- 后端**不会自动执行 shell**
+- 后端只负责把 `result/action` 内容暴露给客户端
+
+在当前 Magnus 中：
+
+- SDK / CLI 客户端会读取 `MAGNUS_ACTION`，并在默认情况下自动执行
+- Web 客户端不会执行任意 shell，只会对受支持的安全子集做映射
+
+#### Web 如何处理文件输出
+
+Web 端不会直接执行 `MAGNUS_ACTION` 中的 shell 命令。它只支持一个安全白名单：
+
+```bash
+magnus receive <file-secret>
+magnus receive <file-secret> --output <target>
+magnus receive <file-secret> -o <target>
+```
+
+当 Job 的 `action` 匹配到这个模式时，Web 会：
+
+1. 从 action 中解析出 `file_secret`
+2. 调用 `/api/files/download/{token}` 触发浏览器下载
+3. 如果 action 里有 `--output/-o`，则将其视为**建议下载名**
+
+需要注意：
+
+- Web 不会把 `target` 当作浏览器本地绝对路径执行
+- 对浏览器来说，`target` 只是建议文件名或相对保存名
+- 如果 `action` 不是受支持的 `magnus receive ...` 形式，Web 只显示原始文本，不会执行
+
+兼容旧蓝图时还有一个补充规则：
+
+- 如果 Job 没有写 `MAGNUS_ACTION`
+- 但 `MAGNUS_RESULT` 文本中包含 `magnus-secret:...`
+- Web 也会从结果文本中提取 secret，并提供下载按钮
+
+这主要用于兼容旧版 `transfer_file` 蓝图：当 `target` 为空时，它只会把下载提示写进 `MAGNUS_RESULT`。
+
+#### 大模型后训练示例
+
+下面是一个典型的 SFT / continued pretraining 文件流：
+
+1. 本地调用：
+
+```python
+import magnus
+
+result = magnus.run_blueprint(
+    "llm-sft",
+    args={
+        "base_model": "/data/models/qwen2.5-7b",
+        "dataset": "/data/datasets/my-sft",
+    },
+)
+print(result)
+```
+
+2. SDK 自动行为：
+
+- 将 `/data/models/qwen2.5-7b` 上传为一个 `FileSecret`
+- 将 `/data/datasets/my-sft` 上传为一个 `FileSecret`
+- 把两个 secret 传给蓝图
+
+3. 容器内训练脚本：
+
+```bash
+magnus receive "$BASE_MODEL_SECRET" --output /tmp/base_model
+magnus receive "$DATASET_SECRET" --output /tmp/dataset
+python train.py \
+  --model_name_or_path /tmp/base_model \
+  --data_path /tmp/dataset \
+  --output_dir /tmp/output
+```
+
+4. 训练结束后回传：
+
+```bash
+echo '{"success": true, "message": "training finished"}' > "$MAGNUS_RESULT"
+SECRET=$(magnus custody /tmp/output)
+echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
+```
+
+5. 本地客户端：
+
+- 先读取 `MAGNUS_RESULT`
+- 再自动执行 `MAGNUS_ACTION`
+- 最终将训练产物下载到本地 `./output`
 
 ### 文件代管
 
@@ -720,6 +976,34 @@ with open(os.environ["MAGNUS_ACTION"], "w") as f:
 **返回值**：`str`，`magnus-secret:xxxx` 格式
 
 `custody_file_async` 为异步版本，参数相同。
+
+补充说明：
+
+- 目录会被自动打包上传；下载时自动解压
+- `expire_minutes` 受服务端配置的最大 TTL 限制
+- `max_downloads=1` 适合“一次性回传”；不设时表示不限制下载次数
+- 文件代管是中转层，不是长期归档系统；过期后文件会被服务端清理
+
+#### 手动上传/下载闭环
+
+如果不通过蓝图自动上传，也可以手动走完整闭环：
+
+```python
+import magnus
+
+secret = magnus.custody_file("./dataset")
+print(secret)
+
+path = magnus.download_file(secret, "./restored_dataset")
+print(path)
+```
+
+对应 CLI：
+
+```bash
+magnus custody ./dataset
+magnus receive magnus-secret:7919-calm-boat-fire --output ./restored_dataset
+```
 
 ### 技能 (Skill)
 
