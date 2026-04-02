@@ -11,10 +11,12 @@ import { FEISHU_APP_ID, IS_LOCAL_MODE, API_BASE } from "@/lib/config";
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
+  showLoginDialog: boolean;
   login: () => void;
   loginWithFeishu: () => void;
   loginWithToken: (token: string) => Promise<string | null>;
   logout: () => void;
+  setShowLoginDialog: (show: boolean) => void;
 }
 
 
@@ -24,6 +26,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
   const router = useRouter();
 
   // 读取并解析本地存储的用户信息
@@ -101,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       autoLoginLocal();
       return;
     }
-    loginWithFeishu();
+    setShowLoginDialog(true);
   };
 
   const loginWithFeishu = () => {
@@ -141,7 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, loginWithFeishu, loginWithToken, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, showLoginDialog, login, loginWithFeishu, loginWithToken, logout, setShowLoginDialog }}>
       {children}
     </AuthContext.Provider>
   );

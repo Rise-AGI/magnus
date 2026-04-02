@@ -62,6 +62,7 @@ const translations = {
   "auth.tokenPlaceholder": { zh: "输入 Magnus Token (sk-...)", en: "Enter Magnus Token (sk-...)" },
   "auth.tokenLoginButton": { zh: "登录", en: "Login" },
   "auth.tokenLoginError": { zh: "令牌无效或已过期", en: "Invalid or expired token" },
+  "auth.oauthDenied": { zh: "授权被拒绝", en: "Authorization denied" },
 
   // ===== Header =====
   "header.hideToken": { zh: "隐藏令牌", en: "Hide Token" },

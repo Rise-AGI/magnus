@@ -7,13 +7,13 @@ import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { TokenInput, MAGNUS_TOKEN_LENGTH, validateToken } from "@/components/ui/token-input";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { formatBeijingTime } from "@/lib/utils";
 import { UserDetail } from "@/types/auth";
 
-const MAGNUS_TOKEN_LENGTH = 35;
 
 interface PeopleDrawerProps {
   isOpen: boolean;
@@ -112,7 +112,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
   const handleSaveCustomToken = async () => {
     if (!user) return;
     const trimmed = customToken.trim();
-    if (!trimmed.startsWith("sk-") || trimmed.length !== MAGNUS_TOKEN_LENGTH) {
+    if (!validateToken(trimmed)) {
       setCustomTokenError(t("header.customTokenInvalid"));
       return;
     }
@@ -392,26 +392,15 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
 
               {/* Custom token input — revealed on click */}
               {showCustomInput && (
-                <div className="mt-4 pt-4 border-t border-zinc-800/50">
-                  <label className="text-xs text-zinc-500 font-medium block mb-1">{t("header.customTokenLabel")}</label>
-                  <p className="text-xs text-red-400/80 mb-2">{t("header.customTokenWarning")}</p>
-                  <input
-                    type="text"
-                    value={customToken}
-                    onChange={(e) => { setCustomToken(e.target.value); setCustomTokenError(null); }}
-                    placeholder="sk-..."
-                    maxLength={MAGNUS_TOKEN_LENGTH}
-                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20"
-                    autoFocus
-                    onKeyDown={(e) => { if (e.key === "Enter") handleSaveCustomToken(); }}
-                  />
-                  <div className="flex items-center justify-between mt-2">
-                    <span className={`text-xs ${customToken.length === MAGNUS_TOKEN_LENGTH ? "text-green-500" : "text-zinc-600"}`}>
-                      {customToken.length}/{MAGNUS_TOKEN_LENGTH}
-                    </span>
-                    {customTokenError && <span className="text-xs text-red-400">{customTokenError}</span>}
-                  </div>
-                </div>
+                <TokenInput
+                  value={customToken}
+                  onChange={setCustomToken}
+                  error={customTokenError}
+                  onClearError={() => setCustomTokenError(null)}
+                  label={t("header.customTokenLabel")}
+                  warning={t("header.customTokenWarning")}
+                  onSubmit={handleSaveCustomToken}
+                />
               )}
             </div>
 

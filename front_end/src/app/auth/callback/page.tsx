@@ -22,6 +22,8 @@ function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const code = searchParams.get("code");
+  const oauthError = searchParams.get("error");
+  const oauthErrorDesc = searchParams.get("error_description");
   const { t } = useLanguage();
 
   // 防止 React StrictMode 在开发环境下导致 useEffect 执行两次
@@ -29,6 +31,12 @@ function AuthCallbackContent() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    // OAuth 2.0 RFC 6749 §4.1.2.1: 授权服务器通过 error 参数返回错误
+    if (oauthError) {
+      setError(oauthErrorDesc || t("auth.oauthDenied"));
+      return;
+    }
+
     if (!code || hasFetched.current) return;
     
     hasFetched.current = true;
