@@ -157,11 +157,12 @@ export default function PeoplePage() {
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteAgent}
-        title={t("people.drawer.delete")}
-        description={t("people.drawer.deleteConfirm")}
-        confirmText={t("people.drawer.delete")}
+        title={t("people.drawer.offboard")}
+        description={t("people.drawer.offboardConfirm", { name: deleteTarget?.name || "" })}
+        confirmText={t("people.drawer.offboard")}
         isLoading={isDeleting}
         variant="danger"
+        confirmInput={deleteTarget?.name}
       />
 
       <GroupInviteDialog

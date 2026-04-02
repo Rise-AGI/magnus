@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Users, Shield, Eye, EyeOff, PenLine, RefreshCw, Trash2, Camera, Check, X } from "lucide-react";
+import { Users, Shield, Eye, EyeOff, PenLine, RefreshCw, UserMinus, Camera, Check, X } from "lucide-react";
 import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
 import { CopyableText } from "@/components/ui/copyable-text";
@@ -347,15 +347,15 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
               </div>
             </div>
 
-            {/* Footer: Delete (managed member only) */}
+            {/* Footer: Offboard (managed agent only) */}
             {user.user_type === "agent" && (
               <div className="mt-auto pt-6 border-t border-zinc-800 flex justify-end pb-1">
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-red-400 hover:text-white hover:bg-red-600/80 border border-red-800/50 transition-colors flex items-center gap-2"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  {t("people.drawer.delete")}
+                  <UserMinus className="w-4 h-4" />
+                  {t("people.drawer.offboard")}
                 </button>
               </div>
             )}
@@ -446,16 +446,17 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
         </div>
       )}
 
-      {/* Delete Confirmation */}
+      {/* Offboard Confirmation */}
       <ConfirmationDialog
         isOpen={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
         onConfirm={handleDelete}
-        title={t("people.drawer.delete")}
-        description={t("people.drawer.deleteConfirm")}
-        confirmText={t("people.drawer.delete")}
+        title={t("people.drawer.offboard")}
+        description={t("people.drawer.offboardConfirm", { name: user?.name || "" })}
+        confirmText={t("people.drawer.offboard")}
         isLoading={isDeleting}
         variant="danger"
+        confirmInput={user?.name}
       />
 
       {/* Error alert */}

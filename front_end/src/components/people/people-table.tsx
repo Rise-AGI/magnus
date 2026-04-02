@@ -1,7 +1,7 @@
 // front_end/src/components/people/people-table.tsx
 "use client";
 
-import { MessageCircle, RefreshCw, Trash2, Users, Loader2, Shield, UserPlus } from "lucide-react";
+import { MessageCircle, RefreshCw, UserMinus, Users, Loader2, Shield, UserPlus } from "lucide-react";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
@@ -108,7 +108,7 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                       onClick={() => onDelete(user)}
                       className="p-3 bg-red-950/30 text-red-400 rounded-lg border border-red-900/30 active:scale-95"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <UserMinus className="w-4 h-4" />
                     </button>
                   )}
                 </div>
@@ -203,9 +203,9 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                         <button
                           onClick={(e) => { e.stopPropagation(); onDelete(user); }}
                           className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"
-                          title={t("people.drawer.delete")}
+                          title={t("people.drawer.offboard")}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <UserMinus className="w-4 h-4" />
                         </button>
                       )}
                     </div>
