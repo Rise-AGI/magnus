@@ -22,7 +22,7 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { AvatarCircle } from "@/components/ui/user-avatar";
-import { CLUSTER_CONFIG, IS_LOCAL_MODE } from "@/lib/config";
+import { CLUSTER_CONFIG } from "@/lib/config";
 
 interface NavItem {
   i18nKey: string;
@@ -107,7 +107,7 @@ export function Sidebar() {
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all text-sm font-medium bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700"
             >
               <LogIn className="w-4 h-4" />
-              <span>{IS_LOCAL_MODE ? t("auth.signIn") : t("auth.signInWithFeishu")}</span>
+              <span>{t("auth.signIn")}</span>
             </button>
           ) : (
             <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 shadow-sm">
