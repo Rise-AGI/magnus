@@ -11,6 +11,7 @@ __all__ = [
     "JobMetricResponse",
     "PagedJobResponse",
     "FeishuLoginRequest",
+    "TokenLoginRequest",
     "UserInfo",
     "UserDetail",
     "AgentCreate",
@@ -159,6 +160,10 @@ class PagedJobResponse(BaseModel):
 
 class FeishuLoginRequest(BaseModel):
     code: str
+
+
+class TokenLoginRequest(BaseModel):
+    token: str
 
 
 class LoginResponse(BaseModel):

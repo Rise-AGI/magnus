@@ -12,6 +12,8 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   login: () => void;
+  loginWithFeishu: () => void;
+  loginWithToken: (token: string) => Promise<string | null>;
   logout: () => void;
 }
 
@@ -99,10 +101,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       autoLoginLocal();
       return;
     }
+    loginWithFeishu();
+  };
+
+  const loginWithFeishu = () => {
     const REDIRECT_URI = `${window.location.origin}/auth/callback`;
     const FEISHU_AUTH_URL = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=RANDOM_STATE`;
 
     window.location.href = FEISHU_AUTH_URL;
+  };
+
+  // 通过 Magnus Token 登录，返回错误信息或 null（成功）
+  const loginWithToken = async (token: string): Promise<string | null> => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/auth/token/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: "Login failed" }));
+        return err.detail || "Login failed";
+      }
+      const data = await resp.json();
+      localStorage.setItem("magnus_token", data.access_token);
+      localStorage.setItem("magnus_user", JSON.stringify(data.user));
+      setUser(data.user);
+      return null;
+    } catch (error: any) {
+      return error.message || "Network error";
+    }
   };
 
   const logout = () => {
@@ -113,7 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, loginWithFeishu, loginWithToken, logout }}>
       {children}
     </AuthContext.Provider>
   );

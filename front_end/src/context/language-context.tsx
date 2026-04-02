@@ -53,11 +53,15 @@ const translations = {
   "auth.verifyingAccess": { zh: "正在验证权限...", en: "Verifying access..." },
   "auth.required": { zh: "需要登录", en: "Authentication Required" },
   "auth.requiredDesc": { zh: "您需要登录才能访问此资源。", en: "You need to be signed in to access this resource." },
-  "auth.pleaseLogin": { zh: "请使用飞书账号登录以继续。", en: "Please login with your Feishu account to continue." },
+  "auth.pleaseLogin": { zh: "请选择登录方式以继续。", en: "Please choose a login method to continue." },
   "auth.pleaseLoginLocal": { zh: "请点击登录以继续。", en: "Click sign in to continue." },
   "auth.authenticating": { zh: "正在通过飞书登录...", en: "Authenticating with Feishu..." },
   "auth.loginFailed": { zh: "登录失败", en: "Login Failed" },
   "auth.backToHome": { zh: "返回首页", en: "Back to Home" },
+  "auth.tokenLogin": { zh: "通过 Magnus Token 登录", en: "Login with Magnus Token" },
+  "auth.tokenPlaceholder": { zh: "输入 Magnus Token (sk-...)", en: "Enter Magnus Token (sk-...)" },
+  "auth.tokenLoginButton": { zh: "登录", en: "Login" },
+  "auth.tokenLoginError": { zh: "令牌无效或已过期", en: "Invalid or expired token" },
 
   // ===== Header =====
   "header.hideToken": { zh: "隐藏令牌", en: "Hide Token" },
