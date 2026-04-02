@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .. import database
 from .. import models
-from ..schemas import LoginResponse, FeishuLoginRequest, TokenResponse
+from ..schemas import LoginResponse, FeishuLoginRequest, TokenLoginRequest, TokenResponse
 from .._magnus_config import magnus_config, admin_open_ids, is_local_mode
 from .._jwt_signer import jwt_signer
 from .._feishu_client import feishu_client
@@ -231,6 +231,37 @@ async def feishu_login(
             "avatar_url": db_user.avatar_url,
             "email": db_user.email,
             "is_admin": is_local_mode or db_user.feishu_open_id in admin_open_ids,
+        },
+    }
+
+
+@router.post(
+    "/auth/token/login",
+    response_model=LoginResponse,
+)
+def token_login(
+    req: TokenLoginRequest,
+    db: Session = Depends(database.get_db),
+) -> Dict[str, Any]:
+    """通过 Magnus Token (sk-xxx) 登录，返回 JWT + 用户信息。"""
+    user = db.query(models.User).filter(models.User.token == req.token).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Magnus Token",
+        )
+
+    access_token = jwt_signer.create_access_token(payload={"sub": user.id})
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "email": user.email,
+            "is_admin": is_local_mode or user.feishu_open_id in admin_open_ids,
         },
     }
 
