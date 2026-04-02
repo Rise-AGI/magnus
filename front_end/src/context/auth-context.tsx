@@ -130,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem("magnus_token", data.access_token);
       localStorage.setItem("magnus_user", JSON.stringify(data.user));
       setUser(data.user);
+      setShowLoginDialog(false);
       return null;
     } catch (error: any) {
       return error.message || "Network error";

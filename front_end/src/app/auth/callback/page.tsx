@@ -73,7 +73,7 @@ function AuthCallbackContent() {
     };
 
     doLogin();
-  }, [code, router]);
+  }, [code, router, oauthError, oauthErrorDesc, t]);
 
   if (error) {
     return (
