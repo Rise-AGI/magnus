@@ -24,19 +24,63 @@ from ._feishu_client import feishu_client
 
 
 class EndpointFilter(logging.Filter):
+    SUPPRESSED_GET_PATHS = {
+        "/api/cluster/my-active-jobs",
+        "/api/cluster/stats",
+        "/api/conversations",
+        "/api/explorer/sessions",
+        "/api/skills",
+        "/api/users",
+        "/api/users/roster",
+    }
+    SUPPRESSED_GET_PREFIXES = (
+        "/api/blueprints",
+        "/api/jobs",
+        "/api/services",
+    )
+    SUPPRESSED_MESSAGE_FRAGMENTS = (
+        "/logs HTTP",
+    )
+
+    @staticmethod
+    def _extract_access_request(record: logging.LogRecord):
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 5:
+            return None
+
+        _, method, full_path, _, status_code = args[:5]
+        if not isinstance(method, str) or not isinstance(full_path, str):
+            return None
+
+        try:
+            parsed_status_code = int(status_code)
+        except (TypeError, ValueError):
+            return None
+
+        normalized_path = full_path.split("?", 1)[0]
+        return method.upper(), normalized_path, parsed_status_code
+
     def filter(self, record: logging.LogRecord)-> bool:
+        access_request = self._extract_access_request(record)
+        if access_request is not None:
+            method, path, status_code = access_request
+
+            # 保留真实异常请求，例如 explorer 里的 401。
+            if status_code < 400:
+                if method == "OPTIONS" and path.startswith("/api"):
+                    return False
+
+                if method == "GET":
+                    if path in self.SUPPRESSED_GET_PATHS:
+                        return False
+                    if any(path.startswith(prefix) for prefix in self.SUPPRESSED_GET_PREFIXES):
+                        return False
+
         msg = record.getMessage()
-        # 屏蔽高频噪音
-        return not any(x in msg for x in [
-            "GET /api/jobs",
-            "GET /api/cluster/stats",
-            "GET /api/cluster/my-active-jobs",
-            "GET /api/blueprints",
-            "GET /api/services",
-            "/logs HTTP",
-            "OPTIONS /api",
-        ])
+        return not any(fragment in msg for fragment in self.SUPPRESSED_MESSAGE_FRAGMENTS)
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 logger = logging.getLogger(__name__)
 
@@ -166,7 +210,7 @@ async def _refresh_all_user_info() -> None:
                 user_map[u.feishu_open_id] = u
 
     if not user_map:
-        logger.info("用户信息刷新：数据库中无飞书用户，跳过")
+        logger.debug("用户信息刷新：数据库中无飞书用户，跳过")
         return
 
     semaphore = asyncio.Semaphore(CONCURRENCY)
@@ -208,7 +252,10 @@ async def _refresh_all_user_info() -> None:
     if failed:
         raise RuntimeError(f"用户信息刷新：{failed}/{len(user_map)} 人失败")
 
-    logger.info(f"用户信息刷新完成：共 {len(user_map)} 人，{updated} 人有更新")
+    if updated > 0:
+        logger.info(f"用户信息刷新完成：共 {len(user_map)} 人，{updated} 人有更新")
+    else:
+        logger.debug(f"用户信息刷新完成：共 {len(user_map)} 人，0 人有更新")
 
 
 async def _run_user_info_refresh_loop() -> None:
