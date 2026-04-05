@@ -123,8 +123,8 @@ def recover_stuck_images() -> None:
                         pass
                     logger.info(f"Recovered stuck image → cached: {img.uri}")
                 else:
-                    db.delete(img)
-                    logger.info(f"Removed orphan image record: {img.uri}")
+                    img.status = "failed"
+                    logger.info(f"Recovered stuck image → failed: {img.uri}")
             else:
                 sif_path = os.path.join(container_cache_path, img.filename)
                 if os.path.exists(sif_path):
@@ -135,8 +135,8 @@ def recover_stuck_images() -> None:
                         pass
                     logger.info(f"Recovered stuck image → cached: {img.uri}")
                 else:
-                    db.delete(img)
-                    logger.info(f"Removed orphan image record: {img.uri}")
+                    img.status = "failed"
+                    logger.info(f"Recovered stuck image → failed: {img.uri}")
         db.commit()
     finally:
         db.close()
