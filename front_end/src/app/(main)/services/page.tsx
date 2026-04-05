@@ -14,6 +14,7 @@ import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ServiceTable } from "@/components/services/service-table";
 import { ServiceDrawer } from "@/components/services/service-drawer";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { getUserInitials } from "@/lib/user-display";
 
 export default function ServicesPage() {
   const { t } = useLanguage();
@@ -101,7 +102,7 @@ export default function ServicesPage() {
         value: u.id,
         meta: u.email || "",
         icon: u.avatar_url || undefined,
-        initials: u.name.substring(0, 2).toUpperCase(),
+        initials: getUserInitials(u.name),
       })),
     ];
   }, [allUsers, t]);

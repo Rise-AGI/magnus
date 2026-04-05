@@ -17,7 +17,6 @@ import {
   Layers,
   ArrowRight,
   Dna,
-  Construction,
   Users,
   Container,
   MessageCircle,
@@ -36,7 +35,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { i18nKey: "nav.chat", href: "/chat", icon: MessageCircle },
-  { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight },
+  { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight, wip: true },
   { i18nKey: "nav.people", href: "/people", icon: Users },
   { i18nKey: "nav.jobs", href: "/jobs", icon: Rocket },
   { i18nKey: "nav.blueprints", href: "/blueprints", icon: ScrollText },
@@ -124,9 +123,11 @@ export function MobileNav() {
                       <item.icon className={`w-4 h-4 transition-colors ${
                         isActive ? "text-blue-400" : "text-zinc-500"
                       }`} />
-                      {label}
+                      <span className="truncate">{label}</span>
                       {item.wip && (
-                        <Construction className="w-3 h-3 text-zinc-600 ml-auto" />
+                        <span className="ml-auto shrink-0 pl-2 text-[10px] font-normal tracking-wide text-zinc-600">
+                          {t("common.wip")}
+                        </span>
                       )}
                     </Link>
                   );

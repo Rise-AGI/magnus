@@ -9,6 +9,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { getUserInitials } from "@/lib/user-display";
 import type { ConversationDetail, ConversationMember } from "@/types/chat";
 
 interface UserOption {
@@ -87,7 +88,7 @@ export function ConversationSettingsDrawer({
             value: u.id,
             meta: u.email || undefined,
             icon: u.avatar_url || undefined,
-            initials: u.name.substring(0, 2).toUpperCase(),
+            initials: getUserInitials(u.name),
           }))
       );
     }).catch(() => {});
@@ -132,7 +133,7 @@ export function ConversationSettingsDrawer({
             label: removed.user!.name,
             value: removed.user_id,
             icon: removed.user!.avatar_url || undefined,
-            initials: removed.user!.name.substring(0, 2).toUpperCase(),
+            initials: getUserInitials(removed.user!.name),
           },
         ]);
       }
