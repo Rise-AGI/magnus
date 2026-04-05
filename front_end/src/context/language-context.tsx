@@ -952,6 +952,7 @@ def blueprint(
   "images.status.pulling": { zh: "拉取中", en: "Pulling" },
   "images.status.refreshing": { zh: "刷新中", en: "Refreshing" },
   "images.status.unregistered": { zh: "未注册", en: "Unregistered" },
+  "images.status.failed": { zh: "预热失败", en: "Failed" },
   "images.status.missing": { zh: "文件缺失", en: "Missing" },
 
   // ===== People =====
