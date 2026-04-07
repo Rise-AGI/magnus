@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import sys
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Tuple
 from pywheels.file_tools import guarantee_file_exist, delete_file
 from .database import SessionLocal
 from .models import *
@@ -38,14 +38,18 @@ guarantee_file_exist(magnus_uv_cache_path, is_directory=True)
 logger = logging.getLogger(__name__)
 
 
-def _register_image_pulling(db: Session, image_uri: str, user_id: str) -> None:
-    """Pull 开始前，标记镜像为 pulling（首次见到的 URI 才插入）。"""
+def _register_image_pulling(db: Session, image_uri: str, user_id: str) -> bool:
+    """Pull 开始前，标记镜像为 pulling（首次见到的 URI 才插入）。
+    返回 True 表示取得了 DB 生命周期管理权（应由调用方负责 finalize）；
+    返回 False 表示记录已由其他路径（如 images API）管理，调用方不应触碰 DB 状态。
+    """
     existing = db.query(CachedImage).filter(CachedImage.uri == image_uri).first()
     if existing:
         if existing.status == "failed":
             existing.status = "pulling"
             db.commit()
-        return
+            return True
+        return False
     db.add(CachedImage(
         uri=image_uri,
         filename=_image_to_sif_filename(image_uri),
@@ -55,8 +59,10 @@ def _register_image_pulling(db: Session, image_uri: str, user_id: str) -> None:
     ))
     try:
         db.commit()
+        return True
     except IntegrityError:
         db.rollback()
+        return False
 
 
 def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
@@ -107,6 +113,7 @@ class MagnusScheduler:
             self.docker_manager = None
         self.last_snapshot_time = datetime.min.replace(tzinfo=timezone.utc)
         self.preparing_jobs: Dict[str, asyncio.Task] = {}  # job_id -> Task
+        self._image_pull_tasks: Dict[str, asyncio.Task] = {}  # image_uri -> shared pull Task
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
 
 
@@ -493,6 +500,35 @@ class MagnusScheduler:
                 if slurm_queued_count == 0:
                     self._submit_to_slurm(db, head_job)
 
+    async def _pull_image_shared(self, image_uri: str, user_id: Optional[str]) -> Tuple[bool, Optional[str]]:
+        """独立于 job 的镜像拉取 task，自管 DB 状态。
+        仅在本次调用取得 DB 生命周期管理权时才 finalize，避免与 images API 的 _do_pull 互踩。
+        """
+        owns_db_lifecycle = False
+        if user_id:
+            with SessionLocal() as db:
+                owns_db_lifecycle = _register_image_pulling(db, image_uri, user_id)
+        try:
+            image_ok, image_err = await resource_manager.ensure_image(image_uri)
+        except asyncio.CancelledError:
+            raise  # 服务器关停，由 recover_stuck_images 善后
+        except Exception as e:
+            image_ok, image_err = False, str(e)
+        finally:
+            self._image_pull_tasks.pop(image_uri, None)
+        if owns_db_lifecycle:
+            with SessionLocal() as db:
+                _finalize_image_status(db, image_uri, image_ok)
+        return image_ok, image_err
+
+    async def _ensure_image_decoupled(self, image_uri: str, user_id: Optional[str]) -> Tuple[bool, Optional[str]]:
+        """复用或创建共享 pull task，shield 使 job cancel 不中断拉取。"""
+        task = self._image_pull_tasks.get(image_uri)
+        if task is None or task.done():
+            task = asyncio.create_task(self._pull_image_shared(image_uri, user_id))
+            self._image_pull_tasks[image_uri] = task
+        return await asyncio.shield(task)
+
     async def _prepare_job_resources(self, job_id: str):
         """异步准备任务资源：镜像 + 仓库（并行）"""
         # Phase 1 — 读 job 信息 + 注册 pulling 状态（短 session）
@@ -513,12 +549,10 @@ class MagnusScheduler:
 
             guarantee_file_exist(job_working_table, is_directory=True)
 
-            if user_id:
-                _register_image_pulling(db, container_image, user_id)
-
         # Phase 2 — 长 I/O（无 session）
+        # 镜像拉取解耦：shield 保护，job cancel 不中断拉取
         (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
-            resource_manager.ensure_image(container_image),
+            self._ensure_image_decoupled(container_image, user_id),
             resource_manager.ensure_repo(
                 namespace = namespace,
                 repo_name = repo_name,
@@ -536,8 +570,6 @@ class MagnusScheduler:
             if not job or job.status != JobStatus.PREPARING:
                 self._clean_up_working_table(job_id)
                 return
-
-            _finalize_image_status(db, container_image, image_ok)
 
             if not image_ok:
                 job.status = JobStatus.FAILED
