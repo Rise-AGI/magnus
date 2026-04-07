@@ -78,14 +78,14 @@ def blueprint(
     width_arg = f" --width {width}" if width is not None else ""
     height_arg = f" --height {height}" if height is not None else ""
 
-    parts = [
-        "pip install magnus-sdk 'diffusers @ git+https://github.com/huggingface/diffusers.git' transformers accelerate sentencepiece protobuf pillow",
+    pip_line = "pip install magnus-sdk 'diffusers>=0.36.0' transformers accelerate sentencepiece protobuf pillow"
+    run_parts = [
         "python back_end/python_scripts/generate_image.py",
         f"    --prompt '{safe_prompt}'",
         f"    --steps {num_inference_steps}",
         f"    --guidance-scale {guidance_scale}{width_arg}{height_arg}{ref_arg}{seed_arg}",
     ]
-    entry_command = " \\\n".join(parts)
+    entry_command = pip_line + "\n" + " \\\n".join(run_parts)
 
     size_str = f"{width}x{height}" if width and height else "原图尺寸"
     mode = "Kontext Edit" if reference else "Text-to-Image"
