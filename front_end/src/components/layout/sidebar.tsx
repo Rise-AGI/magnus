@@ -17,7 +17,7 @@ import {
   Users,
   Container,
   MessageCircle,
-  Wrench,
+  FolderSync,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
@@ -33,7 +33,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { i18nKey: "nav.chat", href: "/chat", icon: MessageCircle },
-  { i18nKey: "nav.tools", href: "/tools", icon: Wrench },
+  { i18nKey: "nav.tools", href: "/tools", icon: FolderSync },
   { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight, wip: true },
   { i18nKey: "nav.people", href: "/people", icon: Users },
   { i18nKey: "nav.jobs", href: "/jobs", icon: Rocket },

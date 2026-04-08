@@ -21,6 +21,8 @@ import {
   uploadDirectoryToSecret,
   uploadFileToSecret,
 } from "@/lib/file-secret";
+import { NumberStepper } from "@/components/ui/number-stepper";
+import { CopyableText } from "@/components/ui/copyable-text";
 
 interface RecentSecretEntry {
   secret: string;
@@ -56,6 +58,7 @@ function RecentSecretActions({
   onRemove,
   isBusy,
   copiedSecret,
+  t,
 }: {
   entry: RecentSecretEntry;
   onCopy: (secret: string) => Promise<void>;
@@ -63,6 +66,7 @@ function RecentSecretActions({
   onRemove: (secret: string) => void;
   isBusy: boolean;
   copiedSecret: string | null;
+  t: ReturnType<typeof useLanguage>["t"];
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -72,7 +76,7 @@ function RecentSecretActions({
         className="inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-700 hover:text-white"
       >
         {copiedSecret === entry.secret ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        <span className="hidden sm:inline">{copiedSecret === entry.secret ? "Copied" : "Copy"}</span>
+        <span className="hidden sm:inline">{copiedSecret === entry.secret ? t("action.copied") : t("action.copy")}</span>
       </button>
       <button
         type="button"
@@ -81,7 +85,7 @@ function RecentSecretActions({
         className="inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Download className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Download</span>
+        <span className="hidden sm:inline">{t("files.downloadButton")}</span>
       </button>
       <button
         type="button"
@@ -367,30 +371,20 @@ export default function ToolsPage() {
           </div>
 
           <div className="grid gap-4 bg-zinc-900/40 border border-zinc-800 rounded-xl p-4 sm:grid-cols-2 mt-5">
-            <label className="space-y-2">
-              <span className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
-                {t("files.expireMinutes")}
-              </span>
-              <input
-                type="number"
-                min={1}
-                value={expireMinutes}
-                onChange={(e) => setExpireMinutes(Math.max(1, Number(e.target.value) || DEFAULT_EXPIRE_MINUTES))}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
-              />
-            </label>
-            <label className="space-y-2">
-              <span className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
-                {t("files.maxDownloads")}
-              </span>
-              <input
-                type="number"
-                min={1}
-                value={maxDownloads}
-                onChange={(e) => setMaxDownloads(Math.max(1, Number(e.target.value) || DEFAULT_MAX_DOWNLOADS))}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
-              />
-            </label>
+            <NumberStepper
+              label={t("files.expireMinutes")}
+              value={expireMinutes}
+              onChange={setExpireMinutes}
+              min={1}
+              max={1440}
+            />
+            <NumberStepper
+              label={t("files.maxDownloads")}
+              value={maxDownloads}
+              onChange={setMaxDownloads}
+              min={1}
+              max={100}
+            />
           </div>
 
           {latestUpload && (
@@ -424,8 +418,8 @@ export default function ToolsPage() {
                   </button>
                 </div>
               </div>
-              <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200 break-all">
-                {latestUpload.secret}
+              <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
+                <CopyableText text={latestUpload.secret} variant="text" className="font-mono text-xs text-zinc-200 break-all" />
               </div>
               <p className="mt-3 text-xs leading-5 text-zinc-500">{t("files.readyHint")}</p>
             </div>
@@ -450,19 +444,24 @@ export default function ToolsPage() {
             </div>
             <p className="mb-4 text-sm text-zinc-500">{t("files.downloadHint")}</p>
 
-            <label className="space-y-2">
+            <div className="space-y-2">
               <span className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
                 {t("files.secretLabel")}
               </span>
-              <input
-                type="text"
-                value={downloadSecret}
-                onChange={(e) => setDownloadSecret(normalizeFileSecret(e.target.value))}
-                placeholder="magnus-secret:..."
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
-                spellCheck={false}
-              />
-            </label>
+              <div className="flex items-center">
+                <span className="select-none rounded-l-lg border border-r-0 border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-500">
+                  magnus-secret:
+                </span>
+                <input
+                  type="text"
+                  value={downloadSecret.startsWith("magnus-secret:") ? downloadSecret.slice(14) : downloadSecret}
+                  onChange={(e) => setDownloadSecret(normalizeFileSecret(e.target.value))}
+                  placeholder="..."
+                  className="flex-1 min-w-0 rounded-r-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
+                  spellCheck={false}
+                />
+              </div>
+            </div>
 
             <div className="mt-5 flex flex-wrap gap-3">
               <button
@@ -547,7 +546,7 @@ export default function ToolsPage() {
                   <div className="mt-1 truncate text-xs text-zinc-500">
                     {entry.sourceName && entry.sourceName !== entry.fileName ? `${entry.sourceName} -> ${entry.fileName}` : entry.fileName}
                   </div>
-                  <div className="mt-1 truncate font-mono text-xs text-zinc-500">{entry.secret}</div>
+                  <CopyableText text={entry.secret} variant="id" className="mt-1" />
                 </div>
                 <RecentSecretActions
                   entry={entry}
@@ -556,6 +555,7 @@ export default function ToolsPage() {
                   onRemove={removeRecent}
                   isBusy={downloading}
                   copiedSecret={copiedSecret}
+                  t={t}
                 />
               </div>
             ))}
