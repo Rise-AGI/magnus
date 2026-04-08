@@ -17,6 +17,7 @@ import {
   Users,
   Container,
   MessageCircle,
+  Wrench,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
@@ -39,6 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { i18nKey: "nav.services", href: "/services", icon: Layers },
   { i18nKey: "nav.skills", href: "/skills", icon: Dna },
   { i18nKey: "nav.images", href: "/images", icon: Container },
+  { i18nKey: "nav.tools", href: "/tools", icon: Wrench },
   { i18nKey: "nav.cluster", href: "/cluster", icon: LayoutDashboard },
 ];
 

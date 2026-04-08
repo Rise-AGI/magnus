@@ -4,6 +4,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
+  ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
+  ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX, Download, Loader2
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, BarChart3,
   ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX
 } from "lucide-react";
@@ -13,6 +15,8 @@ import { CopyableText } from "@/components/ui/copyable-text";
 import { POLL_INTERVAL } from "@/lib/config";
 import { Job } from "@/types/job";
 import { formatBeijingTime } from "@/lib/utils";
+import { downloadFileSecretWithOptions } from "@/lib/file-secret";
+import { extractFileSecretFromText, parseReceiveAction } from "@/lib/job-action";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { AvatarCircle } from "@/components/ui/user-avatar";
@@ -65,6 +69,7 @@ export default function JobDetailsPage() {
   const lastClickTimeRef = useRef(0);
 
   const [copiedCommand, setCopiedCommand] = useState(false);
+  const [downloadingOutput, setDownloadingOutput] = useState(false);
   const copyToClipboard = async (text: string, setCopied: (v: boolean) => void) => {
     try {
         await navigator.clipboard.writeText(text);
@@ -171,6 +176,27 @@ export default function JobDetailsPage() {
   };
 
   const effectivePage = logPage < 0 ? Math.max(0, logTotalPages - 1) : logPage;
+  const parsedAction = useMemo(() => parseReceiveAction(job?.action), [job?.action]);
+  const fallbackResultSecret = useMemo(
+    () => (parsedAction ? null : extractFileSecretFromText(job?.result)),
+    [job?.result, parsedAction],
+  );
+  const downloadableSecret = parsedAction?.fileSecret ?? fallbackResultSecret;
+  const suggestedOutputName = parsedAction?.suggestedName;
+
+  const handleDownloadOutput = async () => {
+    if (!downloadableSecret) return;
+    setDownloadingOutput(true);
+    try {
+      await downloadFileSecretWithOptions(downloadableSecret, {
+        suggestedName: suggestedOutputName,
+      });
+    } catch (error) {
+      console.error("Failed to download output", error);
+    } finally {
+      setDownloadingOutput(false);
+    }
+  };
 
   const goToFirstPage = () => {
     setFollowMode(false);
@@ -500,6 +526,54 @@ export default function JobDetailsPage() {
                   {job.entry_command}
                 </pre>
               </div>
+            </div>
+          </div>
+
+          {/* Output */}
+          <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
+              <Download className="w-4 h-4 text-zinc-400" />
+              <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.output")}</h3>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-1.5">
+                  {t("jobDetail.result")}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all">
+                  {job.result?.trim() ? job.result : t("jobDetail.noResult")}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-1.5">
+                  {t("jobDetail.action")}
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-300 font-mono whitespace-pre-wrap break-all">
+                  {job.action?.trim() ? job.action : t("jobDetail.noAction")}
+                </div>
+              </div>
+
+              {downloadableSecret ? (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadOutput()}
+                    disabled={downloadingOutput}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center justify-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {downloadingOutput ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    {downloadingOutput ? t("jobDetail.downloadingOutput") : t("jobDetail.downloadOutput")}
+                  </button>
+                  <p className="text-xs text-zinc-500 leading-5">
+                    {t("jobDetail.browserDownloadHint")}
+                  </p>
+                </div>
+              ) : job.action?.trim() ? (
+                <p className="text-xs text-zinc-500 leading-5">
+                  {t("jobDetail.outputUnsupported")}
+                </p>
+              ) : null}
             </div>
           </div>
 
