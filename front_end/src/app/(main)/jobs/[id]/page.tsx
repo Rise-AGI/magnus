@@ -130,14 +130,14 @@ export default function JobDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, isSlurmTask, job?.status, fetchLogs]);
 
-  // Follow mode polling (5x slower than POLL_INTERVAL)
+  // Follow mode polling
   useEffect(() => {
     if (!followMode) return;
     if (job && !['Pending', 'Preparing', 'Running'].includes(job.status)) {
       setFollowMode(false);
       return;
     }
-    const interval = setInterval(() => fetchLogs(-1), POLL_INTERVAL * 5);
+    const interval = setInterval(() => fetchLogs(-1), POLL_INTERVAL);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followMode, job?.status, fetchLogs]);
