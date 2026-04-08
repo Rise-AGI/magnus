@@ -763,6 +763,7 @@ class MagnusScheduler:
                 "MAGNUS_ACTION": f"{magnus_home}/workspace/.magnus_action",
                 "MAGNUS_METRICS_DIR": f"{magnus_home}/workspace/metrics",
                 "MAGNUS_METRICS_PROTO": "metrics.v1",
+                "PYTHONUNBUFFERED": "1",
                 "HOME": magnus_home,
             }
 
