@@ -500,7 +500,6 @@ const translations = {
   "jobDetail.downloadingOutput": { zh: "下载中...", en: "Downloading..." },
   "jobDetail.browserDownloadHint": { zh: "Web 端只对白名单形式的 magnus receive 动作提供浏览器下载。target 在这里会被当作建议下载名，而不是本地绝对路径。", en: "The Web client only supports browser download for allowlisted magnus receive actions. target is treated as a suggested download name here, not a local absolute path." },
   "jobDetail.outputUnsupported": { zh: "这个 action 不是受支持的 magnus receive 形式。Web 端不会执行原始 shell。", en: "This action is not a supported magnus receive form. The Web client will not execute raw shell." },
-  "jobDetail.metrics": { zh: "监控", en: "Metrics" },
 
   // ===== Job Detail - Metrics =====
   "jobDetail.metricsLoading": { zh: "加载监控数据...", en: "Loading metrics..." },

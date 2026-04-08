@@ -33,6 +33,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { i18nKey: "nav.chat", href: "/chat", icon: MessageCircle },
+  { i18nKey: "nav.tools", href: "/tools", icon: Wrench },
   { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight, wip: true },
   { i18nKey: "nav.people", href: "/people", icon: Users },
   { i18nKey: "nav.jobs", href: "/jobs", icon: Rocket },
@@ -40,7 +41,6 @@ const NAV_ITEMS: NavItem[] = [
   { i18nKey: "nav.services", href: "/services", icon: Layers },
   { i18nKey: "nav.skills", href: "/skills", icon: Dna },
   { i18nKey: "nav.images", href: "/images", icon: Container },
-  { i18nKey: "nav.tools", href: "/tools", icon: Wrench },
   { i18nKey: "nav.cluster", href: "/cluster", icon: LayoutDashboard },
 ];
 
