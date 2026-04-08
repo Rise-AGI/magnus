@@ -264,7 +264,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
       </div>
 
       {/* Chart */}
-      <div className="shrink-0 h-[375px]">
+      <div className="shrink-0 h-[375px] [&_svg]:outline-none">
         {chartData.rows.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData.rows} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
@@ -284,6 +284,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
                 width={65}
               />
               <Tooltip
+                cursor={{ stroke: "#3f3f46" }}
                 contentStyle={{
                   backgroundColor: "#18181b",
                   border: "1px solid #3f3f46",
