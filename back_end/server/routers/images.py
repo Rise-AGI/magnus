@@ -327,6 +327,7 @@ def list_images(
     skip: int = 0,
     limit: int = 50,
     search: Optional[str] = None,
+    owner_id: Optional[str] = None,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -335,6 +336,8 @@ def list_images(
     if search:
         safe = search.replace("%", r"\%").replace("_", r"\_")
         query = query.filter(models.CachedImage.uri.ilike(f"%{safe}%", escape="\\"))
+    if owner_id:
+        query = query.filter(models.CachedImage.user_id == owner_id)
 
     db_images = query.options(joinedload(models.CachedImage.user)).all()
     db_filenames = {img.filename for img in db_images}
@@ -344,7 +347,7 @@ def list_images(
     #    如果运维看到 unregistered 镜像，说明有异常的镜像落盘路径，应排查。
     #    local 模式下不扫描 .sif 文件（Docker 自行管理镜像存储）。
     fs_items: list[CachedImageResponse] = []
-    if not is_local_mode and os.path.isdir(container_cache_path):
+    if not owner_id and not is_local_mode and os.path.isdir(container_cache_path):
         for fname in os.listdir(container_cache_path):
             if not fname.endswith(".sif"):
                 continue
