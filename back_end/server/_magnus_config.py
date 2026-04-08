@@ -166,11 +166,10 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
 
     # execution 配置 (续)
     if is_local:
-        # local 模式：container_runtime 固定为 docker，spy_gpu / allow_root / resource_cache 可选
-        expected_exec_keys = {"backend", "container_runtime", "spy_gpu_interval", "allow_root", "resource_cache"}
+        # local 模式：container_runtime 固定为 docker，allow_root / resource_cache 可选
+        expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache"}
         # 提供默认值
         execution.setdefault("container_runtime", "docker")
-        execution.setdefault("spy_gpu_interval", 0)
         execution.setdefault("allow_root", True)
         execution.setdefault("resource_cache", {"container_cache_size": "80G", "repo_cache_size": "20G"})
         if execution["container_runtime"] != "docker":
@@ -179,10 +178,9 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _check_key(execution, "container_runtime", str)
         if execution["container_runtime"] != "apptainer":
             raise NotImplementedError(f"❌ execution.container_runtime '{execution['container_runtime']}' 尚未实现，HPC 模式仅支持 'apptainer'")
-        _check_key(execution, "spy_gpu_interval", int)
         _check_key(execution, "allow_root", bool)
         _check_key(execution, "resource_cache", dict)
-        expected_exec_keys = {"backend", "container_runtime", "spy_gpu_interval", "allow_root", "resource_cache"}
+        expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache"}
 
     _warn_extra_keys(execution, expected_exec_keys, "execution")
 

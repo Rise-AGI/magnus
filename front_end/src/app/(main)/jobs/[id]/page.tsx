@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
+  ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw,
   ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX
 } from "lucide-react";
 import { AnsiUp } from "ansi_up";
@@ -53,7 +53,7 @@ export default function JobDetailsPage() {
 
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"console" | "description" | "metrics">("console");
+  const [activeTab, setActiveTab] = useState<"console" | "description">("console");
 
   const [logs, setLogs] = useState("");
   const [logPage, setLogPage] = useState(-1);
@@ -535,15 +535,6 @@ export default function JobDetailsPage() {
                 <span>{t("jobDetail.description")}</span>
               </div>
 
-              <div
-                onClick={() => setActiveTab("metrics")}
-                className={`flex items-center gap-2 text-sm font-semibold transition-colors cursor-pointer
-                  ${activeTab === "metrics" ? "text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
-              >
-                <Activity className={`w-4 h-4 ${activeTab === "metrics" ? "text-zinc-400" : "text-zinc-600"}`} />
-                <span>{t("jobDetail.metrics")}</span>
-              </div>
-
             </div>
 
             {job.status === "Running" && (
@@ -633,22 +624,6 @@ export default function JobDetailsPage() {
               </div>
             )}
 
-            {activeTab === "metrics" && (
-              <div className="absolute inset-0 overflow-auto p-5 custom-scrollbar">
-                <div className="h-full flex flex-col items-center justify-center text-zinc-500 gap-4 min-h-[400px]">
-                  <div className="relative">
-                    <Activity className="w-12 h-12 opacity-20" />
-                    <div className="absolute -bottom-1 -right-1 bg-amber-500/20 text-amber-500 p-1 rounded-full">
-                      <RefreshCw className="w-4 h-4 animate-spin-slow" />
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-zinc-200 font-bold text-lg mb-1">{t("jobDetail.comingSoon")}</p>
-                    <p className="text-zinc-500 text-sm">{t("jobDetail.underConstruction")}</p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
         </div>

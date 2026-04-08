@@ -1,6 +1,5 @@
 # back_end/server/_scheduler.py
 import os
-import json
 import re
 import asyncio
 import logging
@@ -372,7 +371,6 @@ class MagnusScheduler:
                         job.result = "Internal error: job entered RUNNING state without a scheduler job ID"
                         continue
 
-                    self._harvest_job_metrics(db, job)
                     real_status = slurm_statuses.get(job_id)
                     if real_status == "COMPLETED":
                         self._finalize_completed_job(job)
@@ -386,35 +384,6 @@ class MagnusScheduler:
                     logger.error(f"Failed to sync RUNNING job {job_id}: {e}")
 
             db.commit()
-
-
-    def _harvest_job_metrics(self, db: Session, job: Job)-> None:
-        status_path = f"{magnus_workspace_path}/jobs/{job.id}/gpu_status.json"
-        if not os.path.exists(status_path):
-            return
-
-        try:
-            with open(status_path, "r", encoding="utf-8") as f:
-                raw_data: List[Dict[str, Any]] = json.load(f)
-
-            processed_status = []
-            for i in range(job.gpu_count):
-                if i < len(raw_data):
-                    processed_status.append(raw_data[i])
-                else:
-                    processed_status.append({
-                        "index": i,
-                        "utilization_gpu": 0,
-                        "utilization_memory": 0,
-                    })
-
-            db.add(JobMetric(
-                job_id = job.id,
-                timestamp = datetime.now(timezone.utc),
-                status_json = json.dumps(processed_status),
-            ))
-        except Exception as e:
-            logger.error(f"Failed to harvest metrics for job {job.id}: {e}")
 
 
     async def _make_decisions(self):
@@ -656,7 +625,6 @@ class MagnusScheduler:
 
             self._init_job_working_dir(job_working_table)
 
-            spy_gpu_interval = magnus_config["execution"]["spy_gpu_interval"]
             allow_root = magnus_config["execution"]["allow_root"]
             user_token = job.user.token or ""
             magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['front_end_port']}"
@@ -686,7 +654,6 @@ class MagnusScheduler:
             magnus_address = magnus_address,
             job_id = job_id,
             ephemeral_storage = ephemeral_storage,
-            spy_gpu_interval = spy_gpu_interval,
             allow_root = allow_root,
             entry_command = job.entry_command,
             effective_runner = effective_runner,
@@ -878,14 +845,6 @@ class MagnusScheduler:
     def _init_job_working_dir(self, job_working_table: str)-> None:
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
 
-        gpu_status_path = f"{job_working_table}/gpu_status.json"
-        try:
-            with open(gpu_status_path, "w", encoding="utf-8") as f:
-                f.write("[]")
-            os.chmod(gpu_status_path, 0o666)
-        except Exception as e:
-            logger.error(f"Failed to initialize gpu_status.json: {e}.\nTraceback:\n{traceback.format_exc()}")
-
         for marker_name in [".magnus_success", ".magnus_result", ".magnus_action"]:
             marker_path = f"{job_working_table}/{marker_name}"
             if os.path.exists(marker_path):
@@ -905,21 +864,16 @@ class MagnusScheduler:
         magnus_address: str,
         job_id: str,
         ephemeral_storage: str,
-        spy_gpu_interval: int,
         allow_root: bool,
         entry_command: str,
         effective_runner: str,
     )-> str:
         success_marker_path = f"{job_working_table}/.magnus_success"
-        gpu_status_path = f"{job_working_table}/gpu_status.json"
 
         return f'''import os
 import sys
 import traceback
 import subprocess
-import threading
-import time
-import json
 
 def _parse_size_to_mb(size_str):
     size_str = size_str.strip().upper()
@@ -929,31 +883,10 @@ def _parse_size_to_mb(size_str):
         return int(float(size_str[:-1]))
     return int(size_str)
 
-def _spy_gpu_thread(status_path):
-    interval = {spy_gpu_interval}
-    while True:
-        try:
-            cmd = ["nvidia-smi", "--query-gpu=index,utilization.gpu,utilization.memory", "--format=csv,noheader,nounits"]
-            output = subprocess.check_output(cmd, encoding="utf-8", timeout=2)
-            gpu_list = []
-            for line in output.strip().split('\\n'):
-                if not line.strip(): continue
-                parts = line.split(',')
-                if len(parts) == 3:
-                    gpu_list.append({{"index": int(parts[0].strip()), "utilization_gpu": int(parts[1].strip()), "utilization_memory": int(parts[2].strip())}})
-            temp_path = status_path + ".tmp"
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(gpu_list, f)
-            os.replace(temp_path, status_path)
-        except Exception:
-            pass
-        time.sleep(interval)
-
 def main():
     work_dir = {repr(job_working_table)}
     repo_dir = {repr(repo_dir)}
     success_marker_path = {repr(success_marker_path)}
-    gpu_status_path = {repr(gpu_status_path)}
     sif_path = {repr(sif_path)}
     system_entry_command = {repr(system_entry_command)}
     user_token = {repr(user_token)}
@@ -971,14 +904,7 @@ def main():
     if effective_runner == "root" and not allow_root:
         raise RuntimeError("Error: Not privileged.")
 
-    # Phase 1: Start GPU Spy
-    try:
-        spy = threading.Thread(target=_spy_gpu_thread, args=(gpu_status_path,), daemon=True)
-        spy.start()
-    except Exception as e:
-        print(f"Magnus Warning: Failed to start GPU spy: {{e}}", file=sys.stderr)
-
-    # Phase 2: Prepare user script
+    # Phase 1: Prepare user script
     user_script_path = os.path.join(work_dir, ".magnus_user_script.sh")
     with open(user_script_path, "w") as f:
         f.write("set -e\\n")
@@ -987,7 +913,7 @@ def main():
         f.write("\\n")
     os.chmod(user_script_path, 0o755)
 
-    # Phase 3: Execute with container
+    # Phase 2: Execute with container
     overlay_path = os.path.join(work_dir, "ephemeral_overlay.img")
     try:
         os.makedirs(apptainer_tmp_dir, exist_ok=True)
@@ -1078,7 +1004,7 @@ fi
 """
         ret_code = subprocess.call(shell_cmd, shell=True, executable="/bin/bash")
 
-        # Phase 4: Epilogue - only write success marker if user command succeeded
+        # Phase 3: Epilogue - only write success marker if user command succeeded
         if ret_code == 0:
             with open(success_marker_path, "w") as f:
                 f.write("success")

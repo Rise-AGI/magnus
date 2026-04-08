@@ -439,16 +439,11 @@ const translations = {
   // ===== Job Detail - Tabs =====
   "jobDetail.consoleOutput": { zh: "控制台输出", en: "Console Output" },
   "jobDetail.description": { zh: "描述", en: "Description" },
-  "jobDetail.metrics": { zh: "指标", en: "Metrics" },
 
   // ===== Job Detail - Console =====
   "jobDetail.waitingOutput": { zh: "等待输出...", en: "Waiting for output..." },
   "jobDetail.noOutput": { zh: "执行期间未产生输出", en: "No output generated during execution" },
   "jobDetail.noDescriptionProvided": { zh: "未提供描述。", en: "No description provided." },
-
-  // ===== Job Detail - Metrics =====
-  "jobDetail.comingSoon": { zh: "即将推出", en: "Coming Soon" },
-  "jobDetail.underConstruction": { zh: "施工中...", en: "Under construction..." },
 
   // ===== Service Detail - Not Found =====
   "serviceDetail.notFound": { zh: "服务未找到", en: "Service Not Found" },

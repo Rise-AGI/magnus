@@ -8,7 +8,6 @@ from .models import JobType, JobStatus, ConversationType, MessageType
 __all__ = [
     "JobSubmission",
     "JobResponse",
-    "JobMetricResponse",
     "PagedJobResponse",
     "FeishuLoginRequest",
     "TokenLoginRequest",
@@ -147,12 +146,6 @@ class JobResponse(JobSubmission):
         return v
     
     
-class JobMetricResponse(BaseModel):
-    timestamp: datetime
-    status_json: str
-    class Config: from_attributes = True
-
-
 class PagedJobResponse(BaseModel):
     total: int
     items: List[JobResponse]
