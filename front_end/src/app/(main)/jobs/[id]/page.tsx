@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
   ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX,
-  BarChart3,
+  BarChart3, Package,
 } from "lucide-react";
 import { AnsiUp } from "ansi_up";
 import { client } from "@/lib/api";
@@ -55,7 +55,7 @@ export default function JobDetailsPage() {
 
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"console" | "description" | "metrics">("console");
+  const [activeTab, setActiveTab] = useState<"console" | "description" | "metrics" | "artifacts">("console");
 
   const [logs, setLogs] = useState("");
   const [logPage, setLogPage] = useState(-1);
@@ -545,6 +545,15 @@ export default function JobDetailsPage() {
                 <span>{t("jobDetail.metrics")}</span>
               </div>
 
+              <div
+                onClick={() => setActiveTab("artifacts")}
+                className={`flex items-center gap-2 text-sm font-semibold transition-colors cursor-pointer
+                  ${activeTab === "artifacts" ? "text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              >
+                <Package className={`w-4 h-4 ${activeTab === "artifacts" ? "text-zinc-400" : "text-zinc-600"}`} />
+                <span>{t("jobDetail.artifacts")}</span>
+              </div>
+
             </div>
 
             {job.status === "Running" && (
@@ -637,6 +646,41 @@ export default function JobDetailsPage() {
             {activeTab === "metrics" && (
               <div className="absolute inset-0 overflow-auto p-5 custom-scrollbar">
                 <MetricsChart jobId={jobId} jobStatus={job.status} />
+              </div>
+            )}
+
+            {activeTab === "artifacts" && (
+              <div className="absolute inset-0 overflow-auto p-5 custom-scrollbar space-y-6">
+                {/* Result */}
+                <div>
+                  <h4 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-2">{t("jobDetail.result")}</h4>
+                  {job.result ? (
+                    <pre className="text-sm text-zinc-300 bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-all font-mono">
+                      {job.result}
+                    </pre>
+                  ) : (
+                    <p className="text-sm text-zinc-600 italic">
+                      {['Pending', 'Preparing', 'Running'].includes(job.status)
+                        ? t("jobDetail.waitingOutput")
+                        : t("jobDetail.noResult")}
+                    </p>
+                  )}
+                </div>
+                {/* Action */}
+                <div>
+                  <h4 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-2">{t("jobDetail.action")}</h4>
+                  {job.action ? (
+                    <pre className="text-sm text-zinc-300 bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-all font-mono">
+                      {job.action}
+                    </pre>
+                  ) : (
+                    <p className="text-sm text-zinc-600 italic">
+                      {['Pending', 'Preparing', 'Running'].includes(job.status)
+                        ? t("jobDetail.waitingOutput")
+                        : t("jobDetail.noAction")}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 

@@ -488,9 +488,10 @@ const translations = {
   "jobDetail.systemEntryCommand": { zh: "系统入口指令", en: "System Entry Command" },
 
   // ===== Job Detail - Tabs =====
-  "jobDetail.consoleOutput": { zh: "控制台输出", en: "Console Output" },
+  "jobDetail.consoleOutput": { zh: "日志", en: "Logs" },
   "jobDetail.description": { zh: "描述", en: "Description" },
   "jobDetail.metrics": { zh: "指标", en: "Metrics" },
+  "jobDetail.artifacts": { zh: "产物", en: "Artifacts" },
   "jobDetail.output": { zh: "输出", en: "Output" },
   "jobDetail.result": { zh: "结果", en: "Result" },
   "jobDetail.action": { zh: "动作", en: "Action" },
