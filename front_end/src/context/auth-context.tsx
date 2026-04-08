@@ -11,8 +11,12 @@ import { FEISHU_APP_ID, IS_LOCAL_MODE, API_BASE } from "@/lib/config";
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
+  showLoginDialog: boolean;
   login: () => void;
+  loginWithFeishu: () => void;
+  loginWithToken: (token: string) => Promise<string | null>;
   logout: () => void;
+  setShowLoginDialog: (show: boolean) => void;
 }
 
 
@@ -22,6 +26,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
   const router = useRouter();
 
   // 读取并解析本地存储的用户信息
@@ -99,10 +104,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       autoLoginLocal();
       return;
     }
+    setShowLoginDialog(true);
+  };
+
+  const loginWithFeishu = () => {
     const REDIRECT_URI = `${window.location.origin}/auth/callback`;
     const FEISHU_AUTH_URL = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=RANDOM_STATE`;
 
     window.location.href = FEISHU_AUTH_URL;
+  };
+
+  // 通过 Magnus Token 登录，返回错误信息或 null（成功）
+  const loginWithToken = async (token: string): Promise<string | null> => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/auth/token/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: "Login failed" }));
+        return err.detail || "Login failed";
+      }
+      const data = await resp.json();
+      localStorage.setItem("magnus_token", data.access_token);
+      localStorage.setItem("magnus_user", JSON.stringify(data.user));
+      setUser(data.user);
+      setShowLoginDialog(false);
+      return null;
+    } catch (error: any) {
+      return error.message || "Network error";
+    }
   };
 
   const logout = () => {
@@ -113,7 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, showLoginDialog, login, loginWithFeishu, loginWithToken, logout, setShowLoginDialog }}>
       {children}
     </AuthContext.Provider>
   );

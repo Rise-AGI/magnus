@@ -61,7 +61,6 @@ server:
 execution:
   backend: slurm                         # slurm | local
   container_runtime: apptainer           # apptainer (slurm) | docker (local)
-  spy_gpu_interval: 5
   allow_root: false
   resource_cache:
     container_cache_size: 80G

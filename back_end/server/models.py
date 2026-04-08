@@ -12,7 +12,6 @@ __all__ = [
     "Job",
     "JobType",
     "JobStatus",
-    "JobMetric",
     "ClusterSnapshot",
     "Blueprint",
     "Service",
@@ -99,19 +98,6 @@ class Job(Base):
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metrics: Mapped[list["JobMetric"]] = relationship(
-        back_populates = "job",
-        cascade = "all, delete-orphan",
-    )
-
-
-class JobMetric(Base):
-    __tablename__ = "job_metrics"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), index=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
-    status_json: Mapped[str] = mapped_column(Text)
-    job: Mapped["Job"] = relationship(back_populates="metrics")
 
 
 class ClusterSnapshot(Base):

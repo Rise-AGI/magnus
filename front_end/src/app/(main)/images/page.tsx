@@ -1,17 +1,21 @@
 // front_end/src/app/(main)/images/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Search, Plus, Container, Loader2, RefreshCw, Clock } from "lucide-react";
 import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Drawer } from "@/components/ui/drawer";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { POLL_INTERVAL } from "@/lib/config";
+import { getUserInitials } from "@/lib/user-display";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { formatBeijingTime } from "@/lib/utils";
+
+import { User } from "@/types/auth";
 
 import { ImageTable, CachedImage, formatSize, extractImageName, STATUS_STYLES, STATUS_I18N, isBusy } from "@/components/images/image-table";
 
@@ -21,6 +25,8 @@ export default function ImagesPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState("");
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -40,7 +46,17 @@ export default function ImagesPage() {
   const [viewingImage, setViewingImage] = useState<CachedImage | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => { setCurrentPage(1); }, [debouncedQuery]);
+  useEffect(() => {
+    const fetchUsers = async () => { try { const u = await client("/api/users"); setAllUsers(u); } catch (e) { console.error(e); } };
+    fetchUsers();
+  }, []);
+
+  const userFilterOptions = useMemo(() => [
+    { label: t("common.allUsers"), value: "", icon: "/api/logo" },
+    ...allUsers.map(u => ({ label: u.name, value: u.id, meta: u.email || "", icon: u.avatar_url || undefined, initials: getUserInitials(u.name) }))
+  ], [allUsers, t]);
+
+  useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);
 
   const fetchImages = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
@@ -48,6 +64,7 @@ export default function ImagesPage() {
       const skip = (currentPage - 1) * pageSize;
       const params = new URLSearchParams({ skip: skip.toString(), limit: pageSize.toString() });
       if (debouncedQuery.trim()) params.append("search", debouncedQuery.trim());
+      if (selectedUserId) params.append("owner_id", selectedUserId);
       const res = await client(`/api/images?${params.toString()}`);
       setImages(res.items);
       setTotalItems(res.total);
@@ -56,7 +73,7 @@ export default function ImagesPage() {
     } finally {
       if (!isBackground) setLoading(false);
     }
-  }, [currentPage, pageSize, debouncedQuery]);
+  }, [currentPage, pageSize, debouncedQuery, selectedUserId]);
 
   useEffect(() => {
     fetchImages();
@@ -164,6 +181,10 @@ export default function ImagesPage() {
             placeholder={t("images.searchPlaceholder")}
             className="w-full bg-transparent border-none py-2.5 pl-9 pr-4 text-sm text-zinc-200 focus:outline-none focus:ring-0 placeholder-zinc-600"
           />
+        </div>
+        <div className="h-6 w-px bg-zinc-800 hidden sm:block"></div>
+        <div className="w-full sm:w-56">
+          <SearchableSelect value={selectedUserId} onChange={setSelectedUserId} options={userFilterOptions} placeholder={t("images.filterByUser")} className="mb-0 border-none bg-transparent" />
         </div>
       </div>
 

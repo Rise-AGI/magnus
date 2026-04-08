@@ -9,6 +9,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { POLL_INTERVAL } from "@/lib/config";
 import { DEFAULT_CODE_TEMPLATE } from "@/lib/blueprint-defaults";
+import { getUserInitials } from "@/lib/user-display";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 
@@ -59,7 +60,7 @@ export default function BlueprintsPage() {
 
   const userFilterOptions = useMemo(() => [
       { label: t("common.allUsers"), value: "", icon: "/api/logo" },
-      ...allUsers.map(u => ({ label: u.name, value: u.id, meta: u.email || "", icon: u.avatar_url || undefined, initials: u.name.substring(0, 2).toUpperCase() }))
+      ...allUsers.map(u => ({ label: u.name, value: u.id, meta: u.email || "", icon: u.avatar_url || undefined, initials: getUserInitials(u.name) }))
   ], [allUsers, t]);
 
   useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);

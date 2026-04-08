@@ -11,7 +11,7 @@ function requireEnv(value: string | undefined, key: string): string {
 // 这样无论是 HTTP 本地开发还是 HTTPS 公网访问都不会有 Mixed Content 问题
 // SDK 和其他客户端只需要配置前端地址即可
 export const API_BASE = "";
-export const DEFAULT_ROUTE = "/explorer";
+export const DEFAULT_ROUTE = "/jobs";
 export const AUTH_PROVIDER = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? "feishu";
 export const IS_LOCAL_MODE = AUTH_PROVIDER === "local";
 export const FEISHU_APP_ID = IS_LOCAL_MODE

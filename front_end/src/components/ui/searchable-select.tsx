@@ -149,6 +149,9 @@ export function SearchableSelect({
             sideOffset={4}
             align="start"
             onOpenAutoFocus={(e) => e.preventDefault()}
+            onInteractOutside={(e) => {
+              if (triggerRef.current?.contains(e.target as Node)) e.preventDefault();
+            }}
             style={{ width: triggerRef.current?.offsetWidth }}
             className="bg-[#0F0F11] border border-zinc-800 rounded-lg shadow-2xl z-[200] overflow-hidden max-h-60 overflow-y-auto custom-scrollbar animate-in fade-in duration-100"
           >

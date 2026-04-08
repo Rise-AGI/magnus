@@ -8,6 +8,7 @@ import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { getUserInitials } from "@/lib/user-display";
 import type { ConversationType, PagedConversationResponse } from "@/types/chat";
 
 interface UserOption {
@@ -60,7 +61,7 @@ export default function ChatPage() {
             value: u.id,
             meta: u.email || undefined,
             icon: u.avatar_url || undefined,
-            initials: u.name.substring(0, 2).toUpperCase(),
+            initials: getUserInitials(u.name),
           }))
       );
     }).catch(() => {});

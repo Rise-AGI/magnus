@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { User as UserIcon, UserX } from "lucide-react";
 import type { User } from "@/types/auth";
+import { getUserInitials } from "@/lib/user-display";
 
 type AvatarSize = "xs" | "sm" | "md" | "lg";
 
@@ -54,7 +55,7 @@ export function AvatarCircle({ user, size = "sm", className = "" }: AvatarCircle
         <UserX className={`${icon} text-zinc-600`} />
       ) : (
         <span className={`${text} font-bold text-indigo-400`}>
-          {user.name.substring(0, 2).toUpperCase()}
+          {getUserInitials(user.name)}
         </span>
       )}
     </div>

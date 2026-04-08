@@ -224,7 +224,7 @@ export default function SkillDetailPage() {
           <div className="flex-1 min-w-0 pr-8">
             <div className="flex items-center gap-4 mb-3">
               <Dna className="w-8 h-8 text-blue-500" />
-              <CopyableText text={skill.title} variant="text" className="!w-auto text-3xl font-bold text-white tracking-tight leading-tight" />
+              <CopyableText text={skill.title} variant="text" className="text-3xl font-bold text-white tracking-tight leading-tight" />
             </div>
             <div className="flex items-center gap-1 text-sm text-zinc-500 font-mono">
                <div className="flex items-center gap-2">

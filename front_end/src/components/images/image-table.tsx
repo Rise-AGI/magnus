@@ -40,6 +40,7 @@ export const STATUS_STYLES: Record<string, string> = {
   cached: "bg-green-900/30 text-green-400 border-green-800/50",
   refreshing: "bg-yellow-900/30 text-yellow-400 border-yellow-800/50",
   pulling: "bg-blue-900/30 text-blue-400 border-blue-800/50",
+  failed: "bg-red-900/30 text-red-400 border-red-800/50",
   unregistered: "bg-zinc-800/50 text-zinc-500 border-zinc-700/50",
   missing: "bg-red-900/30 text-red-400 border-red-800/50",
 };
@@ -48,6 +49,7 @@ export const STATUS_I18N: Record<string, string> = {
   cached: "images.status.cached",
   refreshing: "images.status.refreshing",
   pulling: "images.status.pulling",
+  failed: "images.status.failed",
   unregistered: "images.status.unregistered",
   missing: "images.status.missing",
 };

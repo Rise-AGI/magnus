@@ -1,6 +1,5 @@
 # back_end/server/_scheduler.py
 import os
-import json
 import re
 import asyncio
 import logging
@@ -10,7 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import sys
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Tuple
 from pywheels.file_tools import guarantee_file_exist, delete_file
 from .database import SessionLocal
 from .models import *
@@ -38,14 +37,18 @@ guarantee_file_exist(magnus_uv_cache_path, is_directory=True)
 logger = logging.getLogger(__name__)
 
 
-def _register_image_pulling(db: Session, image_uri: str, user_id: str) -> None:
-    """Pull 开始前，标记镜像为 pulling（首次见到的 URI 才插入）。"""
+def _register_image_pulling(db: Session, image_uri: str, user_id: str) -> bool:
+    """Pull 开始前，标记镜像为 pulling（首次见到的 URI 才插入）。
+    返回 True 表示取得了 DB 生命周期管理权（应由调用方负责 finalize）；
+    返回 False 表示记录已由其他路径（如 images API）管理，调用方不应触碰 DB 状态。
+    """
     existing = db.query(CachedImage).filter(CachedImage.uri == image_uri).first()
     if existing:
         if existing.status == "failed":
             existing.status = "pulling"
             db.commit()
-        return
+            return True
+        return False
     db.add(CachedImage(
         uri=image_uri,
         filename=_image_to_sif_filename(image_uri),
@@ -55,8 +58,10 @@ def _register_image_pulling(db: Session, image_uri: str, user_id: str) -> None:
     ))
     try:
         db.commit()
+        return True
     except IntegrityError:
         db.rollback()
+        return False
 
 
 def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
@@ -107,6 +112,7 @@ class MagnusScheduler:
             self.docker_manager = None
         self.last_snapshot_time = datetime.min.replace(tzinfo=timezone.utc)
         self.preparing_jobs: Dict[str, asyncio.Task] = {}  # job_id -> Task
+        self._image_pull_tasks: Dict[str, asyncio.Task] = {}  # image_uri -> shared pull Task
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
 
 
@@ -365,7 +371,6 @@ class MagnusScheduler:
                         job.result = "Internal error: job entered RUNNING state without a scheduler job ID"
                         continue
 
-                    self._harvest_job_metrics(db, job)
                     real_status = slurm_statuses.get(job_id)
                     if real_status == "COMPLETED":
                         self._finalize_completed_job(job)
@@ -379,35 +384,6 @@ class MagnusScheduler:
                     logger.error(f"Failed to sync RUNNING job {job_id}: {e}")
 
             db.commit()
-
-
-    def _harvest_job_metrics(self, db: Session, job: Job)-> None:
-        status_path = f"{magnus_workspace_path}/jobs/{job.id}/gpu_status.json"
-        if not os.path.exists(status_path):
-            return
-
-        try:
-            with open(status_path, "r", encoding="utf-8") as f:
-                raw_data: List[Dict[str, Any]] = json.load(f)
-
-            processed_status = []
-            for i in range(job.gpu_count):
-                if i < len(raw_data):
-                    processed_status.append(raw_data[i])
-                else:
-                    processed_status.append({
-                        "index": i,
-                        "utilization_gpu": 0,
-                        "utilization_memory": 0,
-                    })
-
-            db.add(JobMetric(
-                job_id = job.id,
-                timestamp = datetime.now(timezone.utc),
-                status_json = json.dumps(processed_status),
-            ))
-        except Exception as e:
-            logger.error(f"Failed to harvest metrics for job {job.id}: {e}")
 
 
     async def _make_decisions(self):
@@ -493,6 +469,35 @@ class MagnusScheduler:
                 if slurm_queued_count == 0:
                     self._submit_to_slurm(db, head_job)
 
+    async def _pull_image_shared(self, image_uri: str, user_id: Optional[str]) -> Tuple[bool, Optional[str]]:
+        """独立于 job 的镜像拉取 task，自管 DB 状态。
+        仅在本次调用取得 DB 生命周期管理权时才 finalize，避免与 images API 的 _do_pull 互踩。
+        """
+        owns_db_lifecycle = False
+        if user_id:
+            with SessionLocal() as db:
+                owns_db_lifecycle = _register_image_pulling(db, image_uri, user_id)
+        try:
+            image_ok, image_err = await resource_manager.ensure_image(image_uri)
+        except asyncio.CancelledError:
+            raise  # 服务器关停，由 recover_stuck_images 善后
+        except Exception as e:
+            image_ok, image_err = False, str(e)
+        finally:
+            self._image_pull_tasks.pop(image_uri, None)
+        if owns_db_lifecycle:
+            with SessionLocal() as db:
+                _finalize_image_status(db, image_uri, image_ok)
+        return image_ok, image_err
+
+    async def _ensure_image_decoupled(self, image_uri: str, user_id: Optional[str]) -> Tuple[bool, Optional[str]]:
+        """复用或创建共享 pull task，shield 使 job cancel 不中断拉取。"""
+        task = self._image_pull_tasks.get(image_uri)
+        if task is None or task.done():
+            task = asyncio.create_task(self._pull_image_shared(image_uri, user_id))
+            self._image_pull_tasks[image_uri] = task
+        return await asyncio.shield(task)
+
     async def _prepare_job_resources(self, job_id: str):
         """异步准备任务资源：镜像 + 仓库（并行）"""
         # Phase 1 — 读 job 信息 + 注册 pulling 状态（短 session）
@@ -513,12 +518,10 @@ class MagnusScheduler:
 
             guarantee_file_exist(job_working_table, is_directory=True)
 
-            if user_id:
-                _register_image_pulling(db, container_image, user_id)
-
         # Phase 2 — 长 I/O（无 session）
+        # 镜像拉取解耦：shield 保护，job cancel 不中断拉取
         (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
-            resource_manager.ensure_image(container_image),
+            self._ensure_image_decoupled(container_image, user_id),
             resource_manager.ensure_repo(
                 namespace = namespace,
                 repo_name = repo_name,
@@ -536,8 +539,6 @@ class MagnusScheduler:
             if not job or job.status != JobStatus.PREPARING:
                 self._clean_up_working_table(job_id)
                 return
-
-            _finalize_image_status(db, container_image, image_ok)
 
             if not image_ok:
                 job.status = JobStatus.FAILED
@@ -624,7 +625,6 @@ class MagnusScheduler:
 
             self._init_job_working_dir(job_working_table)
 
-            spy_gpu_interval = magnus_config["execution"]["spy_gpu_interval"]
             allow_root = magnus_config["execution"]["allow_root"]
             user_token = job.user.token or ""
             magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['front_end_port']}"
@@ -654,7 +654,6 @@ class MagnusScheduler:
             magnus_address = magnus_address,
             job_id = job_id,
             ephemeral_storage = ephemeral_storage,
-            spy_gpu_interval = spy_gpu_interval,
             allow_root = allow_root,
             entry_command = job.entry_command,
             effective_runner = effective_runner,
@@ -762,6 +761,8 @@ class MagnusScheduler:
                 "MAGNUS_HOME": magnus_home,
                 "MAGNUS_RESULT": f"{magnus_home}/workspace/.magnus_result",
                 "MAGNUS_ACTION": f"{magnus_home}/workspace/.magnus_action",
+                "MAGNUS_METRICS_DIR": f"{magnus_home}/workspace/metrics",
+                "MAGNUS_METRICS_PROTO": "metrics.v1",
                 "HOME": magnus_home,
             }
 
@@ -845,14 +846,7 @@ class MagnusScheduler:
 
     def _init_job_working_dir(self, job_working_table: str)-> None:
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
-
-        gpu_status_path = f"{job_working_table}/gpu_status.json"
-        try:
-            with open(gpu_status_path, "w", encoding="utf-8") as f:
-                f.write("[]")
-            os.chmod(gpu_status_path, 0o666)
-        except Exception as e:
-            logger.error(f"Failed to initialize gpu_status.json: {e}.\nTraceback:\n{traceback.format_exc()}")
+        guarantee_file_exist(f"{job_working_table}/metrics", is_directory=True)
 
         for marker_name in [".magnus_success", ".magnus_result", ".magnus_action"]:
             marker_path = f"{job_working_table}/{marker_name}"
@@ -873,13 +867,11 @@ class MagnusScheduler:
         magnus_address: str,
         job_id: str,
         ephemeral_storage: str,
-        spy_gpu_interval: int,
         allow_root: bool,
         entry_command: str,
         effective_runner: str,
     )-> str:
         success_marker_path = f"{job_working_table}/.magnus_success"
-        gpu_status_path = f"{job_working_table}/gpu_status.json"
 
         return f'''import os
 import sys
@@ -889,6 +881,78 @@ import threading
 import time
 import json
 
+def _read_cpu_times():
+    try:
+        with open("/proc/stat") as f:
+            parts = f.readline().split()
+        # user, nice, system, idle, iowait, irq, softirq, steal
+        vals = [int(v) for v in parts[1:9]]
+        total = sum(vals)
+        idle = vals[3] + vals[4]  # idle + iowait
+        return total, idle
+    except Exception:
+        return None, None
+
+def _metrics_sidecar(metrics_dir, stop_event):
+    try:
+        import socket
+        path = os.path.join(metrics_dir, "system.jsonl")
+        hostname = socket.gethostname()
+        prev_total, prev_idle = _read_cpu_times()
+        while not stop_event.wait(5.0):
+            now_ms = int(time.time() * 1000)
+            lines = []
+            node_labels = {{"node": hostname}}
+            # GPU metrics
+            try:
+                out = subprocess.check_output(
+                    ["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used",
+                     "--format=csv,noheader,nounits"],
+                    timeout=10, text=True, stderr=subprocess.DEVNULL,
+                )
+                for row in out.strip().split("\\n"):
+                    parts = [p.strip() for p in row.split(",")]
+                    if len(parts) != 3:
+                        continue
+                    idx, util, mem_mib = parts
+                    labels = {{"device": f"cuda:{{idx}}", "node": hostname}}
+                    lines.append(json.dumps({{
+                        "name": "system.gpu.utilization", "kind": "gauge",
+                        "value": float(util), "time_unix_ms": now_ms,
+                        "unit": "percent", "labels": labels,
+                    }}))
+                    lines.append(json.dumps({{
+                        "name": "system.gpu.memory.used_bytes", "kind": "gauge",
+                        "value": float(mem_mib) * 1048576, "time_unix_ms": now_ms,
+                        "unit": "bytes", "labels": labels,
+                    }}))
+            except Exception:
+                pass
+            # CPU metrics
+            try:
+                cur_total, cur_idle = _read_cpu_times()
+                if cur_total is not None and prev_total is not None:
+                    dt = cur_total - prev_total
+                    di = cur_idle - prev_idle
+                    if dt > 0:
+                        cpu_pct = round((1.0 - di / dt) * 100, 1)
+                        lines.append(json.dumps({{
+                            "name": "system.cpu.utilization", "kind": "gauge",
+                            "value": cpu_pct, "time_unix_ms": now_ms,
+                            "unit": "percent", "labels": node_labels,
+                        }}))
+                prev_total, prev_idle = cur_total, cur_idle
+            except Exception:
+                pass
+            if lines:
+                try:
+                    with open(path, "a") as f:
+                        f.write("\\n".join(lines) + "\\n")
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 def _parse_size_to_mb(size_str):
     size_str = size_str.strip().upper()
     if size_str.endswith("G"):
@@ -897,31 +961,10 @@ def _parse_size_to_mb(size_str):
         return int(float(size_str[:-1]))
     return int(size_str)
 
-def _spy_gpu_thread(status_path):
-    interval = {spy_gpu_interval}
-    while True:
-        try:
-            cmd = ["nvidia-smi", "--query-gpu=index,utilization.gpu,utilization.memory", "--format=csv,noheader,nounits"]
-            output = subprocess.check_output(cmd, encoding="utf-8", timeout=2)
-            gpu_list = []
-            for line in output.strip().split('\\n'):
-                if not line.strip(): continue
-                parts = line.split(',')
-                if len(parts) == 3:
-                    gpu_list.append({{"index": int(parts[0].strip()), "utilization_gpu": int(parts[1].strip()), "utilization_memory": int(parts[2].strip())}})
-            temp_path = status_path + ".tmp"
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(gpu_list, f)
-            os.replace(temp_path, status_path)
-        except Exception:
-            pass
-        time.sleep(interval)
-
 def main():
     work_dir = {repr(job_working_table)}
     repo_dir = {repr(repo_dir)}
     success_marker_path = {repr(success_marker_path)}
-    gpu_status_path = {repr(gpu_status_path)}
     sif_path = {repr(sif_path)}
     system_entry_command = {repr(system_entry_command)}
     user_token = {repr(user_token)}
@@ -939,14 +982,17 @@ def main():
     if effective_runner == "root" and not allow_root:
         raise RuntimeError("Error: Not privileged.")
 
-    # Phase 1: Start GPU Spy
+    # Start metrics sidecar (fail-open)
+    metrics_dir = os.path.join(work_dir, "metrics")
+    _stop_metrics = threading.Event()
     try:
-        spy = threading.Thread(target=_spy_gpu_thread, args=(gpu_status_path,), daemon=True)
-        spy.start()
-    except Exception as e:
-        print(f"Magnus Warning: Failed to start GPU spy: {{e}}", file=sys.stderr)
+        _metrics_thread = threading.Thread(
+            target=_metrics_sidecar, args=(metrics_dir, _stop_metrics), daemon=True)
+        _metrics_thread.start()
+    except Exception:
+        _metrics_thread = None
 
-    # Phase 2: Prepare user script
+    # Phase 1: Prepare user script
     user_script_path = os.path.join(work_dir, ".magnus_user_script.sh")
     with open(user_script_path, "w") as f:
         f.write("set -e\\n")
@@ -955,7 +1001,7 @@ def main():
         f.write("\\n")
     os.chmod(user_script_path, 0o755)
 
-    # Phase 3: Execute with container
+    # Phase 2: Execute with container
     overlay_path = os.path.join(work_dir, "ephemeral_overlay.img")
     try:
         os.makedirs(apptainer_tmp_dir, exist_ok=True)
@@ -972,6 +1018,8 @@ export MAGNUS_HOME=${{{{MAGNUS_HOME:-/magnus}}}}
 export APPTAINERENV_MAGNUS_HOME=$MAGNUS_HOME
 export APPTAINERENV_MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
 export APPTAINERENV_MAGNUS_ACTION=$MAGNUS_HOME/workspace/.magnus_action
+export APPTAINERENV_MAGNUS_METRICS_DIR=$MAGNUS_HOME/workspace/metrics
+export APPTAINERENV_MAGNUS_METRICS_PROTO=metrics.v1
 export APPTAINER_TMPDIR={{apptainer_tmp_dir}}
 export APPTAINER_CACHEDIR={{apptainer_cache_dir}}
 # 追加 workspace bind mount: host {{work_dir}} → 容器 $MAGNUS_HOME/workspace
@@ -1046,7 +1094,12 @@ fi
 """
         ret_code = subprocess.call(shell_cmd, shell=True, executable="/bin/bash")
 
-        # Phase 4: Epilogue - only write success marker if user command succeeded
+        # Stop metrics sidecar
+        _stop_metrics.set()
+        if _metrics_thread is not None:
+            _metrics_thread.join(timeout=5)
+
+        # Phase 3: Epilogue - only write success marker if user command succeeded
         if ret_code == 0:
             with open(success_marker_path, "w") as f:
                 f.write("success")
@@ -1128,6 +1181,7 @@ if __name__ == "__main__":
             delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
             delete_file(os.path.join(job_working_table, ".magnus_tmp"))
             delete_file(os.path.join(job_working_table, ".magnus_cache"))
+            # metrics/ 不清理，与 slurm/output.txt 同策略，供 job 结束后回看
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")
 

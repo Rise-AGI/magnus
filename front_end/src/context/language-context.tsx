@@ -54,11 +54,16 @@ const translations = {
   "auth.verifyingAccess": { zh: "正在验证权限...", en: "Verifying access..." },
   "auth.required": { zh: "需要登录", en: "Authentication Required" },
   "auth.requiredDesc": { zh: "您需要登录才能访问此资源。", en: "You need to be signed in to access this resource." },
-  "auth.pleaseLogin": { zh: "请使用飞书账号登录以继续。", en: "Please login with your Feishu account to continue." },
+  "auth.pleaseLogin": { zh: "请选择登录方式以继续。", en: "Please choose a login method to continue." },
   "auth.pleaseLoginLocal": { zh: "请点击登录以继续。", en: "Click sign in to continue." },
   "auth.authenticating": { zh: "正在通过飞书登录...", en: "Authenticating with Feishu..." },
   "auth.loginFailed": { zh: "登录失败", en: "Login Failed" },
   "auth.backToHome": { zh: "返回首页", en: "Back to Home" },
+  "auth.tokenLogin": { zh: "通过 Magnus Token 登录", en: "Login with Magnus Token" },
+  "auth.tokenPlaceholder": { zh: "输入 Magnus Token (sk-...)", en: "Enter Magnus Token (sk-...)" },
+  "auth.tokenLoginButton": { zh: "登录", en: "Login" },
+  "auth.tokenLoginError": { zh: "令牌无效或已过期", en: "Invalid or expired token" },
+  "auth.oauthDenied": { zh: "授权被拒绝", en: "Authorization denied" },
 
   // ===== Header =====
   "header.hideToken": { zh: "隐藏令牌", en: "Hide Token" },
@@ -495,15 +500,21 @@ const translations = {
   "jobDetail.downloadingOutput": { zh: "下载中...", en: "Downloading..." },
   "jobDetail.browserDownloadHint": { zh: "Web 端只对白名单形式的 magnus receive 动作提供浏览器下载。target 在这里会被当作建议下载名，而不是本地绝对路径。", en: "The Web client only supports browser download for allowlisted magnus receive actions. target is treated as a suggested download name here, not a local absolute path." },
   "jobDetail.outputUnsupported": { zh: "这个 action 不是受支持的 magnus receive 形式。Web 端不会执行原始 shell。", en: "This action is not a supported magnus receive form. The Web client will not execute raw shell." },
+  "jobDetail.metrics": { zh: "监控", en: "Metrics" },
+
+  // ===== Job Detail - Metrics =====
+  "jobDetail.metricsLoading": { zh: "加载监控数据...", en: "Loading metrics..." },
+  "jobDetail.metricsNoData": { zh: "暂无监控数据", en: "No metrics data available" },
+  "jobDetail.metricsNoDataDesc": { zh: "任务运行后将自动采集系统指标。用户程序也可按照 Magnus Metrics Protocol 上报自定义指标。", en: "System metrics will be collected automatically once the job starts running. User programs can also report custom metrics via the Magnus Metrics Protocol." },
+  "jobDetail.metricsSelectStream": { zh: "选择指标", en: "Select Metric" },
+  "jobDetail.metricsSystem": { zh: "系统", en: "System" },
+  "jobDetail.metricsTraining": { zh: "训练", en: "Training" },
+  "jobDetail.metricsOther": { zh: "其他", en: "Other" },
 
   // ===== Job Detail - Console =====
   "jobDetail.waitingOutput": { zh: "等待输出...", en: "Waiting for output..." },
   "jobDetail.noOutput": { zh: "执行期间未产生输出", en: "No output generated during execution" },
   "jobDetail.noDescriptionProvided": { zh: "未提供描述。", en: "No description provided." },
-
-  // ===== Job Detail - Metrics =====
-  "jobDetail.comingSoon": { zh: "即将推出", en: "Coming Soon" },
-  "jobDetail.underConstruction": { zh: "施工中...", en: "Under construction..." },
 
   // ===== Service Detail - Not Found =====
   "serviceDetail.notFound": { zh: "服务未找到", en: "Service Not Found" },
@@ -985,6 +996,7 @@ def blueprint(
   "images.subtitle": { zh: "集群容器镜像缓存", en: "Cluster container image cache" },
   "images.preheat": { zh: "预热镜像", en: "Preheat Image" },
   "images.searchPlaceholder": { zh: "搜索镜像...", en: "Search images..." },
+  "images.filterByUser": { zh: "按用户筛选", en: "Filter by User" },
   "images.fetching": { zh: "正在加载...", en: "Loading..." },
   "images.noFound": { zh: "暂无缓存镜像", en: "No cached images" },
   "images.refresh": { zh: "刷新镜像", en: "Refresh Image" },
@@ -1007,6 +1019,7 @@ def blueprint(
   "images.status.pulling": { zh: "拉取中", en: "Pulling" },
   "images.status.refreshing": { zh: "刷新中", en: "Refreshing" },
   "images.status.unregistered": { zh: "未注册", en: "Unregistered" },
+  "images.status.failed": { zh: "预热失败", en: "Failed" },
   "images.status.missing": { zh: "文件缺失", en: "Missing" },
 
   // ===== People =====
@@ -1016,7 +1029,7 @@ def blueprint(
   "people.noFound": { zh: "暂无成员", en: "No members found" },
   "people.searchPlaceholder": { zh: "搜索成员...", en: "Search members..." },
   "people.table.member": { zh: "成员", en: "Member" },
-  "people.table.leader": { zh: "直属上级", en: "+1 Leader" },
+  "people.table.leader": { zh: "负责人", en: "Point Person" },
   "people.table.bpSvc": { zh: "蓝图 / 服务 / 技能", en: "BP / Svc / Skill" },
   "people.table.headcount": { zh: "属额", en: "Headcount" },
   "people.role.admin": { zh: "管理员", en: "Admin" },
@@ -1024,8 +1037,8 @@ def blueprint(
   "people.drawer.title": { zh: "成员详情", en: "Member Details" },
   "people.drawer.headcount": { zh: "属额", en: "Headcount" },
   "people.drawer.created": { zh: "加入时间", en: "Joined" },
-  "people.drawer.delete": { zh: "删除", en: "Delete" },
-  "people.drawer.deleteConfirm": { zh: "确定删除此成员？此操作不可撤销。", en: "Delete this member? This cannot be undone." },
+  "people.drawer.offboard": { zh: "离职", en: "Offboard" },
+  "people.drawer.offboardConfirm": { zh: "确定要将「{name}」离职吗？此操作不可撤销。", en: "Are you sure you want to offboard \"{name}\"? This cannot be undone." },
   "people.drawer.editHeadcount": { zh: "点击编辑属额", en: "Click to edit headcount" },
   "people.drawer.avatarHint": { zh: "点击上传头像", en: "Click to upload avatar" },
   "people.recruit.name": { zh: "名称", en: "Name" },

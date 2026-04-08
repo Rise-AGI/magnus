@@ -15,6 +15,7 @@ import { JobDrawer } from "@/components/jobs/job-drawer";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useJobOperations } from "@/hooks/use-job-operations";
 import { JobTable } from "@/components/jobs/job-table";
+import { getUserInitials } from "@/lib/user-display";
 
 export default function JobsPage() {
   const { t } = useLanguage();
@@ -93,7 +94,7 @@ export default function JobsPage() {
         value: u.id,
         meta: u.email || "",
         icon: u.avatar_url || undefined,
-        initials: u.name.substring(0, 2).toUpperCase(),
+        initials: getUserInitials(u.name),
       }))
     ];
   }, [allUsers, t]);
