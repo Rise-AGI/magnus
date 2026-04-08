@@ -898,6 +898,9 @@ def _metrics_sidecar(metrics_dir, stop_event):
         import socket
         path = os.path.join(metrics_dir, "system.jsonl")
         hostname = socket.gethostname()
+        # GPU 软隔离：只采集 SLURM 分配的 GPU
+        _cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
+        allowed_gpus = set(_cvd.split(",")) if _cvd else None
         prev_total, prev_idle = _read_cpu_times()
         while not stop_event.wait(5.0):
             now_ms = int(time.time() * 1000)
@@ -915,6 +918,8 @@ def _metrics_sidecar(metrics_dir, stop_event):
                     if len(parts) != 3:
                         continue
                     idx, util, mem_mib = parts
+                    if allowed_gpus is not None and idx.strip() not in allowed_gpus:
+                        continue
                     labels = {{"device": f"cuda:{{idx}}", "node": hostname}}
                     lines.append(json.dumps({{
                         "name": "system.gpu.utilization", "kind": "gauge",
@@ -1012,6 +1017,9 @@ export APPTAINERENV_MAGNUS_TOKEN={{user_token}}
 export APPTAINERENV_MAGNUS_ADDRESS={{magnus_address}}
 export APPTAINERENV_MAGNUS_JOB_ID={{job_id}}
 export APPTAINERENV_PYTHONUNBUFFERED=1
+if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
+    export APPTAINERENV_CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES"
+fi
 
 {{system_entry_command}}
 
