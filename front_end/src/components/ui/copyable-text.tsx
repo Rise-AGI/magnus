@@ -77,9 +77,9 @@ export function CopyableText({
     }
   };
 
-  const baseStyles = variant === "id" 
-    ? "text-xs text-zinc-500 font-mono" 
-    : "w-full";
+  const baseStyles = variant === "id"
+    ? "text-xs text-zinc-500 font-mono"
+    : "";
     
   return (
     <button 
