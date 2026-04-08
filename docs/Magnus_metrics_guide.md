@@ -763,7 +763,132 @@ v1 不允许在一个点的 `value` 中放入聚合对象。
 
 ---
 
-## 17. 一句话原则
+## 17. 当前落地实现概述
+
+以下描述 Magnus 对本协议的首个生产实现（v1 落地），供后续开发者快速上手。
+
+### 17.1 架构总览
+
+```
+┌─────────────────────────────────────────────────┐
+│  SLURM 计算节点 (wrapper.py)                      │
+│                                                   │
+│  ┌──────────────┐    ┌──────────────────────┐     │
+│  │ 用户 Job 进程  │    │ system metrics sidecar│     │
+│  │ (任意语言)     │    │ (Python daemon thread)│     │
+│  │               │    │                      │     │
+│  │ 写 *.jsonl ──────▶ │ 写 system.jsonl ──────────▶ │
+│  └──────────────┘    └──────────────────────┘     │
+│         │                      │                   │
+│         └──────────┬───────────┘                   │
+│                    ▼                               │
+│         $MAGNUS_METRICS_DIR/                       │
+│         (bind mount → 宿主机磁盘)                   │
+└─────────────────────────────────────────────────┘
+                     │
+                     ▼ (共享文件系统)
+┌─────────────────────────────────────────────────┐
+│  Magnus 头节点                                     │
+│                                                   │
+│  routers/metrics.py                               │
+│  ├─ GET /jobs/{id}/metrics/streams  (列出 stream)  │
+│  └─ GET /jobs/{id}/metrics/query    (查询数据点)   │
+│         │                                         │
+│         ▼ 直读 JSONL 文件，不入数据库               │
+│                                                   │
+│  前端 MetricsChart 组件                             │
+│  └─ recharts 折线图，sidebar 选择指标              │
+└─────────────────────────────────────────────────┘
+```
+
+### 17.2 系统指标采集
+
+SLURM 模式下，wrapper.py 内置一个 daemon thread（`_metrics_sidecar`），每 5 秒采集一次：
+
+- `system.gpu.utilization`：通过 `nvidia-smi --query-gpu=utilization.gpu`
+- `system.gpu.memory.used_bytes`：通过 `nvidia-smi --query-gpu=memory.used`，MiB 换算为 bytes
+- `system.cpu.utilization`：通过 `/proc/stat` 两次采样算 delta
+
+写入 `$MAGNUS_METRICS_DIR/system.jsonl`，格式严格遵循本协议。
+
+sidecar 全链路 fail-open：nvidia-smi 不存在（CPU-only 任务）或 `/proc/stat` 不可读时静默跳过。sidecar 在容器启动前开始，容器退出后停止（`threading.Event` + `join(timeout=5)`）。
+
+Docker 本地模式不启动 sidecar（无 wrapper.py），但环境变量照常注入，用户代码可自行上报。
+
+### 17.3 环境变量
+
+Magnus 运行时向 Job 注入：
+
+| 变量 | 值 | 注入方式 |
+|------|---|---------|
+| `MAGNUS_METRICS_DIR` | `$MAGNUS_HOME/workspace/metrics` | SLURM: `APPTAINERENV_*`; Docker: `-e` |
+| `MAGNUS_METRICS_PROTO` | `metrics.v1` | 同上 |
+| `MAGNUS_JOB_ID` | Job UUID | 已有，无需新增 |
+
+`MAGNUS_METRICS_DIR` 对应的宿主机路径是 `{workspace}/jobs/{job_id}/metrics/`，通过 bind mount 映射到容器内。数据实际写在宿主机磁盘（非容器可写层），不占 overlay 配额。
+
+### 17.4 存储与生命周期
+
+- **不入数据库**。JSONL 文件即数据源，API 按需读取解析。
+- **metrics/ 目录不随 Job 清理删除**，与 `slurm/output.txt` 同策略。Job 结束后用户仍可回看历史指标。
+- 典型数据量：8 卡 × 3 指标 × 5 秒间隔 × 24 小时 ≈ 41 万行 ≈ 50 MB，对共享文件系统而言可忽略。
+
+### 17.5 API
+
+两个端点，均需 Bearer token 认证：
+
+**`GET /api/jobs/{job_id}/metrics/streams`**
+
+扫描 `metrics/*.jsonl`，返回去重的 stream 列表：
+
+```json
+[
+  {
+    "name": "system.gpu.utilization",
+    "kind": "gauge",
+    "unit": "percent",
+    "step_domain": null,
+    "labels": {"device": "cuda:0", "node": "node-01"},
+    "point_count": 1234
+  }
+]
+```
+
+**`GET /api/jobs/{job_id}/metrics/query?name=...&labels=...&max_points=2000`**
+
+按 name、labels、step_domain、时间范围过滤，超限时均匀降采样。返回：
+
+```json
+{
+  "name": "system.gpu.utilization",
+  "points": [
+    {"value": 87.0, "time_unix_ms": 1770000123456, "labels": {"device": "cuda:0"}}
+  ]
+}
+```
+
+### 17.6 前端
+
+Job Detail 页面的"指标"tab，基于 recharts：
+
+- 左侧 sidebar 按 system / train / 其他分组展示可用指标名
+- 右侧折线图，同一指标的不同 label 组合（如多 GPU）自动多线渲染
+- Running 状态下自动轮询刷新
+- 空数据状态有引导文案
+
+### 17.7 已知限制与演进方向
+
+| 限制 | 影响 | 演进路径 |
+|------|------|---------|
+| API 全量读文件 | 几十卡规模 OK；千卡超算需优化 | 引入 Collector 异步入库（time-series DB）或 seek-based 读取 |
+| 前端一次看一个指标 | 不能同时对比 GPU 利用率和显存 | 多图 dashboard 视图 |
+| 无 step 轴切换 | 训练指标只能按时间看 | 前端加 time/step 轴切换 |
+| Docker 模式无系统指标 | 本地开发无 GPU 监控 | 加 Docker entrypoint wrapper 或 sidecar 容器 |
+| 无告警规则 | 无法自动报警 | 未来版本定义告警阈值语法 |
+
+---
+
+## 18. 一句话原则
 
 Magnus Metrics Protocol v1 的核心原则是：
 
