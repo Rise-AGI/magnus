@@ -171,7 +171,7 @@ async function gzipBytes(data: Uint8Array) {
   const stream = new CompressionStreamCtor("gzip");
   const resultPromise = new Response(stream.readable).blob();
   const writer = stream.writable.getWriter();
-  await writer.write(data);
+  await writer.write(data as Uint8Array<ArrayBuffer>);
   await writer.close();
   return resultPromise;
 }
