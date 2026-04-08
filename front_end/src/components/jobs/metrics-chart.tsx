@@ -220,7 +220,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   return (
     <div className="h-full flex flex-col">
       {/* Metric selector */}
-      <div className="shrink-0 mb-4">
+      <div className="shrink-0 mb-6">
         <div className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <SearchableSelect
