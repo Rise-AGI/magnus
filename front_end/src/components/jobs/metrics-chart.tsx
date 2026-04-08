@@ -180,6 +180,19 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
     return { systemMetrics, trainMetrics, otherMetrics };
   }, [grouped]);
 
+  const selectOptions = useMemo(() => {
+    const opts: { label: string; value: string; meta?: string }[] = [];
+    const addGroup = (groupLabel: string, names: string[]) => {
+      for (const name of names) {
+        opts.push({ label: metricDisplayName(name), value: name, meta: groupLabel });
+      }
+    };
+    addGroup(t("jobDetail.metricsSystem"), metricNames.systemMetrics);
+    addGroup(t("jobDetail.metricsTraining"), metricNames.trainMetrics);
+    addGroup(t("jobDetail.metricsOther"), metricNames.otherMetrics);
+    return opts;
+  }, [metricNames, t]);
+
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center text-zinc-500">
@@ -199,19 +212,6 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
       </div>
     );
   }
-
-  const selectOptions = useMemo(() => {
-    const opts: { label: string; value: string; meta?: string }[] = [];
-    const addGroup = (groupLabel: string, names: string[]) => {
-      for (const name of names) {
-        opts.push({ label: metricDisplayName(name), value: name, meta: groupLabel });
-      }
-    };
-    addGroup(t("jobDetail.metricsSystem"), metricNames.systemMetrics);
-    addGroup(t("jobDetail.metricsTraining"), metricNames.trainMetrics);
-    addGroup(t("jobDetail.metricsOther"), metricNames.otherMetrics);
-    return opts;
-  }, [metricNames, t]);
 
   return (
     <div className="h-full flex flex-col">
