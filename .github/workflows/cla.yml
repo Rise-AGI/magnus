@@ -31,6 +31,6 @@ jobs:
           path-to-signatures: "signatures/cla.json"
           path-to-document: "https://github.com/Rise-AGI/magnus/blob/main/CLA.md"
           branch: "main"
-          allowlist: "parkcai,Renko6626,yujingyi68-cloud,dependabot[bot]"
+          allowlist: "parkcai,Renko6626,yujingyi68-cloud,konformal,syzeng,wjsoj,StephenQSstarThomas,SonnyNondegeneracy,dependabot[bot]"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
