@@ -8,7 +8,7 @@ import {
 import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, Clock, Hash } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 
 
@@ -79,6 +79,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   const [streams, setStreams] = useState<MetricStream[]>([]);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [data, setData] = useState<Map<string, QueryResult>>(new Map());
+  const [xAxis, setXAxis] = useState<"time" | "step">("time");
   const [loading, setLoading] = useState(true);
 
   const fetchStreams = useCallback(async () => {
@@ -148,25 +149,28 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   }, [jobStatus, fetchStreams, fetchData, selectedMetric, selectedStreams]);
 
   const chartData = useMemo(() => {
-    const timeMap = new Map<number, Record<string, number>>();
+    const indexMap = new Map<number, Record<string, number>>();
     const seriesKeys: string[] = [];
+    let hasStep = false;
 
     for (const [key, result] of Array.from(data.entries())) {
       const seriesName = key || "default";
       if (!seriesKeys.includes(seriesName)) seriesKeys.push(seriesName);
       for (const point of result.points) {
-        const existing = timeMap.get(point.time_unix_ms) || {};
+        if (point.step != null) hasStep = true;
+        const xKey = xAxis === "step" && point.step != null ? point.step : point.time_unix_ms;
+        const existing = indexMap.get(xKey) || {};
         existing[seriesName] = point.value;
-        timeMap.set(point.time_unix_ms, existing);
+        indexMap.set(xKey, existing);
       }
     }
 
-    const sorted = Array.from(timeMap.entries())
+    const sorted = Array.from(indexMap.entries())
       .sort(([a], [b]) => a - b)
-      .map(([time, values]) => ({ time, ...values }));
+      .map(([x, values]) => ({ x, ...values }));
 
-    return { rows: sorted, seriesKeys };
-  }, [data]);
+    return { rows: sorted, seriesKeys, hasStep };
+  }, [data, xAxis]);
 
   const metricNames = useMemo(() => {
     const systemMetrics: string[] = [];
@@ -217,12 +221,36 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
     <div className="h-full flex flex-col justify-center">
       {/* Metric selector */}
       <div className="shrink-0 mb-4">
-        <SearchableSelect
-          value={selectedMetric ?? ""}
-          options={selectOptions}
-          onChange={(val) => setSelectedMetric(val)}
-          placeholder={t("jobDetail.metricsSelectStream")}
-        />
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <SearchableSelect
+              value={selectedMetric ?? ""}
+              options={selectOptions}
+              onChange={(val) => setSelectedMetric(val)}
+              placeholder={t("jobDetail.metricsSelectStream")}
+            />
+          </div>
+          {chartData.hasStep && (
+            <div className="shrink-0 flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+              <button
+                onClick={() => setXAxis("time")}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors
+                  ${xAxis === "time" ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              >
+                <Clock className="w-3 h-3" />
+                {t("jobDetail.metricsAxisTime")}
+              </button>
+              <button
+                onClick={() => setXAxis("step")}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors
+                  ${xAxis === "step" ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              >
+                <Hash className="w-3 h-3" />
+                {t("jobDetail.metricsAxisStep")}
+              </button>
+            </div>
+          )}
+        </div>
         {selectedMetric && chartData.seriesKeys.length > 1 && (
           <div className="flex gap-3 mt-2 flex-wrap">
             {chartData.seriesKeys.map((key, i) => (
@@ -242,10 +270,10 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
             <LineChart data={chartData.rows} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
               <XAxis
-                dataKey="time"
+                dataKey="x"
                 type="number"
                 domain={["dataMin", "dataMax"]}
-                tickFormatter={formatTime}
+                tickFormatter={xAxis === "time" ? formatTime : (v: number) => String(v)}
                 stroke="#52525b"
                 tick={{ fontSize: 11, fill: "#71717a" }}
               />
@@ -262,7 +290,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
                   borderRadius: "6px",
                   fontSize: "12px",
                 }}
-                labelFormatter={(label) => formatTime(Number(label))}
+                labelFormatter={(label) => xAxis === "time" ? formatTime(Number(label)) : `Step ${label}`}
                 formatter={(value) => [formatValue(Number(value), selectedUnit), ""]}
               />
               {chartData.seriesKeys.map((key, i) => (

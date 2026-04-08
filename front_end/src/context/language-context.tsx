@@ -507,6 +507,8 @@ const translations = {
   "jobDetail.metricsNoData": { zh: "暂无指标数据", en: "No metrics data available" },
   "jobDetail.metricsNoDataDesc": { zh: "任务运行后将自动采集系统指标。\n用户程序也可按照 Magnus Metrics Protocol 上报自定义指标。", en: "System metrics will be collected automatically once the job starts running.\nUser programs can also report custom metrics via the Magnus Metrics Protocol." },
   "jobDetail.metricsSelectStream": { zh: "选择指标", en: "Select Metric" },
+  "jobDetail.metricsAxisTime": { zh: "时间", en: "Time" },
+  "jobDetail.metricsAxisStep": { zh: "步数", en: "Step" },
   "jobDetail.metricsSystem": { zh: "系统", en: "System" },
   "jobDetail.metricsTraining": { zh: "训练", en: "Training" },
   "jobDetail.metricsOther": { zh: "其他", en: "Other" },
