@@ -214,7 +214,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col justify-center">
       {/* Metric selector */}
       <div className="shrink-0 mb-4">
         <SearchableSelect
@@ -236,7 +236,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
       </div>
 
       {/* Chart */}
-      <div className="flex-1 min-h-0">
+      <div className="shrink-0 h-[375px]">
         {chartData.rows.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData.rows} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
