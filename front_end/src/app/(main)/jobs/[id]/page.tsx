@@ -653,7 +653,7 @@ export default function JobDetailsPage() {
               <div className="absolute inset-0 overflow-auto p-5 custom-scrollbar space-y-6">
                 {/* Result */}
                 <div>
-                  <h4 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-2">{t("jobDetail.result")}</h4>
+                  <h4 className="text-sm font-semibold text-zinc-400 mb-2">{t("jobDetail.result")}</h4>
                   {job.result ? (
                     <pre className="text-sm text-zinc-300 bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-all font-mono">
                       {job.result}
@@ -668,7 +668,7 @@ export default function JobDetailsPage() {
                 </div>
                 {/* Action */}
                 <div>
-                  <h4 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-2">{t("jobDetail.action")}</h4>
+                  <h4 className="text-sm font-semibold text-zinc-400 mb-2">{t("jobDetail.action")}</h4>
                   {job.action ? (
                     <pre className="text-sm text-zinc-300 bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-all font-mono">
                       {job.action}
