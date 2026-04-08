@@ -761,6 +761,8 @@ class MagnusScheduler:
                 "MAGNUS_HOME": magnus_home,
                 "MAGNUS_RESULT": f"{magnus_home}/workspace/.magnus_result",
                 "MAGNUS_ACTION": f"{magnus_home}/workspace/.magnus_action",
+                "MAGNUS_METRICS_DIR": f"{magnus_home}/workspace/metrics",
+                "MAGNUS_METRICS_PROTO": "metrics.v1",
                 "HOME": magnus_home,
             }
 
@@ -844,6 +846,7 @@ class MagnusScheduler:
 
     def _init_job_working_dir(self, job_working_table: str)-> None:
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
+        guarantee_file_exist(f"{job_working_table}/metrics", is_directory=True)
 
         for marker_name in [".magnus_success", ".magnus_result", ".magnus_action"]:
             marker_path = f"{job_working_table}/{marker_name}"
@@ -874,6 +877,81 @@ class MagnusScheduler:
 import sys
 import traceback
 import subprocess
+import threading
+import time
+import json
+
+def _read_cpu_times():
+    try:
+        with open("/proc/stat") as f:
+            parts = f.readline().split()
+        # user, nice, system, idle, iowait, irq, softirq, steal
+        vals = [int(v) for v in parts[1:9]]
+        total = sum(vals)
+        idle = vals[3] + vals[4]  # idle + iowait
+        return total, idle
+    except Exception:
+        return None, None
+
+def _metrics_sidecar(metrics_dir, stop_event):
+    try:
+        import socket
+        path = os.path.join(metrics_dir, "system.jsonl")
+        hostname = socket.gethostname()
+        prev_total, prev_idle = _read_cpu_times()
+        while not stop_event.wait(5.0):
+            now_ms = int(time.time() * 1000)
+            lines = []
+            node_labels = {{"node": hostname}}
+            # GPU metrics
+            try:
+                out = subprocess.check_output(
+                    ["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used",
+                     "--format=csv,noheader,nounits"],
+                    timeout=10, text=True, stderr=subprocess.DEVNULL,
+                )
+                for row in out.strip().split("\\n"):
+                    parts = [p.strip() for p in row.split(",")]
+                    if len(parts) != 3:
+                        continue
+                    idx, util, mem_mib = parts
+                    labels = {{"device": f"cuda:{{idx}}", "node": hostname}}
+                    lines.append(json.dumps({{
+                        "name": "system.gpu.utilization", "kind": "gauge",
+                        "value": float(util), "time_unix_ms": now_ms,
+                        "unit": "percent", "labels": labels,
+                    }}))
+                    lines.append(json.dumps({{
+                        "name": "system.gpu.memory.used_bytes", "kind": "gauge",
+                        "value": float(mem_mib) * 1048576, "time_unix_ms": now_ms,
+                        "unit": "bytes", "labels": labels,
+                    }}))
+            except Exception:
+                pass
+            # CPU metrics
+            try:
+                cur_total, cur_idle = _read_cpu_times()
+                if cur_total is not None and prev_total is not None:
+                    dt = cur_total - prev_total
+                    di = cur_idle - prev_idle
+                    if dt > 0:
+                        cpu_pct = round((1.0 - di / dt) * 100, 1)
+                        lines.append(json.dumps({{
+                            "name": "system.cpu.utilization", "kind": "gauge",
+                            "value": cpu_pct, "time_unix_ms": now_ms,
+                            "unit": "percent", "labels": node_labels,
+                        }}))
+                prev_total, prev_idle = cur_total, cur_idle
+            except Exception:
+                pass
+            if lines:
+                try:
+                    with open(path, "a") as f:
+                        f.write("\\n".join(lines) + "\\n")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 def _parse_size_to_mb(size_str):
     size_str = size_str.strip().upper()
@@ -904,6 +982,16 @@ def main():
     if effective_runner == "root" and not allow_root:
         raise RuntimeError("Error: Not privileged.")
 
+    # Start metrics sidecar (fail-open)
+    metrics_dir = os.path.join(work_dir, "metrics")
+    _stop_metrics = threading.Event()
+    try:
+        _metrics_thread = threading.Thread(
+            target=_metrics_sidecar, args=(metrics_dir, _stop_metrics), daemon=True)
+        _metrics_thread.start()
+    except Exception:
+        _metrics_thread = None
+
     # Phase 1: Prepare user script
     user_script_path = os.path.join(work_dir, ".magnus_user_script.sh")
     with open(user_script_path, "w") as f:
@@ -930,6 +1018,8 @@ export MAGNUS_HOME=${{{{MAGNUS_HOME:-/magnus}}}}
 export APPTAINERENV_MAGNUS_HOME=$MAGNUS_HOME
 export APPTAINERENV_MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
 export APPTAINERENV_MAGNUS_ACTION=$MAGNUS_HOME/workspace/.magnus_action
+export APPTAINERENV_MAGNUS_METRICS_DIR=$MAGNUS_HOME/workspace/metrics
+export APPTAINERENV_MAGNUS_METRICS_PROTO=metrics.v1
 export APPTAINER_TMPDIR={{apptainer_tmp_dir}}
 export APPTAINER_CACHEDIR={{apptainer_cache_dir}}
 # 追加 workspace bind mount: host {{work_dir}} → 容器 $MAGNUS_HOME/workspace
@@ -1003,6 +1093,11 @@ else
 fi
 """
         ret_code = subprocess.call(shell_cmd, shell=True, executable="/bin/bash")
+
+        # Stop metrics sidecar
+        _stop_metrics.set()
+        if _metrics_thread is not None:
+            _metrics_thread.join(timeout=5)
 
         # Phase 3: Epilogue - only write success marker if user command succeeded
         if ret_code == 0:
@@ -1086,6 +1181,7 @@ if __name__ == "__main__":
             delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
             delete_file(os.path.join(job_working_table, ".magnus_tmp"))
             delete_file(os.path.join(job_working_table, ".magnus_cache"))
+            # metrics/ 不清理，与 slurm/output.txt 同策略，供 job 结束后回看
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")
 

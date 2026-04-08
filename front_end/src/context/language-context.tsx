@@ -439,6 +439,16 @@ const translations = {
   // ===== Job Detail - Tabs =====
   "jobDetail.consoleOutput": { zh: "控制台输出", en: "Console Output" },
   "jobDetail.description": { zh: "描述", en: "Description" },
+  "jobDetail.metrics": { zh: "监控", en: "Metrics" },
+
+  // ===== Job Detail - Metrics =====
+  "jobDetail.metricsLoading": { zh: "加载监控数据...", en: "Loading metrics..." },
+  "jobDetail.metricsNoData": { zh: "暂无监控数据", en: "No metrics data available" },
+  "jobDetail.metricsNoDataDesc": { zh: "任务运行后将自动采集系统指标。用户程序也可按照 Magnus Metrics Protocol 上报自定义指标。", en: "System metrics will be collected automatically once the job starts running. User programs can also report custom metrics via the Magnus Metrics Protocol." },
+  "jobDetail.metricsSelectStream": { zh: "选择指标", en: "Select Metric" },
+  "jobDetail.metricsSystem": { zh: "系统", en: "System" },
+  "jobDetail.metricsTraining": { zh: "训练", en: "Training" },
+  "jobDetail.metricsOther": { zh: "其他", en: "Other" },
 
   // ===== Job Detail - Console =====
   "jobDetail.waitingOutput": { zh: "等待输出...", en: "Waiting for output..." },

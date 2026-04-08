@@ -89,6 +89,7 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 | `{work}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | 可写层，job 结束后删除 |
 | `{work}/.magnus_tmp/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
 | `{work}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
+| `{work}/metrics/` | submit → 永久 | wrapper sidecar + 用户代码 | routers/metrics.py | Magnus Metrics Protocol v1 JSONL 指标文件 |
 
 **cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。`slurm/output.txt` 不被清理。
 
@@ -101,6 +102,7 @@ ${MAGNUS_HOME}/workspace/repository/         git checkout, 也是 --pwd
 ${MAGNUS_HOME}/workspace/.magnus_user_script.sh
 ${MAGNUS_HOME}/workspace/.magnus_result      $MAGNUS_RESULT
 ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
+${MAGNUS_HOME}/workspace/metrics/            $MAGNUS_METRICS_DIR (Metrics Protocol v1)
 ${MAGNUS_HOME}/.tmp/                         SDK 文件中转目录 (容器可写层, 自动创建)
 ```
 

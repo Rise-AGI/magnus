@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw,
+  ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, BarChart3,
   ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX
 } from "lucide-react";
 import { AnsiUp } from "ansi_up";
@@ -24,6 +24,7 @@ import { NotFound } from "@/components/ui/not-found";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { useBackNavigation } from "@/hooks/use-back-navigation";
+import { MetricsChart } from "@/components/jobs/metrics-chart";
 
 const ansiUp = new AnsiUp();
 
@@ -53,7 +54,7 @@ export default function JobDetailsPage() {
 
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"console" | "description">("console");
+  const [activeTab, setActiveTab] = useState<"console" | "description" | "metrics">("console");
 
   const [logs, setLogs] = useState("");
   const [logPage, setLogPage] = useState(-1);
@@ -535,6 +536,15 @@ export default function JobDetailsPage() {
                 <span>{t("jobDetail.description")}</span>
               </div>
 
+              <div
+                onClick={() => setActiveTab("metrics")}
+                className={`flex items-center gap-2 text-sm font-semibold transition-colors cursor-pointer
+                  ${activeTab === "metrics" ? "text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+              >
+                <BarChart3 className={`w-4 h-4 ${activeTab === "metrics" ? "text-zinc-400" : "text-zinc-600"}`} />
+                <span>{t("jobDetail.metrics")}</span>
+              </div>
+
             </div>
 
             {job.status === "Running" && (
@@ -621,6 +631,12 @@ export default function JobDetailsPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {activeTab === "metrics" && (
+              <div className="absolute inset-0 overflow-auto p-5 custom-scrollbar">
+                <MetricsChart jobId={jobId} jobStatus={job.status} />
               </div>
             )}
 
