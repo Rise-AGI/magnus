@@ -1,6 +1,5 @@
 # back_end/server/routers/jobs.py
 import os
-import json
 import logging
 from typing import List, Optional, Dict, Any
 
@@ -294,38 +293,6 @@ def get_job_logs_paginated(
     except Exception as e:
         logger.exception(f"[logs] Error for job={job_id}")
         return {"logs": f"Error reading logs: {str(e)}", "page": 0, "total_pages": 1}
-
-
-@router.get(
-    "/jobs/{job_id}/metrics",
-)
-def get_job_metrics(
-    job_id: str,
-    db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
-)-> List[Dict[str, Any]]:
-    latest_metric: Optional[models.JobMetric] = db.query(models.JobMetric)\
-        .filter(models.JobMetric.job_id == job_id)\
-        .order_by(models.JobMetric.timestamp.desc())\
-        .first()
-
-    if not latest_metric:
-        return []
-
-    try:
-        metrics: List[Dict[str, Any]] = json.loads(latest_metric.status_json)
-        formatted_metrics = [
-            {
-                "index": m.get("index"),
-                "utilization": m.get("utilization_gpu", 0),
-            }
-            for m in metrics
-        ]
-        return formatted_metrics
-
-    except Exception as e:
-        logger.error(f"Failed to parse metrics for job {job_id}: {e}")
-        return []
 
 
 @router.post("/jobs/{job_id}/terminate")

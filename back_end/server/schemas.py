@@ -8,9 +8,9 @@ from .models import JobType, JobStatus, ConversationType, MessageType
 __all__ = [
     "JobSubmission",
     "JobResponse",
-    "JobMetricResponse",
     "PagedJobResponse",
     "FeishuLoginRequest",
+    "TokenLoginRequest",
     "UserInfo",
     "UserDetail",
     "AgentCreate",
@@ -146,12 +146,6 @@ class JobResponse(JobSubmission):
         return v
     
     
-class JobMetricResponse(BaseModel):
-    timestamp: datetime
-    status_json: str
-    class Config: from_attributes = True
-
-
 class PagedJobResponse(BaseModel):
     total: int
     items: List[JobResponse]
@@ -159,6 +153,10 @@ class PagedJobResponse(BaseModel):
 
 class FeishuLoginRequest(BaseModel):
     code: str
+
+
+class TokenLoginRequest(BaseModel):
+    token: str
 
 
 class LoginResponse(BaseModel):

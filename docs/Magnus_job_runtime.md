@@ -47,15 +47,11 @@ wrapper.py (Python, SLURM 直接运行)
               └── .magnus_user_script.sh  ← 用户代码
 ```
 
-### Phase 1: GPU Spy
-
-守护线程，每 `spy_gpu_interval`（默认 5）秒调一次 `nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory`，原子写入 `gpu_status.json`（写 .tmp → `os.replace`）。scheduler 心跳时读取该文件采集指标。
-
-### Phase 2: 用户脚本
+### Phase 1: 用户脚本
 
 将 `job.entry_command` 写入 `.magnus_user_script.sh`，前面加 `set -e`。
 
-### Phase 3: Shell 引导层
+### Phase 2: Shell 引导层
 
 这是最复杂的部分，按顺序执行：
 
@@ -71,7 +67,7 @@ wrapper.py (Python, SLURM 直接运行)
 10. **注入 HOME** — `--env HOME=$MAGNUS_HOME`（`APPTAINERENV_HOME` 被 apptainer 禁止，用 `--env` 绕过）
 11. **执行 apptainer** — host 模式直接 exec，bridge 模式走 `rootlesskit`
 
-### Phase 4: Epilogue
+### Phase 3: Epilogue
 
 apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overlay 文件。
 
@@ -85,15 +81,15 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 |------|----------|--------|--------|------|
 | `{work}/repository/` | prepare → cleanup | resource_manager | 容器 (bind) | git checkout，容器内的工作目录 |
 | `{work}/wrapper.py` | submit → cleanup | scheduler | SLURM | 生成的执行入口 |
-| `{work}/gpu_status.json` | submit → job 结束 | GPU spy thread | scheduler 心跳 | 原子更新的 GPU 指标 |
 | `{work}/slurm/output.txt` | submit → 永久 | SLURM | API (日志) | sbatch --output 指向此处 |
 | `{work}/.magnus_user_script.sh` | wrapper 执行 → cleanup | wrapper.py | 容器 (bind) | 用户入口脚本 |
 | `{work}/.magnus_success` | epilogue → sync_reality | wrapper.py | scheduler | 成功标记，存在即 SUCCESS |
 | `{work}/.magnus_result` | 容器内用户写入 → API 读取 | 用户代码 | routers/jobs.py | 任务结果内容 |
 | `{work}/.magnus_action` | 容器内用户写入 → API 读取 | 用户代码 | routers/jobs.py + SDK | 客户端动作指令 |
-| `{work}/ephemeral_overlay.img` | Phase 3 → finally | wrapper shell | apptainer | 可写层，job 结束后删除 |
-| `{work}/.magnus_tmp/` | Phase 3 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
-| `{work}/.magnus_cache/` | Phase 3 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
+| `{work}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | 可写层，job 结束后删除 |
+| `{work}/.magnus_tmp/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
+| `{work}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
+| `{work}/metrics/` | submit → 永久 | wrapper sidecar + 用户代码 | routers/metrics.py | Magnus Metrics Protocol v1 JSONL 指标文件 |
 
 **cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。`slurm/output.txt` 不被清理。
 
@@ -106,6 +102,7 @@ ${MAGNUS_HOME}/workspace/repository/         git checkout, 也是 --pwd
 ${MAGNUS_HOME}/workspace/.magnus_user_script.sh
 ${MAGNUS_HOME}/workspace/.magnus_result      $MAGNUS_RESULT
 ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
+${MAGNUS_HOME}/workspace/metrics/            $MAGNUS_METRICS_DIR (Metrics Protocol v1)
 ${MAGNUS_HOME}/.tmp/                         SDK 文件中转目录 (容器可写层, 自动创建)
 ```
 
@@ -345,7 +342,6 @@ server:
   root: /home/magnus/magnus-data            # 所有路径的根
   scheduler:
     heartbeat_interval: 2                   # 心跳间隔 (秒)
-    spy_gpu_interval: 5                     # GPU 采集间隔 (秒)
     snapshot_interval: 300                  # 集群快照间隔 (秒)
     allow_root: false                       # 是否允许 root runner
   resource_cache:

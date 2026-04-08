@@ -123,8 +123,8 @@ def recover_stuck_images() -> None:
                         pass
                     logger.info(f"Recovered stuck image → cached: {img.uri}")
                 else:
-                    db.delete(img)
-                    logger.info(f"Removed orphan image record: {img.uri}")
+                    img.status = "failed"
+                    logger.info(f"Recovered stuck image → failed: {img.uri}")
             else:
                 sif_path = os.path.join(container_cache_path, img.filename)
                 if os.path.exists(sif_path):
@@ -135,8 +135,8 @@ def recover_stuck_images() -> None:
                         pass
                     logger.info(f"Recovered stuck image → cached: {img.uri}")
                 else:
-                    db.delete(img)
-                    logger.info(f"Removed orphan image record: {img.uri}")
+                    img.status = "failed"
+                    logger.info(f"Recovered stuck image → failed: {img.uri}")
         db.commit()
     finally:
         db.close()
@@ -229,8 +229,9 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
                     img.updated_at = datetime.now(timezone.utc)
                     db.commit()
                 else:
-                    # 首次拉取失败：删除这条记录，干净撤退
-                    db.delete(img)
+                    # 首次拉取失败：保留记录，标记 failed，用户可重试或删除
+                    img.status = "failed"
+                    img.updated_at = datetime.now(timezone.utc)
                     db.commit()
         except Exception:
             db.rollback()
@@ -283,6 +284,14 @@ async def _begin_pull(
             raise HTTPException(status_code=409, detail="Image is currently being pulled/refreshed.")
         if existing and not _is_admin_or_owner(current_user, existing.user_id, db):
             raise HTTPException(status_code=403, detail="Only the owner or admin can re-pull this image.")
+        if existing and existing.status == "failed":
+            existing.status = "pulling"
+            existing.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(existing)
+            resp = CachedImageResponse.model_validate(existing)
+            asyncio.create_task(_do_pull(existing.id, uri, is_refresh=False))
+            return resp
 
         if existing:
             existing.status = "refreshing"
@@ -318,6 +327,7 @@ def list_images(
     skip: int = 0,
     limit: int = 50,
     search: Optional[str] = None,
+    owner_id: Optional[str] = None,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -326,6 +336,8 @@ def list_images(
     if search:
         safe = search.replace("%", r"\%").replace("_", r"\_")
         query = query.filter(models.CachedImage.uri.ilike(f"%{safe}%", escape="\\"))
+    if owner_id:
+        query = query.filter(models.CachedImage.user_id == owner_id)
 
     db_images = query.options(joinedload(models.CachedImage.user)).all()
     db_filenames = {img.filename for img in db_images}
@@ -335,7 +347,7 @@ def list_images(
     #    如果运维看到 unregistered 镜像，说明有异常的镜像落盘路径，应排查。
     #    local 模式下不扫描 .sif 文件（Docker 自行管理镜像存储）。
     fs_items: list[CachedImageResponse] = []
-    if not is_local_mode and os.path.isdir(container_cache_path):
+    if not owner_id and not is_local_mode and os.path.isdir(container_cache_path):
         for fname in os.listdir(container_cache_path):
             if not fname.endswith(".sif"):
                 continue
@@ -368,7 +380,7 @@ def list_images(
         for img in db_images:
             sif_path = os.path.join(container_cache_path, img.filename)
             resp = CachedImageResponse.model_validate(img)
-            if not os.path.exists(sif_path) and img.status not in ("refreshing", "pulling"):
+            if not os.path.exists(sif_path) and img.status not in ("refreshing", "pulling", "failed"):
                 resp.status = "missing"
             combined.append(resp)
 

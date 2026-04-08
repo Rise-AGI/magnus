@@ -31,6 +31,7 @@ back_end/run*.sh
 back_end/!scripts/**
 back_end/api_keys.json
 back_end/python_scripts/run*.py
+back_end/pictures/
 
 
 # Others

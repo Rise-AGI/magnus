@@ -2,18 +2,18 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Users, Shield, Eye, EyeOff, PenLine, RefreshCw, Trash2, Camera, Check, X } from "lucide-react";
+import { Users, Shield, Eye, EyeOff, PenLine, RefreshCw, UserMinus, Camera, Check, X } from "lucide-react";
 import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { TokenInput, MAGNUS_TOKEN_LENGTH, validateToken } from "@/components/ui/token-input";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { formatBeijingTime } from "@/lib/utils";
 import { UserDetail } from "@/types/auth";
 
-const MAGNUS_TOKEN_LENGTH = 35;
 
 interface PeopleDrawerProps {
   isOpen: boolean;
@@ -112,7 +112,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
   const handleSaveCustomToken = async () => {
     if (!user) return;
     const trimmed = customToken.trim();
-    if (!trimmed.startsWith("sk-") || trimmed.length !== MAGNUS_TOKEN_LENGTH) {
+    if (!validateToken(trimmed)) {
       setCustomTokenError(t("header.customTokenInvalid"));
       return;
     }
@@ -347,15 +347,15 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
               </div>
             </div>
 
-            {/* Footer: Delete (managed member only) */}
+            {/* Footer: Offboard (managed agent only) */}
             {user.user_type === "agent" && (
               <div className="mt-auto pt-6 border-t border-zinc-800 flex justify-end pb-1">
                 <button
                   onClick={() => setShowDeleteConfirm(true)}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-red-400 hover:text-white hover:bg-red-600/80 border border-red-800/50 transition-colors flex items-center gap-2"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  {t("people.drawer.delete")}
+                  <UserMinus className="w-4 h-4" />
+                  {t("people.drawer.offboard")}
                 </button>
               </div>
             )}
@@ -392,33 +392,15 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
 
               {/* Custom token input — revealed on click */}
               {showCustomInput && (
-                <div className="mt-4 pt-4 border-t border-zinc-800/50">
-                  <label className="text-xs text-zinc-500 font-medium block mb-1">{t("header.customTokenLabel")}</label>
-                  <p className="text-xs text-red-400/80 mb-2">{t("header.customTokenWarning")}</p>
-                  <input
-                    type="text"
-                    value={customToken}
-                    onChange={(e) => { setCustomToken(e.target.value); setCustomTokenError(null); }}
-                    placeholder="sk-..."
-                    maxLength={MAGNUS_TOKEN_LENGTH}
-                    className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-lg text-sm font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20"
-                    autoFocus
-                    onKeyDown={(e) => { if (e.key === "Enter") handleSaveCustomToken(); }}
-                  />
-                  <div className="flex items-center justify-between mt-2">
-                    <span className={`text-xs ${customToken.length === MAGNUS_TOKEN_LENGTH ? "text-green-500" : "text-zinc-600"}`}>
-                      {customToken.length}/{MAGNUS_TOKEN_LENGTH}
-                    </span>
-                    {customTokenError && <span className="text-xs text-red-400">{customTokenError}</span>}
-                  </div>
-                  <button
-                    onClick={handleSaveCustomToken}
-                    disabled={isSavingCustom || customToken.length !== MAGNUS_TOKEN_LENGTH}
-                    className="mt-2 w-full px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isSavingCustom ? "..." : t("header.saveCustomToken")}
-                  </button>
-                </div>
+                <TokenInput
+                  value={customToken}
+                  onChange={setCustomToken}
+                  error={customTokenError}
+                  onClearError={() => setCustomTokenError(null)}
+                  label={t("header.customTokenLabel")}
+                  warning={t("header.customTokenWarning")}
+                  onSubmit={handleSaveCustomToken}
+                />
               )}
             </div>
 
@@ -434,35 +416,47 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
               <div className="flex items-center gap-3">
                 <button
                   onClick={closeResetDialog}
-                  disabled={isRefreshingToken}
+                  disabled={isRefreshingToken || isSavingCustom}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50"
                 >
                   {t("common.cancel")}
                 </button>
-                <button
-                  onClick={handleRefreshToken}
-                  disabled={isRefreshingToken}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-500 border border-red-500/50 shadow-lg shadow-red-900/20 transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                >
-                  {isRefreshingToken && <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
-                  {t("header.resetToken")}
-                </button>
+                {showCustomInput ? (
+                  <button
+                    onClick={handleSaveCustomToken}
+                    disabled={isSavingCustom || customToken.length !== MAGNUS_TOKEN_LENGTH}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSavingCustom && <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
+                    {t("header.saveCustomToken")}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleRefreshToken}
+                    disabled={isRefreshingToken}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-500 border border-red-500/50 shadow-lg shadow-red-900/20 transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                  >
+                    {isRefreshingToken && <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
+                    {t("header.resetToken")}
+                  </button>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirmation */}
+      {/* Offboard Confirmation */}
       <ConfirmationDialog
         isOpen={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
         onConfirm={handleDelete}
-        title={t("people.drawer.delete")}
-        description={t("people.drawer.deleteConfirm")}
-        confirmText={t("people.drawer.delete")}
+        title={t("people.drawer.offboard")}
+        description={t("people.drawer.offboardConfirm", { name: user?.name || "" })}
+        confirmText={t("people.drawer.offboard")}
         isLoading={isDeleting}
         variant="danger"
+        confirmInput={user?.name}
       />
 
       {/* Error alert */}

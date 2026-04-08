@@ -17,7 +17,6 @@ import {
   Layers,
   ArrowRight,
   Dna,
-  Construction,
   Users,
   Container,
   MessageCircle,
@@ -25,7 +24,7 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { AvatarCircle } from "@/components/ui/user-avatar";
-import { CLUSTER_CONFIG, IS_LOCAL_MODE } from "@/lib/config";
+import { CLUSTER_CONFIG } from "@/lib/config";
 
 interface NavItem {
   i18nKey: string;
@@ -36,7 +35,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { i18nKey: "nav.chat", href: "/chat", icon: MessageCircle },
-  { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight },
+  { i18nKey: "nav.explorer", href: "/explorer", icon: ArrowRight, wip: true },
   { i18nKey: "nav.people", href: "/people", icon: Users },
   { i18nKey: "nav.jobs", href: "/jobs", icon: Rocket },
   { i18nKey: "nav.blueprints", href: "/blueprints", icon: ScrollText },
@@ -124,9 +123,11 @@ export function MobileNav() {
                       <item.icon className={`w-4 h-4 transition-colors ${
                         isActive ? "text-blue-400" : "text-zinc-500"
                       }`} />
-                      {label}
+                      <span className="truncate">{label}</span>
                       {item.wip && (
-                        <Construction className="w-3 h-3 text-zinc-600 ml-auto" />
+                        <span className="ml-auto shrink-0 pl-2 text-[10px] font-normal tracking-wide text-zinc-600">
+                          {t("common.wip")}
+                        </span>
                       )}
                     </Link>
                   );
@@ -144,7 +145,7 @@ export function MobileNav() {
                   className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 active:scale-95 transition-all"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>{IS_LOCAL_MODE ? t("auth.signIn") : t("auth.signInWithFeishu")}</span>
+                  <span>{t("auth.signIn")}</span>
                 </button>
               ) : (
                 <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800">
