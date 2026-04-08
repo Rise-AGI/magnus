@@ -502,9 +502,9 @@ const translations = {
   "jobDetail.outputUnsupported": { zh: "这个 action 不是受支持的 magnus receive 形式。Web 端不会执行原始 shell。", en: "This action is not a supported magnus receive form. The Web client will not execute raw shell." },
 
   // ===== Job Detail - Metrics =====
-  "jobDetail.metricsLoading": { zh: "加载监控数据...", en: "Loading metrics..." },
-  "jobDetail.metricsNoData": { zh: "暂无监控数据", en: "No metrics data available" },
-  "jobDetail.metricsNoDataDesc": { zh: "任务运行后将自动采集系统指标。用户程序也可按照 Magnus Metrics Protocol 上报自定义指标。", en: "System metrics will be collected automatically once the job starts running. User programs can also report custom metrics via the Magnus Metrics Protocol." },
+  "jobDetail.metricsLoading": { zh: "加载指标数据...", en: "Loading metrics..." },
+  "jobDetail.metricsNoData": { zh: "暂无指标数据", en: "No metrics data available" },
+  "jobDetail.metricsNoDataDesc": { zh: "任务运行后将自动采集系统指标。\n用户程序也可按照 Magnus Metrics Protocol 上报自定义指标。", en: "System metrics will be collected automatically once the job starts running.\nUser programs can also report custom metrics via the Magnus Metrics Protocol." },
   "jobDetail.metricsSelectStream": { zh: "选择指标", en: "Select Metric" },
   "jobDetail.metricsSystem": { zh: "系统", en: "System" },
   "jobDetail.metricsTraining": { zh: "训练", en: "Training" },
