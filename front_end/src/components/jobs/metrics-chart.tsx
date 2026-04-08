@@ -9,6 +9,7 @@ import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
 import { BarChart3 } from "lucide-react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 
 
 interface MetricStream {
@@ -199,60 +200,45 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
     );
   }
 
-  const renderGroup = (label: string, names: string[]) => {
-    if (names.length === 0) return null;
-    return (
-      <div key={label}>
-        <div className="text-xs text-zinc-600 uppercase tracking-wider mb-1 mt-3 first:mt-0">{label}</div>
-        {names.map(name => (
-          <button
-            key={name}
-            onClick={() => setSelectedMetric(name)}
-            className={`block w-full text-left text-sm px-2 py-1.5 rounded transition-colors truncate
-              ${selectedMetric === name
-                ? "bg-zinc-700/50 text-zinc-200"
-                : "text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50"}`}
-          >
-            {metricDisplayName(name)}
-          </button>
-        ))}
-      </div>
-    );
-  };
+  const selectOptions = useMemo(() => {
+    const opts: { label: string; value: string; meta?: string }[] = [];
+    const addGroup = (groupLabel: string, names: string[]) => {
+      for (const name of names) {
+        opts.push({ label: metricDisplayName(name), value: name, meta: groupLabel });
+      }
+    };
+    addGroup(t("jobDetail.metricsSystem"), metricNames.systemMetrics);
+    addGroup(t("jobDetail.metricsTraining"), metricNames.trainMetrics);
+    addGroup(t("jobDetail.metricsOther"), metricNames.otherMetrics);
+    return opts;
+  }, [metricNames, t]);
 
   return (
-    <div className="h-full flex gap-4">
-      {/* Sidebar: stream selector */}
-      <div className="w-56 shrink-0 overflow-y-auto custom-scrollbar pr-2 border-r border-zinc-800">
-        <div className="text-xs text-zinc-500 font-semibold mb-2">{t("jobDetail.metricsSelectStream")}</div>
-        {renderGroup(t("jobDetail.metricsSystem"), metricNames.systemMetrics)}
-        {renderGroup(t("jobDetail.metricsTraining"), metricNames.trainMetrics)}
-        {renderGroup(t("jobDetail.metricsOther"), metricNames.otherMetrics)}
-      </div>
-
-      {/* Chart area */}
-      <div className="flex-1 min-w-0">
-        {selectedMetric && (
-          <div className="mb-3">
-            <h3 className="text-zinc-200 font-semibold text-sm">{metricDisplayName(selectedMetric)}</h3>
-            {selectedUnit && (
-              <span className="text-xs text-zinc-600">{selectedUnit}</span>
-            )}
-            {chartData.seriesKeys.length > 1 && (
-              <div className="flex gap-3 mt-1 flex-wrap">
-                {chartData.seriesKeys.map((key, i) => (
-                  <span key={key} className="text-xs text-zinc-500 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STREAM_COLORS[i % STREAM_COLORS.length] }} />
-                    {key}
-                  </span>
-                ))}
-              </div>
-            )}
+    <div className="h-full flex flex-col">
+      {/* Metric selector */}
+      <div className="shrink-0 mb-4">
+        <SearchableSelect
+          value={selectedMetric ?? ""}
+          options={selectOptions}
+          onChange={(val) => setSelectedMetric(val)}
+          placeholder={t("jobDetail.metricsSelectStream")}
+        />
+        {selectedMetric && chartData.seriesKeys.length > 1 && (
+          <div className="flex gap-3 mt-2 flex-wrap">
+            {chartData.seriesKeys.map((key, i) => (
+              <span key={key} className="text-xs text-zinc-500 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STREAM_COLORS[i % STREAM_COLORS.length] }} />
+                {key}
+              </span>
+            ))}
           </div>
         )}
+      </div>
 
+      {/* Chart */}
+      <div className="flex-1 min-h-0">
         {chartData.rows.length > 0 ? (
-          <ResponsiveContainer width="100%" height={360}>
+          <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData.rows} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
               <XAxis
@@ -294,7 +280,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div className="h-[360px] flex items-center justify-center text-zinc-600 text-sm">
+          <div className="h-full flex items-center justify-center text-zinc-600 text-sm">
             {t("jobDetail.metricsNoData")}
           </div>
         )}
