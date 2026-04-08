@@ -930,6 +930,7 @@ def blueprint(
   "images.subtitle": { zh: "集群容器镜像缓存", en: "Cluster container image cache" },
   "images.preheat": { zh: "预热镜像", en: "Preheat Image" },
   "images.searchPlaceholder": { zh: "搜索镜像...", en: "Search images..." },
+  "images.filterByUser": { zh: "按用户筛选", en: "Filter by User" },
   "images.fetching": { zh: "正在加载...", en: "Loading..." },
   "images.noFound": { zh: "暂无缓存镜像", en: "No cached images" },
   "images.refresh": { zh: "刷新镜像", en: "Refresh Image" },
