@@ -163,6 +163,10 @@ const translations = {
   "jobForm.waitingForLaunch": { zh: "等待启动", en: "Waiting for launch" },
   "jobForm.launchJob": { zh: "启动任务", en: "Launch Job" },
   "jobForm.reLaunch": { zh: "重新启动", en: "Re-Launch" },
+  "jobForm.error.repoNotFound": { zh: "仓库不存在，请检查命名空间和仓库名称", en: "Repository not found. Please check namespace and repo name." },
+  "jobForm.error.accessDenied": { zh: "无权访问该仓库", en: "Access denied to this repository." },
+  "jobForm.error.gitTimeout": { zh: "Git 操作超时，请稍后重试", en: "Git operation timed out. Please try again." },
+  "jobForm.error.gitError": { zh: "Git 操作失败，请稍后重试", en: "Git operation failed. Please try again." },
 
   // ===== Job Priority Labels =====
   "priority.a1": { zh: "A1 - 高优稳定", en: "A1 - High Priority Stable" },

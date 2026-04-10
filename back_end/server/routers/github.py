@@ -24,6 +24,15 @@ for _k in ("GIT_ASKPASS", "SSH_ASKPASS"):
 _GIT_TIMEOUT = 15
 
 
+def _classify_git_error(stderr: str) -> tuple[int, str]:
+    low = stderr.lower()
+    if "not found" in low or "does not exist" in low or "no such" in low:
+        return 404, "repo_not_found"
+    if "permission denied" in low or "access denied" in low or "could not read" in low:
+        return 403, "access_denied"
+    return 502, "git_error"
+
+
 def _repo_url(ns: str, repo: str) -> str:
     if is_local_mode:
         return f"https://github.com/{ns}/{repo}.git"
@@ -49,7 +58,8 @@ async def _git_ls_remote_branches(ns: str, repo: str) -> List[Dict[str, str]]:
     if proc.returncode != 0:
         error = stderr.decode().strip()
         logger.warning(f"git ls-remote --heads failed for {ns}/{repo}: {error}")
-        raise HTTPException(status_code=502, detail=f"git ls-remote failed: {error}")
+        code, reason = _classify_git_error(error)
+        raise HTTPException(status_code=code, detail=reason)
 
     branches = []
     for line in stdout.decode().strip().splitlines():
@@ -95,7 +105,8 @@ async def _git_fetch_commits(
         if proc.returncode != 0:
             error = stderr.decode().strip()
             logger.warning(f"git clone --bare failed for {ns}/{repo}#{branch}: {error}")
-            raise HTTPException(status_code=502, detail=f"git clone failed: {error}")
+            code, reason = _classify_git_error(error)
+            raise HTTPException(status_code=code, detail=reason)
 
         proc = await asyncio.create_subprocess_exec(
             "git", "log", "--format=%H%n%s%n%an%n%aI", "-n", str(per_page),
@@ -132,7 +143,7 @@ async def get_branches(
     if not branches:
         raise HTTPException(
             status_code=404,
-            detail="Repo not found or empty",
+            detail="repo_not_found",
         )
     return branches
 
