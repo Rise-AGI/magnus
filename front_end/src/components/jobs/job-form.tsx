@@ -209,7 +209,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     if (errorField === field) { setErrorField(null); setErrorMessage(null); }
   };
 
-  const gitErrorMessage = (raw: string): string => {
+  const gitErrorMessage = useCallback((raw: string): string => {
     const map: Record<string, string> = {
       repo_not_found: t("jobForm.error.repoNotFound"),
       access_denied: t("jobForm.error.accessDenied"),
@@ -218,7 +218,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     if (map[raw]) return map[raw];
     if (raw.toLowerCase().includes("timed out")) return t("jobForm.error.gitTimeout");
     return t("jobForm.error.gitError");
-  };
+  }, [t]);
 
   const scrollToError = (id: string) => {
     const el = document.getElementById(id);
@@ -250,7 +250,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     } finally {
       setLoading(false); 
     }
-  }, [namespace, repoName, mode]);
+  }, [namespace, repoName, mode, gitErrorMessage]);
 
   // Init for Clone Mode (run once on mount)
   const cloneInitRef = useRef(false);
@@ -289,7 +289,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     };
 
     fetchCommits();
-  }, [selectedBranch, hasScanned, namespace, repoName, mode]);
+  }, [selectedBranch, hasScanned, namespace, repoName, mode, gitErrorMessage]);
 
   const handleLaunch = async () => {
     setErrorField(null); setErrorMessage(null);
