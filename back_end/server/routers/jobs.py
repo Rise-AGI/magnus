@@ -59,6 +59,13 @@ def create_job(
     if job_dict.get("system_entry_command") is None:
         job_dict["system_entry_command"] = cluster["default_system_entry_command"]
 
+    # 兼容空仓库模式：数据库中 namespace/repo_name 仍为 NOT NULL
+    # 空仓库时前端/SDK 会传 None，这里统一落库为空字符串
+    if job_dict.get("namespace") is None:
+        job_dict["namespace"] = ""
+    if job_dict.get("repo_name") is None:
+        job_dict["repo_name"] = ""
+
     try:
         normalized_shared_files = shared_file_manager.normalize_shared_files(job_dict.get("shared_files"))
     except SharedFileValidationError as error:
