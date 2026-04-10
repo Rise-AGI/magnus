@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHand
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { client } from "@/lib/api";
 import { useLanguage } from "@/context/language-context";
 import {
@@ -86,6 +87,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [repoError, setRepoError] = useState<string | null>(null);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   
@@ -100,6 +102,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   const commandRef = useRef<HTMLTextAreaElement>(null);
   const systemCommandRef = useRef<HTMLTextAreaElement>(null);
   const actionRef = useRef<HTMLDivElement>(null);
+  const lastBranchRef = useRef(initialData?.branch || "");
 
   // === Imperative Handle for Clipboard Actions ===
   useImperativeHandle(ref, () => ({
@@ -231,9 +234,9 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       }
     } catch (e: any) {
       console.error(e);
-      setErrorMessage(e.message || "Failed to fetch branches");
+      setRepoError(e.message || "Failed to fetch branches");
       setHasScanned(false);
-    } finally { 
+    } finally {
       setLoading(false); 
     }
   }, [namespace, repoName, mode]);
@@ -250,18 +253,27 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   useEffect(() => {
     if (!selectedBranch || !hasScanned) return;
 
+    const branchChanged = selectedBranch !== lastBranchRef.current;
+    lastBranchRef.current = selectedBranch;
+
+    if (branchChanged) {
+      setCommits([]);
+      setSelectedCommit("");
+    }
+
     const fetchCommits = async () => {
       try {
         const data = await client(`/api/github/${namespace}/${repoName}/commits?branch=${selectedBranch}`);
         setCommits(data);
-        if (mode === 'create' && data.length > 0) {
+        if (data.length > 0 && (mode === 'create' || branchChanged)) {
             setSelectedCommit("HEAD");
         }
-      } catch (e) { 
-        console.error("Fetch commits failed", e); 
+      } catch (e: any) {
+        console.error("Fetch commits failed", e);
+        setRepoError(e.message || "Failed to fetch commits");
       }
     };
-    
+
     fetchCommits();
   }, [selectedBranch, hasScanned, namespace, repoName, mode]);
 
@@ -615,6 +627,15 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         </div>
       </div>
 
+      <ConfirmationDialog
+        isOpen={!!repoError}
+        onClose={() => setRepoError(null)}
+        title={t("common.error")}
+        description={repoError}
+        confirmText={t("common.ok")}
+        mode="alert"
+        variant="danger"
+      />
     </div>
   );
 });
