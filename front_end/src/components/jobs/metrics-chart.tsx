@@ -74,6 +74,23 @@ function metricDisplayName(name: string): string {
 }
 
 
+function metricPriority(s: MetricStream): number {
+  const n = s.name;
+  const isSystem = n.startsWith("system.");
+  const isGpu = n.startsWith("system.gpu.");
+  const hasStep = s.step_domain != null;
+
+  // user metrics (train.*, eval.*, custom) > system.gpu.* > other system.*
+  // within each tier, step > no step
+  if (!isSystem) return hasStep ? 0 : 1;
+  if (isGpu) return hasStep ? 2 : 3;
+  return hasStep ? 4 : 5;
+}
+
+function pickDefaultMetric(streams: MetricStream[]): MetricStream {
+  return streams.reduce((best, s) => metricPriority(s) < metricPriority(best) ? s : best);
+}
+
 export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
   const { t } = useLanguage();
   const [streams, setStreams] = useState<MetricStream[]>([]);
@@ -87,7 +104,9 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
       const result: MetricStream[] = await client(`/api/jobs/${jobId}/metrics/streams`);
       setStreams(result);
       if (result.length > 0 && selectedMetric === null) {
-        setSelectedMetric(result[0].name);
+        const best = pickDefaultMetric(result);
+        setSelectedMetric(best.name);
+        if (best.step_domain) setXAxis("step");
       }
     } catch {
       // fail silently
