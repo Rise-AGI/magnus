@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from library import *
 from .routers import *
 from .routers.ws_chat import ws_router
-from ._github_client import *
 from ._magnus_config import *
 from . import models
 from .database import *
@@ -338,7 +337,6 @@ async def lifespan(
         logger.info("Scheduler loop stopped.")
 
     file_custody_manager.shutdown()
-    await github_client.close()
 
 
 app = FastAPI(
