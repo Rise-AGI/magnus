@@ -453,7 +453,7 @@ class SharedFileManager:
 
     async def cleanup_loop(self)-> None:
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(24 * 3600)
             try:
                 await asyncio.to_thread(self._cleanup_once)
             except Exception as error:
