@@ -209,6 +209,17 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     if (errorField === field) { setErrorField(null); setErrorMessage(null); }
   };
 
+  const gitErrorMessage = (raw: string): string => {
+    const map: Record<string, string> = {
+      repo_not_found: t("jobForm.error.repoNotFound"),
+      access_denied: t("jobForm.error.accessDenied"),
+      git_error: t("jobForm.error.gitError"),
+    };
+    if (map[raw]) return map[raw];
+    if (raw.toLowerCase().includes("timed out")) return t("jobForm.error.gitTimeout");
+    return t("jobForm.error.gitError");
+  };
+
   const scrollToError = (id: string) => {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -234,20 +245,23 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       }
     } catch (e: any) {
       console.error(e);
-      setRepoError(e.message || "Failed to fetch branches");
+      setRepoError(gitErrorMessage(e.message || "git_error"));
       setHasScanned(false);
     } finally {
       setLoading(false); 
     }
   }, [namespace, repoName, mode]);
 
-  // Init for Clone Mode
+  // Init for Clone Mode (run once on mount)
+  const cloneInitRef = useRef(false);
   useEffect(() => {
+    if (cloneInitRef.current) return;
     if (mode === 'clone' && initialData) {
-        setHasScanned(true); 
+        cloneInitRef.current = true;
+        setHasScanned(true);
         fetchBranches();
     }
-  }, [mode, initialData, fetchBranches]); 
+  }, [mode, initialData, fetchBranches]);
 
   // Fetch commits when branch changes
   useEffect(() => {
@@ -270,7 +284,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         }
       } catch (e: any) {
         console.error("Fetch commits failed", e);
-        setRepoError(e.message || "Failed to fetch commits");
+        setRepoError(gitErrorMessage(e.message || "git_error"));
       }
     };
 
