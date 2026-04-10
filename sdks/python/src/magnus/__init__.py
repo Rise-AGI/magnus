@@ -112,6 +112,16 @@ __all__ = [
     "custody_file_async",
     "create_shared_folder",
     "create_shared_folder_async",
+    "get_shared_folder_info",
+    "get_shared_folder_info_async",
+    "list_shared_files",
+    "list_shared_files_async",
+    "download_shared_file",
+    "download_shared_file_async",
+    "update_shared_folder",
+    "update_shared_folder_async",
+    "restore_shared_folder",
+    "restore_shared_folder_async",
     "save_site",
     "remove_site",
     "set_current_site",
@@ -176,6 +186,36 @@ def create_shared_folder(expire_days: int, expected_size_gb: int, timeout: float
 
 async def create_shared_folder_async(expire_days: int, expected_size_gb: int, timeout: float = 10.0) -> Dict[str, Any]:
     return await default_client.create_shared_folder_async(expire_days, expected_size_gb, timeout)
+
+def get_shared_folder_info(token: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.get_shared_folder_info(token, timeout)
+
+async def get_shared_folder_info_async(token: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.get_shared_folder_info_async(token, timeout)
+
+def list_shared_files(token: str, path: str = "", timeout: float = 10.0) -> List[Dict[str, Any]]:
+    return default_client.list_shared_files(token, path, timeout)
+
+async def list_shared_files_async(token: str, path: str = "", timeout: float = 10.0) -> List[Dict[str, Any]]:
+    return await default_client.list_shared_files_async(token, path, timeout)
+
+def download_shared_file(token: str, file_path: str, dest = None, timeout: float = 60.0):
+    return default_client.download_shared_file(token, file_path, dest, timeout)
+
+async def download_shared_file_async(token: str, file_path: str, dest = None, timeout: float = 60.0):
+    return await default_client.download_shared_file_async(token, file_path, dest, timeout)
+
+def update_shared_folder(token: str, expected_size_gb: Optional[int] = None, extend_days: Optional[int] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.update_shared_folder(token, expected_size_gb, extend_days, timeout)
+
+async def update_shared_folder_async(token: str, expected_size_gb: Optional[int] = None, extend_days: Optional[int] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.update_shared_folder_async(token, expected_size_gb, extend_days, timeout)
+
+def restore_shared_folder(token: str, new_expire_days: Optional[int] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.restore_shared_folder(token, new_expire_days, timeout)
+
+async def restore_shared_folder_async(token: str, new_expire_days: Optional[int] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.restore_shared_folder_async(token, new_expire_days, timeout)
 
 def list_jobs(limit: int = 20, skip: int = 0, search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_jobs(limit, skip, search, timeout)

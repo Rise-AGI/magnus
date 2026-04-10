@@ -1426,6 +1426,166 @@ class MagnusClient:
             timeout,
         )
 
+    # === Shared Folder Management ===
+
+    def get_shared_folder_info(
+        self,
+        token: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """获取共享文件夹信息"""
+        try:
+            resp = self.http.get(f"/shared-files/{token}", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting shared folder info.")
+        except httpx.TransportError as e:
+            raise self._network_error("getting shared folder info", e)
+
+    async def get_shared_folder_info_async(
+        self,
+        token: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.get_shared_folder_info, token, timeout)
+
+    def list_shared_files(
+        self,
+        token: str,
+        path: str = "",
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        """列出共享文件夹中的文件"""
+        try:
+            params = {"path": path} if path else {}
+            resp = self.http.get(f"/shared-files/{token}/files", params=params, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json().get("files", [])
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while listing shared files.")
+        except httpx.TransportError as e:
+            raise self._network_error("listing shared files", e)
+
+    async def list_shared_files_async(
+        self,
+        token: str,
+        path: str = "",
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self.list_shared_files, token, path, timeout)
+
+    def download_shared_file(
+        self,
+        token: str,
+        file_path: str,
+        dest: Optional[Path] = None,
+        timeout: float = 60.0,
+    ) -> Path:
+        """下载共享文件夹中的文件"""
+        try:
+            resp = self.http.get(
+                f"/shared-files/{token}/download",
+                params={"path": file_path},
+                timeout=timeout,
+            )
+            self._handle_error(resp)
+            
+            # 从 Content-Disposition 获取文件名
+            content_disp = resp.headers.get("content-disposition", "")
+            filename = file_path.split("/")[-1]
+            if "filename=" in content_disp:
+                for part in content_disp.split(";"):
+                    if "filename=" in part:
+                        filename = part.split("filename=")[1].strip('"')
+                        break
+            
+            if dest is None:
+                dest = Path(filename)
+            else:
+                dest = Path(dest)
+                if dest.is_dir():
+                    dest = dest / filename
+            
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(resp.content)
+            return dest
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while downloading shared file.")
+        except httpx.TransportError as e:
+            raise self._network_error("downloading shared file", e)
+
+    async def download_shared_file_async(
+        self,
+        token: str,
+        file_path: str,
+        dest: Optional[Path] = None,
+        timeout: float = 60.0,
+    ) -> Path:
+        return await asyncio.to_thread(self.download_shared_file, token, file_path, dest, timeout)
+
+    def update_shared_folder(
+        self,
+        token: str,
+        expected_size_gb: Optional[int] = None,
+        extend_days: Optional[int] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """更新共享文件夹属性（仅创建者/管理员）"""
+        payload: Dict[str, Any] = {}
+        if expected_size_gb is not None:
+            payload["expected_size_gb"] = expected_size_gb
+        if extend_days is not None:
+            payload["extend_days"] = extend_days
+        
+        if not payload:
+            raise MagnusError("At least one of expected_size_gb or extend_days must be provided")
+        
+        try:
+            resp = self.http.patch(f"/shared-files/{token}", json=payload, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while updating shared folder.")
+        except httpx.TransportError as e:
+            raise self._network_error("updating shared folder", e)
+
+    async def update_shared_folder_async(
+        self,
+        token: str,
+        expected_size_gb: Optional[int] = None,
+        extend_days: Optional[int] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self.update_shared_folder, token, expected_size_gb, extend_days, timeout,
+        )
+
+    def restore_shared_folder(
+        self,
+        token: str,
+        new_expire_days: Optional[int] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """从归档恢复共享文件夹（仅创建者/管理员）"""
+        payload = {"new_expire_days": new_expire_days} if new_expire_days else {}
+        try:
+            resp = self.http.post(f"/shared-files/{token}/restore", json=payload, timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while restoring shared folder.")
+        except httpx.TransportError as e:
+            raise self._network_error("restoring shared folder", e)
+
+    async def restore_shared_folder_async(
+        self,
+        token: str,
+        new_expire_days: Optional[int] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.restore_shared_folder, token, new_expire_days, timeout)
+
     def call_service(
         self,
         service_id: str,

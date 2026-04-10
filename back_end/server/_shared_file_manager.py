@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ._magnus_config import magnus_config
 from .database import SessionLocal
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 SHARED_FILE_ROOT = Path("/data/sharedfile")
 ARCHIVED_SHARED_FILE_ROOT = Path("/data/archived_sharedfile")
-PROPERTIES_FILENAME = "properties.json"
+PROPERTIES_FILENAME = ".properties"
 MOUNT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -183,6 +183,205 @@ class SharedFileManager:
         with open(token_dir / PROPERTIES_FILENAME, "w", encoding="utf-8") as f:
             json.dump(properties, f, indent=2, ensure_ascii=True)
         return properties
+
+    def get_shared_folder_info(self, token: str)-> Dict[str, Any]:
+        """获取共享文件夹信息"""
+        token_dir = SHARED_FILE_ROOT / token
+        if token_dir.exists() and token_dir.is_dir():
+            properties_path = token_dir / PROPERTIES_FILENAME
+            if properties_path.exists():
+                with open(properties_path, "r", encoding="utf-8") as f:
+                    props = json.load(f)
+                props["status"] = "active"
+                props["actual_size_bytes"] = _get_dir_size(token_dir)
+                return props
+        
+        # 检查是否已归档
+        if self._token_is_archived(token):
+            # 查找归档文件
+            archive_path = ARCHIVED_SHARED_FILE_ROOT / f"{token}.tar.gz"
+            if not archive_path.exists():
+                for p in ARCHIVED_SHARED_FILE_ROOT.glob(f"{token}-*.tar.gz"):
+                    archive_path = p
+                    break
+            if archive_path.exists():
+                return {
+                    "token": token,
+                    "status": "archived",
+                    "archive_path": str(archive_path),
+                }
+        
+        raise SharedFileNotFoundError(f"Token '{token}' not found")
+
+    def list_files(self, token: str, subpath: str = "")-> List[Dict[str, Any]]:
+        """列出共享文件夹中的文件"""
+        token_dir = SHARED_FILE_ROOT / token
+        if not token_dir.exists() or not token_dir.is_dir():
+            if self._token_is_archived(token):
+                raise SharedFileInvalidatedError("Token is archived")
+            raise SharedFileNotFoundError(f"Token '{token}' not found")
+        
+        target_dir = token_dir / subpath if subpath else token_dir
+        if not target_dir.exists() or not target_dir.is_dir():
+            raise SharedFileValidationError(f"Path '{subpath}' not found or not a directory")
+        
+        # 安全检查：确保路径在 token_dir 内
+        try:
+            target_dir.resolve().relative_to(token_dir.resolve())
+        except ValueError:
+            raise SharedFileValidationError("Invalid path")
+        
+        files = []
+        for item in sorted(target_dir.iterdir()):
+            # 跳过隐藏文件（包括 .properties）
+            if item.name.startswith("."):
+                continue
+            rel_path = str(item.relative_to(token_dir))
+            if item.is_dir():
+                files.append({
+                    "name": item.name,
+                    "path": rel_path,
+                    "type": "directory",
+                })
+            else:
+                files.append({
+                    "name": item.name,
+                    "path": rel_path,
+                    "type": "file",
+                    "size": item.stat().st_size,
+                })
+        return files
+
+    def get_file_path(self, token: str, file_path: str)-> Path:
+        """获取文件路径用于下载"""
+        token_dir = SHARED_FILE_ROOT / token
+        if not token_dir.exists() or not token_dir.is_dir():
+            if self._token_is_archived(token):
+                raise SharedFileInvalidatedError("Token is archived")
+            raise SharedFileNotFoundError(f"Token '{token}' not found")
+        
+        target = token_dir / file_path
+        if not target.exists():
+            raise SharedFileNotFoundError(f"File '{file_path}' not found")
+        
+        # 安全检查
+        try:
+            target.resolve().relative_to(token_dir.resolve())
+        except ValueError:
+            raise SharedFileValidationError("Invalid path")
+        
+        return target
+
+    def update_properties(
+        self,
+        token: str,
+        user_id: str,
+        is_admin: bool,
+        expected_size_gb: Optional[int] = None,
+        extend_days: Optional[int] = None,
+    )-> Dict[str, Any]:
+        """更新共享文件夹属性（仅创建者或管理员）"""
+        token_dir = SHARED_FILE_ROOT / token
+        if not token_dir.exists() or not token_dir.is_dir():
+            raise SharedFileNotFoundError(f"Token '{token}' not found")
+        
+        properties_path = token_dir / PROPERTIES_FILENAME
+        if not properties_path.exists():
+            raise SharedFileValidationError("Properties file not found")
+        
+        with open(properties_path, "r", encoding="utf-8") as f:
+            props = json.load(f)
+        
+        # 权限检查
+        if props.get("created_by") != user_id and not is_admin:
+            raise SharedFileValidationError("Only creator or admin can update properties")
+        
+        now = _utc_now()
+        
+        if expected_size_gb is not None:
+            if expected_size_gb < 1 or expected_size_gb > 800:
+                raise SharedFileValidationError("expected_size_gb must be between 1 and 800")
+            props["expected_size_gb"] = expected_size_gb
+            props["expected_size_bytes"] = expected_size_gb * 1024 * 1024 * 1024
+            props["updated_at"] = now.isoformat()
+        
+        if extend_days is not None:
+            if extend_days < 1 or extend_days > 90:
+                raise SharedFileValidationError("extend_days must be between 1 and 90")
+            current_expire = _parse_iso_datetime(props["expire_at"])
+            new_expire = current_expire + timedelta(days=extend_days)
+            props["expire_at"] = new_expire.isoformat()
+            props["expire_days"] = (new_expire - _parse_iso_datetime(props["created_at"])).days
+            props["updated_at"] = now.isoformat()
+        
+        with open(properties_path, "w", encoding="utf-8") as f:
+            json.dump(props, f, indent=2, ensure_ascii=True)
+        
+        props["status"] = "active"
+        props["actual_size_bytes"] = _get_dir_size(token_dir)
+        return props
+
+    def restore_archived(self, token: str, user_id: str, is_admin: bool, new_expire_days: Optional[int] = None)-> Dict[str, Any]:
+        """从归档恢复共享文件夹（仅创建者或管理员）"""
+        # 检查是否已存在活跃版本
+        token_dir = SHARED_FILE_ROOT / token
+        if token_dir.exists():
+            raise SharedFileValidationError("Token already exists in active state")
+        
+        # 查找归档文件
+        archive_path = ARCHIVED_SHARED_FILE_ROOT / f"{token}.tar.gz"
+        if not archive_path.exists():
+            for p in ARCHIVED_SHARED_FILE_ROOT.glob(f"{token}-*.tar.gz"):
+                archive_path = p
+                break
+        
+        if not archive_path.exists():
+            raise SharedFileNotFoundError(f"Archived token '{token}' not found")
+        
+        # 先解压到临时位置，读取 properties 检查权限
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with tarfile.open(archive_path, "r:gz") as tar:
+                tar.extractall(tmpdir)
+            
+            extracted_dir = Path(tmpdir) / token
+            props_path = extracted_dir / PROPERTIES_FILENAME
+            if not props_path.exists():
+                raise SharedFileValidationError("Properties file not found in archive")
+            
+            with open(props_path, "r", encoding="utf-8") as f:
+                props = json.load(f)
+            
+            # 权限检查
+            if props.get("created_by") != user_id and not is_admin:
+                raise SharedFileValidationError("Only creator or admin can restore archived folder")
+            
+            # 更新过期时间
+            now = _utc_now()
+            if new_expire_days is not None:
+                if new_expire_days < 7 or new_expire_days > 90:
+                    raise SharedFileValidationError("new_expire_days must be between 7 and 90")
+                props["expire_at"] = (now + timedelta(days=new_expire_days)).isoformat()
+                props["expire_days"] = new_expire_days
+            else:
+                # 默认延长 7 天
+                props["expire_at"] = (now + timedelta(days=7)).isoformat()
+                props["expire_days"] = 7
+            
+            props["restored_at"] = now.isoformat()
+            
+            with open(props_path, "w", encoding="utf-8") as f:
+                json.dump(props, f, indent=2, ensure_ascii=True)
+            
+            # 移动到活跃目录
+            shutil.move(str(extracted_dir), str(token_dir))
+        
+        # 删除归档文件
+        archive_path.unlink(missing_ok=True)
+        
+        props["status"] = "active"
+        props["actual_size_bytes"] = _get_dir_size(token_dir)
+        return props
 
     def _active_shared_tokens(self)-> Set[str]:
         active_statuses = {

@@ -120,6 +120,16 @@ export default function ToolsPage() {
   const [sharedExpectedSizeGb, setSharedExpectedSizeGb] = useState(10);
   const [creatingShared, setCreatingShared] = useState(false);
   const [createdSharedToken, setCreatedSharedToken] = useState<string | null>(null);
+  
+  // Shared folder management state
+  const [manageToken, setManageToken] = useState("");
+  const [sharedInfo, setSharedInfo] = useState<Record<string, any> | null>(null);
+  const [sharedFiles, setSharedFiles] = useState<Array<Record<string, any>>>([]);
+  const [sharedPath, setSharedPath] = useState("");
+  const [loadingShared, setLoadingShared] = useState(false);
+  const [extendDays, setExtendDays] = useState(7);
+  const [newExpectedSize, setNewExpectedSize] = useState(10);
+  const [restoreDays, setRestoreDays] = useState(7);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -301,6 +311,104 @@ export default function ToolsPage() {
     }
   };
 
+  // Shared folder management functions
+  const handleViewSharedFolder = async () => {
+    if (!manageToken.trim()) return;
+    setLoadingShared(true);
+    setErrorMessage(null);
+    setSharedInfo(null);
+    setSharedFiles([]);
+    setSharedPath("");
+    try {
+      const info = await client(`/api/shared-files/${manageToken.trim()}`);
+      setSharedInfo(info);
+      if (info.status === "active") {
+        await loadSharedFiles("");
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : t("files.sharedNotFound"));
+    } finally {
+      setLoadingShared(false);
+    }
+  };
+
+  const loadSharedFiles = async (subpath: string) => {
+    if (!manageToken.trim()) return;
+    try {
+      const result = await client(`/api/shared-files/${manageToken.trim()}/files?path=${encodeURIComponent(subpath)}`);
+      setSharedFiles(result.files || []);
+      setSharedPath(subpath);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : t("files.sharedNotFound"));
+    }
+  };
+
+  const handleDownloadSharedFile = async (filePath: string, fileName: string) => {
+    try {
+      const response = await fetch(
+        `/api/shared-files/${manageToken.trim()}/download?path=${encodeURIComponent(filePath)}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
+      );
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : t("files.downloadFailed"));
+    }
+  };
+
+  const handleUpdateSharedFolder = async () => {
+    if (!manageToken.trim()) return;
+    setLoadingShared(true);
+    setErrorMessage(null);
+    try {
+      await client(`/api/shared-files/${manageToken.trim()}`, {
+        method: "PATCH",
+        json: {
+          expected_size_gb: newExpectedSize || undefined,
+          extend_days: extendDays || undefined,
+        },
+      });
+      setStatusMessage(t("files.sharedUpdateSuccess"));
+      await handleViewSharedFolder();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : t("files.sharedUpdateFailed"));
+    } finally {
+      setLoadingShared(false);
+    }
+  };
+
+  const handleRestoreSharedFolder = async () => {
+    if (!manageToken.trim()) return;
+    setLoadingShared(true);
+    setErrorMessage(null);
+    try {
+      await client(`/api/shared-files/${manageToken.trim()}/restore`, {
+        method: "POST",
+        json: { new_expire_days: restoreDays },
+      });
+      setStatusMessage(t("files.sharedRestoreSuccess"));
+      await handleViewSharedFolder();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : t("files.sharedRestoreFailed"));
+    } finally {
+      setLoadingShared(false);
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
   const directoryPickerProps = {
     webkitdirectory: "",
     directory: "",
@@ -357,6 +465,192 @@ export default function ToolsPage() {
           {creatingShared ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {t("files.sharedCreate")}
         </button>
+      </section>
+
+      {/* Shared Folder Management */}
+      <section className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-6 backdrop-blur-sm">
+        <h2 className="text-lg font-semibold text-white">{t("files.sharedManageTitle")}</h2>
+        <p className="text-sm text-zinc-500 mt-1">{t("files.sharedManageHint")}</p>
+        <div className="mt-4 flex gap-2">
+          <input
+            type="text"
+            value={manageToken}
+            onChange={(e) => setManageToken(e.target.value)}
+            placeholder={t("files.sharedTokenLabel")}
+            className="flex-1 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none transition focus:border-blue-500"
+          />
+          <button
+            type="button"
+            onClick={() => void handleViewSharedFolder()}
+            disabled={loadingShared || !manageToken.trim()}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loadingShared ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {t("files.sharedViewButton")}
+          </button>
+        </div>
+
+        {sharedInfo && (
+          <div className="mt-4 space-y-4">
+            {/* Info */}
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${sharedInfo.status === "active" ? "bg-green-500/20 text-green-300" : "bg-yellow-500/20 text-yellow-300"}`}>
+                  {sharedInfo.status === "active" ? t("files.sharedActive") : t("files.sharedArchived")}
+                </span>
+              </div>
+              {sharedInfo.created_at && (
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="text-zinc-500">{t("files.sharedCreatedAt")}:</div>
+                  <div className="text-zinc-300">{new Date(sharedInfo.created_at).toLocaleString()}</div>
+                  {sharedInfo.expire_at && (
+                    <>
+                      <div className="text-zinc-500">{t("files.sharedExpiresAt")}:</div>
+                      <div className="text-zinc-300">{new Date(sharedInfo.expire_at).toLocaleString()}</div>
+                    </>
+                  )}
+                  {sharedInfo.actual_size_bytes !== undefined && (
+                    <>
+                      <div className="text-zinc-500">{t("files.sharedActualSize")}:</div>
+                      <div className="text-zinc-300">{formatBytes(sharedInfo.actual_size_bytes)}</div>
+                    </>
+                  )}
+                  {sharedInfo.expected_size_gb && (
+                    <>
+                      <div className="text-zinc-500">{t("files.sharedExpectedSize")}:</div>
+                      <div className="text-zinc-300">{sharedInfo.expected_size_gb} GB</div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Files browser (active only) */}
+            {sharedInfo.status === "active" && (
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-medium text-zinc-200">{t("files.sharedFiles")}</h3>
+                  {sharedPath && (
+                    <button
+                      type="button"
+                      onClick={() => loadSharedFiles("")}
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      {t("files.sharedBackToRoot")}
+                    </button>
+                  )}
+                </div>
+                {sharedPath && (
+                  <div className="text-xs text-zinc-500 mb-2">
+                    {t("files.sharedCurrentPath")}: {sharedPath}
+                  </div>
+                )}
+                {sharedFiles.length === 0 ? (
+                  <div className="text-sm text-zinc-500">{t("files.sharedNoFiles")}</div>
+                ) : (
+                  <div className="space-y-1">
+                    {sharedFiles.map((file) => (
+                      <div
+                        key={file.path}
+                        className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-zinc-800/50"
+                      >
+                        <div
+                          className="flex items-center gap-2 cursor-pointer flex-1"
+                          onClick={() => file.type === "directory" && loadSharedFiles(file.path)}
+                        >
+                          <span className="text-zinc-300">{file.name}</span>
+                          {file.type === "directory" && (
+                            <span className="text-xs text-zinc-500">/</span>
+                          )}
+                          {file.size !== undefined && (
+                            <span className="text-xs text-zinc-500">({formatBytes(file.size)})</span>
+                          )}
+                        </div>
+                        {file.type === "file" && (
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadSharedFile(file.path, file.name)}
+                            className="text-xs text-blue-400 hover:text-blue-300"
+                          >
+                            {t("files.sharedDownloadFile")}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Update / Restore (creator/admin only) */}
+            {(sharedInfo.is_creator || sharedInfo.is_admin) && (
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+                {sharedInfo.status === "archived" ? (
+                  <div className="space-y-3">
+                    <p className="text-sm text-zinc-400">{t("files.sharedRestoreHint")}</p>
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="text-xs text-zinc-500">{t("files.sharedRestoreDays")}</label>
+                        <input
+                          type="number"
+                          value={restoreDays}
+                          onChange={(e) => setRestoreDays(parseInt(e.target.value) || 7)}
+                          min={7}
+                          max={90}
+                          className="w-full mt-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreSharedFolder()}
+                        disabled={loadingShared}
+                        className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded text-sm font-medium"
+                      >
+                        {t("files.sharedRestoreButton")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium text-zinc-200">{t("files.sharedUpdateTitle")}</h3>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="text-xs text-zinc-500">{t("files.sharedExtendDays")}</label>
+                        <input
+                          type="number"
+                          value={extendDays}
+                          onChange={(e) => setExtendDays(parseInt(e.target.value) || 7)}
+                          min={1}
+                          max={90}
+                          className="w-full mt-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-zinc-500">{t("files.sharedNewExpectedSize")}</label>
+                        <input
+                          type="number"
+                          value={newExpectedSize}
+                          onChange={(e) => setNewExpectedSize(parseInt(e.target.value) || 10)}
+                          min={1}
+                          max={800}
+                          className="w-full mt-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateSharedFolder()}
+                      disabled={loadingShared}
+                      className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium"
+                    >
+                      {t("files.sharedUpdateButton")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <div className="grid gap-6 xl:grid-cols-2">
