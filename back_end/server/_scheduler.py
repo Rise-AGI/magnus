@@ -516,23 +516,29 @@ class MagnusScheduler:
             user_id = job.user_id
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             repo_dir = f"{job_working_table}/repository"
+            has_repo = bool(repo_name)  # 是否需要克隆仓库
 
             guarantee_file_exist(job_working_table, is_directory=True)
 
         # Phase 2 — 长 I/O（无 session）
         # 镜像拉取解耦：shield 保护，job cancel 不中断拉取
-        (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
-            self._ensure_image_decoupled(container_image, user_id),
-            resource_manager.ensure_repo(
-                namespace = namespace,
-                repo_name = repo_name,
-                branch = branch,
-                commit_sha = commit_sha,
-                target_dir = repo_dir,
-                runner = effective_runner,
-                job_working_dir = job_working_table,
-            ),
-        )
+        if has_repo:
+            (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
+                self._ensure_image_decoupled(container_image, user_id),
+                resource_manager.ensure_repo(
+                    namespace = namespace,
+                    repo_name = repo_name,
+                    branch = branch,
+                    commit_sha = commit_sha,
+                    target_dir = repo_dir,
+                    runner = effective_runner,
+                    job_working_dir = job_working_table,
+                ),
+            )
+        else:
+            # 无仓库：只准备镜像
+            image_ok, image_err = await self._ensure_image_decoupled(container_image, user_id)
+            repo_ok, repo_result, resolved_branch = True, None, None
 
         # Phase 3 — 回写状态（短 session）
         with SessionLocal() as db:
@@ -548,15 +554,15 @@ class MagnusScheduler:
                 logger.error(f"Job {job_id} failed: {image_err}")
                 return
 
-            if not repo_ok:
+            if has_repo and not repo_ok:
                 job.status = JobStatus.FAILED
                 job.result = f"Failed to clone repo: {repo_result}"
                 db.commit()
                 logger.error(f"Job {job_id} failed: {repo_result}")
                 return
 
-            assert repo_result is not None
-            job.commit_sha = repo_result
+            if has_repo and repo_result is not None:
+                job.commit_sha = repo_result
 
             if resolved_branch is not None:
                 job.branch = resolved_branch
@@ -623,6 +629,7 @@ class MagnusScheduler:
 
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             repo_dir = f"{job_working_table}/repository"
+            has_repo = bool(job.repo_name)  # 是否有仓库
 
             self._init_job_working_dir(job_working_table)
 
@@ -664,6 +671,7 @@ class MagnusScheduler:
                 entry_command = job.entry_command,
                 effective_runner = effective_runner,
                 shared_mount_specs = shared_mount_specs,
+                has_repo = has_repo,
             )
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}")
@@ -792,6 +800,10 @@ class MagnusScheduler:
 
             # GPU: 如果 job 请求了 GPU 且本机有 GPU，尝试启用
             gpu_enabled = job.gpu_count > 0
+            
+            # 工作目录：有仓库时进入 repository 子目录
+            has_repo = bool(job.repo_name)
+            container_work_dir = f"{magnus_home}/workspace/repository" if has_repo else f"{magnus_home}/workspace"
 
             self.docker_manager.run_container(
                 container_name=container_name,
@@ -799,7 +811,7 @@ class MagnusScheduler:
                 entry_command=container_cmd,
                 bind_mounts=bind_mounts,
                 env_vars=env_vars,
-                working_dir=f"{magnus_home}/workspace/repository",
+                working_dir=container_work_dir,
                 gpu_enabled=gpu_enabled,
                 network_mode=network_mode,
             )
@@ -890,6 +902,7 @@ class MagnusScheduler:
         entry_command: str,
         effective_runner: str,
         shared_mount_specs: List[Tuple[str, str, str]],
+        has_repo: bool = True,
     )-> str:
         success_marker_path = f"{job_working_table}/.magnus_success"
         shared_bind_lines: List[str] = []
@@ -898,6 +911,9 @@ class MagnusScheduler:
             shared_bind_lines.append(f'export APPTAINER_BIND="${{APPTAINER_BIND:+${{APPTAINER_BIND}},}}{host_dir}:{container_dir}"')
             shared_bind_lines.append(f'export APPTAINER_BIND="${{APPTAINER_BIND:+${{APPTAINER_BIND}},}}{host_properties}:{container_dir}/{PROPERTIES_FILENAME}:ro"')
         shared_bind_block = "\n".join(shared_bind_lines)
+        
+        # 工作目录：有仓库时进入 repository 子目录
+        container_work_dir = "$MAGNUS_HOME/workspace/repository" if has_repo else "$MAGNUS_HOME/workspace"
 
         return f'''import os
 import sys
@@ -1116,7 +1132,7 @@ if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
 fi
 
-APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
+APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd {container_work_dir} {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     ROOTLESSKIT_FLAGS="--net=slirp4netns --port-driver=builtin --publish $MAGNUS_PORT_MAP"

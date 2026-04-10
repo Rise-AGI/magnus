@@ -238,8 +238,16 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   };
 
   const fetchBranches = useCallback(async () => {
+    // 无仓库时跳过
+    if (!repoName.trim()) {
+      setBranches([]);
+      setCommits([]);
+      setSelectedBranch("");
+      setSelectedCommit("");
+      setHasScanned(true);
+      return;
+    }
     if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace is required"); return; }
-    if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo Name is required"); return; }
     
     setLoading(true);
     setErrorField(null); setErrorMessage(null);
@@ -295,11 +303,16 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     setErrorField(null); setErrorMessage(null);
 
     if (!taskName.trim()) { setErrorField("taskName"); setErrorMessage("⚠️ Task Name is required"); scrollToError("field-taskName"); return; }
-    if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace required"); scrollToError("field-namespace"); return; }
-    if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo required"); scrollToError("field-repo"); return; }
-    if (!hasScanned) { setErrorField("repo"); setErrorMessage("⚠️ Please Scan Repo first"); scrollToError("field-repo"); return; }
-    if (!selectedBranch) { setErrorField("branch"); setErrorMessage("⚠️ Select Branch"); scrollToError("field-branch"); return; }
-    if (!selectedCommit) { setErrorField("commit"); setErrorMessage("⚠️ Select Commit"); scrollToError("field-commit"); return; }
+    
+    // 有仓库时才需要验证仓库相关字段
+    const hasRepo = repoName.trim().length > 0;
+    if (hasRepo) {
+      if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace required"); scrollToError("field-namespace"); return; }
+      if (!hasScanned) { setErrorField("repo"); setErrorMessage("⚠️ Please Scan Repo first"); scrollToError("field-repo"); return; }
+      if (!selectedBranch) { setErrorField("branch"); setErrorMessage("⚠️ Select Branch"); scrollToError("field-branch"); return; }
+      if (!selectedCommit) { setErrorField("commit"); setErrorMessage("⚠️ Select Commit"); scrollToError("field-commit"); return; }
+    }
+    
     if (!gpuType) { setErrorMessage("⚠️ Select GPU Type"); return; }
     if (!command.trim()) { setErrorField("command"); setErrorMessage("⚠️ Command required"); scrollToError("field-command"); return; }
 
@@ -327,10 +340,10 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     const payload = {
       task_name: taskName,
       description: description,
-      namespace,
-      repo_name: repoName,
-      branch: selectedBranch,
-      commit_sha: selectedCommit,
+      namespace: namespace.trim() ? namespace.trim() : null,
+      repo_name: repoName.trim() ? repoName.trim() : null,
+      branch: selectedBranch || null,
+      commit_sha: selectedCommit || null,
       entry_command: command,
       gpu_count: gpuCount,
       gpu_type: gpuType,

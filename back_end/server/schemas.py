@@ -102,12 +102,12 @@ class PagedUserResponse(BaseModel):
 class JobSubmission(BaseModel):
     task_name: str
     entry_command: str
-    repo_name: str
+    repo_name: Optional[str] = None        # None = 不克隆仓库，直接进入容器
     branch: Optional[str] = None            # None = fallback: main → master → default
     commit_sha: Optional[str] = None        # None = HEAD
     gpu_type: str = "cpu"
     description: Optional[str] = None
-    namespace: str = "Rise-AGI"
+    namespace: Optional[str] = None         # None = 不克隆仓库
     gpu_count: int = 0
     job_type: JobType = JobType.A2
     container_image: Optional[str] = None
