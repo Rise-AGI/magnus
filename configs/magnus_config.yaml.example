@@ -37,8 +37,6 @@ server:
       admins:                              # open_id list, empty = no admins
         - ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
       refresh_interval: 3600               # seconds between user info refreshes (avatar, name, etc.), 0 = disabled
-  github_client:
-    token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   scheduler:
     heartbeat_interval: 2
     snapshot_interval: 300

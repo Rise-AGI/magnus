@@ -76,12 +76,11 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         "cors_origins",
     }
     if not is_local:
-        _check_key(server, "github_client", dict)
         _check_key(server, "explorer", dict)
-        expected_server_keys |= {"github_client", "explorer"}
+        expected_server_keys |= {"explorer"}
     else:
         # local 模式下这些是可选的
-        expected_server_keys |= {"github_client", "explorer"}
+        expected_server_keys |= {"explorer"}
     _warn_extra_keys(server, expected_server_keys, "server")
 
     # database 配置
@@ -121,11 +120,6 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(jwt_signer, "algorithm", str)
     _check_key(jwt_signer, "expire_minutes", int)
     _warn_extra_keys(jwt_signer, {"secret_key", "algorithm", "expire_minutes"}, "server.auth.jwt_signer")
-
-    # github_client 配置 (HPC 必须, local 可选)
-    if not is_local:
-        _check_key(server["github_client"], "token", str)
-        _warn_extra_keys(server["github_client"], {"token"}, "server.github_client")
 
     # scheduler 配置
     scheduler_cfg = server["scheduler"]
