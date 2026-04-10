@@ -370,7 +370,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
                 ${errorField === 'namespace' ? 'animate-shake border-red-500' : 'border-zinc-800'}`} 
               value={namespace} 
               placeholder="e.g. Rise-AGI"
-              onChange={e => { setNamespace(e.target.value); clearError('namespace'); }} 
+              onChange={e => { setNamespace(e.target.value); setHasScanned(false); clearError('namespace'); }}
             />
           </div>
           <div id="field-repo">
@@ -380,7 +380,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
                 ${errorField === 'repo' ? 'animate-shake border-red-500' : 'border-zinc-800'}`} 
               value={repoName} 
               placeholder="e.g. magnus"
-              onChange={e => { setRepoName(e.target.value); clearError('repo'); }} 
+              onChange={e => { setRepoName(e.target.value); setHasScanned(false); clearError('repo'); }}
             />
           </div>
         </div>
