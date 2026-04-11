@@ -65,6 +65,7 @@ execution:
     repo_cache_size: 20G
 
 cluster:
+  registry_mirror: null
   name: Your Cluster Name
   gpus:
     -

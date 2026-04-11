@@ -199,6 +199,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         cluster.setdefault("default_container_image", "docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime")
         cluster.setdefault("default_ephemeral_storage", "10G")
         cluster.setdefault("default_system_entry_command", "")
+        cluster.setdefault("registry_mirror", None)
     else:
         _check_key(config, "cluster", dict)
         cluster = config["cluster"]
@@ -212,10 +213,13 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _check_key(cluster, "default_container_image", str)
         _check_key(cluster, "default_ephemeral_storage", str)
         _check_key(cluster, "default_system_entry_command", str)
+        cluster.setdefault("registry_mirror", None)
+        _check_key(cluster, "registry_mirror", str, nullable=True)
         _warn_extra_keys(cluster, {
             "name", "gpus", "max_cpu_count", "max_memory_demand",
             "default_cpu_count", "default_memory_demand", "default_runner",
             "default_container_image", "default_ephemeral_storage", "default_system_entry_command",
+            "registry_mirror",
         }, "cluster")
 
 
