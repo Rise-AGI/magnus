@@ -1,7 +1,7 @@
 // front_end/src/components/jobs/metrics-chart.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
@@ -75,22 +75,6 @@ function metricDisplayName(name: string): string {
 }
 
 
-function metricPriority(s: MetricStream): number {
-  const n = s.name;
-  const isSystem = n.startsWith("system.");
-  const isGpu = n.startsWith("system.gpu.");
-
-  // user metrics (train.*, eval.*, custom) > system.gpu.* > other system.*
-  // within each tier, step > no step
-  if (!isSystem) return s.has_step ? 0 : 1;
-  if (isGpu) return s.has_step ? 2 : 3;
-  return s.has_step ? 4 : 5;
-}
-
-function pickDefaultMetric(streams: MetricStream[]): MetricStream {
-  return streams.reduce((best, s) => metricPriority(s) < metricPriority(best) ? s : best);
-}
-
 export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
   const { t } = useLanguage();
   const [streams, setStreams] = useState<MetricStream[]>([]);
@@ -99,22 +83,49 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   // null = auto-follow data (prefer step when available); non-null = user override
   const [xAxisOverride, setXAxisOverride] = useState<"time" | "step" | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dataFetched, setDataFetched] = useState(false);
+  const fetchDataReqRef = useRef(0);
 
-  const fetchStreams = useCallback(async () => {
+  const fetchInitial = useCallback(async () => {
     try {
-      const result: MetricStream[] = await client(`/api/jobs/${jobId}/metrics/streams`);
-      setStreams(result);
-      if (result.length > 0 && selectedMetric === null) {
-        setSelectedMetric(pickDefaultMetric(result).name);
+      type InitialResponse = {
+        streams: MetricStream[];
+        default_metric: string | null;
+        default_data: { labels: Record<string, string>; points: MetricPoint[] }[];
+      };
+      const result: InitialResponse = await client(`/api/jobs/${jobId}/metrics/initial`);
+      setStreams(result.streams);
+      if (result.default_metric) {
+        const metricName = result.default_metric;
+        setSelectedMetric(metricName);
+        const dataMap = new Map<string, QueryResult>();
+        for (const entry of result.default_data) {
+          dataMap.set(labelsKey(entry.labels), {
+            name: metricName,
+            points: entry.points,
+          });
+        }
+        setData(dataMap);
+        setDataFetched(true);
       }
     } catch {
       // fail silently
     } finally {
       setLoading(false);
     }
-  }, [jobId, selectedMetric]);
+  }, [jobId]);
+
+  const fetchStreams = useCallback(async () => {
+    try {
+      const result: MetricStream[] = await client(`/api/jobs/${jobId}/metrics/streams`);
+      setStreams(result);
+    } catch {
+      // fail silently
+    }
+  }, [jobId]);
 
   const fetchData = useCallback(async (metricName: string, metricStreams: MetricStream[]) => {
+    const reqId = ++fetchDataReqRef.current;
     const entries = await Promise.all(
       metricStreams.map(async (stream): Promise<[string, QueryResult] | null> => {
         try {
@@ -130,11 +141,14 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
         }
       })
     );
+    // Stale-response guard: a newer fetchData has superseded this one
+    if (fetchDataReqRef.current !== reqId) return;
     const results = new Map<string, QueryResult>();
     for (const entry of entries) {
       if (entry) results.set(entry[0], entry[1]);
     }
     setData(results);
+    setDataFetched(true);
   }, [jobId]);
 
   const grouped = useMemo(() => groupStreamsByMetric(streams), [streams]);
@@ -143,6 +157,11 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
     () => (selectedMetric ? grouped.get(selectedMetric) || [] : []),
     [grouped, selectedMetric],
   );
+
+  // Latest-value ref so the polling interval doesn't need selectedStreams in its deps
+  // (otherwise every fetchStreams result would tear down and recreate the interval)
+  const selectedStreamsRef = useRef(selectedStreams);
+  selectedStreamsRef.current = selectedStreams;
 
   const selectedUnit = selectedStreams[0]?.unit ?? null;
 
@@ -158,24 +177,27 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   const xAxis: "time" | "step" = xAxisOverride ?? (dataHasStep ? "step" : "time");
 
   useEffect(() => {
-    fetchStreams();
-  }, [fetchStreams]);
+    fetchInitial();
+  }, [fetchInitial]);
 
   useEffect(() => {
     if (!selectedMetric || selectedStreams.length === 0) return;
+    if (dataFetched) return;
     fetchData(selectedMetric, selectedStreams);
-  }, [selectedMetric, selectedStreams, fetchData]);
+  }, [selectedMetric, selectedStreams, fetchData, dataFetched]);
 
   useEffect(() => {
     if (jobStatus !== "Running") return;
     const interval = setInterval(() => {
-      fetchStreams();
-      if (selectedMetric && selectedStreams.length > 0) {
-        fetchData(selectedMetric, selectedStreams);
+      if (selectedMetric === null) {
+        fetchInitial();
+      } else {
+        fetchStreams();
+        fetchData(selectedMetric, selectedStreamsRef.current);
       }
     }, POLL_INTERVAL * 5);
     return () => clearInterval(interval);
-  }, [jobStatus, fetchStreams, fetchData, selectedMetric, selectedStreams]);
+  }, [jobStatus, fetchInitial, fetchStreams, fetchData, selectedMetric]);
 
   const chartData = useMemo(() => {
     const indexMap = new Map<number, Record<string, number>>();
@@ -253,7 +275,12 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
             <SearchableSelect
               value={selectedMetric ?? ""}
               options={selectOptions}
-              onChange={(val) => { setSelectedMetric(val); setXAxisOverride(null); }}
+              onChange={(val) => {
+                setSelectedMetric(val);
+                setXAxisOverride(null);
+                setData(new Map());
+                setDataFetched(false);
+              }}
               placeholder={t("jobDetail.metricsSelectStream")}
             />
           </div>
@@ -335,6 +362,10 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
               ))}
             </LineChart>
           </ResponsiveContainer>
+        ) : selectedMetric && !dataFetched ? (
+          <div className="h-full flex items-center justify-center text-zinc-500">
+            <span className="animate-pulse">{t("jobDetail.metricsLoading")}</span>
+          </div>
         ) : (
           <div className="h-full flex items-center justify-center text-zinc-600 text-sm">
             {t("jobDetail.metricsNoData")}
