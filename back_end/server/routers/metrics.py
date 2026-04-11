@@ -75,8 +75,11 @@ def list_metric_streams(
                 "step_domain": p.get("step_domain"),
                 "labels": p.get("labels") or {},
                 "point_count": 0,
+                "has_step": False,
             }
         streams[key]["point_count"] += 1
+        if p.get("step") is not None:
+            streams[key]["has_step"] = True
 
     return list(streams.values())
 

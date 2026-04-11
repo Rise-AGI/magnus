@@ -19,6 +19,7 @@ interface MetricStream {
   step_domain: string | null;
   labels: Record<string, string>;
   point_count: number;
+  has_step: boolean;
 }
 
 interface MetricPoint {
@@ -78,13 +79,12 @@ function metricPriority(s: MetricStream): number {
   const n = s.name;
   const isSystem = n.startsWith("system.");
   const isGpu = n.startsWith("system.gpu.");
-  const hasStep = s.step_domain != null;
 
   // user metrics (train.*, eval.*, custom) > system.gpu.* > other system.*
   // within each tier, step > no step
-  if (!isSystem) return hasStep ? 0 : 1;
-  if (isGpu) return hasStep ? 2 : 3;
-  return hasStep ? 4 : 5;
+  if (!isSystem) return s.has_step ? 0 : 1;
+  if (isGpu) return s.has_step ? 2 : 3;
+  return s.has_step ? 4 : 5;
 }
 
 function pickDefaultMetric(streams: MetricStream[]): MetricStream {
@@ -96,7 +96,8 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   const [streams, setStreams] = useState<MetricStream[]>([]);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [data, setData] = useState<Map<string, QueryResult>>(new Map());
-  const [xAxis, setXAxis] = useState<"time" | "step">("time");
+  // null = auto-follow data (prefer step when available); non-null = user override
+  const [xAxisOverride, setXAxisOverride] = useState<"time" | "step" | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchStreams = useCallback(async () => {
@@ -104,9 +105,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
       const result: MetricStream[] = await client(`/api/jobs/${jobId}/metrics/streams`);
       setStreams(result);
       if (result.length > 0 && selectedMetric === null) {
-        const best = pickDefaultMetric(result);
-        setSelectedMetric(best.name);
-        if (best.step_domain) setXAxis("step");
+        setSelectedMetric(pickDefaultMetric(result).name);
       }
     } catch {
       // fail silently
@@ -147,6 +146,17 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
 
   const selectedUnit = selectedStreams[0]?.unit ?? null;
 
+  const dataHasStep = useMemo(() => {
+    for (const result of Array.from(data.values())) {
+      for (const point of result.points) {
+        if (point.step != null) return true;
+      }
+    }
+    return false;
+  }, [data]);
+
+  const xAxis: "time" | "step" = xAxisOverride ?? (dataHasStep ? "step" : "time");
+
   useEffect(() => {
     fetchStreams();
   }, [fetchStreams]);
@@ -170,13 +180,11 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   const chartData = useMemo(() => {
     const indexMap = new Map<number, Record<string, number>>();
     const seriesKeys: string[] = [];
-    let hasStep = false;
 
     for (const [key, result] of Array.from(data.entries())) {
       const seriesName = key || "default";
       if (!seriesKeys.includes(seriesName)) seriesKeys.push(seriesName);
       for (const point of result.points) {
-        if (point.step != null) hasStep = true;
         const xKey = xAxis === "step" && point.step != null ? point.step : point.time_unix_ms;
         const existing = indexMap.get(xKey) || {};
         existing[seriesName] = point.value;
@@ -188,7 +196,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
       .sort(([a], [b]) => a - b)
       .map(([x, values]) => ({ x, ...values }));
 
-    return { rows: sorted, seriesKeys, hasStep };
+    return { rows: sorted, seriesKeys };
   }, [data, xAxis]);
 
   const metricNames = useMemo(() => {
@@ -245,14 +253,14 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
             <SearchableSelect
               value={selectedMetric ?? ""}
               options={selectOptions}
-              onChange={(val) => setSelectedMetric(val)}
+              onChange={(val) => { setSelectedMetric(val); setXAxisOverride(null); }}
               placeholder={t("jobDetail.metricsSelectStream")}
             />
           </div>
-          {chartData.hasStep && (
+          {dataHasStep && (
             <div className="shrink-0 flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
               <button
-                onClick={() => setXAxis("time")}
+                onClick={() => setXAxisOverride("time")}
                 className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors
                   ${xAxis === "time" ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
               >
@@ -260,7 +268,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
                 {t("jobDetail.metricsAxisTime")}
               </button>
               <button
-                onClick={() => setXAxis("step")}
+                onClick={() => setXAxisOverride("step")}
                 className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors
                   ${xAxis === "step" ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
               >
