@@ -48,6 +48,10 @@ server:
     max_processes: 128
     default_ttl_minutes: 60  # 1 hour
     max_ttl_minutes: 1440    # 1 day
+  sharedfile:
+    invalidation_retention_period: 14
+    root_path: /data/sharedfile
+    archived_root_path: /data/archived_sharedfile
   explorer:
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-235b-a22b

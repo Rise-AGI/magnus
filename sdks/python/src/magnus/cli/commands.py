@@ -1,6 +1,7 @@
 # sdks/python/src/magnus/cli/commands.py
 import io
 import os
+import re
 import sys
 import json
 import signal
@@ -29,6 +30,12 @@ from .. import (
     submit_job as api_submit_job,
     call_service,
     custody_file as api_custody_file,
+    create_shared_folder as api_create_shared_folder,
+    get_shared_folder_info as api_get_shared_folder_info,
+    list_shared_files as api_list_shared_files,
+    download_shared_file as api_download_shared_file,
+    update_shared_folder as api_update_shared_folder,
+    restore_shared_folder as api_restore_shared_folder,
     list_jobs as api_list_jobs,
     get_job as api_get_job,
     get_job_result as api_get_job_result,
@@ -542,6 +549,20 @@ image_app = typer.Typer(
     ),
 )
 app.add_typer(image_app)
+shared_app = typer.Typer(
+    name="shared",
+    help=(
+        "Shared folder operations.\n\n"
+        "Subcommands:\n"
+        "  create    Create a shared folder token\n"
+        "  info      Get shared folder information\n"
+        "  list      List files in a shared folder\n"
+        "  download  Download a file from a shared folder\n"
+        "  update    Update shared folder properties\n"
+        "  restore   Restore an archived shared folder\n"
+    ),
+)
+app.add_typer(shared_app)
 
 
 @app.command(name="config")
@@ -892,7 +913,10 @@ _JOB_PARAM_KEYS: Dict[str, type] = {
     "ephemeral_storage": str,
     "runner": str,
     "system_entry_command": str,
+    "shared_file": str,
 }
+
+_SHARED_MOUNT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _parse_job_args(args: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -915,6 +939,21 @@ def _parse_job_args(args: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
             if key in _CLI_KEY_TYPES:
                 cli_config[key] = _coerce_cli_value(key, value)
+            elif key == "shared_file":
+                if "=" not in value:
+                    raise MagnusError("Invalid --shared-file format, expected <name>=<token>")
+                mount_name, token = value.split("=", 1)
+                mount_name = mount_name.strip()
+                token = token.strip()
+                if not mount_name or not _SHARED_MOUNT_NAME_PATTERN.fullmatch(mount_name):
+                    raise MagnusError(f"Invalid shared mount name '{mount_name}'. Allowed: letters, numbers, '_' and '-'")
+                if not token:
+                    raise MagnusError("Shared file token cannot be empty")
+                shared_files = job_params.get("shared_files")
+                if not isinstance(shared_files, dict):
+                    shared_files = {}
+                    job_params["shared_files"] = shared_files
+                shared_files[mount_name] = token
             elif key in _JOB_PARAM_KEYS:
                 expected_type = _JOB_PARAM_KEYS[key]
                 job_params[key] = expected_type(value) if expected_type is not str else value
@@ -1108,6 +1147,7 @@ Optional parameters:
   --job-type TEXT           Job type (A1/A2/B1/B2)
   --description TEXT        Job description
   --system-entry-command TEXT  System-level setup script
+  --shared-file TEXT        Shared mount pair: <name>=<token> (repeatable)
 """.strip()
 
 _SUBMIT_OPTIONS_EPILOG = f"""{_JOB_PARAMS_DOC}
@@ -1632,6 +1672,141 @@ def custody_cmd(
         raise typer.Exit(code=1)
     except Exception as e:
         print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@shared_app.command(name="create")
+def shared_create_cmd(
+    expire_days: int = typer.Option(7, "--expire-days", help="Invalidation window in days (7-90)"),
+    expected_size_gb: int = typer.Option(10, "--expected-size-gb", help="Expected size in GB (1-800)"),
+):
+    """Create a shared folder token."""
+    try:
+        result = api_create_shared_folder(expire_days=expire_days, expected_size_gb=expected_size_gb)
+        token = result.get("token", "")
+        expire_at = result.get("expire_at", "-")
+        print_msg(f"Shared folder token: [cyan]{token}[/cyan]")
+        print_msg(f"Expire at: {expire_at}")
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+
+@shared_app.command(name="info")
+def shared_info_cmd(
+    token: str = typer.Argument(..., help="Shared folder token"),
+):
+    """Get shared folder information."""
+    try:
+        info = api_get_shared_folder_info(token)
+        console.print()
+        console.print(f"  [bold]Token:[/bold]     {info.get('token', '-')}")
+        console.print(f"  [bold]Status:[/bold]     {info.get('status', '-')}")
+        
+        if info.get("created_at"):
+            console.print(f"  [bold]Created:[/bold]    {info.get('created_at')}")
+        if info.get("expire_at"):
+            console.print(f"  [bold]Expires:[/bold]    {info.get('expire_at')}")
+        if info.get("expected_size_gb"):
+            console.print(f"  [bold]Expected:[/bold]   {info.get('expected_size_gb')} GB")
+        if info.get("actual_size_bytes") is not None:
+            size = info["actual_size_bytes"]
+            size_str = f"{size / (1024**3):.2f} GB" if size > 1024**3 else f"{size / (1024**2):.2f} MB"
+            console.print(f"  [bold]Actual:[/bold]     {size_str}")
+        
+        if info.get("is_creator"):
+            console.print(f"  [dim]You are the creator[/dim]")
+        elif info.get("is_admin"):
+            console.print(f"  [dim]You have admin privileges[/dim]")
+        
+        console.print()
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+
+@shared_app.command(name="list")
+def shared_list_cmd(
+    token: str = typer.Argument(..., help="Shared folder token"),
+    path: str = typer.Option("", "--path", "-p", help="Subdirectory path"),
+):
+    """List files in a shared folder."""
+    try:
+        files = api_list_shared_files(token, path)
+        
+        if not files:
+            print_msg("Folder is empty")
+            return
+        
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Name")
+        table.add_column("Type")
+        table.add_column("Size")
+        
+        for f in files:
+            name = f.get("name", "-")
+            ftype = f.get("type", "-")
+            size = f.get("size")
+            size_str = f"{size / (1024**2):.1f} MB" if size else "-"
+            table.add_row(name, ftype, size_str)
+        
+        console.print(table)
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+
+@shared_app.command(name="download")
+def shared_download_cmd(
+    token: str = typer.Argument(..., help="Shared folder token"),
+    file_path: str = typer.Argument(..., help="File path in shared folder"),
+    dest: Optional[str] = typer.Option(None, "--dest", "-d", help="Destination path"),
+):
+    """Download a file from a shared folder."""
+    try:
+        from pathlib import Path
+        dest_path = Path(dest) if dest else None
+        result = api_download_shared_file(token, file_path, dest_path)
+        print_msg(f"Downloaded to: [cyan]{result}[/cyan]")
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+
+@shared_app.command(name="update")
+def shared_update_cmd(
+    token: str = typer.Argument(..., help="Shared folder token"),
+    expected_size_gb: Optional[int] = typer.Option(None, "--expected-size-gb", "-s", help="New expected size in GB"),
+    extend_days: Optional[int] = typer.Option(None, "--extend-days", "-e", help="Days to extend expiration"),
+):
+    """Update shared folder properties (creator/admin only)."""
+    if expected_size_gb is None and extend_days is None:
+        print_error("At least one of --expected-size-gb or --extend-days must be provided")
+        raise typer.Exit(code=1)
+    
+    try:
+        result = api_update_shared_folder(token, expected_size_gb, extend_days)
+        print_msg(f"Updated successfully")
+        print_msg(f"Expire at: {result.get('expire_at', '-')}")
+        print_msg(f"Expected size: {result.get('expected_size_gb', '-')} GB")
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+
+@shared_app.command(name="restore")
+def shared_restore_cmd(
+    token: str = typer.Argument(..., help="Shared folder token"),
+    expire_days: Optional[int] = typer.Option(7, "--expire-days", "-e", help="Days until expiration after restore"),
+):
+    """Restore an archived shared folder (creator/admin only)."""
+    try:
+        result = api_restore_shared_folder(token, expire_days)
+        print_msg(f"Restored successfully")
+        print_msg(f"Status: {result.get('status', '-')}")
+        print_msg(f"Expire at: {result.get('expire_at', '-')}")
+    except MagnusError as e:
+        print_error(str(e))
         raise typer.Exit(code=1)
 
 
@@ -2980,6 +3155,8 @@ server:
     max_processes: 16
     default_ttl_minutes: 60
     max_ttl_minutes: 1440
+  sharedfile:
+    invalidation_retention_period: 14
 
 execution:
   backend: local

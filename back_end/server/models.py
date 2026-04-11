@@ -98,6 +98,7 @@ class Job(Base):
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shared_files: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ClusterSnapshot(Base):

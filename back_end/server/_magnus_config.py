@@ -69,10 +69,16 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(server, "scheduler", dict)
     _check_key(server, "service_proxy", dict)
     _check_key(server, "file_custody", dict)
+    server.setdefault("sharedfile", {
+        "invalidation_retention_period": 14,
+        "root_path": "/data/sharedfile",
+        "archived_root_path": "/data/archived_sharedfile",
+    })
+    _check_key(server, "sharedfile", dict)
 
     expected_server_keys = {
         "address", "front_end_port", "back_end_port", "root",
-        "database", "auth", "scheduler", "service_proxy", "file_custody",
+        "database", "auth", "scheduler", "service_proxy", "file_custody", "sharedfile",
         "cors_origins",
     }
     if not is_local:
@@ -157,6 +163,15 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _warn_extra_keys(file_custody, {
         "max_size", "max_file_size", "max_processes", "default_ttl_minutes", "max_ttl_minutes",
     }, "server.file_custody")
+
+    sharedfile = server["sharedfile"]
+    sharedfile.setdefault("invalidation_retention_period", 14)
+    sharedfile.setdefault("root_path", "/data/sharedfile")
+    sharedfile.setdefault("archived_root_path", "/data/archived_sharedfile")
+    _check_key(sharedfile, "invalidation_retention_period", int)
+    _check_key(sharedfile, "root_path", str)
+    _check_key(sharedfile, "archived_root_path", str)
+    _warn_extra_keys(sharedfile, {"invalidation_retention_period", "root_path", "archived_root_path"}, "server.sharedfile")
 
     # execution 配置 (续)
     if is_local:

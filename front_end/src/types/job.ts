@@ -23,6 +23,7 @@ export interface Job {
   runner?: string | null;
   container_image: string;
   system_entry_command: string;
+  shared_files?: Record<string, string> | null;
   result?: string;
   action?: string;
 }

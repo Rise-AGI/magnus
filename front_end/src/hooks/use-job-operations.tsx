@@ -57,6 +57,7 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
       runner: job.runner,
       container_image: job.container_image,
       system_entry_command: job.system_entry_command,
+      shared_files: job.shared_files,
     });
     setFormKey((k) => k + 1);
     setIsDrawerOpen(true);

@@ -1,5 +1,6 @@
 # back_end/server/routers/jobs.py
 import os
+import json
 import logging
 from typing import List, Optional, Dict, Any
 
@@ -14,6 +15,7 @@ from ..schemas import JobResponse, JobSubmission, PagedJobResponse
 from .._magnus_config import magnus_config, is_admin_user
 from .._resource_manager import _parse_size_string
 from .._scheduler import scheduler
+from .._shared_file_manager import shared_file_manager, SharedFileValidationError, SharedFileNotFoundError, SharedFileInvalidatedError
 from .auth import get_current_user
 
 
@@ -56,6 +58,24 @@ def create_job(
         job_dict["container_image"] = cluster["default_container_image"]
     if job_dict.get("system_entry_command") is None:
         job_dict["system_entry_command"] = cluster["default_system_entry_command"]
+
+    # 兼容空仓库模式：数据库中 namespace/repo_name 仍为 NOT NULL
+    # 空仓库时前端/SDK 会传 None，这里统一落库为空字符串
+    if job_dict.get("namespace") is None:
+        job_dict["namespace"] = ""
+    if job_dict.get("repo_name") is None:
+        job_dict["repo_name"] = ""
+
+    try:
+        normalized_shared_files = shared_file_manager.normalize_shared_files(job_dict.get("shared_files"))
+    except SharedFileValidationError as error:
+        raise ValueError(str(error))
+    except SharedFileNotFoundError as error:
+        raise FileNotFoundError(str(error))
+    except SharedFileInvalidatedError as error:
+        raise RuntimeError(str(error))
+
+    job_dict["shared_files"] = json.dumps(normalized_shared_files, ensure_ascii=True)
 
     db_job = models.Job(
         **job_dict,
@@ -102,6 +122,10 @@ def submit_job(
         db_job = create_job(job_data.model_dump(), current_user.id, db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return db_job
 
 

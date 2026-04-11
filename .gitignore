@@ -47,3 +47,11 @@ documents/
 *claude_report*
 *claude_playground*
 *claude_battlefield*
+
+
+back_end/uv.lock
+back_end/~/magnus-data-develop/database/magnus.db
+back_end/~/magnus-data-develop/database/magnus.db-shm
+back_end/~/magnus-data-develop/database/magnus.db-wal
+configs/magnus_config.yaml.example
+front_end/package-lock.json

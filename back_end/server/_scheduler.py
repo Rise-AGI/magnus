@@ -18,6 +18,7 @@ from ._docker_manager import DockerManager
 from ._magnus_config import magnus_config, is_local_mode
 from ._resource_manager import resource_manager
 from ._resource_manager import _image_to_sif_filename
+from ._shared_file_manager import shared_file_manager, PROPERTIES_FILENAME
 
 
 __all__ = [
@@ -515,23 +516,29 @@ class MagnusScheduler:
             user_id = job.user_id
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             repo_dir = f"{job_working_table}/repository"
+            has_repo = bool(repo_name)  # 是否需要克隆仓库
 
             guarantee_file_exist(job_working_table, is_directory=True)
 
         # Phase 2 — 长 I/O（无 session）
         # 镜像拉取解耦：shield 保护，job cancel 不中断拉取
-        (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
-            self._ensure_image_decoupled(container_image, user_id),
-            resource_manager.ensure_repo(
-                namespace = namespace,
-                repo_name = repo_name,
-                branch = branch,
-                commit_sha = commit_sha,
-                target_dir = repo_dir,
-                runner = effective_runner,
-                job_working_dir = job_working_table,
-            ),
-        )
+        if has_repo:
+            (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
+                self._ensure_image_decoupled(container_image, user_id),
+                resource_manager.ensure_repo(
+                    namespace = namespace,
+                    repo_name = repo_name,
+                    branch = branch,
+                    commit_sha = commit_sha,
+                    target_dir = repo_dir,
+                    runner = effective_runner,
+                    job_working_dir = job_working_table,
+                ),
+            )
+        else:
+            # 无仓库：只准备镜像
+            image_ok, image_err = await self._ensure_image_decoupled(container_image, user_id)
+            repo_ok, repo_result, resolved_branch = True, None, None
 
         # Phase 3 — 回写状态（短 session）
         with SessionLocal() as db:
@@ -547,15 +554,15 @@ class MagnusScheduler:
                 logger.error(f"Job {job_id} failed: {image_err}")
                 return
 
-            if not repo_ok:
+            if has_repo and not repo_ok:
                 job.status = JobStatus.FAILED
                 job.result = f"Failed to clone repo: {repo_result}"
                 db.commit()
                 logger.error(f"Job {job_id} failed: {repo_result}")
                 return
 
-            assert repo_result is not None
-            job.commit_sha = repo_result
+            if has_repo and repo_result is not None:
+                job.commit_sha = repo_result
 
             if resolved_branch is not None:
                 job.branch = resolved_branch
@@ -622,6 +629,7 @@ class MagnusScheduler:
 
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             repo_dir = f"{job_working_table}/repository"
+            has_repo = bool(job.repo_name)  # 是否有仓库
 
             self._init_job_working_dir(job_working_table)
 
@@ -644,20 +652,33 @@ class MagnusScheduler:
 
         default_ephemeral_storage = magnus_config["cluster"]["default_ephemeral_storage"]
         ephemeral_storage = job.ephemeral_storage if job.ephemeral_storage else default_ephemeral_storage
+        try:
+            shared_mount_specs = [
+                (name, str(host_dir), str(host_properties))
+                for name, host_dir, host_properties in shared_file_manager.build_mount_specs(job.shared_files)
+            ]
 
-        wrapper_content = self._build_wrapper_content(
-            job_working_table = job_working_table,
-            repo_dir = repo_dir,
-            sif_path = sif_path,
-            system_entry_command = system_entry_command,
-            user_token = user_token,
-            magnus_address = magnus_address,
-            job_id = job_id,
-            ephemeral_storage = ephemeral_storage,
-            allow_root = allow_root,
-            entry_command = job.entry_command,
-            effective_runner = effective_runner,
-        )
+            wrapper_content = self._build_wrapper_content(
+                job_working_table = job_working_table,
+                repo_dir = repo_dir,
+                sif_path = sif_path,
+                system_entry_command = system_entry_command,
+                user_token = user_token,
+                magnus_address = magnus_address,
+                job_id = job_id,
+                ephemeral_storage = ephemeral_storage,
+                allow_root = allow_root,
+                entry_command = job.entry_command,
+                effective_runner = effective_runner,
+                shared_mount_specs = shared_mount_specs,
+                has_repo = has_repo,
+            )
+        except Exception as error:
+            logger.error(f"Job {job.id} submission error: {error}")
+            job.status = JobStatus.FAILED
+            job.result = f"Job submission setup failed: {error}"
+            db.commit()
+            return False
 
         wrapper_path = f"{job_working_table}/wrapper.py"
         try:
@@ -734,6 +755,11 @@ class MagnusScheduler:
             bind_mounts = [
                 f"{job_working_table}:{magnus_home}/workspace",
             ]
+            shared_mount_specs = shared_file_manager.build_mount_specs(job.shared_files)
+            for mount_name, host_dir, host_properties in shared_mount_specs:
+                container_dir = f"{magnus_home}/{mount_name}"
+                bind_mounts.append(f"{host_dir}:{container_dir}")
+                bind_mounts.append(f"{host_properties}:{container_dir}/{PROPERTIES_FILENAME}:ro")
 
             # 解析 system_entry_command 中的 APPTAINER_BIND（如有）
             default_system_entry_command = magnus_config["cluster"]["default_system_entry_command"]
@@ -774,6 +800,10 @@ class MagnusScheduler:
 
             # GPU: 如果 job 请求了 GPU 且本机有 GPU，尝试启用
             gpu_enabled = job.gpu_count > 0
+            
+            # 工作目录：有仓库时进入 repository 子目录
+            has_repo = bool(job.repo_name)
+            container_work_dir = f"{magnus_home}/workspace/repository" if has_repo else f"{magnus_home}/workspace"
 
             self.docker_manager.run_container(
                 container_name=container_name,
@@ -781,7 +811,7 @@ class MagnusScheduler:
                 entry_command=container_cmd,
                 bind_mounts=bind_mounts,
                 env_vars=env_vars,
-                working_dir=f"{magnus_home}/workspace/repository",
+                working_dir=container_work_dir,
                 gpu_enabled=gpu_enabled,
                 network_mode=network_mode,
             )
@@ -871,8 +901,19 @@ class MagnusScheduler:
         allow_root: bool,
         entry_command: str,
         effective_runner: str,
+        shared_mount_specs: List[Tuple[str, str, str]],
+        has_repo: bool = True,
     )-> str:
         success_marker_path = f"{job_working_table}/.magnus_success"
+        shared_bind_lines: List[str] = []
+        for mount_name, host_dir, host_properties in shared_mount_specs:
+            container_dir = f"$MAGNUS_HOME/{mount_name}"
+            shared_bind_lines.append(f'export APPTAINER_BIND="${{APPTAINER_BIND:+${{APPTAINER_BIND}},}}{host_dir}:{container_dir}"')
+            shared_bind_lines.append(f'export APPTAINER_BIND="${{APPTAINER_BIND:+${{APPTAINER_BIND}},}}{host_properties}:{container_dir}/{PROPERTIES_FILENAME}:ro"')
+        shared_bind_block = "\n".join(shared_bind_lines)
+        
+        # 工作目录：有仓库时进入 repository 子目录
+        container_work_dir = "$MAGNUS_HOME/workspace/repository" if has_repo else "$MAGNUS_HOME/workspace"
 
         return f'''import os
 import sys
@@ -1035,6 +1076,7 @@ export APPTAINER_CACHEDIR={{apptainer_cache_dir}}
 # 追加 workspace bind mount: host {{work_dir}} → 容器 $MAGNUS_HOME/workspace
 # SDK 的 get_tmp_base() 依赖此 bind mount 判断运行环境（MAGNUS_HOME 存在 + workspace 目录存在 → 用 $MAGNUS_HOME/.tmp/ 中转文件，位于容器可写层而非 host 磁盘）
 export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:$MAGNUS_HOME/workspace"
+{{shared_bind_block}}
 
 MAGNUS_HOST_GATEWAY="${{{{MAGNUS_HOST_GATEWAY:-10.0.2.2}}}}"
 for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy; do
@@ -1090,7 +1132,7 @@ if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
 fi
 
-APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
+APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd {container_work_dir} {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     ROOTLESSKIT_FLAGS="--net=slirp4netns --port-driver=builtin --publish $MAGNUS_PORT_MAP"

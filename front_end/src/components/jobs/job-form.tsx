@@ -32,6 +32,25 @@ const JOB_TYPES = [
   { label: "B2 - 次优可抢", value: "B2", meta: "Preemptible (Low)" },
 ];
 
+const SHARED_MOUNT_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+function formatSharedFiles(sharedFiles?: Record<string, string> | string | null): string {
+  if (!sharedFiles) return "";
+  // Handle JSON string from API response
+  if (typeof sharedFiles === "string") {
+    try {
+      const parsed = JSON.parse(sharedFiles);
+      if (typeof parsed === "object" && parsed !== null) {
+        return Object.entries(parsed).map(([name, token]) => `${name}=${token}`).join("\n");
+      }
+      return "";
+    } catch {
+      return "";
+    }
+  }
+  return Object.entries(sharedFiles).map(([name, token]) => `${name}=${token}`).join("\n");
+}
+
 interface Branch { name: string; commit_sha: string; }
 interface Commit { sha: string; message: string; author: string; date: string; }
 
@@ -52,6 +71,7 @@ export interface JobFormData {
   runner?: string | null;
   container_image?: string | null;
   system_entry_command?: string | null;
+  shared_files?: Record<string, string> | string | null;
 }
 
 interface JobFormProps {
@@ -97,6 +117,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   const [runner, setRunner] = useState<string>(initialData?.runner || "");
   const [containerImage, setContainerImage] = useState<string>(initialData?.container_image || DEFAULT_CONTAINER_IMAGE);
   const [systemEntryCommand, setSystemEntryCommand] = useState<string>(initialData?.system_entry_command || DEFAULT_SYSTEM_ENTRY_COMMAND);
+  const [sharedFilesInput, setSharedFilesInput] = useState<string>(formatSharedFiles(initialData?.shared_files));
 
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const commandRef = useRef<HTMLTextAreaElement>(null);
@@ -124,6 +145,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         runner: runner,
         container_image: containerImage,
         system_entry_command: systemEntryCommand,
+        shared_files: sharedFilesInput,
       };
     },
     applyPayload: (payload: any) => {
@@ -162,6 +184,10 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       if (payload.runner !== undefined) setRunner(payload.runner);
       if (payload.container_image !== undefined) setContainerImage(payload.container_image);
       if (payload.system_entry_command !== undefined) setSystemEntryCommand(payload.system_entry_command);
+      if (payload.shared_files !== undefined) {
+        if (typeof payload.shared_files === "string") setSharedFilesInput(payload.shared_files);
+        else setSharedFilesInput(formatSharedFiles(payload.shared_files));
+      }
 
       // Auto-scroll to actions
       setTimeout(() => {
@@ -226,8 +252,16 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   };
 
   const fetchBranches = useCallback(async () => {
+    // 无仓库时跳过
+    if (!repoName.trim()) {
+      setBranches([]);
+      setCommits([]);
+      setSelectedBranch("");
+      setSelectedCommit("");
+      setHasScanned(true);
+      return;
+    }
     if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace is required"); return; }
-    if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo Name is required"); return; }
     
     setLoading(true);
     setErrorField(null); setErrorMessage(null);
@@ -295,21 +329,47 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     setErrorField(null); setErrorMessage(null);
 
     if (!taskName.trim()) { setErrorField("taskName"); setErrorMessage("⚠️ Task Name is required"); scrollToError("field-taskName"); return; }
-    if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace required"); scrollToError("field-namespace"); return; }
-    if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo required"); scrollToError("field-repo"); return; }
-    if (!hasScanned) { setErrorField("repo"); setErrorMessage("⚠️ Please Scan Repo first"); scrollToError("field-repo"); return; }
-    if (!selectedBranch) { setErrorField("branch"); setErrorMessage("⚠️ Select Branch"); scrollToError("field-branch"); return; }
-    if (!selectedCommit) { setErrorField("commit"); setErrorMessage("⚠️ Select Commit"); scrollToError("field-commit"); return; }
+    
+    // 有仓库时才需要验证仓库相关字段
+    const hasRepo = repoName.trim().length > 0;
+    if (hasRepo) {
+      if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace required"); scrollToError("field-namespace"); return; }
+      if (!hasScanned) { setErrorField("repo"); setErrorMessage("⚠️ Please Scan Repo first"); scrollToError("field-repo"); return; }
+      if (!selectedBranch) { setErrorField("branch"); setErrorMessage("⚠️ Select Branch"); scrollToError("field-branch"); return; }
+      if (!selectedCommit) { setErrorField("commit"); setErrorMessage("⚠️ Select Commit"); scrollToError("field-commit"); return; }
+    }
+    
     if (!gpuType) { setErrorMessage("⚠️ Select GPU Type"); return; }
     if (!command.trim()) { setErrorField("command"); setErrorMessage("⚠️ Command required"); scrollToError("field-command"); return; }
+
+    const sharedFiles: Record<string, string> = {};
+    const sharedLines = sharedFilesInput.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+    for (const line of sharedLines) {
+      const index = line.indexOf("=");
+      if (index <= 0 || index === line.length - 1) {
+        setErrorField("sharedFiles");
+        setErrorMessage("⚠️ Shared files format: <name>=<token>");
+        scrollToError("field-sharedFiles");
+        return;
+      }
+      const mountName = line.slice(0, index).trim();
+      const token = line.slice(index + 1).trim();
+      if (!SHARED_MOUNT_NAME_PATTERN.test(mountName)) {
+        setErrorField("sharedFiles");
+        setErrorMessage("⚠️ Mount name only allows letters, numbers, '_' and '-'");
+        scrollToError("field-sharedFiles");
+        return;
+      }
+      sharedFiles[mountName] = token;
+    }
 
     const payload = {
       task_name: taskName,
       description: description,
-      namespace,
-      repo_name: repoName,
-      branch: selectedBranch,
-      commit_sha: selectedCommit,
+      namespace: namespace.trim() ? namespace.trim() : null,
+      repo_name: repoName.trim() ? repoName.trim() : null,
+      branch: selectedBranch || null,
+      commit_sha: selectedCommit || null,
       entry_command: command,
       gpu_count: gpuCount,
       gpu_type: gpuType,
@@ -320,6 +380,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       runner: runner.trim() ? runner.trim() : null,
       container_image: containerImage.trim() ? containerImage.trim() : null,
       system_entry_command: systemEntryCommand.trim() ? systemEntryCommand.trim() : null,
+      shared_files: Object.keys(sharedFiles).length > 0 ? sharedFiles : null,
     };
     
     try {
@@ -590,6 +651,20 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
                     spellCheck={false}
                   />
                 </div>
+              </div>
+
+              <div className="sm:col-span-2" id="field-sharedFiles">
+                <label className={`text-xs uppercase tracking-wider mb-1.5 block font-medium ${errorField === 'sharedFiles' ? 'text-red-500' : 'text-zinc-500'}`}>
+                  {t("jobForm.sharedFiles")}
+                </label>
+                <textarea
+                  className={`w-full bg-zinc-950 border px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 font-mono min-h-[84px]
+                    ${errorField === 'sharedFiles' ? 'animate-shake border-red-500' : 'border-zinc-800'}`}
+                  value={sharedFilesInput}
+                  placeholder={t("jobForm.sharedFilesPlaceholder")}
+                  onChange={e => { setSharedFilesInput(e.target.value); clearError('sharedFiles'); }}
+                  spellCheck={false}
+                />
               </div>
             </div>
           )}

@@ -204,6 +204,7 @@ See [Job Runtime Documentation](docs/Magnus_job_runtime.md) for container execut
 | [SDK & CLI Guide](docs/Magnus_SDK_Guide.md) | Python API, async support, all CLI commands |
 | [Blueprint Crafting Guide](docs/Blueprint_Crafting_Guide.md) | Type annotations, parameter metadata, file transfer |
 | [Job Runtime](docs/Magnus_job_runtime.md) | Container isolation, environment variables, networking |
+| [Shared Folder System](docs/Shared_Folder_System.md) | Shared folders, file browsing, lifecycle management |
 
 ## Contributing
 

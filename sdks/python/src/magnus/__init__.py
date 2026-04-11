@@ -110,6 +110,18 @@ __all__ = [
     "download_file_async",
     "custody_file",
     "custody_file_async",
+    "create_shared_folder",
+    "create_shared_folder_async",
+    "get_shared_folder_info",
+    "get_shared_folder_info_async",
+    "list_shared_files",
+    "list_shared_files_async",
+    "download_shared_file",
+    "download_shared_file_async",
+    "update_shared_folder",
+    "update_shared_folder_async",
+    "restore_shared_folder",
+    "restore_shared_folder_async",
     "save_site",
     "remove_site",
     "set_current_site",
@@ -145,17 +157,17 @@ def run_blueprint(blueprint_id: str, args: Optional[Dict[str, Any]] = None, use_
 async def run_blueprint_async(blueprint_id: str, args: Optional[Dict[str, Any]] = None, use_preference: bool = False, save_preference: bool = True, expire_minutes: int = 60, max_downloads: Optional[int] = 1, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
     return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout, poll_interval, execute_action)
 
-def submit_job(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: float = 10.0) -> str:
-    return default_client.submit_job(task_name, entry_command, repo_name, branch, commit_sha, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout)
+def submit_job(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, shared_files: Optional[Dict[str, str]] = None, timeout: float = 10.0) -> str:
+    return default_client.submit_job(task_name=task_name, entry_command=entry_command, repo_name=repo_name, branch=branch, commit_sha=commit_sha, gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace, job_type=job_type, description=description, container_image=container_image, cpu_count=cpu_count, memory_demand=memory_demand, ephemeral_storage=ephemeral_storage, runner=runner, system_entry_command=system_entry_command, shared_files=shared_files, timeout=timeout)
 
-async def submit_job_async(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: float = 10.0) -> str:
-    return await default_client.submit_job_async(task_name, entry_command, repo_name, branch, commit_sha, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout)
+async def submit_job_async(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, shared_files: Optional[Dict[str, str]] = None, timeout: float = 10.0) -> str:
+    return await default_client.submit_job_async(task_name=task_name, entry_command=entry_command, repo_name=repo_name, branch=branch, commit_sha=commit_sha, gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace, job_type=job_type, description=description, container_image=container_image, cpu_count=cpu_count, memory_demand=memory_demand, ephemeral_storage=ephemeral_storage, runner=runner, system_entry_command=system_entry_command, shared_files=shared_files, timeout=timeout)
 
-def execute_job(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
-    return default_client.execute_job(task_name, entry_command, repo_name, branch, commit_sha, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout, poll_interval, execute_action)
+def execute_job(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, shared_files: Optional[Dict[str, str]] = None, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
+    return default_client.execute_job(task_name=task_name, entry_command=entry_command, repo_name=repo_name, branch=branch, commit_sha=commit_sha, gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace, job_type=job_type, description=description, container_image=container_image, cpu_count=cpu_count, memory_demand=memory_demand, ephemeral_storage=ephemeral_storage, runner=runner, system_entry_command=system_entry_command, shared_files=shared_files, timeout=timeout, poll_interval=poll_interval, execute_action=execute_action)
 
-async def execute_job_async(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
-    return await default_client.execute_job_async(task_name, entry_command, repo_name, branch, commit_sha, gpu_type, gpu_count, namespace, job_type, description, container_image, cpu_count, memory_demand, ephemeral_storage, runner, system_entry_command, timeout, poll_interval, execute_action)
+async def execute_job_async(task_name: str, entry_command: str, repo_name: str, branch: Optional[str] = None, commit_sha: Optional[str] = None, gpu_type: str = "cpu", gpu_count: int = 0, namespace: str = "Rise-AGI", job_type: str = "A2", description: Optional[str] = None, container_image: Optional[str] = None, cpu_count: Optional[int] = None, memory_demand: Optional[str] = None, ephemeral_storage: Optional[str] = None, runner: Optional[str] = None, system_entry_command: Optional[str] = None, shared_files: Optional[Dict[str, str]] = None, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
+    return await default_client.execute_job_async(task_name=task_name, entry_command=entry_command, repo_name=repo_name, branch=branch, commit_sha=commit_sha, gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace, job_type=job_type, description=description, container_image=container_image, cpu_count=cpu_count, memory_demand=memory_demand, ephemeral_storage=ephemeral_storage, runner=runner, system_entry_command=system_entry_command, shared_files=shared_files, timeout=timeout, poll_interval=poll_interval, execute_action=execute_action)
 
 def call_service(service_id: str, payload: Union[Dict[str, Any], str, bytes, list], endpoint: Optional[str] = None, timeout: float = 60.0, protocol: Literal["http", "mcp"] = "http", **kwargs: Any) -> Any:
     return default_client.call_service(service_id, payload, endpoint, timeout, protocol, **kwargs)
@@ -168,6 +180,42 @@ def custody_file(path: str, expire_minutes: int = 60, max_downloads: Optional[in
 
 async def custody_file_async(path: str, expire_minutes: int = 60, max_downloads: Optional[int] = None, timeout: float = 300.0) -> str:
     return await default_client.custody_file_async(path, expire_minutes, max_downloads, timeout)
+
+def create_shared_folder(expire_days: int, expected_size_gb: int, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.create_shared_folder(expire_days, expected_size_gb, timeout)
+
+async def create_shared_folder_async(expire_days: int, expected_size_gb: int, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.create_shared_folder_async(expire_days, expected_size_gb, timeout)
+
+def get_shared_folder_info(token: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.get_shared_folder_info(token, timeout)
+
+async def get_shared_folder_info_async(token: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.get_shared_folder_info_async(token, timeout)
+
+def list_shared_files(token: str, path: str = "", timeout: float = 10.0) -> List[Dict[str, Any]]:
+    return default_client.list_shared_files(token, path, timeout)
+
+async def list_shared_files_async(token: str, path: str = "", timeout: float = 10.0) -> List[Dict[str, Any]]:
+    return await default_client.list_shared_files_async(token, path, timeout)
+
+def download_shared_file(token: str, file_path: str, dest = None, timeout: float = 60.0):
+    return default_client.download_shared_file(token, file_path, dest, timeout)
+
+async def download_shared_file_async(token: str, file_path: str, dest = None, timeout: float = 60.0):
+    return await default_client.download_shared_file_async(token, file_path, dest, timeout)
+
+def update_shared_folder(token: str, expected_size_gb: Optional[int] = None, extend_days: Optional[int] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.update_shared_folder(token, expected_size_gb, extend_days, timeout)
+
+async def update_shared_folder_async(token: str, expected_size_gb: Optional[int] = None, extend_days: Optional[int] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.update_shared_folder_async(token, expected_size_gb, extend_days, timeout)
+
+def restore_shared_folder(token: str, new_expire_days: Optional[int] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.restore_shared_folder(token, new_expire_days, timeout)
+
+async def restore_shared_folder_async(token: str, new_expire_days: Optional[int] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.restore_shared_folder_async(token, new_expire_days, timeout)
 
 def list_jobs(limit: int = 20, skip: int = 0, search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_jobs(limit, skip, search, timeout)

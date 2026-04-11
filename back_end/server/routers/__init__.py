@@ -9,6 +9,7 @@ from . import blueprints
 from . import services
 from . import explore
 from . import files
+from . import shared_files
 from . import skills
 from . import images
 from . import users
@@ -34,6 +35,7 @@ router.include_router(blueprints.router, tags=["Blueprints"])
 router.include_router(services.router, tags=["Services"])
 router.include_router(explore.router, tags=["Explore"])
 router.include_router(files.router, tags=["Files"])
+router.include_router(shared_files.router, tags=["SharedFiles"])
 router.include_router(skills.router, tags=["Skills"])
 router.include_router(images.router, tags=["Images"])
 router.include_router(chat.router, tags=["Chat"])
