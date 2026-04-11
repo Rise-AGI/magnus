@@ -18,6 +18,22 @@ __all__ = ["resource_manager"]
 logger = logging.getLogger(__name__)
 
 
+_registry_mirror: Optional[str] = magnus_config["cluster"]["registry_mirror"]
+
+
+def _rewrite_image_for_mirror(image: str) -> str:
+    if _registry_mirror is None or not image.startswith("docker://"):
+        return image
+    rest = image[len("docker://"):]
+    parts = rest.split("/")
+    if len(parts) > 1 and ("." in parts[0] or ":" in parts[0]):
+        return image
+    name_part = rest.split(":")[0].split("@")[0]
+    if "/" not in name_part:
+        rest = "library/" + rest
+    return f"docker://{_registry_mirror}/{rest}"
+
+
 magnus_root = magnus_config['server']['root']
 magnus_container_cache_path = f"{magnus_root}/container_cache"
 magnus_repo_cache_path = f"{magnus_root}/repo_cache"
@@ -174,10 +190,11 @@ class ResourceManager:
 
     async def _ensure_image_docker(self, image: str, force: bool = False) -> Tuple[bool, Optional[str]]:
         """Docker 模式：使用 docker pull，Docker 自身管理镜像缓存"""
-        docker_image = re.sub(r'^[a-z]+://', '', image)
+        pull_image = _rewrite_image_for_mirror(image)
+        docker_image = re.sub(r'^[a-z]+://', '', pull_image)
 
         if not force:
-            # 检查本地是否已有
+            # 检查本地是否已有（用重写后的名称，因为 Docker 按实际拉取名存储）
             proc = await asyncio.create_subprocess_exec(
                 "docker", "image", "inspect", docker_image,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -187,7 +204,10 @@ class ResourceManager:
             if proc.returncode == 0:
                 return True, None
 
-        logger.info(f"🐳 Pulling Docker image: {docker_image}")
+        if pull_image != image:
+            logger.info(f"🐳 Pulling Docker image: {image} (via mirror: {docker_image})")
+        else:
+            logger.info(f"🐳 Pulling Docker image: {docker_image}")
         start_time = time.time()
 
         proc = await asyncio.create_subprocess_exec(
@@ -245,7 +265,11 @@ class ResourceManager:
             # 这样断电/OOM 只会留下 .tmp，重启时统一清理，正式 .sif 不会被污染
             pull_dest = sif_path + ".tmp"
 
-            logger.info(f"Pulling container image: {image}")
+            pull_image = _rewrite_image_for_mirror(image)
+            if pull_image != image:
+                logger.info(f"Pulling container image: {image} (via mirror: {pull_image})")
+            else:
+                logger.info(f"Pulling container image: {image}")
             start_time = time.time()
 
             # 非瞬态错误（镜像不存在、鉴权失败等）直接失败，不浪费时间重试
@@ -258,7 +282,7 @@ class ResourceManager:
                 env["APPTAINER_CACHEDIR"] = magnus_apptainer_cache_path
                 env["GODEBUG"] = "http2client=0"
                 proc = await asyncio.create_subprocess_exec(
-                    "apptainer", "pull", pull_dest, image,
+                    "apptainer", "pull", pull_dest, pull_image,
                     stdout = asyncio.subprocess.PIPE,
                     stderr = asyncio.subprocess.PIPE,
                     env = env,
