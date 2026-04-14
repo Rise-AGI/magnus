@@ -21,17 +21,36 @@ logger = logging.getLogger(__name__)
 _registry_mirror: Optional[str] = magnus_config["cluster"]["registry_mirror"]
 
 
-def _rewrite_image_for_mirror(image: str) -> str:
-    if _registry_mirror is None or not image.startswith("docker://"):
+_DOCKER_HUB_HOSTS = {"registry-1.docker.io", "index.docker.io", "docker.io"}
+
+
+def _rewrite_image_for_mirror(image: str)-> str:
+    if _registry_mirror is None:
         return image
-    rest = image[len("docker://"):]
+
+    for scheme in ("docker://", "oras://"):
+        if image.startswith(scheme):
+            rest = image[len(scheme):]
+            break
+    else:
+        return image
+
     parts = rest.split("/")
-    if len(parts) > 1 and ("." in parts[0] or ":" in parts[0]):
-        return image
-    name_part = rest.split(":")[0].split("@")[0]
-    if "/" not in name_part:
-        rest = "library/" + rest
-    return f"docker://{_registry_mirror}/{rest}"
+    host = parts[0] if len(parts) > 1 and ("." in parts[0] or ":" in parts[0]) else None
+
+    if host is None:
+        # docker://alpine, docker://pytorch/pytorch:tag — implicit Docker Hub
+        name_part = rest.split(":")[0].split("@")[0]
+        if "/" not in name_part:
+            rest = "library/" + rest
+        return f"{scheme}{_registry_mirror}/{rest}"
+
+    if host in _DOCKER_HUB_HOSTS:
+        # oras://registry-1.docker.io/user/repo:tag — explicit Docker Hub
+        rest_without_host = "/".join(parts[1:])
+        return f"{scheme}{_registry_mirror}/{rest_without_host}"
+
+    return image
 
 
 magnus_root = magnus_config['server']['root']
