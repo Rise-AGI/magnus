@@ -1,3 +1,5 @@
+> **Language / 语言**: [English](sdk-and-cli.md) · **简体中文**
+
 # Magnus SDK & CLI 指南
 
 CLI 的 API 与 Python SDK 保持一致。相同的操作在不同接口中具有相同的语义和参数结构。
@@ -86,7 +88,7 @@ SDK 通过两个配置项连接后端：
 
 | 配置项 | 说明 | 示例 |
 |--------|------|------|
-| `address` | 后端地址 | `http://162.105.151.196:8017` |
+| `address` | 后端地址 | `http://your-magnus-host:8017` |
 | `token` | Trust Token，从 Web 界面用户菜单获取 | `sk-aBcDeFgHiJkLmNoPqRsTuVwXyZaB` |
 
 交互式配置（保存到 `~/.magnus/config.json`）：
@@ -139,7 +141,7 @@ magnus.configure(
 |------|------|--------|
 | `MAGNUS_HOME` | 容器内 Magnus 根目录（`$HOME` 由 `--containall` 隔离，指向容器默认值，与此不同） | `/magnus` |
 | `MAGNUS_TOKEN` | 当前用户的 Trust Token | `sk-...` |
-| `MAGNUS_ADDRESS` | 后端地址 | `http://162.105.151.196:3011` |
+| `MAGNUS_ADDRESS` | 后端地址 | `http://your-magnus-host:3011` |
 | `MAGNUS_JOB_ID` | 当前任务 ID | `abc123` |
 | `MAGNUS_RESULT` | 结果文件路径，写入此文件的内容作为任务结果返回 | `$MAGNUS_HOME/workspace/.magnus_result` |
 | `MAGNUS_ACTION` | 动作文件路径，写入此文件的命令会在客户端自动执行 | `$MAGNUS_HOME/workspace/.magnus_action` |
@@ -1301,7 +1303,7 @@ magnus config
 ```
 
 ```
-  MAGNUS_ADDRESS  http://162.105.151.196:8017
+  MAGNUS_ADDRESS  http://your-magnus-host:8017
   MAGNUS_TOKEN    sk-a****************ZaB
 ```
 

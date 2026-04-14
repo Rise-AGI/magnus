@@ -1,3 +1,5 @@
+> **Language / 语言**: [English](internal-links.md) · **简体中文**
+
 # 需求文档：Magnus 站内链接渲染
 
 ## 背景
@@ -5,8 +7,8 @@
 Magnus 的 Skill 系统存储结构化知识文档（Markdown 格式），其中需要引用 Magnus 平台内部的资源——Job、Blueprint、Skill 等。
 
 当前的问题是：Magnus 有多个访问入口：
-- **内网**：`http://162.105.151.134:3011`
-- **Cloudflare**：`https://magnus.pkuplasma.com`
+- **内网**：`http://<intranet-host>:3011`
+- **公网（如 Cloudflare）**：`https://magnus.example.com`
 
 如果在 Skill 文档中硬编码某个地址的链接，从另一个入口访问的用户点击后会跳到错误的地址。
 
@@ -41,8 +43,8 @@ const resolveMagnusLink = (href: string) => {
 ```
 
 这样：
-- 内网用户点击 → `http://162.105.151.134:3011/jobs/abc123`
-- Cloudflare 用户点击 → `https://magnus.pkuplasma.com/jobs/abc123`
+- 内网用户点击 → `http://<intranet-host>:3011/jobs/abc123`
+- 公网用户点击 → `https://magnus.example.com/jobs/abc123`
 
 ### 3. 影响范围
 

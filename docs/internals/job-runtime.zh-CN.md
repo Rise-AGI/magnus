@@ -1,6 +1,6 @@
-# Magnus Job Runtime
+> **Language / 语言**: [English](job-runtime.md) · **简体中文**
 
-> 2026-02-20, by Zeyu Cai
+# Magnus Job Runtime
 
 本文档描述 Magnus job 从提交到容器内执行的完整运行时链路，以及宿主机与容器之间的文件系统协议和环境变量协议。
 

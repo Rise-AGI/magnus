@@ -1,3 +1,5 @@
+> **Language / 语言**: **English** · [简体中文](CONTRIBUTING.zh-CN.md)
+
 # Contributing to Magnus
 
 We welcome contributions from the community. Before submitting a pull request, please read through this guide.

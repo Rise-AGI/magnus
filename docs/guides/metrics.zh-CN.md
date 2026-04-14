@@ -1,3 +1,5 @@
+> **Language / 语言**: [English](metrics.md) · **简体中文**
+
 # Magnus Metrics Guide
 
 本文档定义 Magnus Job 与 Magnus Metrics Collector 之间的指标协议。
