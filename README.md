@@ -1,4 +1,4 @@
-<!-- README.md -->
+> **Language / 语言**: **English** · [简体中文](README.zh-CN.md)
 
 # Magnus: An Agentic Infrastructure Automating Scientific Discoveries
 
@@ -94,7 +94,7 @@ closing the loop between experimentation and sedimentation. A workflow that star
 a one-off experiment can be crystallized into a Blueprint; an agent can later improve it
 based on new results, guided by the domain knowledge encoded in Skills.
 
-See the [Blueprint Crafting Guide](docs/Blueprint_Crafting_Guide.md) for full documentation.
+See the [Blueprint Crafting Guide](docs/guides/blueprint-crafting.md) for full documentation.
 
 ### Skills
 
@@ -156,7 +156,7 @@ magnus run validate-feynrules --model ~/models/minimal_Zp.fr --lagrangian LSM
 magnus logs -1    # view logs of the most recent job
 ```
 
-Full SDK and CLI reference: [Magnus SDK Guide](docs/Magnus_SDK_Guide.md).
+Full SDK and CLI reference: [Magnus SDK Guide](docs/guides/sdk-and-cli.md).
 
 ## Used In
 
@@ -195,15 +195,27 @@ cd front_end && npm install && npm run dev
 ```
 
 Requirements: Python >= 3.14, Node.js LTS, SLURM, Apptainer.
-See [Job Runtime Documentation](docs/Magnus_job_runtime.md) for container execution details.
+See [Job Runtime Documentation](docs/internals/job-runtime.md) for container execution details.
 
 ## Documentation
 
-| Document | Contents |
-|----------|----------|
-| [SDK & CLI Guide](docs/Magnus_SDK_Guide.md) | Python API, async support, all CLI commands |
-| [Blueprint Crafting Guide](docs/Blueprint_Crafting_Guide.md) | Type annotations, parameter metadata, file transfer |
-| [Job Runtime](docs/Magnus_job_runtime.md) | Container isolation, environment variables, networking |
+**User guides** — start here if you are building with Magnus:
+
+- [SDK & CLI Guide](docs/guides/sdk-and-cli.md) — Python API, async support, and the full CLI reference
+- [Blueprint Crafting Guide](docs/guides/blueprint-crafting.md) — Type annotations, parameter metadata, file transfer
+- [Local Mode](docs/guides/local-mode.md) — Run Magnus locally with Docker instead of SLURM
+- [Metrics Protocol](docs/guides/metrics.md) — Cross-language metrics reporting protocol for Jobs
+
+<details>
+<summary><strong>Internals &amp; references</strong> — for operators and contributors</summary>
+
+- [Job Runtime](docs/internals/job-runtime.md) — Container isolation, environment variables, networking
+- [uv Image Notes](docs/internals/uv-image.md) — Building the `magnus-runtime` container image with uv
+- [Internal Links Requirements](docs/requirements/internal-links.md) — Design notes for the `magnus:///` URI scheme
+
+</details>
+
+All pages are bilingual; use the language switcher at the top of each document.
 
 ## Contributing
 
@@ -219,5 +231,5 @@ This project is licensed under the [GNU Affero General Public License v3.0](LICE
 
 ## Acknowledgments
 
-- [Apptainer](https://github.com/apptainer/apptainer) --  Powers Magnus's container execution through its robust runtime for HPC workloads.
-- [croc](https://github.com/schollz/croc) --  Inspired Magnus's file custody feature through its frictionless approach to moving files.
+- [Apptainer](https://github.com/apptainer/apptainer) — Powers Magnus's container execution through its robust runtime for HPC workloads.
+- [croc](https://github.com/schollz/croc) — Inspired Magnus's file custody feature through its frictionless approach to moving files.

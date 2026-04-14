@@ -1,3 +1,5 @@
+> **Language / 语言**: [English](uv-image.md) · **简体中文**
+
 # Magnus Runtime Image: uv 配置与镜像烧录经验
 
 ## 背景

@@ -1,5 +1,9 @@
 # Rise-AGI Individual Contributor License Agreement
 
+> *A Simplified Chinese reference translation is available at [CLA.zh-CN.md](CLA.zh-CN.md). The English version on this page is the sole legally authoritative text; in case of any conflict, the English version prevails.*
+>
+> *本文档提供 [简体中文参考译本](CLA.zh-CN.md)。本页英文版本为唯一具有法律效力的正本；若有冲突，以英文版本为准。*
+
 Thank you for your interest in contributing to Magnus, a project maintained by Rise-AGI.
 
 By submitting a contribution (via pull request, patch, or any other mechanism) to any Rise-AGI repository, you agree to the following terms:

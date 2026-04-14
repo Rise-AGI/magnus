@@ -1,3 +1,5 @@
+> **Language / 语言**: **English** · [简体中文](local-mode.zh-CN.md)
+
 # Local Magnus Mode
 
 ## Overview

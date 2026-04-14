@@ -1,3 +1,5 @@
+> **Language / 语言**: [English](blueprint-crafting.md) · **简体中文**
+
 # Blueprint Crafting Guide
 
 本文档是 Magnus 蓝图系统的权威参考，面向人类开发者和 AI Agent（如 Claude Code）。
