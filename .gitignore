@@ -44,6 +44,7 @@ back_end/pictures/
 documents/
 *DS_Store*
 *vscode*
+CLAUDE.md
 *claude_report*
 *claude_playground*
 *claude_battlefield*
