@@ -5,6 +5,17 @@ import logging
 from .commands import app
 
 
+def _ensure_utf8_stdio():
+    # Banner and many outputs contain non-ASCII (©, ·, CJK). On Windows
+    # cp936 terminals, writing such chars raises UnicodeEncodeError. Force
+    # UTF-8 with replace so the CLI runs on any legacy codepage.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        reconfigure(encoding="utf-8", errors="replace")
+
+
 def _preprocess_argv():
     """
     预处理 sys.argv，让负数索引能被正确解析。
@@ -24,6 +35,7 @@ def _preprocess_argv():
 
 
 def main():
+    _ensure_utf8_stdio()
     logging.getLogger("magnus").setLevel(logging.ERROR)
     _preprocess_argv()
     app()
