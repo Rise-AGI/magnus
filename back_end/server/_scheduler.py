@@ -1047,11 +1047,12 @@ for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO
     fi
 done
 
-# Detect setuid apptainer: check binary setuid bit (zero I/O, instant)
-if [ -u "$(command -v apptainer)" ]; then
+# Detect setuid apptainer: the setuid bit lives on the starter helper, not the CLI wrapper.
+# find is used to avoid hardcoding the arch-specific lib path (e.g. x86_64-linux-gnu).
+_setuid_apptainer=
+if _starter=$(find /usr/lib /usr/libexec -name "starter" -path "*/apptainer/bin/*" 2>/dev/null | head -1) \
+   && [ -n "$_starter" ] && [ -u "$_starter" ]; then
     _setuid_apptainer=1
-else
-    _setuid_apptainer=
 fi
 
 # setuid apptainer: overlay root-owned (unreadable) + userns blocked → degrade to --contain
