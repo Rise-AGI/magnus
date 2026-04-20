@@ -4,6 +4,7 @@
 {/* 感谢 @wjsoj 卫同学！love you ❤ */}
 
 import React from "react";
+import Link from "next/link";
 import Markdown, { type Components } from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -24,6 +25,7 @@ interface RenderMarkdownProps {
   content: string;
   className?: string;
   onLinkClick?: (href: string) => void;
+  fromPath?: string;
   components?: Components;
 }
 
@@ -32,6 +34,7 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
   content,
   className,
   onLinkClick,
+  fromPath,
   components: componentOverrides,
 }: RenderMarkdownProps) {
 
@@ -150,6 +153,20 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
       </div>
     ),
     a: ({ className, href, ...props }: any) => {
+      if (href?.startsWith("magnus:///") && fromPath) {
+        const target = "/" + href.slice("magnus:///".length);
+        const sep = target.includes("?") ? "&" : "?";
+        return (
+          <Link
+            href={`${target}${sep}from=${fromPath}`}
+            className={cn(
+              "font-medium underline underline-offset-4 text-blue-400 hover:text-blue-300 transition-all",
+              className,
+            )}
+            {...props}
+          />
+        );
+      }
       const isRelative = href && !href.match(/^(https?:\/\/|#|mailto:)/);
       return (
         <a
@@ -227,7 +244,11 @@ const RenderMarkdown = React.memo(function RenderMarkdown({
     </div>
   );
 }, (prevProps, nextProps) => {
-  return prevProps.content === nextProps.content && prevProps.className === nextProps.className && prevProps.onLinkClick === nextProps.onLinkClick && prevProps.components === nextProps.components;
+  return prevProps.content === nextProps.content &&
+    prevProps.className === nextProps.className &&
+    prevProps.onLinkClick === nextProps.onLinkClick &&
+    prevProps.fromPath === nextProps.fromPath &&
+    prevProps.components === nextProps.components;
 });
 
 export default RenderMarkdown;

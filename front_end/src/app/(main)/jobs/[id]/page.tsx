@@ -632,7 +632,7 @@ export default function JobDetailsPage() {
               <div className="absolute inset-0 overflow-auto p-5 custom-scrollbar">
                 <div className="min-h-[200px]">
                   {job.description ? (
-                    <RenderMarkdown content={job.description} />
+                    <RenderMarkdown content={job.description} fromPath={`/jobs/${jobId}`} />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[200px] italic">
                       <AlignLeft className="w-8 h-8 opacity-20" />

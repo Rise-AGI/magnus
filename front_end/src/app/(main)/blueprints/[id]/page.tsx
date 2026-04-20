@@ -338,7 +338,7 @@ export default function BlueprintDetailsPage() {
              </div>
              <div className="p-5 overflow-auto custom-scrollbar min-h-[60px]">
                 {blueprint.description.trim() ? (
-                  <RenderMarkdown content={blueprint.description} />
+                  <RenderMarkdown content={blueprint.description} fromPath={`/blueprints/${blueprintId}`} />
                 ) : (
                   <p className="text-sm text-zinc-600 italic">{t("blueprintDetail.noDescription")}</p>
                 )}
