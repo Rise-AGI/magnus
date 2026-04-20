@@ -1047,12 +1047,11 @@ for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO
     fi
 done
 
-# Detect setuid apptainer: the setuid bit lives on the starter helper, not the CLI wrapper.
-# find is used to avoid hardcoding the arch-specific lib path (e.g. x86_64-linux-gnu).
-_setuid_apptainer=
-if _starter=$(find /usr/lib /usr/libexec -name "starter" -path "*/apptainer/bin/*" 2>/dev/null | head -1) \
-   && [ -n "$_starter" ] && [ -u "$_starter" ]; then
+# Detect setuid apptainer: check binary setuid bit (zero I/O, instant)
+if [ -u "$(command -v apptainer)" ]; then
     _setuid_apptainer=1
+else
+    _setuid_apptainer=
 fi
 
 # setuid apptainer: overlay root-owned (unreadable) + userns blocked → degrade to --contain
@@ -1081,15 +1080,14 @@ else
     echo "[Magnus] WARNING: containment disabled (MAGNUS_CONTAIN_LEVEL=none), host filesystem visible, no write isolation" >&2
 fi
 
-if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
-    APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
-fi
-
-# --contain/--containall isolates HOME; pass --env HOME= so Apptainer resolves it at
-# the flag level rather than falling back to user-namespace home isolation, which is
-# incompatible with the setuid workflow (Apptainer 1.4+).
+# --containall / --contain isolates HOME, so --env HOME=... works cleanly.
+# Without containment, Apptainer forbids overriding HOME via --env, so skip it.
 if [ -n "$APPTAINER_CONTAIN" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --env HOME=$MAGNUS_HOME"
+fi
+
+if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
+    APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
 fi
 
 APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
