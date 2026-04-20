@@ -177,9 +177,6 @@ export function FileSecretInput({
       </div>
 
       <div className="space-y-1 text-xs">
-        <p className="text-zinc-500">
-          {t("fileSecret.webHint")}
-        </p>
         {uploadError && (
           <p className="text-red-400">
             {uploadError}

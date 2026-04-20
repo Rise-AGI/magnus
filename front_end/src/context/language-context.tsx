@@ -384,7 +384,6 @@ const translations = {
   "fileSecret.uploadFailed": { zh: "上传失败", en: "Upload failed" },
   "fileSecret.invalidResponse": { zh: "服务端返回格式错误", en: "Invalid server response" },
   "fileSecret.copyFailed": { zh: "复制失败", en: "Copy failed" },
-  "fileSecret.webHint": { zh: "支持上传小文件和小型文件夹。文件夹会先打成 tar.gz；大模型和大数据集仍建议使用共享存储或服务器路径。", en: "Supports small files and folders. Folders are packed into tar.gz first; large models and datasets should still use shared storage or server paths." },
   "files.subtitle": { zh: "上传文件或小型文件夹，生成 FileSecret，或根据已有 secret 下载文件。", en: "Upload files or small folders to generate FileSecrets, or download files from an existing secret." },
   "files.warning": { zh: "这个页面适合小文件和临时文件。大模型权重、大数据集和长期资产仍建议使用共享存储、对象存储或服务器路径。", en: "This page is for small and temporary files. Large model weights, large datasets, and long-lived assets should still use shared storage, object storage, or server-side paths." },
   "files.tip": { zh: "上传成功后，可以直接复制返回的 magnus-secret 并填入蓝图参数。", en: "After upload, you can copy the returned magnus-secret directly into blueprint parameters." },
