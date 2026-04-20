@@ -36,6 +36,17 @@ class FileTooLargeError(Exception):
         super().__init__(f'File "{filename}" exceeds the {_format_size(limit)} limit.')
 
 
+class CustodyLimitError(Exception):
+    def __init__(self, limit: int):
+        self.limit = limit
+        super().__init__(f"File custody slot limit reached ({limit}). Try again later.")
+
+
+class CustodyStorageFullError(Exception):
+    def __init__(self):
+        super().__init__("File custody storage is full. Try again later.")
+
+
 # === Human-friendly token generation ===
 
 def _sieve_primes(lo: int, hi: int)-> List[int]:
@@ -372,15 +383,9 @@ class FileCustodyManager:
         # 先占位再写文件，避免并发请求绕过 _max_processes 限制
         with self._lock:
             if len(self._entries) >= self._max_processes:
-                raise RuntimeError(
-                    f"File custody limit reached ({self._max_processes}). "
-                    "Try again later or increase max_processes."
-                )
+                raise CustodyLimitError(self._max_processes)
             if self._current_size >= self._max_size:
-                raise RuntimeError(
-                    "File custody storage full. "
-                    "Wait for entries to expire or increase max_size."
-                )
+                raise CustodyStorageFullError()
             entry_id = self._generate_token()
             placeholder = CustodyEntry(
                 entry_id = entry_id,
@@ -415,9 +420,7 @@ class FileCustodyManager:
                 if self._current_size > self._max_size:
                     self._current_size -= written
                     placeholder.file_size = 0
-                    raise RuntimeError(
-                        "File custody storage exceeded after write. File removed."
-                    )
+                    raise CustodyStorageFullError()
         except Exception:
             with self._lock:
                 self._entries.pop(entry_id, None)

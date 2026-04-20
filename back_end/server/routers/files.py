@@ -9,7 +9,13 @@ from pydantic import BaseModel
 from .auth import get_current_user
 from .. import models
 from .._magnus_config import magnus_config
-from .._file_custody_manager import file_custody_manager, FILE_SECRET_PREFIX, FileTooLargeError
+from .._file_custody_manager import (
+    file_custody_manager,
+    FILE_SECRET_PREFIX,
+    CustodyLimitError,
+    CustodyStorageFullError,
+    FileTooLargeError,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -51,6 +57,10 @@ async def upload_file(
             is_directory,
             max_downloads,
         )
+    except CustodyLimitError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except CustodyStorageFullError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except FileTooLargeError as e:
         raise HTTPException(status_code=413, detail=str(e))
     return FileCustodyResponse(file_secret=f"{FILE_SECRET_PREFIX}{token}")
