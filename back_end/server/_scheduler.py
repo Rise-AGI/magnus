@@ -1085,6 +1085,13 @@ if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
 fi
 
+# --contain/--containall isolates HOME; pass --env HOME= so Apptainer resolves it at
+# the flag level rather than falling back to user-namespace home isolation, which is
+# incompatible with the setuid workflow (Apptainer 1.4+).
+if [ -n "$APPTAINER_CONTAIN" ]; then
+    APPTAINER_FLAGS="$APPTAINER_FLAGS --env HOME=$MAGNUS_HOME"
+fi
+
 APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
