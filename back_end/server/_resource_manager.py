@@ -95,6 +95,34 @@ for _k in ("GIT_ASKPASS", "SSH_ASKPASS"):
     _git_env.pop(_k, None)
 
 
+# Fanout 聚合窗口：同一个 cache 的 origin refs 在这个 TTL 内被认为足够新，
+# 避免一次 blueprint fanout 里 N 个 worker 串行打 N 次上游 fetch
+# （TTL 内所有 job 共享同一次 fetch 的结果，N 次上游请求 → 1 次）
+REPO_FRESHNESS_TTL_SECONDS = 30
+
+# 默认分支解析结果的内存缓存 TTL：fanout 里所有 worker 解析的是同一个 repo
+# 的默认分支，没必要每次都打 ls-remote
+DEFAULT_BRANCH_CACHE_TTL_SECONDS = 300
+
+# git fetch 重试与超时（对齐 _resolve_default_branch 的 3 次重试 + 指数退避；
+# fetch 比 ls-remote 重，超时放宽到 30s）
+GIT_FETCH_MAX_RETRIES = 3
+GIT_FETCH_TIMEOUT_SECONDS = 30
+
+# cat-file 只读本地 object db，正常毫秒级；这里只是为了在 NFS / 盘满等异常
+# I/O 场景下避免无限期阻塞整个 fanout（此 subprocess 是在 repo_lock 内调用）
+GIT_CAT_FILE_TIMEOUT_SECONDS = 5
+
+# cache 的上次 fetch 时间戳文件名，放在 <cache>/.git/ 里避免污染 working tree
+CACHE_FETCH_TIMESTAMP_FILENAME = "magnus_fetch_ts"
+
+# 只有 40 位完整 hex SHA 被视为不可变、可以走"cache 已有则跳过 fetch"的快路径。
+# tag / branch 名 / 短 SHA 都可能指向移动目标或产生歧义，必须经 TTL + 显式 fetch 把关，
+# 避免把陈旧的同名 ref 悄悄当成用户想要的那一版交付出去。
+# 大小写都接受：git 默认小写，但人工复制 / API 产物中大写 SHA 合法且常见
+FULL_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
 def _image_to_sif_filename(image: str)-> str:
     """docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime -> pytorch_pytorch_2.5.1-cuda12.4-cudnn9-runtime.sif"""
     name = re.sub(r'^[a-z]+://', '', image)
@@ -121,6 +149,11 @@ class ResourceManager:
     def __init__(self):
         self.image_locks: Dict[str, asyncio.Lock] = {}
         self.repo_locks: Dict[str, asyncio.Lock] = {}
+        # repo_url -> (default_branch, expires_at_epoch_seconds)
+        self._default_branch_cache: Dict[str, Tuple[str, float]] = {}
+        # repo_url -> asyncio.Lock, 用于串行化同 repo 的 ls-remote，
+        # 让 fanout 里先到的解析结果被后到者复用
+        self._default_branch_locks: Dict[str, asyncio.Lock] = {}
 
     def get_sif_path(self, image: str)-> str:
         return os.path.join(magnus_container_cache_path, _image_to_sif_filename(image))
@@ -394,6 +427,111 @@ class ResourceManager:
 
         return None
 
+    async def _resolve_default_branch_cached(self, repo_url: str)-> Optional[str]:
+        """带 TTL 内存缓存 + per-repo 锁的默认分支解析。
+        fanout 里 N 个 worker 命中同一个 repo 时，只有第一个打上游 ls-remote，
+        其余在锁内等待 + 二次命中缓存直接返回。"""
+        now = time.time()
+        cached = self._default_branch_cache.get(repo_url)
+        if cached is not None and now < cached[1]:
+            return cached[0]
+
+        if repo_url not in self._default_branch_locks:
+            self._default_branch_locks[repo_url] = asyncio.Lock()
+
+        async with self._default_branch_locks[repo_url]:
+            # 二次检查：锁外已有其它协程完成解析
+            cached = self._default_branch_cache.get(repo_url)
+            if cached is not None and time.time() < cached[1]:
+                return cached[0]
+
+            branch = await self._resolve_default_branch(repo_url)
+            if branch is not None:
+                self._default_branch_cache[repo_url] = (
+                    branch, time.time() + DEFAULT_BRANCH_CACHE_TTL_SECONDS,
+                )
+            return branch
+
+    def _cache_fetch_ts_path(self, cache_path: str)-> str:
+        return os.path.join(cache_path, ".git", CACHE_FETCH_TIMESTAMP_FILENAME)
+
+    def _read_cache_fetch_ts(self, cache_path: str)-> float:
+        """读取 cache 上次成功 fetch/clone 的 epoch 秒；缺失或损坏返回 0.0（视为极陈旧）"""
+        try:
+            with open(self._cache_fetch_ts_path(cache_path)) as f:
+                return float(f.read().strip())
+        except (OSError, ValueError):
+            return 0.0
+
+    def _write_cache_fetch_ts(self, cache_path: str)-> None:
+        try:
+            with open(self._cache_fetch_ts_path(cache_path), "w") as f:
+                f.write(str(time.time()))
+        except OSError as e:
+            logger.warning(f"Failed to write fetch timestamp for {cache_path}: {e}")
+
+    async def _cache_has_commit(self, cache_path: str, sha: str)-> bool:
+        """检查 cache 的 object db 中是否已有该 commit。
+        对具体 SHA 场景：若 cache 已有，可彻底 skip fetch（SHA 不可变，永远不会过时）。
+        超时视为"不确定"—>返回 False，走 fetch 路径兜底，绝不因 I/O 挂起阻塞整个 fanout"""
+        proc = await asyncio.create_subprocess_exec(
+            "git", "cat-file", "-e", f"{sha}^{{commit}}",
+            cwd = cache_path,
+            stdout = asyncio.subprocess.DEVNULL,
+            stderr = asyncio.subprocess.DEVNULL,
+            env = _git_env,
+        )
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=GIT_CAT_FILE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning(
+                f"git cat-file timed out ({GIT_CAT_FILE_TIMEOUT_SECONDS}s) "
+                f"on {cache_path} for {sha}; treating as miss"
+            )
+            return False
+        return proc.returncode == 0
+
+    async def _fetch_in_cache(self, cache_path: str, repo_url: str)-> bool:
+        """在 cache 里跑 git fetch origin，带 3 次重试和指数退避。
+        重试语义与 _resolve_default_branch 对齐，便于日志对照分析。"""
+        for attempt in range(GIT_FETCH_MAX_RETRIES):
+            proc = await asyncio.create_subprocess_exec(
+                "git", "fetch", "origin",
+                cwd = cache_path,
+                stdout = asyncio.subprocess.DEVNULL,
+                stderr = asyncio.subprocess.PIPE,
+                env = _git_env,
+            )
+            try:
+                _, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=GIT_FETCH_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning(
+                    f"git fetch timed out ({GIT_FETCH_TIMEOUT_SECONDS}s), "
+                    f"attempt {attempt + 1}/{GIT_FETCH_MAX_RETRIES}: {repo_url}"
+                )
+                if attempt < GIT_FETCH_MAX_RETRIES - 1:
+                    await asyncio.sleep(2 ** attempt)
+                continue
+
+            if proc.returncode == 0:
+                return True
+
+            error_msg = stderr.decode().strip()
+            logger.warning(
+                f"git fetch failed (rc={proc.returncode}), "
+                f"attempt {attempt + 1}/{GIT_FETCH_MAX_RETRIES}: {repo_url} — {error_msg}"
+            )
+            if attempt < GIT_FETCH_MAX_RETRIES - 1:
+                await asyncio.sleep(2 ** attempt)
+
+        return False
+
     async def ensure_repo(
         self,
         namespace: str,
@@ -423,25 +561,33 @@ class ResourceManager:
         else:
             repo_url = f"git@github.com:{namespace}/{repo_name}.git"
 
-        # branch=None: 解析仓库默认分支
+        # branch=None: 解析仓库默认分支（带 TTL 内存缓存，fanout 里只打一次 ls-remote）
         if branch is None:
-            branch = await self._resolve_default_branch(repo_url)
+            branch = await self._resolve_default_branch_cached(repo_url)
             if branch is None:
                 return False, "Failed to determine default branch", None
 
         cache_path = self._get_repo_cache_path(namespace, repo_name, branch)
         cache_key = f"{namespace}/{repo_name}/{branch}"
 
-        # Phase 1: 确保 cache 存在（带锁）
+        # Phase 1 + 2: 在 repo_lock 内串行化 clone / fetch / copy。
+        # - fanout 的 N 个 job 共享这把锁 → N 次上游 fetch 被去重为最多 1 次
+        # - copy 保留在锁内，避免"job A 在 copytree 时 job B 的 fetch 改写 cache"导致的撕裂读
+        # - checkout 在锁外跑（target_dir 已是隔离副本，无需上游 I/O）
         if cache_key not in self.repo_locks:
             self.repo_locks[cache_key] = asyncio.Lock()
 
+        # 只有 40 位完整 hex SHA 走"cache 已有则跳过 fetch"的快路径；
+        # "HEAD" / "msg:..." / tag 名 / branch 名 / 短 SHA 都按需时效处理（TTL + fail-closed），
+        # 否则本次修复的"绝不回落化石"语义会从非 40 位入口复发
+        is_immutable_sha = bool(FULL_SHA_PATTERN.match(commit_sha))
+
         async with self.repo_locks[cache_key]:
+            # Phase 1a: cache 不存在 → clone（刚 clone 完即视为最新）
             if not os.path.exists(cache_path):
                 self._evict_lru_repos()
 
                 start_time = time.time()
-
                 logger.info(f"Cloning repo to cache: {repo_url} -> {cache_path}")
 
                 proc = await asyncio.create_subprocess_exec(
@@ -461,35 +607,70 @@ class ResourceManager:
 
                 elapsed = time.time() - start_time
                 logger.info(f"Repo cached: {cache_path} ({elapsed:.1f}s)")
+                self._write_cache_fetch_ts(cache_path)
 
-            # 更新 cache 访问时间
+            # Phase 1b: cache 已存在 → 按需刷新
+            else:
+                if is_immutable_sha:
+                    # 完整 SHA：不可变对象，cache 已有就永远可用；没有才 fetch
+                    # （不走 TTL——我们需要的是对象存在性，不是时效性）
+                    if not await self._cache_has_commit(cache_path, commit_sha):
+                        fetch_ok = await self._fetch_in_cache(cache_path, repo_url)
+                        if fetch_ok:
+                            self._write_cache_fetch_ts(cache_path)
+                        if not await self._cache_has_commit(cache_path, commit_sha):
+                            logger.error(
+                                f"Commit {commit_sha} not found in cache for {repo_url} "
+                                f"(fetch_ok={fetch_ok})"
+                            )
+                            return False, (
+                                f"commit {commit_sha} not found in repository "
+                                f"(fetch_ok={fetch_ok})"
+                            ), None
+                else:
+                    # "HEAD" / "msg:..." / tag / branch / 短 SHA 都可能指向移动目标：
+                    # TTL 内视为足够新（fanout 聚合窗口），过了 TTL 就必须成功 fetch，
+                    # 否则直接 FAIL——绝不回落到化石 cache
+                    cache_age = time.time() - self._read_cache_fetch_ts(cache_path)
+                    if cache_age > REPO_FRESHNESS_TTL_SECONDS:
+                        fetch_ok = await self._fetch_in_cache(cache_path, repo_url)
+                        if fetch_ok:
+                            self._write_cache_fetch_ts(cache_path)
+                        else:
+                            logger.error(
+                                f"git fetch failed for {repo_url}; "
+                                f"refusing to serve stale cache for commit_sha={commit_sha!r}"
+                            )
+                            return False, (
+                                f"git fetch failed for {repo_url}: "
+                                f"cannot guarantee freshness for {commit_sha!r}"
+                            ), None
+
+            # 更新 cache 访问时间（LRU 按 atime 淘汰，活跃 cache 需持续刷 atime）
             try:
                 os.utime(cache_path, None)
             except OSError:
                 pass
 
-        # Phase 2: 复制 cache 到工作目录（放到线程池避免阻塞 event loop）
-        start_time = time.time()
-        loop = asyncio.get_event_loop()
-        try:
-            await loop.run_in_executor(None, functools.partial(shutil.copytree, cache_path, target_dir, symlinks=True))
-        except Exception as e:
-            logger.error(f"Failed to copy repo cache: {e}")
-            return False, f"copy cache failed: {e}", None
+            # Phase 2: 锁内复制 cache 到工作目录。
+            # copytree 放线程池避免阻塞 event loop；锁保证其它协程不会在我们 copy 时
+            # 通过 fetch 改写 cache 的 refs / pack 文件
+            start_time = time.time()
+            loop = asyncio.get_event_loop()
+            try:
+                await loop.run_in_executor(
+                    None,
+                    functools.partial(shutil.copytree, cache_path, target_dir, symlinks=True),
+                )
+            except Exception as e:
+                # 清掉可能的半成品 target_dir，否则入口 `if os.path.exists(target_dir)` 短路条件
+                # 会在下次调度时把残留副本误判为"已就绪"，跑在不完整代码上
+                shutil.rmtree(target_dir, ignore_errors=True)
+                logger.error(f"Failed to copy repo cache: {e}")
+                return False, f"copy cache failed: {e}", None
 
-        # Phase 3: fetch + checkout 到指定 commit
-        proc = await asyncio.create_subprocess_exec(
-            "git", "fetch", "origin",
-            cwd = target_dir,
-            stdout = asyncio.subprocess.DEVNULL,
-            stderr = asyncio.subprocess.PIPE,
-            env = _git_env,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            logger.warning(f"git fetch failed (may be ok): {stderr.decode().strip()}")
-
-        # 解析 commit_sha 语义：
+        # Phase 3: 解析 commit_sha 语义并 checkout（无需 fetch——cache 上一步已刷新，
+        # target_dir 是隔离副本，origin/<branch> 与 cache 保持一致）
         # - "HEAD": checkout origin/<branch> 最新提交
         # - "msg:<regex>": 搜索最近的 commit message 匹配正则的提交
         # - 其他: 视为 40 位 SHA 或 tag 等 git ref
