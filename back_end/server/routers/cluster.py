@@ -3,6 +3,7 @@ from typing import List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .. import database
@@ -195,14 +196,21 @@ def get_cluster_stats(
     # --- 6. Pending Jobs 处理与分页 ---
     # 排序：Pending/Queued/Paused 按调度优先级，Preparing 在最后
     # 排除已在 SLURM 中运行的 job，避免因状态延迟导致同一 job 同时出现在两列
+    # NOTE: `NULL NOT IN (...)` 在 SQL 里结果是 NULL 而非 TRUE，会把 slurm_job_id 为
+    # NULL 的行（未提交到 SLURM 的 PENDING/PREPARING 任务）静默过滤掉；用 or_ 显式
+    # 放行 NULL，这些任务显然不可能已在 SLURM 中运行。
     running_job_ids = {job.slurm_job_id for job in magnus_jobs_orm}
+    not_running_in_slurm = (
+        or_(models.Job.slurm_job_id.is_(None), ~models.Job.slurm_job_id.in_(running_job_ids))
+        if running_job_ids else None
+    )
     pending_jobs_orm = db.query(models.Job).filter(
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
-        *([ ~models.Job.slurm_job_id.in_(running_job_ids) ] if running_job_ids else []),
+        *([not_running_in_slurm] if not_running_in_slurm is not None else []),
     ).all()
     preparing_jobs_orm = db.query(models.Job).filter(
         models.Job.status == JobStatus.PREPARING,
-        *([ ~models.Job.slurm_job_id.in_(running_job_ids) ] if running_job_ids else []),
+        *([not_running_in_slurm] if not_running_in_slurm is not None else []),
     ).all()
 
     # Pending/Queued/Paused 按调度器排序
