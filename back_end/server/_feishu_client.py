@@ -1,6 +1,6 @@
 # back_end/server/_feishu_client.py
 from library import *
-from ._magnus_config import magnus_config, is_local_mode
+from ._magnus_config import magnus_config, is_local_auth
 
 
 __all__ = [
@@ -8,7 +8,7 @@ __all__ = [
 ]
 
 
-if is_local_mode:
+if is_local_auth:
     feishu_client = None  # type: ignore
 else:
     _config = magnus_config["server"]["auth"]["feishu_client"]

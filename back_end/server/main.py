@@ -153,7 +153,7 @@ run_migrations()
 
 
 def _log_admin_status()-> None:
-    if is_local_mode:
+    if is_local_auth:
         logger.info("🔑 Admin: 本地模式，所有用户均为管理员")
         return
     if not admin_open_ids:
@@ -175,7 +175,7 @@ _log_admin_status()
 # ── 本地模式：自动创建默认用户 ──────────────────────────────
 
 def _ensure_local_user() -> None:
-    if not is_local_mode:
+    if not is_local_auth:
         return
     import getpass
     with SessionLocal() as db:
@@ -308,7 +308,7 @@ async def lifespan(
 
     # 用户信息刷新：本地模式跳过，HPC 模式首次同步执行（quick fail），然后启动后台循环
     user_refresh_task = None
-    if not is_local_mode:
+    if not is_local_auth:
         refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]
         if refresh_interval > 0:
             await _refresh_all_user_info()
@@ -316,7 +316,7 @@ async def lifespan(
         else:
             logger.info("用户信息刷新已禁用 (refresh_interval = 0)")
     else:
-        logger.info("🏠 本地模式：跳过飞书用户信息刷新")
+        logger.info("🏠 本地认证模式：跳过飞书用户信息刷新")
 
     yield
 

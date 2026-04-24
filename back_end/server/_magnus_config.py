@@ -9,6 +9,7 @@ __all__ = [
     "magnus_config",
     "admin_open_ids",
     "is_local_mode",
+    "is_local_auth",
     "is_admin_user",
 ]
 
@@ -102,18 +103,21 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _check_key(auth, "jwt_signer", dict)
         _warn_extra_keys(auth, {"provider", "jwt_signer"}, "server.auth")
     else:
-        if auth_provider != "feishu":
-            raise NotImplementedError(f"❌ auth.provider '{auth_provider}' 尚未实现，HPC 模式仅支持 'feishu'")
+        if auth_provider not in ("feishu", "local"):
+            raise NotImplementedError(f"❌ auth.provider '{auth_provider}' 尚未实现，HPC 模式支持 'feishu' 或 'local'")
         _check_key(auth, "jwt_signer", dict)
-        _check_key(auth, "feishu_client", dict)
-        _warn_extra_keys(auth, {"provider", "jwt_signer", "feishu_client"}, "server.auth")
+        if auth_provider == "feishu":
+            _check_key(auth, "feishu_client", dict)
+            _warn_extra_keys(auth, {"provider", "jwt_signer", "feishu_client"}, "server.auth")
 
-        feishu_client = auth["feishu_client"]
-        _check_key(feishu_client, "app_id", str)
-        _check_key(feishu_client, "app_secret", str)
-        _check_key(feishu_client, "admins", list)
-        _check_key(feishu_client, "refresh_interval", int)
-        _warn_extra_keys(feishu_client, {"app_id", "app_secret", "admins", "refresh_interval"}, "server.auth.feishu_client")
+            feishu_client = auth["feishu_client"]
+            _check_key(feishu_client, "app_id", str)
+            _check_key(feishu_client, "app_secret", str)
+            _check_key(feishu_client, "admins", list)
+            _check_key(feishu_client, "refresh_interval", int)
+            _warn_extra_keys(feishu_client, {"app_id", "app_secret", "admins", "refresh_interval"}, "server.auth.feishu_client")
+        else:
+            _warn_extra_keys(auth, {"provider", "jwt_signer"}, "server.auth")
 
     jwt_signer = auth["jwt_signer"]
     _check_key(jwt_signer, "secret_key", str)
@@ -256,16 +260,17 @@ def _load_magnus_config()-> Dict[str, Any]:
 
 magnus_config = _load_magnus_config()
 is_local_mode = magnus_config["execution"]["backend"] == "local"
+is_local_auth = magnus_config["server"]["auth"]["provider"] == "local"
 
 admin_open_ids: Set[str]
-if is_local_mode:
+if is_local_auth:
     admin_open_ids = set()
 else:
     admin_open_ids = set(magnus_config["server"]["auth"]["feishu_client"]["admins"])
 
 
 def is_admin_user(user) -> bool:
-    """本地模式下所有用户都是 admin；HPC 模式下检查 feishu_open_id。"""
-    if is_local_mode:
+    """本地认证模式下所有用户都是 admin；飞书模式下检查 feishu_open_id。"""
+    if is_local_auth:
         return True
     return user.feishu_open_id in admin_open_ids

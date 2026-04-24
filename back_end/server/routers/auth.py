@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .. import database
 from .. import models
 from ..schemas import LoginResponse, FeishuLoginRequest, TokenLoginRequest, TokenResponse
-from .._magnus_config import magnus_config, admin_open_ids, is_local_mode
+from .._magnus_config import magnus_config, admin_open_ids, is_local_auth
 from .._jwt_signer import jwt_signer
 from .._feishu_client import feishu_client
 
@@ -86,7 +86,7 @@ def get_current_user(
     db: Session = Depends(database.get_db)
 )-> models.User:
     # Local 模式不鉴权：127.0.0.1 only，直接返回唯一用户
-    if is_local_mode:
+    if is_local_auth:
         local_user = db.query(models.User).first()
         if local_user is None:
             raise HTTPException(status_code=500, detail="No local user found. Server may not have initialized properly.")
@@ -180,7 +180,7 @@ def local_login(
     db: Session = Depends(database.get_db),
 ) -> Dict[str, Any]:
     """本地模式免登录：返回本地用户信息，供前端初始化。"""
-    if not is_local_mode:
+    if not is_local_auth:
         raise HTTPException(status_code=501, detail="Local login is only available in local mode")
 
     local_user = db.query(models.User).first()
@@ -210,7 +210,7 @@ async def feishu_login(
     req: FeishuLoginRequest,
     db: Session = Depends(database.get_db)
 )-> Dict[str, Any]:
-    if is_local_mode:
+    if is_local_auth:
         raise HTTPException(status_code=501, detail="Feishu login is not available in local mode")
 
     try:
@@ -230,7 +230,7 @@ async def feishu_login(
             "name": db_user.name,
             "avatar_url": db_user.avatar_url,
             "email": db_user.email,
-            "is_admin": is_local_mode or db_user.feishu_open_id in admin_open_ids,
+            "is_admin": is_local_auth or db_user.feishu_open_id in admin_open_ids,
         },
     }
 
@@ -261,7 +261,7 @@ def token_login(
             "name": user.name,
             "avatar_url": user.avatar_url,
             "email": user.email,
-            "is_admin": is_local_mode or user.feishu_open_id in admin_open_ids,
+            "is_admin": is_local_auth or user.feishu_open_id in admin_open_ids,
         },
     }
 
