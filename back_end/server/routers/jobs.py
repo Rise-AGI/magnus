@@ -14,6 +14,7 @@ from ..schemas import JobResponse, JobSubmission, PagedJobResponse
 from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, validate_cluster_limits
 from .._scheduler import scheduler
 from .auth import get_current_user
+from library import escape_like
 
 
 logger = logging.getLogger(__name__)
@@ -116,7 +117,7 @@ def get_jobs(
     query = db.query(models.Job)
 
     if search:
-        safe = search.replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(search)
         search_pattern = f"%{safe}%"
         query = query.filter(
             or_(

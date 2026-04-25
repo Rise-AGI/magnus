@@ -24,6 +24,7 @@ from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
 from .._magnus_config import magnus_config, is_local_mode, is_admin_user
 from .._resource_manager import resource_manager, _image_to_sif_filename
+from library import escape_like
 
 
 logger = logging.getLogger(__name__)
@@ -330,7 +331,7 @@ def list_images(
     # 1. DB records
     query = db.query(models.CachedImage)
     if search:
-        safe = search.replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(search)
         query = query.filter(models.CachedImage.uri.ilike(f"%{safe}%", escape="\\"))
     if owner_id:
         query = query.filter(models.CachedImage.user_id == owner_id)

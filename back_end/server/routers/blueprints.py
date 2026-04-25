@@ -215,7 +215,7 @@ def list_blueprints(
 
     # 1. 搜索逻辑 (Title, ID, Description)
     if search:
-        safe = search.replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(search)
         search_pattern = f"%{safe}%"
         query = query.filter(
             or_(

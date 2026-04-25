@@ -26,6 +26,7 @@ from .._id_registry import assert_id_available
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
 from .._magnus_config import magnus_config, is_admin_user
+from library import escape_like
 
 
 logger = logging.getLogger(__name__)
@@ -218,7 +219,7 @@ def list_skills(
     query = db.query(models.Skill)
 
     if search:
-        safe = search.replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(search)
         search_pattern = f"%{safe}%"
         query = query.filter(
             or_(
