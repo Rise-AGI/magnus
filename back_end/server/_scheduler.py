@@ -899,41 +899,43 @@ def _metrics_sidecar(metrics_dir, stop_event):
         import socket
         path = os.path.join(metrics_dir, "system.jsonl")
         hostname = socket.gethostname()
-        # GPU 软隔离：只采集 SLURM 分配的 GPU
-        _cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
-        allowed_gpus = set(_cvd.split(",")) if _cvd else None
+        # Only sample GPU indices that SLURM allocated to this job via CUDA_VISIBLE_DEVICES.
+        # An unset/empty value previously disabled the filter and let nvidia-smi attribute
+        # every visible GPU to a CPU-only job.
+        _cvd = os.environ.get("CUDA_VISIBLE_DEVICES") or ""
+        allowed_gpus = set(s.strip() for s in _cvd.split(",") if s.strip().isdigit())
         prev_total, prev_idle = _read_cpu_times()
         while not stop_event.wait(5.0):
             now_ms = int(time.time() * 1000)
             lines = []
             node_labels = {{"node": hostname}}
-            # GPU metrics
-            try:
-                out = subprocess.check_output(
-                    ["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used",
-                     "--format=csv,noheader,nounits"],
-                    timeout=10, text=True, stderr=subprocess.DEVNULL,
-                )
-                for row in out.strip().split("\\n"):
-                    parts = [p.strip() for p in row.split(",")]
-                    if len(parts) != 3:
-                        continue
-                    idx, util, mem_mib = parts
-                    if allowed_gpus is not None and idx.strip() not in allowed_gpus:
-                        continue
-                    labels = {{"device": f"cuda:{{idx}}", "node": hostname}}
-                    lines.append(json.dumps({{
-                        "name": "system.gpu.utilization", "kind": "gauge",
-                        "value": float(util), "time_unix_ms": now_ms,
-                        "unit": "percent", "labels": labels,
-                    }}))
-                    lines.append(json.dumps({{
-                        "name": "system.gpu.memory.used_bytes", "kind": "gauge",
-                        "value": float(mem_mib) * 1048576, "time_unix_ms": now_ms,
-                        "unit": "bytes", "labels": labels,
-                    }}))
-            except Exception:
-                pass
+            if allowed_gpus:
+                try:
+                    out = subprocess.check_output(
+                        ["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used",
+                         "--format=csv,noheader,nounits"],
+                        timeout=10, text=True, stderr=subprocess.DEVNULL,
+                    )
+                    for row in out.strip().split("\\n"):
+                        parts = [p.strip() for p in row.split(",")]
+                        if len(parts) != 3:
+                            continue
+                        idx, util, mem_mib = parts
+                        if idx.strip() not in allowed_gpus:
+                            continue
+                        labels = {{"device": f"cuda:{{idx}}", "node": hostname}}
+                        lines.append(json.dumps({{
+                            "name": "system.gpu.utilization", "kind": "gauge",
+                            "value": float(util), "time_unix_ms": now_ms,
+                            "unit": "percent", "labels": labels,
+                        }}))
+                        lines.append(json.dumps({{
+                            "name": "system.gpu.memory.used_bytes", "kind": "gauge",
+                            "value": float(mem_mib) * 1048576, "time_unix_ms": now_ms,
+                            "unit": "bytes", "labels": labels,
+                        }}))
+                except Exception:
+                    pass
             # CPU metrics
             try:
                 cur_total, cur_idle = _read_cpu_times()
