@@ -131,7 +131,7 @@ def query_metrics(
     step_domain: Optional[str] = None,
     since_ms: Optional[int] = None,
     until_ms: Optional[int] = None,
-    max_points: int = Query(default=2000, le=10000),
+    max_points: int = Query(default=2000, ge=1, le=10000),
     _: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     metrics_dir = _metrics_dir_for_job(job_id)
@@ -173,7 +173,7 @@ def query_metrics(
 @router.get("/jobs/{job_id}/metrics/initial")
 def get_initial_metrics(
     job_id: str,
-    max_points: int = Query(default=2000, le=10000),
+    max_points: int = Query(default=2000, ge=1, le=10000),
     _: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     metrics_dir = _metrics_dir_for_job(job_id)
