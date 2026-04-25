@@ -223,7 +223,7 @@ Magnus is actively evolving. If you run into rough edges, have ideas for improve
 or want to contribute code, please open an issue or pull request.
 We appreciate every report, suggestion, and patch.
 
-Reach out directly at parkcai@126.com, we would genuinely love to hear from you.
+Reach out directly at parkcai@126.com -- we would genuinely love to hear from you.
 
 ## License
 
