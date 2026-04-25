@@ -24,7 +24,12 @@ from ..schemas import (
 )
 from .._id_registry import assert_id_available
 from .auth import get_current_user
-from .users import _is_ancestor, _get_all_subordinate_ids
+from .users import _get_all_subordinate_ids
+from ._authz import (
+    assert_can_manage_resource,
+    assert_valid_transfer_target,
+    compute_can_manage,
+)
 from .._magnus_config import magnus_config, is_admin_user
 from library import escape_like
 
@@ -89,18 +94,6 @@ def _cleanup_skill_resources(skill_id: str) -> None:
         shutil.rmtree(resources_dir, ignore_errors=True)
 
 
-def _assert_can_manage(
-    db: Session,
-    skill: models.Skill,
-    current_user: models.User,
-) -> None:
-    is_admin = is_admin_user(current_user)
-    is_owner = skill.user_id == current_user.id
-    is_superior = not is_owner and _is_ancestor(db, current_user.id, skill.user_id)
-    if not (is_admin or is_owner or is_superior):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-
 def _enrich_response(skill: models.Skill, can_manage: bool) -> SkillResponse:
     """将 ORM 对象转为 response，附带文件系统上的 resource 文件。"""
     resp = SkillResponse.model_validate(skill)
@@ -135,7 +128,7 @@ def create_skill(
         assert_id_available(db, skill.id)
 
     if existing:
-        _assert_can_manage(db, existing, current_user)
+        assert_can_manage_resource(db, current_user, existing.user_id, resource_label="skill")
         existing.title = skill.title
         existing.description = skill.description
         existing.updated_at = datetime.now(timezone.utc)
@@ -172,7 +165,7 @@ def delete_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    _assert_can_manage(db, skill, current_user)
+    assert_can_manage_resource(db, current_user, skill.user_id, resource_label="skill")
 
     db.delete(skill)
     db.commit()
@@ -191,14 +184,9 @@ def transfer_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    _assert_can_manage(db, skill, current_user)
+    assert_can_manage_resource(db, current_user, skill.user_id, resource_label="skill")
 
-    new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
-    if not new_owner:
-        raise HTTPException(status_code=404, detail="Target user not found")
-    is_admin = is_admin_user(current_user)
-    if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
-        raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
+    assert_valid_transfer_target(db, current_user, body.new_owner_id)
 
     skill.user_id = body.new_owner_id
     skill.updated_at = datetime.now(timezone.utc)
@@ -244,7 +232,9 @@ def list_skills(
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     result = []
     for skill in items:
-        can_manage = is_admin or skill.user_id == current_user.id or skill.user_id in subordinate_ids
+        can_manage = compute_can_manage(
+            db, current_user, skill.user_id, subordinate_ids=subordinate_ids,
+        )
         resp = SkillResponse.model_validate(skill)
         resp.can_manage = can_manage
         result.append(resp)
@@ -266,8 +256,7 @@ def get_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    is_admin = is_admin_user(current_user)
-    can_manage = is_admin or skill.user_id == current_user.id or _is_ancestor(db, current_user.id, skill.user_id)
+    can_manage = compute_can_manage(db, current_user, skill.user_id)
     return _enrich_response(skill, can_manage)
 
 
@@ -285,7 +274,7 @@ def upload_skill_resource(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    _assert_can_manage(db, skill, current_user)
+    assert_can_manage_resource(db, current_user, skill.user_id, resource_label="skill")
 
     filename = file.filename or ""
     ext = Path(filename).suffix.lower()
@@ -330,7 +319,7 @@ def delete_skill_resource(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    _assert_can_manage(db, skill, current_user)
+    assert_can_manage_resource(db, current_user, skill.user_id, resource_label="skill")
 
     resources_dir = _skill_resources_dir(skill_id)
     file_path = resources_dir / path

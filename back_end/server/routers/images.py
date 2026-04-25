@@ -21,7 +21,12 @@ from ..schemas import (
     TransferRequest,
 )
 from .auth import get_current_user
-from .users import _is_ancestor, _get_all_subordinate_ids
+from .users import _get_all_subordinate_ids
+from ._authz import (
+    assert_can_manage_resource,
+    assert_valid_transfer_target,
+    compute_can_manage,
+)
 from .._magnus_config import magnus_config, is_local_mode, is_admin_user
 from .._resource_manager import resource_manager, _image_to_sif_filename
 from library import escape_like
@@ -143,12 +148,6 @@ def recover_stuck_images() -> None:
         db.close()
 
 
-def _is_admin_or_owner(current_user: models.User, owner_id: str, db: Session) -> bool:
-    if current_user.id == owner_id or is_admin_user(current_user):
-        return True
-    return _is_ancestor(db, current_user.id, owner_id)
-
-
 # ─── 后台拉取任务 ───────────────────────────────────────────────
 
 async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
@@ -266,8 +265,7 @@ async def _begin_pull(
         ).filter(models.CachedImage.id == image_id).first()
         if not img:
             raise HTTPException(status_code=404, detail="Image not found")
-        if not _is_admin_or_owner(current_user, img.user_id, db):
-            raise HTTPException(status_code=403, detail="Only the owner or admin can refresh this image")
+        assert_can_manage_resource(db, current_user, img.user_id, resource_label="cached image")
         if img.status in ("pulling", "refreshing"):
             raise HTTPException(status_code=409, detail="Image is already being pulled/refreshed.")
         img.status = "refreshing"
@@ -279,8 +277,8 @@ async def _begin_pull(
 
         if existing and existing.status in ("pulling", "refreshing"):
             raise HTTPException(status_code=409, detail="Image is currently being pulled/refreshed.")
-        if existing and not _is_admin_or_owner(current_user, existing.user_id, db):
-            raise HTTPException(status_code=403, detail="Only the owner or admin can re-pull this image.")
+        if existing:
+            assert_can_manage_resource(db, current_user, existing.user_id, resource_label="cached image")
         if existing and existing.status == "failed":
             existing.status = "pulling"
             existing.updated_at = datetime.now(timezone.utc)
@@ -403,7 +401,9 @@ def list_images(
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     for resp in combined:
         if resp.user_id:
-            resp.can_manage = is_admin or resp.user_id == current_user.id or resp.user_id in subordinate_ids
+            resp.can_manage = compute_can_manage(
+                db, current_user, resp.user_id, subordinate_ids=subordinate_ids,
+            )
 
     total = len(combined)
     page = combined[skip:skip + limit]
@@ -453,8 +453,7 @@ async def delete_image(
         if not img:
             raise HTTPException(status_code=404, detail="Image not found")
 
-        if not _is_admin_or_owner(current_user, img.user_id, db):
-            raise HTTPException(status_code=403, detail="Only the owner or admin can delete this image")
+        assert_can_manage_resource(db, current_user, img.user_id, resource_label="cached image")
 
         if img.status in ("pulling", "refreshing"):
             raise HTTPException(status_code=409, detail="Cannot delete an image that is being pulled/refreshed.")
@@ -492,18 +491,9 @@ def transfer_image(
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    is_admin = is_admin_user(current_user)
-    is_owner = img.user_id == current_user.id
-    is_superior = not is_owner and _is_ancestor(db, current_user.id, img.user_id)
+    assert_can_manage_resource(db, current_user, img.user_id, resource_label="cached image")
 
-    if not (is_admin or is_owner or is_superior):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-    new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
-    if not new_owner:
-        raise HTTPException(status_code=404, detail="Target user not found")
-    if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
-        raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
+    assert_valid_transfer_target(db, current_user, body.new_owner_id)
 
     img.user_id = body.new_owner_id
     img.updated_at = datetime.now(timezone.utc)

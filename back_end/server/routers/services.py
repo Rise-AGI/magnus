@@ -24,7 +24,12 @@ from .._id_registry import assert_id_available
 from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, validate_cluster_limits
 from .._scheduler import scheduler
 from .auth import get_current_user
-from .users import _is_ancestor, _get_all_subordinate_ids
+from .users import _get_all_subordinate_ids
+from ._authz import (
+    assert_can_manage_resource,
+    assert_valid_transfer_target,
+    compute_can_manage,
+)
 from library import escape_like
 
 logger = logging.getLogger(__name__)
@@ -257,11 +262,7 @@ def create_service(
         raise HTTPException(status_code=400, detail=str(e))
 
     if existing:
-        is_admin = is_admin_user(current_user)
-        is_owner = existing.owner_id == current_user.id
-        is_superior = not is_owner and _is_ancestor(db, current_user.id, existing.owner_id)
-        if not (is_admin or is_owner or is_superior):
-            raise HTTPException(status_code=403, detail="You cannot modify a service created by another user.")
+        assert_can_manage_resource(db, current_user, existing.owner_id, resource_label="service")
 
         was_active = existing.is_active
         will_be_active = data.get("is_active", was_active)
@@ -308,12 +309,7 @@ def delete_service(
     if not svc:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    is_admin = is_admin_user(current_user)
-    is_owner = svc.owner_id == current_user.id
-    is_superior = not is_owner and _is_ancestor(db, current_user.id, svc.owner_id)
-
-    if not (is_admin or is_owner or is_superior):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    assert_can_manage_resource(db, current_user, svc.owner_id, resource_label="service")
 
     _shutdown_service_resources_sync(service_id, db)
 
@@ -335,18 +331,9 @@ def transfer_service(
     if not svc:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    is_admin = is_admin_user(current_user)
-    is_owner = svc.owner_id == current_user.id
-    is_superior = not is_owner and _is_ancestor(db, current_user.id, svc.owner_id)
+    assert_can_manage_resource(db, current_user, svc.owner_id, resource_label="service")
 
-    if not (is_admin or is_owner or is_superior):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-    new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
-    if not new_owner:
-        raise HTTPException(status_code=404, detail="Target user not found")
-    if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
-        raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
+    assert_valid_transfer_target(db, current_user, body.new_owner_id)
 
     svc.owner_id = body.new_owner_id
     svc.updated_at = datetime.now(timezone.utc)
@@ -396,7 +383,9 @@ def list_services(
     result = []
     for svc in items:
         resp = ServiceResponse.model_validate(svc)
-        resp.can_manage = is_admin or svc.owner_id == current_user.id or svc.owner_id in subordinate_ids
+        resp.can_manage = compute_can_manage(
+            db, current_user, svc.owner_id, subordinate_ids=subordinate_ids,
+        )
         result.append(resp)
 
     return {"total": total, "items": result}
@@ -413,9 +402,8 @@ def get_service(
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    is_admin = is_admin_user(current_user)
     resp = ServiceResponse.model_validate(service)
-    resp.can_manage = is_admin or service.owner_id == current_user.id or _is_ancestor(db, current_user.id, service.owner_id)
+    resp.can_manage = compute_can_manage(db, current_user, service.owner_id)
     return resp
 
 

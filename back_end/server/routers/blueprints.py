@@ -23,9 +23,14 @@ from ..schemas import (
 from .._blueprint_manager import blueprint_manager
 from .._id_registry import assert_id_available
 from .auth import get_current_user
-from .users import _is_ancestor, _get_all_subordinate_ids
+from .users import _get_all_subordinate_ids
 from .jobs import create_job
 from .._magnus_config import is_admin_user
+from ._authz import (
+    assert_can_manage_resource,
+    assert_valid_transfer_target,
+    compute_can_manage,
+)
 from library import *
 
 
@@ -110,14 +115,13 @@ def create_blueprint(
         assert_id_available(db, bp.id)
 
     if existing:
-        is_admin = is_admin_user(current_user)
-        is_owner = existing.user_id == current_user.id
-        is_superior = not is_owner and _is_ancestor(db, current_user.id, existing.user_id)
-        if not (is_admin or is_owner or is_superior):
-            raise HTTPException(
-                status_code=403,
-                detail="You cannot modify a blueprint created by another user. Please verify the Blueprint ID.",
-            )
+        assert_can_manage_resource(
+            db,
+            current_user,
+            existing.user_id,
+            resource_label="blueprint",
+            hint="Please verify the Blueprint ID.",
+        )
 
         # Update existing
         existing.title = bp.title
@@ -153,12 +157,7 @@ def delete_blueprint(
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    is_admin = is_admin_user(current_user)
-    is_owner = bp.user_id == current_user.id
-    is_superior = not is_owner and _is_ancestor(db, current_user.id, bp.user_id)
-
-    if not (is_admin or is_owner or is_superior):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    assert_can_manage_resource(db, current_user, bp.user_id, resource_label="blueprint")
 
     db.delete(bp)
     db.commit()
@@ -176,18 +175,9 @@ def transfer_blueprint(
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    is_admin = is_admin_user(current_user)
-    is_owner = bp.user_id == current_user.id
-    is_superior = not is_owner and _is_ancestor(db, current_user.id, bp.user_id)
+    assert_can_manage_resource(db, current_user, bp.user_id, resource_label="blueprint")
 
-    if not (is_admin or is_owner or is_superior):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-    new_owner = db.query(models.User).filter(models.User.id == body.new_owner_id).first()
-    if not new_owner:
-        raise HTTPException(status_code=404, detail="Target user not found")
-    if not is_admin and body.new_owner_id != current_user.id and not _is_ancestor(db, current_user.id, body.new_owner_id):
-        raise HTTPException(status_code=403, detail="Target must be yourself or your subordinate")
+    assert_valid_transfer_target(db, current_user, body.new_owner_id)
 
     bp.user_id = body.new_owner_id
     bp.updated_at = datetime.now(timezone.utc)
@@ -242,7 +232,9 @@ def list_blueprints(
     result = []
     for bp in items:
         resp = BlueprintResponse.model_validate(bp)
-        resp.can_manage = is_admin or bp.user_id == current_user.id or bp.user_id in subordinate_ids
+        resp.can_manage = compute_can_manage(
+            db, current_user, bp.user_id, subordinate_ids=subordinate_ids,
+        )
         result.append(resp)
 
     return {"total": total, "items": result}
@@ -265,9 +257,8 @@ def get_blueprint(
     if not blueprint:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    is_admin = is_admin_user(current_user)
     resp = BlueprintResponse.model_validate(blueprint)
-    resp.can_manage = is_admin or blueprint.user_id == current_user.id or _is_ancestor(db, current_user.id, blueprint.user_id)
+    resp.can_manage = compute_can_manage(db, current_user, blueprint.user_id)
     return resp
 
 
