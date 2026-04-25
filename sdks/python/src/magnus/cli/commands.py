@@ -34,6 +34,9 @@ from .. import (
     get_job_result as api_get_job_result,
     get_job_action as api_get_job_action,
     get_job_logs as api_get_job_logs,
+    get_metric_streams as api_get_metric_streams,
+    get_metric_points as api_get_metric_points,
+    save_metric_chart as api_save_metric_chart,
     terminate_job as api_terminate_job,
     get_cluster_stats as api_get_cluster_stats,
     list_blueprints as api_list_blueprints,
@@ -2331,6 +2334,304 @@ def job_kill_subcmd(
       magnus job kill <job-id>
     """
     _do_kill_job(job_ref=_extract_job_ref(ctx), force=force)
+
+
+# === Metric subcommand ===
+
+_METRIC_DATA_SUFFIXES = {".csv", ".json", ".yaml", ".yml"}
+_METRIC_IMAGE_SUFFIXES = {".png"}
+
+
+def _parse_labels_filter(labels_str: Optional[str]) -> Optional[Dict[str, str]]:
+    if not labels_str:
+        return None
+    try:
+        parsed = json.loads(labels_str)
+    except json.JSONDecodeError as e:
+        raise MagnusError(f"--labels must be valid JSON object: {e}")
+    if not isinstance(parsed, dict):
+        raise MagnusError("--labels must be a JSON object, e.g. '{\"device\":\"cuda:0\"}'")
+    return {str(k): str(v) for k, v in parsed.items()}
+
+
+def _flatten_metric_point(point: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten a metric point's labels for CSV-style output."""
+    out: Dict[str, Any] = {
+        "step": point.get("step"),
+        "value": point.get("value"),
+        "time_unix_ms": point.get("time_unix_ms"),
+    }
+    for k, v in (point.get("labels") or {}).items():
+        out[f"label_{k}"] = v
+    return out
+
+
+def _write_points_csv(points: List[Dict[str, Any]], output: Path) -> None:
+    import csv
+    flat = [_flatten_metric_point(p) for p in points]
+    fieldnames: List[str] = ["step", "value", "time_unix_ms"]
+    seen = set(fieldnames)
+    for row in flat:
+        for k in row.keys():
+            if k not in seen:
+                fieldnames.append(k)
+                seen.add(k)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in flat:
+            writer.writerow({k: row.get(k, "") for k in fieldnames})
+
+
+def _write_points_json(points: List[Dict[str, Any]], output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps({"points": points}, indent=2), encoding="utf-8")
+
+
+def _write_points_yaml(points: List[Dict[str, Any]], output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w", encoding="utf-8") as f:
+        _yaml_dumper.dump({"points": points}, f)
+
+
+def _do_job_metric_streams(job_ref: str, fmt: OutputFormat) -> None:
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+        streams = api_get_metric_streams(resolved_id)
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+    if not streams:
+        print_msg("[dim]No metric streams available for this job.[/dim]")
+        return
+
+    if fmt == "table":
+        table = Table(title=f"Metric streams: {resolved_id}")
+        table.add_column("name", style="cyan")
+        table.add_column("kind")
+        table.add_column("unit")
+        table.add_column("step_domain")
+        table.add_column("labels")
+        table.add_column("points", justify="right")
+        for s in streams:
+            labels = s.get("labels") or {}
+            label_str = ",".join(f"{k}={v}" for k, v in sorted(labels.items())) or "-"
+            table.add_row(
+                str(s.get("name", "")),
+                str(s.get("kind", "")),
+                str(s.get("unit") or "-"),
+                str(s.get("step_domain") or "-"),
+                label_str,
+                str(s.get("point_count", 0)),
+            )
+        console.print(table)
+    else:
+        _output_data(streams, fmt)
+
+
+def _do_job_metric_points(
+    job_ref: str,
+    name: str,
+    labels: Optional[str],
+    step_domain: Optional[str],
+    max_points: int,
+    output: Optional[Path],
+    fmt: OutputFormat,
+) -> None:
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+        labels_dict = _parse_labels_filter(labels)
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+    if output is not None:
+        suffix = output.suffix.lower()
+        if suffix in _METRIC_IMAGE_SUFFIXES:
+            try:
+                api_save_metric_chart(
+                    resolved_id, name, output,
+                    labels=labels_dict, step_domain=step_domain,
+                    max_points=max_points,
+                )
+                print_msg(f"Saved chart to [green]{output}[/green]")
+            except MagnusError as e:
+                print_error(str(e))
+                raise typer.Exit(code=1)
+            except Exception as e:
+                print_error(f"Unexpected error: {e}")
+                raise typer.Exit(code=1)
+            return
+
+        if suffix not in _METRIC_DATA_SUFFIXES:
+            print_error(
+                f"Unsupported output suffix '{suffix}'. "
+                f"Use one of: .csv, .json, .yaml, .yml, .png"
+            )
+            raise typer.Exit(code=1)
+
+    try:
+        points = api_get_metric_points(
+            resolved_id, name,
+            labels=labels_dict, step_domain=step_domain,
+            max_points=max_points,
+        )
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+    if output is not None:
+        suffix = output.suffix.lower()
+        try:
+            if suffix == ".csv":
+                _write_points_csv(points, output)
+            elif suffix == ".json":
+                _write_points_json(points, output)
+            elif suffix in (".yaml", ".yml"):
+                _write_points_yaml(points, output)
+        except OSError as e:
+            print_error(f"Failed to write {output}: {e}")
+            raise typer.Exit(code=1)
+        print_msg(f"Wrote {len(points)} points to [green]{output}[/green]")
+        return
+
+    _output_data({"name": name, "points": points}, fmt)
+
+
+def _extract_metric_args(
+    ctx: typer.Context,
+) -> Tuple[str, Optional[str], Optional[Path], Optional[str], Optional[str], int, Optional[str]]:
+    """Parse `magnus job metric <ref> [name]` plus options out of ctx.args.
+
+    Negative indices like `-1` look like options to Click, so the standard
+    `_JOB_REF_CTX` (ignore_unknown_options + allow_extra_args) routes them into
+    ctx.args. We then walk ctx.args ourselves, collecting positional values
+    and matching known flags `-o/--output`, `--labels`, `--step-domain`,
+    `--max-points`, `-f/--format`. Both `-o` and `--output` aliases work.
+    """
+    args = list(ctx.args)
+    positional: List[str] = []
+    output: Optional[str] = None
+    labels: Optional[str] = None
+    step_domain: Optional[str] = None
+    max_points: int = 2000
+    fmt: Optional[str] = None
+
+    def _take_value(flag: str, idx: int) -> Tuple[str, int]:
+        if idx + 1 >= len(args):
+            print_error(f"Missing value for {flag}")
+            raise typer.Exit(code=1)
+        return args[idx + 1], idx + 2
+
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok in ("-o", "--output"):
+            output, i = _take_value(tok, i)
+        elif tok.startswith("--output="):
+            output = tok.split("=", 1)[1]
+            i += 1
+        elif tok.startswith("-o="):
+            output = tok.split("=", 1)[1]
+            i += 1
+        elif tok == "--labels":
+            labels, i = _take_value(tok, i)
+        elif tok.startswith("--labels="):
+            labels = tok.split("=", 1)[1]
+            i += 1
+        elif tok == "--step-domain":
+            step_domain, i = _take_value(tok, i)
+        elif tok.startswith("--step-domain="):
+            step_domain = tok.split("=", 1)[1]
+            i += 1
+        elif tok == "--max-points":
+            mp, i = _take_value(tok, i)
+            try:
+                max_points = int(mp)
+            except ValueError:
+                print_error(f"--max-points must be an integer, got: {mp}")
+                raise typer.Exit(code=1)
+        elif tok.startswith("--max-points="):
+            try:
+                max_points = int(tok.split("=", 1)[1])
+            except ValueError:
+                print_error(f"--max-points must be an integer, got: {tok}")
+                raise typer.Exit(code=1)
+            i += 1
+        elif tok in ("-f", "--format"):
+            fmt, i = _take_value(tok, i)
+        elif tok.startswith("--format="):
+            fmt = tok.split("=", 1)[1]
+            i += 1
+        else:
+            positional.append(tok)
+            i += 1
+
+    if not positional:
+        print_error("Missing argument: JOB_REF (job index like -1, -2 or job ID)")
+        raise typer.Exit(code=1)
+
+    job_ref = positional[0]
+    metric_name = positional[1] if len(positional) > 1 else None
+
+    output_path: Optional[Path] = Path(output) if output else None
+    return job_ref, metric_name, output_path, labels, step_domain, max_points, fmt
+
+
+@job_app.command(name="metric", context_settings=_JOB_REF_CTX)
+def job_metric_subcmd(ctx: typer.Context):
+    """
+    List metric streams or fetch metric points / chart for a job.
+
+    Without METRIC_NAME, lists all available metric streams for the job.
+    With METRIC_NAME, prints data points to stdout (YAML by default).
+
+    Use -o / --output to write to file:
+      *.csv / *.json / *.yaml -> raw data
+      *.png                   -> server-rendered chart
+
+    Other options:
+      --labels      JSON object filter, e.g. '{"global_rank":"0"}'
+      --step-domain Filter by step_domain
+      --max-points  Server-side downsample target (1..10000), default 2000
+      -f / --format Output format for stdout: yaml, json, table
+
+    JOB_REF: Job index (-1, -2, ...) or job ID.
+
+    Examples:
+      magnus job metric -1
+      magnus job metric -1 train.loss
+      magnus job metric -1 train.loss --labels '{"global_rank":"0"}'
+      magnus job metric -1 train.loss -o loss.csv
+      magnus job metric -1 train.loss -o loss.png
+      magnus job metric -1 train.loss --output loss.png
+    """
+    job_ref, metric_name, output, labels, step_domain, max_points, fmt_opt = (
+        _extract_metric_args(ctx)
+    )
+    fmt: OutputFormat = fmt_opt if fmt_opt in ("table", "yaml", "json") else _auto_format()  # type: ignore[assignment]
+
+    if metric_name is None:
+        _do_job_metric_streams(job_ref, fmt)
+        return
+
+    _do_job_metric_points(
+        job_ref=job_ref,
+        name=metric_name,
+        labels=labels,
+        step_domain=step_domain,
+        max_points=max_points,
+        output=output,
+        fmt=fmt,
+    )
 
 
 @job_app.command(

@@ -37,6 +37,7 @@ The CLI API is consistent with the Python SDK. The same operations have the same
     - [magnus job result](#magnus-job-result)
     - [magnus job action](#magnus-job-action)
     - [magnus job kill](#magnus-job-kill)
+    - [magnus job metric](#magnus-job-metric)
   - [magnus blueprint](#magnus-blueprint)
     - [magnus blueprint list](#magnus-blueprint-list)
     - [magnus blueprint get](#magnus-blueprint-get)
@@ -1215,6 +1216,10 @@ All synchronous APIs have a corresponding `_async` async version.
 | `get_job_result(job_id)` | Get job result | `Optional[str]` |
 | `get_job_action(job_id)` | Get job action | `Optional[str]` |
 | `get_job_logs(job_id, page)` | Get job logs | `{logs, page, total_pages}` |
+| `get_metric_streams(job_id)` | List metric streams for a job | `List[Dict]` |
+| `get_metric_points(job_id, name, labels=, as_numpy=False, ...)` | Get raw metric points | `List[Dict]` or `(steps, values, times)` ndarray tuple |
+| `get_metric_chart(job_id, name, ...)` | Server-rendered metric PNG | `bytes` |
+| `save_metric_chart(job_id, name, output, ...)` | Server-rendered PNG written to disk | `Path` |
 | `terminate_job(job_id)` | Terminate a job | Status info |
 | `launch_blueprint(id, args, ...)` | Submit a blueprint job, return immediately | Job ID |
 | `run_blueprint(id, args, timeout, ...)` | Submit a blueprint and wait for completion | `Optional[str]` |
@@ -1426,6 +1431,26 @@ magnus job kill -1 -f            # skip confirmation
 
 **Options**:
 - `-f, --force`: skip confirmation
+
+#### magnus job metric
+
+List metric streams for a job, fetch raw data points, or save a server-rendered chart. The output suffix dispatches the format: `.csv` / `.json` / `.yaml` for raw data, `.png` for a chart.
+
+```bash
+magnus job metric -1                                  # list streams
+magnus job metric -1 train.loss                       # print points (YAML when piped)
+magnus job metric -1 train.loss -o loss.csv          # save CSV (labels expand to label_* columns)
+magnus job metric -1 train.loss -o loss.png          # save server-rendered PNG
+magnus job metric -1 train.loss --output loss.png    # --output alias
+magnus job metric -1 train.loss --labels '{"global_rank":"0"}'
+```
+
+**Options**:
+- `-o, --output`: write to file; suffix decides format (.csv/.json/.yaml = data, .png = chart)
+- `--labels`: filter by labels (JSON object)
+- `--step-domain`: filter by step_domain
+- `--max-points`: server-side downsample target (1..10000), default 2000
+- `-f, --format`: stdout output format (yaml/json/table)
 
 ### magnus blueprint
 

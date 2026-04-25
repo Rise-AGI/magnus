@@ -10,6 +10,7 @@ dependencies = [
     "fastmcp>=2.14.2",
     "httpx[socks]>=0.28.1",
     "magnus-sdk>=0.7.9",
+    "matplotlib>=3.10.0",
     "openai>=1.0.0",
     "pyjwt>=2.10.1",
     "pypdf>=5.0.0",

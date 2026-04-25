@@ -887,7 +887,73 @@ Job Detail 页面的"指标"tab，基于 recharts：
 - Running 状态下自动轮询刷新
 - 空数据状态有引导文案
 
-### 17.7 已知限制与演进方向
+### 17.7 SDK 与 CLI 访问
+
+除 Web UI 外，Magnus 同时通过 Python SDK 和 CLI 暴露指标，便于以编程方式（如 notebook 或训练 agent）查阅 job 数据。
+
+#### Python SDK
+
+```python
+from magnus import (
+    get_metric_streams,
+    get_metric_points,
+    get_metric_chart,
+    save_metric_chart,
+)
+
+# 1. 列出某个 job 产生的全部指标流
+streams = get_metric_streams(job_id)
+# -> [{name, kind, unit, step_domain, labels, point_count, has_step}, ...]
+
+# 2. 拉取原始数据点（dict 列表）
+points = get_metric_points(job_id, "train.loss")
+
+# 3. 拉取数据点为 numpy 数组（numpy 是惰性可选依赖）
+steps, values, times = get_metric_points(
+    job_id, "train.loss",
+    labels={"global_rank": "0"},
+    as_numpy=True,
+)
+# 没有 step 轴的点在 steps 中以 NaN 表示。
+
+# 4. 拿到服务器渲染的 PNG 图
+png_bytes = get_metric_chart(job_id, "train.loss")
+
+# 5. 一步保存图到磁盘
+from pathlib import Path
+save_metric_chart(job_id, "train.loss", Path("loss.png"))
+```
+
+异步变体（`get_metric_streams_async`、`get_metric_points_async`、`get_metric_chart_async`、`save_metric_chart_async`）可用于异步管道。`numpy` 仅在 `as_numpy=True` 时惰性导入。
+
+#### CLI
+
+```bash
+magnus job metric -1                                  # 列出指标流（默认 table；管道下输出 YAML）
+magnus job metric -1 train.loss                       # 打印数据点（YAML / JSON 通过 -f 切换）
+magnus job metric -1 train.loss --labels '{"global_rank":"0"}'
+magnus job metric -1 train.loss -o loss.csv          # 写入数据：CSV / JSON / YAML
+magnus job metric -1 train.loss -o loss.png          # 写入服务器渲染图
+magnus job metric -1 train.loss --output loss.png    # 长格式别名
+```
+
+输出文件后缀决定格式：
+
+- `.csv` / `.json` / `.yaml` / `.yml`：原始数据点（CSV 把 labels 展开为 `label_*` 列）
+- `.png`：服务器渲染折线图（每个 labels 组合一条线，有 step 时使用 step 轴，否则使用时间轴）
+
+#### 渲染所用的服务器端点
+
+CLI / SDK 的图表 helper 代理到一个新增端点：
+
+```text
+GET /api/jobs/{job_id}/metrics/render?name=...&labels=...&step_domain=...
+    &since_ms=...&until_ms=...&max_points=2000&format=png
+```
+
+渲染使用 matplotlib 的 `Agg` backend，并在线程池里执行（`asyncio.to_thread`），保证 FastAPI event loop 不被阻塞。job 没有指标数据时端点返回一张 "no data" 占位 PNG —— 比 404 对在 notebook 里直接嵌图的用户更友好。
+
+### 17.8 已知限制与演进方向
 
 | 限制 | 影响 | 演进路径 |
 |------|------|---------|

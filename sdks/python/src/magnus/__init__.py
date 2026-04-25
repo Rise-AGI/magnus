@@ -1,6 +1,7 @@
 # sdks/python/src/magnus/__init__.py
 from importlib.metadata import version as _pkg_version
 from typing import Optional, Dict, Any, Union, Literal, List
+from pathlib import Path
 from enum import Enum
 
 from .exceptions import (
@@ -74,6 +75,14 @@ __all__ = [
     "get_job_action_async",
     "get_job_logs",
     "get_job_logs_async",
+    "get_metric_streams",
+    "get_metric_streams_async",
+    "get_metric_points",
+    "get_metric_points_async",
+    "get_metric_chart",
+    "get_metric_chart_async",
+    "save_metric_chart",
+    "save_metric_chart_async",
     "terminate_job",
     "terminate_job_async",
     "get_cluster_stats",
@@ -204,6 +213,30 @@ def get_job_logs(job_id: str, page: int = -1, timeout: float = 10.0) -> Dict[str
 
 async def get_job_logs_async(job_id: str, page: int = -1, timeout: float = 10.0) -> Dict[str, Any]:
     return await default_client.get_job_logs_async(job_id, page, timeout)
+
+def get_metric_streams(job_id: str, timeout: float = 10.0) -> List[Dict[str, Any]]:
+    return default_client.get_metric_streams(job_id, timeout)
+
+async def get_metric_streams_async(job_id: str, timeout: float = 10.0) -> List[Dict[str, Any]]:
+    return await default_client.get_metric_streams_async(job_id, timeout)
+
+def get_metric_points(job_id: str, name: str, labels: Optional[Dict[str, str]] = None, since_ms: Optional[int] = None, until_ms: Optional[int] = None, step_domain: Optional[str] = None, max_points: int = 2000, as_numpy: bool = False, timeout: float = 30.0) -> Any:
+    return default_client.get_metric_points(job_id, name, labels, since_ms, until_ms, step_domain, max_points, as_numpy, timeout)
+
+async def get_metric_points_async(job_id: str, name: str, labels: Optional[Dict[str, str]] = None, since_ms: Optional[int] = None, until_ms: Optional[int] = None, step_domain: Optional[str] = None, max_points: int = 2000, as_numpy: bool = False, timeout: float = 30.0) -> Any:
+    return await default_client.get_metric_points_async(job_id, name, labels, since_ms, until_ms, step_domain, max_points, as_numpy, timeout)
+
+def get_metric_chart(job_id: str, name: str, labels: Optional[Dict[str, str]] = None, since_ms: Optional[int] = None, until_ms: Optional[int] = None, step_domain: Optional[str] = None, max_points: int = 2000, format: str = "png", timeout: float = 60.0) -> bytes:
+    return default_client.get_metric_chart(job_id, name, labels, since_ms, until_ms, step_domain, max_points, format, timeout)
+
+async def get_metric_chart_async(job_id: str, name: str, labels: Optional[Dict[str, str]] = None, since_ms: Optional[int] = None, until_ms: Optional[int] = None, step_domain: Optional[str] = None, max_points: int = 2000, format: str = "png", timeout: float = 60.0) -> bytes:
+    return await default_client.get_metric_chart_async(job_id, name, labels, since_ms, until_ms, step_domain, max_points, format, timeout)
+
+def save_metric_chart(job_id: str, name: str, output: Path, labels: Optional[Dict[str, str]] = None, since_ms: Optional[int] = None, until_ms: Optional[int] = None, step_domain: Optional[str] = None, max_points: int = 2000, format: str = "png", timeout: float = 60.0) -> Path:
+    return default_client.save_metric_chart(job_id, name, output, labels, since_ms, until_ms, step_domain, max_points, format, timeout)
+
+async def save_metric_chart_async(job_id: str, name: str, output: Path, labels: Optional[Dict[str, str]] = None, since_ms: Optional[int] = None, until_ms: Optional[int] = None, step_domain: Optional[str] = None, max_points: int = 2000, format: str = "png", timeout: float = 60.0) -> Path:
+    return await default_client.save_metric_chart_async(job_id, name, output, labels, since_ms, until_ms, step_domain, max_points, format, timeout)
 
 def get_cluster_stats(timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.get_cluster_stats(timeout)

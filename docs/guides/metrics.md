@@ -887,7 +887,73 @@ The "Metrics" tab on the Job Detail page, based on recharts:
 - Auto-polls and refreshes in Running state
 - Empty-data state has guidance copy
 
-### 17.7 Known Limitations and Evolution Directions
+### 17.7 SDK and CLI Access
+
+In addition to the Web UI, Magnus exposes metrics via the Python SDK and CLI so jobs can be inspected programmatically (e.g. from notebooks or training agents).
+
+#### Python SDK
+
+```python
+from magnus import (
+    get_metric_streams,
+    get_metric_points,
+    get_metric_chart,
+    save_metric_chart,
+)
+
+# 1. List all metric streams produced by a job
+streams = get_metric_streams(job_id)
+# -> [{name, kind, unit, step_domain, labels, point_count, has_step}, ...]
+
+# 2. Fetch raw points (list of dicts)
+points = get_metric_points(job_id, "train.loss")
+
+# 3. Fetch points as numpy arrays (numpy is a lazy optional dep)
+steps, values, times = get_metric_points(
+    job_id, "train.loss",
+    labels={"global_rank": "0"},
+    as_numpy=True,
+)
+# steps holds NaN for points that have no step axis.
+
+# 4. Get a server-rendered PNG chart
+png_bytes = get_metric_chart(job_id, "train.loss")
+
+# 5. Save the chart to disk in one call
+from pathlib import Path
+save_metric_chart(job_id, "train.loss", Path("loss.png"))
+```
+
+Async variants (`get_metric_streams_async`, `get_metric_points_async`, `get_metric_chart_async`, `save_metric_chart_async`) are available for async pipelines. `numpy` is imported lazily and is only required when `as_numpy=True`.
+
+#### CLI
+
+```bash
+magnus job metric -1                                  # list streams (table by default; YAML when piped)
+magnus job metric -1 train.loss                       # print points (YAML / JSON via -f)
+magnus job metric -1 train.loss --labels '{"global_rank":"0"}'
+magnus job metric -1 train.loss -o loss.csv          # write data: CSV / JSON / YAML
+magnus job metric -1 train.loss -o loss.png          # write server-rendered chart
+magnus job metric -1 train.loss --output loss.png    # same, long-form alias
+```
+
+Output suffix dispatches the format:
+
+- `.csv` / `.json` / `.yaml` / `.yml`: raw data points (CSV flattens labels into `label_*` columns)
+- `.png`: server-rendered line chart (one line per labels combo, axis = step if available else time)
+
+#### Server endpoint for renders
+
+The CLI / SDK chart helpers proxy to a single new endpoint:
+
+```text
+GET /api/jobs/{job_id}/metrics/render?name=...&labels=...&step_domain=...
+    &since_ms=...&until_ms=...&max_points=2000&format=png
+```
+
+Rendering uses matplotlib's `Agg` backend and runs on a thread-pool (`asyncio.to_thread`) so the FastAPI event loop is never blocked. When a job has no metrics, the endpoint returns a "no data" placeholder PNG — friendlier than a 404 for users embedding the URL in notebooks.
+
+### 17.8 Known Limitations and Evolution Directions
 
 | Limitation | Impact | Evolution path |
 |------|------|---------|

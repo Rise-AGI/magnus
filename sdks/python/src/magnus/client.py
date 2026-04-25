@@ -926,6 +926,216 @@ class MagnusClient:
     ) -> Dict[str, Any]:
         return await asyncio.to_thread(self.get_job_logs, job_id, page, timeout)
 
+    # === Metrics Methods ===
+
+    @staticmethod
+    def _build_metric_query_params(
+        name: Optional[str],
+        labels: Optional[Dict[str, str]],
+        since_ms: Optional[int],
+        until_ms: Optional[int],
+        step_domain: Optional[str],
+        max_points: int,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"max_points": max_points}
+        if name is not None:
+            params["name"] = name
+        if labels:
+            params["labels"] = json.dumps(labels)
+        if since_ms is not None:
+            params["since_ms"] = since_ms
+        if until_ms is not None:
+            params["until_ms"] = until_ms
+        if step_domain is not None:
+            params["step_domain"] = step_domain
+        return params
+
+    def get_metric_streams(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        try:
+            resp = self.http.get(f"/jobs/{job_id}/metrics/streams", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while listing metric streams.")
+        except httpx.TransportError as e:
+            raise self._network_error("listing metric streams", e)
+
+    async def get_metric_streams_async(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self.get_metric_streams, job_id, timeout)
+
+    def get_metric_points(
+        self,
+        job_id: str,
+        name: str,
+        labels: Optional[Dict[str, str]] = None,
+        since_ms: Optional[int] = None,
+        until_ms: Optional[int] = None,
+        step_domain: Optional[str] = None,
+        max_points: int = 2000,
+        as_numpy: bool = False,
+        timeout: float = 30.0,
+    ) -> Any:
+        """Fetch raw points for a metric stream.
+
+        Returns a list of dicts (one per point) by default. When `as_numpy=True`,
+        returns a tuple `(steps, values, times)` of three numpy arrays of the
+        same length; `steps` contains NaN where a point has no step. Numpy is
+        imported lazily — pip install numpy is only required when `as_numpy=True`.
+        """
+        params = self._build_metric_query_params(
+            name, labels, since_ms, until_ms, step_domain, max_points,
+        )
+        try:
+            resp = self.http.get(
+                f"/jobs/{job_id}/metrics/query", params=params, timeout=timeout,
+            )
+            self._handle_error(resp)
+            payload = resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while querying metric points.")
+        except httpx.TransportError as e:
+            raise self._network_error("querying metric points", e)
+
+        points: List[Dict[str, Any]] = payload.get("points", []) or []
+
+        if not as_numpy:
+            return points
+
+        try:
+            import numpy as np  # type: ignore
+        except ImportError as e:
+            raise MagnusError(
+                "numpy is required for as_numpy=True; pip install numpy"
+            ) from e
+
+        n = len(points)
+        steps = np.full(n, np.nan, dtype=float)
+        values = np.empty(n, dtype=float)
+        times = np.empty(n, dtype=np.int64)
+        for i, p in enumerate(points):
+            v = p.get("value")
+            values[i] = float("nan") if v is None else float(v)
+            t = p.get("time_unix_ms")
+            times[i] = 0 if t is None else int(t)
+            s = p.get("step")
+            if s is not None:
+                steps[i] = float(s)
+        return steps, values, times
+
+    async def get_metric_points_async(
+        self,
+        job_id: str,
+        name: str,
+        labels: Optional[Dict[str, str]] = None,
+        since_ms: Optional[int] = None,
+        until_ms: Optional[int] = None,
+        step_domain: Optional[str] = None,
+        max_points: int = 2000,
+        as_numpy: bool = False,
+        timeout: float = 30.0,
+    ) -> Any:
+        return await asyncio.to_thread(
+            self.get_metric_points,
+            job_id, name, labels, since_ms, until_ms,
+            step_domain, max_points, as_numpy, timeout,
+        )
+
+    def get_metric_chart(
+        self,
+        job_id: str,
+        name: str,
+        labels: Optional[Dict[str, str]] = None,
+        since_ms: Optional[int] = None,
+        until_ms: Optional[int] = None,
+        step_domain: Optional[str] = None,
+        max_points: int = 2000,
+        format: str = "png",
+        timeout: float = 60.0,
+    ) -> bytes:
+        """Fetch a server-rendered chart of the metric. Returns image bytes."""
+        params = self._build_metric_query_params(
+            name, labels, since_ms, until_ms, step_domain, max_points,
+        )
+        params["format"] = format
+        try:
+            resp = self.http.get(
+                f"/jobs/{job_id}/metrics/render", params=params, timeout=timeout,
+            )
+            self._handle_error(resp)
+            return resp.content
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while rendering metric chart.")
+        except httpx.TransportError as e:
+            raise self._network_error("rendering metric chart", e)
+
+    async def get_metric_chart_async(
+        self,
+        job_id: str,
+        name: str,
+        labels: Optional[Dict[str, str]] = None,
+        since_ms: Optional[int] = None,
+        until_ms: Optional[int] = None,
+        step_domain: Optional[str] = None,
+        max_points: int = 2000,
+        format: str = "png",
+        timeout: float = 60.0,
+    ) -> bytes:
+        return await asyncio.to_thread(
+            self.get_metric_chart,
+            job_id, name, labels, since_ms, until_ms,
+            step_domain, max_points, format, timeout,
+        )
+
+    def save_metric_chart(
+        self,
+        job_id: str,
+        name: str,
+        output: Path,
+        labels: Optional[Dict[str, str]] = None,
+        since_ms: Optional[int] = None,
+        until_ms: Optional[int] = None,
+        step_domain: Optional[str] = None,
+        max_points: int = 2000,
+        format: str = "png",
+        timeout: float = 60.0,
+    ) -> Path:
+        """Convenience wrapper: render via server and write bytes to `output`."""
+        png = self.get_metric_chart(
+            job_id, name, labels, since_ms, until_ms,
+            step_domain, max_points, format, timeout,
+        )
+        output = Path(output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(png)
+        return output
+
+    async def save_metric_chart_async(
+        self,
+        job_id: str,
+        name: str,
+        output: Path,
+        labels: Optional[Dict[str, str]] = None,
+        since_ms: Optional[int] = None,
+        until_ms: Optional[int] = None,
+        step_domain: Optional[str] = None,
+        max_points: int = 2000,
+        format: str = "png",
+        timeout: float = 60.0,
+    ) -> Path:
+        return await asyncio.to_thread(
+            self.save_metric_chart,
+            job_id, name, output, labels, since_ms, until_ms,
+            step_domain, max_points, format, timeout,
+        )
+
     def get_cluster_stats(
         self,
         timeout: float = 10.0,
