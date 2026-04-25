@@ -251,23 +251,38 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
   const clearError = (field: string) => { if (errorField === field) { setErrorField(null); setErrorMessage(null); } };
   const scrollToError = (id: string) => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
 
+  const gitErrorMessage = useCallback((raw: string): string => {
+    const map: Record<string, string> = {
+      upstream_rate_limited: t("jobForm.error.upstreamRateLimited"),
+      upstream_unreachable: t("jobForm.error.upstreamUnreachable"),
+      upstream_timeout: t("jobForm.error.upstreamTimeout"),
+      repo_not_found: t("jobForm.error.repoNotFound"),
+      permission_denied: t("jobForm.error.permissionDenied"),
+      git_error: t("jobForm.error.gitError"),
+    };
+    if (map[raw]) return map[raw];
+    if (raw.toLowerCase().includes("timed out")) return t("jobForm.error.upstreamTimeout");
+    return t("jobForm.error.gitError");
+  }, [t]);
+
   const fetchBranches = useCallback(async () => {
     if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace required"); return; }
     if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo required"); return; }
     setLoading(true); setErrorField(null); setErrorMessage(null);
-    if (!initialData) { setBranches([]); setCommits([]); setSelectedBranch(""); setSelectedCommit(""); } 
-    
+    if (!initialData) { setBranches([]); setCommits([]); setSelectedBranch(""); setSelectedCommit(""); }
+
     try {
       const data = await client(`/api/github/${namespace}/${repoName}/branches`);
       setBranches(data);
       setHasScanned(true);
       if (!initialData && data.length > 0) setSelectedBranch(data[0].name);
-    } catch (e: any) { setErrorMessage(e.message); setHasScanned(false); } finally { setLoading(false); }
+    } catch (e: any) { setErrorMessage(gitErrorMessage(e.message || "git_error")); setHasScanned(false); } finally { setLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [namespace, repoName, initialData]);
 
   useEffect(() => {
     if (initialData) { setHasScanned(true); fetchBranches(); }
-  }, [initialData, fetchBranches]); 
+  }, [initialData, fetchBranches]);
 
   useEffect(() => {
     if (!selectedBranch || !hasScanned) return;
@@ -276,9 +291,13 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
         const data = await client(`/api/github/${namespace}/${repoName}/commits?branch=${selectedBranch}`);
         setCommits(data);
         if (!initialData && data.length > 0) setSelectedCommit(data[0].sha);
-      } catch (e) { console.error(e); }
+      } catch (e: any) {
+        console.error("Fetch commits failed", e);
+        setErrorMessage(gitErrorMessage(e.message || "git_error"));
+      }
     };
     fetchCommits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranch, hasScanned, namespace, repoName, initialData]);
 
   const handleSave = async () => {

@@ -211,12 +211,15 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
 
   const gitErrorMessage = useCallback((raw: string): string => {
     const map: Record<string, string> = {
+      upstream_rate_limited: t("jobForm.error.upstreamRateLimited"),
+      upstream_unreachable: t("jobForm.error.upstreamUnreachable"),
+      upstream_timeout: t("jobForm.error.upstreamTimeout"),
       repo_not_found: t("jobForm.error.repoNotFound"),
-      access_denied: t("jobForm.error.accessDenied"),
+      permission_denied: t("jobForm.error.permissionDenied"),
       git_error: t("jobForm.error.gitError"),
     };
     if (map[raw]) return map[raw];
-    if (raw.toLowerCase().includes("timed out")) return t("jobForm.error.gitTimeout");
+    if (raw.toLowerCase().includes("timed out")) return t("jobForm.error.upstreamTimeout");
     return t("jobForm.error.gitError");
   }, [t]);
 
@@ -250,7 +253,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     } finally {
       setLoading(false); 
     }
-  }, [namespace, repoName, mode, gitErrorMessage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [namespace, repoName, mode]);
 
   // Init for Clone Mode (run once on mount)
   const cloneInitRef = useRef(false);
@@ -289,7 +293,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     };
 
     fetchCommits();
-  }, [selectedBranch, hasScanned, namespace, repoName, mode, gitErrorMessage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranch, hasScanned, namespace, repoName, mode]);
 
   const handleLaunch = async () => {
     setErrorField(null); setErrorMessage(null);

@@ -164,8 +164,10 @@ const translations = {
   "jobForm.launchJob": { zh: "启动任务", en: "Launch Job" },
   "jobForm.reLaunch": { zh: "重新启动", en: "Re-Launch" },
   "jobForm.error.repoNotFound": { zh: "仓库不存在，请检查命名空间和仓库名称", en: "Repository not found. Please check namespace and repo name." },
-  "jobForm.error.accessDenied": { zh: "无权访问该仓库", en: "Access denied to this repository." },
-  "jobForm.error.gitTimeout": { zh: "Git 操作超时，请稍后重试", en: "Git operation timed out. Please try again." },
+  "jobForm.error.permissionDenied": { zh: "无权访问该仓库", en: "Access denied to this repository." },
+  "jobForm.error.upstreamRateLimited": { zh: "Git 服务繁忙，请稍后重试", en: "Git service is busy, please retry shortly." },
+  "jobForm.error.upstreamUnreachable": { zh: "无法连接到 Git 服务，请检查网络或稍后重试", en: "Unable to reach Git service, please check network or retry shortly." },
+  "jobForm.error.upstreamTimeout": { zh: "Git 请求超时，请稍后重试", en: "Git request timed out, please retry shortly." },
   "jobForm.error.gitError": { zh: "Git 操作失败，请稍后重试", en: "Git operation failed. Please try again." },
 
   // ===== Job Priority Labels =====
