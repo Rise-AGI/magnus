@@ -84,6 +84,7 @@ All paths are based on `{magnus_root}/workspace/jobs/{job_id}/` (abbreviated bel
 | `{work}/slurm/output.txt` | submit → permanent | SLURM | API (logs) | sbatch --output points here |
 | `{work}/.magnus_user_script.sh` | wrapper exec → cleanup | wrapper.py | container (bind) | user entry script |
 | `{work}/.magnus_success` | epilogue → sync_reality | wrapper.py | scheduler | success marker; its existence means SUCCESS |
+| `{work}/.magnus_oom` | epilogue (on non-zero ret) → sync_reality / cleanup | wrapper.py (cgroup memory.events probe) | scheduler | OOM marker; its existence means the kernel OOM-killed something inside the job's cgroup. Scheduler rewrites `job.result` to a memory-limit message instead of the generic FAILED string. Docker mode uses `docker inspect .State.OOMKilled` instead of this file. |
 | `{work}/.magnus_result` | user writes inside container → API reads | user code | routers/jobs.py | task result content |
 | `{work}/.magnus_action` | user writes inside container → API reads | user code | routers/jobs.py + SDK | client action instruction |
 | `{work}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | writable layer, deleted after job ends |

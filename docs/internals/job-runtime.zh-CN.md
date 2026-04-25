@@ -84,6 +84,7 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 | `{work}/slurm/output.txt` | submit → 永久 | SLURM | API (日志) | sbatch --output 指向此处 |
 | `{work}/.magnus_user_script.sh` | wrapper 执行 → cleanup | wrapper.py | 容器 (bind) | 用户入口脚本 |
 | `{work}/.magnus_success` | epilogue → sync_reality | wrapper.py | scheduler | 成功标记，存在即 SUCCESS |
+| `{work}/.magnus_oom` | epilogue（仅在 ret≠0 时写）→ sync_reality / cleanup | wrapper.py（探测 cgroup memory.events） | scheduler | OOM 标记，存在即表示 job 所在 cgroup 内发生过内核 OOM-kill；调度器据此把 `job.result` 改写为内存超限提示，覆盖通用 FAILED 字符串。Docker 模式改用 `docker inspect .State.OOMKilled` 取代此文件。 |
 | `{work}/.magnus_result` | 容器内用户写入 → API 读取 | 用户代码 | routers/jobs.py | 任务结果内容 |
 | `{work}/.magnus_action` | 容器内用户写入 → API 读取 | 用户代码 | routers/jobs.py + SDK | 客户端动作指令 |
 | `{work}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | 可写层，job 结束后删除 |

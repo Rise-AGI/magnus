@@ -2,7 +2,7 @@
 # Symmetric interface to SlurmManager for local-mode Docker execution.
 import logging
 import subprocess
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 __all__ = [
@@ -109,6 +109,38 @@ class DockerManager:
         except Exception as e:
             logger.error(f"Failed to check container status '{container_name}': {e}")
             return "UNKNOWN"
+
+    def get_termination_info(self, container_name: str) -> Dict[str, Any]:
+        """Inspect a finished container for OOM-kill and exit code.
+
+        Needed because check_container_status collapses every non-zero exit to "FAILED" and
+        cannot distinguish OOM-kill from a generic crash. Call only after a FAILED verdict.
+
+        Returns {"oom_killed": bool, "exit_code": int}. On any inspect failure the dict falls
+        back to {"oom_killed": False, "exit_code": -1} so the caller degrades to the generic
+        failure message rather than crashing the heartbeat.
+        """
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "--format", "{{.State.OOMKilled}}:{{.State.ExitCode}}", container_name],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                return {"oom_killed": False, "exit_code": -1}
+
+            output = result.stdout.strip()
+            if ":" not in output:
+                return {"oom_killed": False, "exit_code": -1}
+
+            oom_str, exit_code_str = output.rsplit(":", 1)
+            return {
+                "oom_killed": oom_str.strip().lower() == "true",
+                "exit_code": int(exit_code_str),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to inspect termination info for '{container_name}': {e}")
+            return {"oom_killed": False, "exit_code": -1}
 
     def get_container_exit_code(self, container_name: str) -> Optional[int]:
         try:

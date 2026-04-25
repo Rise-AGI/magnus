@@ -201,7 +201,10 @@ class MagnusScheduler:
         else:
             logger.warning(f"Job {job.id} completed but NO success marker found. Marking FAILED.")
             job.status = JobStatus.FAILED
-            job.result = "Job process exited but did not report success (no success marker found)"
+            if self._has_oom_marker(job.id):
+                job.result = self._format_oom_message(job.memory_demand)
+            else:
+                job.result = "Job process exited but did not report success (no success marker found)"
         job.slurm_job_id = None
         self._clean_up_working_table(job.id)
 
@@ -212,6 +215,17 @@ class MagnusScheduler:
             self._sync_reality_docker()
         else:
             self._sync_reality_slurm()
+
+    @staticmethod
+    def _format_oom_message(memory_demand: Optional[str]) -> str:
+        # New jobs always have memory_demand filled (router defaults); guard for legacy NULL rows.
+        shown = memory_demand if memory_demand is not None else "unspecified"
+        return f"Out of memory: job exceeded its memory limit (memory_demand={shown})"
+
+    @staticmethod
+    def _has_oom_marker(job_id: str) -> bool:
+        marker_path = f"{magnus_workspace_path}/jobs/{job_id}/.magnus_oom"
+        return os.path.exists(marker_path)
 
     def _sync_reality_docker(self):
         """同步 Docker 容器状态到数据库（三阶段模式，与 _sync_reality_slurm 对称）"""
@@ -274,7 +288,11 @@ class MagnusScheduler:
                         elif real_status == "FAILED":
                             logger.warning(f"Job {job.id} failed in Docker")
                             job.status = JobStatus.FAILED
-                            job.result = "Container exited with non-zero status while starting"
+                            term_info = self.docker_manager.get_termination_info(container_name)
+                            if term_info.get("oom_killed"):
+                                job.result = self._format_oom_message(job.memory_demand)
+                            else:
+                                job.result = "Container exited with non-zero status while starting"
                             job.slurm_job_id = None
                             self.docker_manager.remove_container(container_name)
                             self._clean_up_working_table(job.id)
@@ -297,7 +315,16 @@ class MagnusScheduler:
                         elif real_status in ["FAILED", "UNKNOWN"]:
                             logger.warning(f"Job {job.id} failed in Docker (Status: {real_status})")
                             job.status = JobStatus.FAILED
-                            job.result = f"Container {real_status} during execution"
+                            # UNKNOWN means the container is gone; OOMKilled is only meaningful
+                            # for FAILED (exited non-zero), so only consult inspect there.
+                            term_info = (
+                                self.docker_manager.get_termination_info(container_name)
+                                if real_status == "FAILED" else {"oom_killed": False}
+                            )
+                            if term_info.get("oom_killed"):
+                                job.result = self._format_oom_message(job.memory_demand)
+                            else:
+                                job.result = f"Container {real_status} during execution"
                             job.slurm_job_id = None
                             self.docker_manager.remove_container(container_name)
                             self._clean_up_working_table(job.id)
@@ -352,7 +379,10 @@ class MagnusScheduler:
                     elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
                         logger.warning(f"Job {job.id} failed in SLURM queue (Status: {real_status}).")
                         job.status = JobStatus.FAILED
-                        job.result = f"Scheduler reported {real_status} while job was queued"
+                        if self._has_oom_marker(job.id):
+                            job.result = self._format_oom_message(job.memory_demand)
+                        else:
+                            job.result = f"Scheduler reported {real_status} while job was queued"
                         job.slurm_job_id = None
                         self._clean_up_working_table(job.id)
                     # else: SLURM 仍在排队（PD）或状态未知，保持 QUEUED
@@ -377,7 +407,10 @@ class MagnusScheduler:
                     elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
                         logger.warning(f"Job {job.id} failed in SLURM (Status: {real_status}).")
                         job.status = JobStatus.FAILED
-                        job.result = f"Scheduler reported {real_status} during execution"
+                        if self._has_oom_marker(job.id):
+                            job.result = self._format_oom_message(job.memory_demand)
+                        else:
+                            job.result = f"Scheduler reported {real_status} during execution"
                         job.slurm_job_id = None
                         self._clean_up_working_table(job.id)
                 except Exception as e:
@@ -849,7 +882,7 @@ class MagnusScheduler:
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
         guarantee_file_exist(f"{job_working_table}/metrics", is_directory=True)
 
-        for marker_name in [".magnus_success", ".magnus_result", ".magnus_action"]:
+        for marker_name in [".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom"]:
             marker_path = f"{job_working_table}/{marker_name}"
             if os.path.exists(marker_path):
                 try:
@@ -968,6 +1001,55 @@ def _parse_size_to_mb(size_str):
     if size_str.endswith("M"):
         return int(float(size_str[:-1]))
     return int(size_str)
+
+def _check_oom():
+    # Synchronous (not a daemon thread): if wrapper.py is itself OOM-killed the
+    # marker is lost, but in a same-cgroup OOM the kernel kills the largest
+    # victim first, and wrapper.py memory footprint is tiny. Fail-open on every
+    # error so OOM detection cannot break the wrapper main flow.
+    try:
+        with open("/proc/self/cgroup") as f:
+            line = f.readline().strip()
+        if not line:
+            return False, 0
+        if line.startswith("0::"):
+            # cgroup v2: "0::<rel-path>"
+            rel = line[3:]
+            events_path = "/sys/fs/cgroup" + rel.rstrip("/") + "/memory.events"
+            try:
+                with open(events_path) as ef:
+                    for ev_line in ef:
+                        parts = ev_line.split()
+                        if len(parts) >= 2 and parts[0] == "oom_kill":
+                            count = int(parts[1])
+                            return count > 0, count
+            except Exception:
+                return False, 0
+            return False, 0
+        # cgroup v1: each line is "<id>:<controllers>:<rel-path>"
+        rel = None
+        with open("/proc/self/cgroup") as f:
+            for raw in f:
+                cols = raw.strip().split(":", 2)
+                if len(cols) == 3 and "memory" in cols[1].split(","):
+                    rel = cols[2]
+                    break
+        if not rel:
+            return False, 0
+        oom_ctrl_path = "/sys/fs/cgroup/memory" + rel.rstrip("/") + "/memory.oom_control"
+        try:
+            with open(oom_ctrl_path) as ef:
+                for ev_line in ef:
+                    parts = ev_line.split()
+                    if len(parts) >= 2 and parts[0] == "oom_kill":
+                        count = int(parts[1])
+                        return count > 0, count
+        except Exception:
+            # Old kernels lack oom_kill on v1 (only under_oom) — fail-open.
+            return False, 0
+        return False, 0
+    except Exception:
+        return False, 0
 
 def main():
     work_dir = {repr(job_working_table)}
@@ -1111,6 +1193,17 @@ fi
         if _metrics_thread is not None:
             _metrics_thread.join(timeout=5)
 
+        # Synchronous OOM check before exit (not a daemon — must finish even if
+        # apptainer exited non-zero). Fail-open: any error skips marker write.
+        if ret_code != 0:
+            try:
+                _oom, _oom_count = _check_oom()
+                if _oom:
+                    with open(os.path.join(work_dir, ".magnus_oom"), "w") as _omf:
+                        _omf.write(f"oom_kill_count={{_oom_count}}\\n")
+            except Exception:
+                pass
+
         # Phase 3: Epilogue - only write success marker if user command succeeded
         if ret_code == 0:
             with open(success_marker_path, "w") as f:
@@ -1189,6 +1282,7 @@ if __name__ == "__main__":
             delete_file(os.path.join(job_working_table, "repository"))
             delete_file(os.path.join(job_working_table, "wrapper.py"))
             delete_file(os.path.join(job_working_table, ".magnus_success"))
+            delete_file(os.path.join(job_working_table, ".magnus_oom"))
             delete_file(os.path.join(job_working_table, ".magnus_user_script.sh"))
             delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
             delete_file(os.path.join(job_working_table, ".magnus_tmp"))
