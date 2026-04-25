@@ -18,6 +18,7 @@ from .database import *
 from ._scheduler import scheduler
 from ._service_manager import service_manager
 from ._file_custody_manager import file_custody_manager
+from ._metrics_collector import DockerMetricsCollector
 from .routers.images import recover_stuck_images
 from ._feishu_client import feishu_client
 
@@ -306,6 +307,13 @@ async def lifespan(
     service_manager_task = asyncio.create_task(service_manager.start_background_loop())
     file_custody_task = asyncio.create_task(file_custody_manager.cleanup_loop())
 
+    # Docker mode: host-side system-metrics collector (cgroup + nvidia-smi).
+    # Mirrors the in-container _metrics_sidecar that wrapper.py runs in SLURM mode.
+    docker_metrics_collector: Optional[DockerMetricsCollector] = None
+    if is_local_mode:
+        docker_metrics_collector = DockerMetricsCollector()
+        docker_metrics_collector.start()
+
     # 用户信息刷新：本地模式跳过，HPC 模式首次同步执行（quick fail），然后启动后台循环
     user_refresh_task = None
     if not is_local_auth:
@@ -327,6 +335,8 @@ async def lifespan(
     file_custody_task.cancel()
     if user_refresh_task:
         user_refresh_task.cancel()
+    if docker_metrics_collector is not None:
+        await docker_metrics_collector.stop()
     try:
         await scheduler_task
         await service_manager_task

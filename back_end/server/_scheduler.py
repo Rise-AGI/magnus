@@ -915,17 +915,85 @@ import threading
 import time
 import json
 
-def _read_cpu_times():
+# NOTE: cgroup parsing here is duplicated from
+# back_end/server/_metrics_collector.py (host-side Docker collector).
+# Wrapper.py is built by f-string templating and cannot import that module
+# at runtime on the compute node. Keep both impls behaviorally equivalent.
+def _cg_paths():
+    """Return (v2_rel, v1_mem_rel, v1_cpu_rel) for /proc/self. Any may be None."""
+    v2_rel = None
+    v1_mem = None
+    v1_cpu = None
     try:
-        with open("/proc/stat") as f:
-            parts = f.readline().split()
-        # user, nice, system, idle, iowait, irq, softirq, steal
-        vals = [int(v) for v in parts[1:9]]
-        total = sum(vals)
-        idle = vals[3] + vals[4]  # idle + iowait
-        return total, idle
+        with open("/proc/self/cgroup") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line:
+                    continue
+                if line.startswith("0::"):
+                    v2_rel = line[3:]
+                    continue
+                cols = line.split(":", 2)
+                if len(cols) != 3:
+                    continue
+                ctrls = cols[1].split(",")
+                if "memory" in ctrls and v1_mem is None:
+                    v1_mem = cols[2]
+                if v1_cpu is None and ("cpuacct" in ctrls or "cpu" in ctrls):
+                    v1_cpu = cols[2]
     except Exception:
-        return None, None
+        return None, None, None
+    return v2_rel, v1_mem, v1_cpu
+
+def _read_cpu_usage_usec():
+    """Cumulative cpu usage in microseconds for our cgroup. None on failure."""
+    v2_rel, _, v1_cpu = _cg_paths()
+    if v2_rel is not None:
+        path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/cpu.stat"
+        try:
+            with open(path) as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0] == "usage_usec":
+                        return int(parts[1])
+        except Exception:
+            return None
+        return None
+    if v1_cpu is None:
+        return None
+    # cpuacct.usage is in nanoseconds; convert to microseconds for parity with v2.
+    path = "/sys/fs/cgroup/cpuacct" + v1_cpu.rstrip("/") + "/cpuacct.usage"
+    try:
+        with open(path) as f:
+            return int(f.read().strip()) // 1000
+    except Exception:
+        return None
+
+def _read_memory_used_bytes():
+    v2_rel, v1_mem, _ = _cg_paths()
+    if v2_rel is not None:
+        path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/memory.current"
+        try:
+            with open(path) as f:
+                return int(f.read().strip())
+        except Exception:
+            return None
+    if v1_mem is None:
+        return None
+    path = "/sys/fs/cgroup/memory" + v1_mem.rstrip("/") + "/memory.usage_in_bytes"
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except Exception:
+        return None
+
+def _allocated_cpus():
+    """Return CPU count this task is entitled to. Falls back conservatively."""
+    for var in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE"):
+        v = os.environ.get(var)
+        if v and v.isdigit() and int(v) > 0:
+            return int(v)
+    return os.cpu_count() or 1
 
 def _metrics_sidecar(metrics_dir, stop_event):
     try:
@@ -937,7 +1005,11 @@ def _metrics_sidecar(metrics_dir, stop_event):
         # every visible GPU to a CPU-only job.
         _cvd = os.environ.get("CUDA_VISIBLE_DEVICES") or ""
         allowed_gpus = set(s.strip() for s in _cvd.split(",") if s.strip().isdigit())
-        prev_total, prev_idle = _read_cpu_times()
+        # CPU utilization is now task-quota relative (cgroup) rather than node-wide
+        # (/proc/stat). 100% = task fully using its allocated cores.
+        alloc_cpus = float(_allocated_cpus())
+        prev_usage_usec = _read_cpu_usage_usec()
+        prev_wall_ms = int(time.time() * 1000)
         while not stop_event.wait(5.0):
             now_ms = int(time.time() * 1000)
             lines = []
@@ -969,20 +1041,35 @@ def _metrics_sidecar(metrics_dir, stop_event):
                         }}))
                 except Exception:
                     pass
-            # CPU metrics
+            # CPU metrics (cgroup-based, task-quota relative)
             try:
-                cur_total, cur_idle = _read_cpu_times()
-                if cur_total is not None and prev_total is not None:
-                    dt = cur_total - prev_total
-                    di = cur_idle - prev_idle
-                    if dt > 0:
-                        cpu_pct = round((1.0 - di / dt) * 100, 1)
+                cur_usage_usec = _read_cpu_usage_usec()
+                if cur_usage_usec is not None and prev_usage_usec is not None:
+                    d_usage = cur_usage_usec - prev_usage_usec
+                    d_wall_ms = now_ms - prev_wall_ms
+                    if d_wall_ms > 0 and alloc_cpus > 0 and d_usage >= 0:
+                        cpu_pct = round((d_usage / (d_wall_ms * 1000.0) / alloc_cpus) * 100, 1)
+                        if cpu_pct > 100.0:
+                            cpu_pct = 100.0
                         lines.append(json.dumps({{
                             "name": "system.cpu.utilization", "kind": "gauge",
                             "value": cpu_pct, "time_unix_ms": now_ms,
                             "unit": "percent", "labels": node_labels,
                         }}))
-                prev_total, prev_idle = cur_total, cur_idle
+                if cur_usage_usec is not None:
+                    prev_usage_usec = cur_usage_usec
+                    prev_wall_ms = now_ms
+            except Exception:
+                pass
+            # Memory metrics
+            try:
+                mem_bytes = _read_memory_used_bytes()
+                if mem_bytes is not None:
+                    lines.append(json.dumps({{
+                        "name": "system.memory.used_bytes", "kind": "gauge",
+                        "value": float(mem_bytes), "time_unix_ms": now_ms,
+                        "unit": "bytes", "labels": node_labels,
+                    }}))
             except Exception:
                 pass
             if lines:

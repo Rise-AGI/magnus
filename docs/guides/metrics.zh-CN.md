@@ -807,15 +807,24 @@ v1 不允许在一个点的 `value` 中放入聚合对象。
 
 SLURM 模式下，wrapper.py 内置一个 daemon thread（`_metrics_sidecar`），每 5 秒采集一次：
 
-- `system.gpu.utilization`：通过 `nvidia-smi --query-gpu=utilization.gpu`
+- `system.gpu.utilization`：通过 `nvidia-smi --query-gpu=utilization.gpu`，按 `CUDA_VISIBLE_DEVICES` 过滤
 - `system.gpu.memory.used_bytes`：通过 `nvidia-smi --query-gpu=memory.used`，MiB 换算为 bytes
-- `system.cpu.utilization`：通过 `/proc/stat` 两次采样算 delta
+- `system.cpu.utilization`：cgroup CPU 用时 delta（v2 读 `cpu.stat usage_usec`，v1 读 `cpuacct.usage`）除以申请到的核数。**100% 表示任务完全用满它申请的核数**，而不是整个节点。申请核数按 `SLURM_CPUS_PER_TASK` / `SLURM_CPUS_ON_NODE` / `os.cpu_count()` 优先级取。
+- `system.memory.used_bytes`：cgroup 内存（v2 `memory.current`，v1 `memory.usage_in_bytes`）
 
 写入 `$MAGNUS_METRICS_DIR/system.jsonl`，格式严格遵循本协议。
 
-sidecar 全链路 fail-open：nvidia-smi 不存在（CPU-only 任务）或 `/proc/stat` 不可读时静默跳过。sidecar 在容器启动前开始，容器退出后停止（`threading.Event` + `join(timeout=5)`）。
+sidecar 全链路 fail-open：nvidia-smi 不存在（CPU-only 任务）或某个 cgroup 文件不可读时静默跳过该项指标。sidecar 在容器启动前开始，容器退出后停止（`threading.Event` + `join(timeout=5)`）。
 
-Docker 本地模式不启动 sidecar（无 wrapper.py），但环境变量照常注入，用户代码可自行上报。
+Docker 本地模式容器内无 wrapper.py，由宿主机侧采集器（`back_end/server/_metrics_collector.py`，FastAPI lifespan 启动的单个 asyncio task）为每个 RUNNING 容器采集同样的四个指标。它通过 `docker inspect` 拿到容器的宿主机 PID，读与 SLURM sidecar 相同的 cgroup 文件；GPU 通过解析容器环境中的 `NVIDIA_VISIBLE_DEVICES` 过滤 `nvidia-smi` 输出。产出的文件路径、stream 名、单位、labels 与 SLURM 模式完全一致；API 与前端对两种模式无感。
+
+**Caveat — CPU% 何时退化为节点级语义。** "100% = 任务跑满申请的核数" 这一语义依赖运行时能定位到任务级的 CPU quota 信号。当该信号缺失时，采集器 fail-open，分母回退到 `os.cpu_count()`（节点全核），曲线实际上就成了节点级 CPU%——与 bug 修复前的行为同形。这是已知限制，而非 bug：
+
+- **SLURM 站点使用 `proctrack/linuxproc`**（而非 `task/cgroup`）：任务的 cgroup 即宿主机 root，`cpu.stat usage_usec` 反映的是整机活动且没有暴露 quota；若 `SLURM_CPUS_PER_TASK` / `SLURM_CPUS_ON_NODE` 也未设置，分母会塌陷到 `os.cpu_count()`。
+- **cgroup 文件不可读**（权限或异常的宿主机配置）：无法确定任务级 quota，采集器跳过该信号并回退。
+- **Docker 容器启动时未设置 CPU quota**（默认情况下没传 `--cpus` / `--cpu-quota`）：`cpu.max` 读出 `max`，`_read_allocated_cpus` 返回 `None`，分母回退到 `os.cpu_count()`。
+
+如果你的站点需要 task-relative 的 CPU%，请在 SLURM 上配 `task/cgroup`，或在 Docker 启动时显式传 `--cpus`。
 
 ### 17.3 环境变量
 
@@ -885,7 +894,6 @@ Job Detail 页面的"指标"tab，基于 recharts：
 | API 全量读文件 | 几十卡规模 OK；千卡超算需优化 | 引入 Collector 异步入库（time-series DB）或 seek-based 读取 |
 | 前端一次看一个指标 | 不能同时对比 GPU 利用率和显存 | 多图 dashboard 视图 |
 | 无 step 轴切换 | 训练指标只能按时间看 | 前端加 time/step 轴切换 |
-| Docker 模式无系统指标 | 本地开发无 GPU 监控 | 加 Docker entrypoint wrapper 或 sidecar 容器 |
 | 无告警规则 | 无法自动报警 | 未来版本定义告警阈值语法 |
 
 ---

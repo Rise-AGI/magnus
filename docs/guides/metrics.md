@@ -807,15 +807,24 @@ The following describes Magnus's first production implementation of this protoco
 
 In SLURM mode, wrapper.py has a built-in daemon thread (`_metrics_sidecar`) that samples every 5 seconds:
 
-- `system.gpu.utilization`: via `nvidia-smi --query-gpu=utilization.gpu`
+- `system.gpu.utilization`: via `nvidia-smi --query-gpu=utilization.gpu`, filtered by `CUDA_VISIBLE_DEVICES`
 - `system.gpu.memory.used_bytes`: via `nvidia-smi --query-gpu=memory.used`, converting MiB to bytes
-- `system.cpu.utilization`: via two samples of `/proc/stat` to compute delta
+- `system.cpu.utilization`: cgroup CPU usage delta (`cpu.stat usage_usec` on v2, `cpuacct.usage` on v1) divided by allocated cores. **100% means the task is fully using its allocated cores**, not the whole node. Allocated cores are taken from `SLURM_CPUS_PER_TASK` / `SLURM_CPUS_ON_NODE` / `os.cpu_count()` in that priority order.
+- `system.memory.used_bytes`: cgroup memory (`memory.current` on v2, `memory.usage_in_bytes` on v1)
 
 Writes to `$MAGNUS_METRICS_DIR/system.jsonl`, strictly following this protocol.
 
-The sidecar is fail-open end-to-end: if nvidia-smi does not exist (CPU-only tasks) or `/proc/stat` is not readable, it silently skips. The sidecar starts before the container starts and stops after the container exits (`threading.Event` + `join(timeout=5)`).
+The sidecar is fail-open end-to-end: if nvidia-smi does not exist (CPU-only tasks) or any cgroup file is not readable, it silently skips that metric. The sidecar starts before the container starts and stops after the container exits (`threading.Event` + `join(timeout=5)`).
 
-Docker local mode does not start the sidecar (no wrapper.py), but environment variables are still injected as usual; user code may report on its own.
+In Docker local mode there is no wrapper.py inside the container, so a host-side collector (`back_end/server/_metrics_collector.py`, a single asyncio task started in the FastAPI lifespan) samples the same four metrics for every RUNNING container. It resolves the container's host PID via `docker inspect` and reads the same cgroup files the SLURM sidecar reads, then parses `NVIDIA_VISIBLE_DEVICES` from the container env to filter `nvidia-smi` output. The output schema (file path, stream names, units, labels) is identical to SLURM mode; the API and frontend treat both modes the same.
+
+**Caveat — when CPU% degrades to node-wide semantics.** The "100% = task fully using its allocated cores" guarantee assumes the runtime can locate a per-task CPU quota signal. When that signal is absent, the collector fails open and falls back to `os.cpu_count()` (whole-node cores) as the denominator, so the curve effectively reports node-level CPU% — the same shape as the pre-fix behavior. This is a known limitation, not a bug:
+
+- **SLURM sites using `proctrack/linuxproc`** (rather than `task/cgroup`): the job's cgroup is the host root, so `cpu.stat usage_usec` reflects host-wide activity and no quota is exposed. If `SLURM_CPUS_PER_TASK` / `SLURM_CPUS_ON_NODE` are also unset, the denominator collapses to `os.cpu_count()`.
+- **Cgroup files unreadable** (permissions, unusual host configs): the per-task quota cannot be determined; the collector skips that signal and falls back.
+- **Docker containers started without a CPU quota** (no `--cpus` / `--cpu-quota`, the default): `cpu.max` reads `max`, so `_read_allocated_cpus` returns `None` and the denominator falls back to `os.cpu_count()`.
+
+If task-relative CPU% matters at your site, configure `task/cgroup` on SLURM or pass an explicit `--cpus` to Docker.
 
 ### 17.3 Environment Variables
 
@@ -885,7 +894,6 @@ The "Metrics" tab on the Job Detail page, based on recharts:
 | API reads entire files | OK for tens of GPUs; needs optimization at thousand-GPU supercomputer scale | Introduce Collector async ingest (time-series DB) or seek-based reading |
 | Frontend views one metric at a time | Cannot simultaneously compare GPU utilization and memory | Multi-chart dashboard view |
 | No step-axis toggle | Training metrics can only be viewed by time | Add time/step axis toggle on frontend |
-| Docker mode has no system metrics | No GPU monitoring in local development | Add Docker entrypoint wrapper or sidecar container |
 | No alerting rules | Cannot automatically alert | Future version defines alert threshold syntax |
 
 ---
