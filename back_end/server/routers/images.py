@@ -142,12 +142,8 @@ def recover_stuck_images() -> None:
         db.close()
 
 
-def _is_admin(current_user: models.User) -> bool:
-    return is_admin_user(current_user)
-
-
 def _is_admin_or_owner(current_user: models.User, owner_id: str, db: Session) -> bool:
-    if current_user.id == owner_id or _is_admin(current_user):
+    if current_user.id == owner_id or is_admin_user(current_user):
         return True
     return _is_ancestor(db, current_user.id, owner_id)
 
@@ -402,7 +398,7 @@ def list_images(
     combined.sort(key=_sort_key)
 
     # 4. 计算 can_manage
-    is_admin = _is_admin(current_user)
+    is_admin = is_admin_user(current_user)
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     for resp in combined:
         if resp.user_id:
@@ -495,7 +491,7 @@ def transfer_image(
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    is_admin = _is_admin(current_user)
+    is_admin = is_admin_user(current_user)
     is_owner = img.user_id == current_user.id
     is_superior = not is_owner and _is_ancestor(db, current_user.id, img.user_id)
 
