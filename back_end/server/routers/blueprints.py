@@ -318,7 +318,7 @@ def run_blueprint(
                         base_params = dict(cached)
                         base_params.update(final_params)
                         final_params = base_params
-                except Exception as e:
+                except ValueError as e:
                     logger.warning(f"Failed to merge preferences: {e}")
 
 
@@ -360,7 +360,7 @@ def run_blueprint(
         logger.info(f"Blueprint {blueprint_id} launched job {db_job.id}")
         return {"job_id": db_job.id}
 
-    except Exception as e:
+    except (ValueError, NameError, TypeError) as e:
         logger.error(f"Blueprint run failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     
