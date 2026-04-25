@@ -21,7 +21,7 @@ from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse, TransferRequest
 from .._service_manager import service_manager
 from .._id_registry import assert_id_available
-from .._magnus_config import magnus_config, is_admin_user
+from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, validate_cluster_limits
 from .._scheduler import scheduler
 from .auth import get_current_user
 from .users import _is_ancestor, _get_all_subordinate_ids
@@ -171,6 +171,9 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 entry_command = env_cmd,
                 status = JobStatus.PREPARING,
                 job_type = service.job_type,
+                # NOTE: Service.container_image is schema-nullable (models.py: Mapped[str | None]),
+                # while Job.container_image is NOT NULL. New services route through apply_cluster_defaults,
+                # but legacy rows predating that helper may still hold NULL — keep this fallback as defense in depth.
                 container_image = service.container_image or magnus_config["cluster"]["default_container_image"],
                 system_entry_command = service.system_entry_command,
             )
@@ -245,19 +248,12 @@ def create_service(
     data = service_data.model_dump()
 
     # 所有 Optional 字段填入集群默认值
-    cluster = magnus_config["cluster"]
-    if data.get("cpu_count") is None or data["cpu_count"] == 0:
-        data["cpu_count"] = cluster["default_cpu_count"]
-    if data.get("memory_demand") is None:
-        data["memory_demand"] = cluster["default_memory_demand"]
-    if data.get("ephemeral_storage") is None:
-        data["ephemeral_storage"] = cluster["default_ephemeral_storage"]
-    if data.get("runner") is None:
-        data["runner"] = cluster["default_runner"]
-    if data.get("container_image") is None:
-        data["container_image"] = cluster["default_container_image"]
-    if data.get("system_entry_command") is None:
-        data["system_entry_command"] = cluster["default_system_entry_command"]
+    apply_cluster_defaults(data)
+    # 与 jobs.py 对齐：超额请求转 HTTP 400，避免通过 service revive 绕过 Job 资源上限
+    try:
+        validate_cluster_limits(data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     if existing:
         is_admin = is_admin_user(current_user)

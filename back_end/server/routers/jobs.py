@@ -11,8 +11,7 @@ from .. import database
 from .. import models
 from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
-from .._magnus_config import magnus_config, is_admin_user
-from .._resource_manager import _parse_size_string
+from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, validate_cluster_limits
 from .._scheduler import scheduler
 from .auth import get_current_user
 
@@ -34,31 +33,8 @@ def create_job(
     SDK /jobs/submit 和 Blueprint /run 都收敛到这里。
     负责：填充集群默认值、校验资源上限、创建 ORM 对象、写入数据库。
     """
-    cluster = magnus_config["cluster"]
-    if job_dict.get("cpu_count") is None or job_dict["cpu_count"] == 0:
-        job_dict["cpu_count"] = cluster["default_cpu_count"]
-    if job_dict.get("memory_demand") is None:
-        job_dict["memory_demand"] = cluster["default_memory_demand"]
-
-    # CPU 上限校验
-    max_cpu = cluster["max_cpu_count"]
-    if job_dict["cpu_count"] > max_cpu:
-        raise ValueError(f"cpu_count={job_dict['cpu_count']} exceeds cluster limit ({max_cpu})")
-
-    # 内存上限校验
-    max_mem_str = cluster["max_memory_demand"]
-    requested_mem = _parse_size_string(job_dict["memory_demand"])
-    max_mem = _parse_size_string(max_mem_str)
-    if requested_mem > max_mem:
-        raise ValueError(f"memory_demand={job_dict['memory_demand']} exceeds cluster limit ({max_mem_str})")
-    if job_dict.get("ephemeral_storage") is None:
-        job_dict["ephemeral_storage"] = cluster["default_ephemeral_storage"]
-    if job_dict.get("runner") is None:
-        job_dict["runner"] = cluster["default_runner"]
-    if job_dict.get("container_image") is None:
-        job_dict["container_image"] = cluster["default_container_image"]
-    if job_dict.get("system_entry_command") is None:
-        job_dict["system_entry_command"] = cluster["default_system_entry_command"]
+    apply_cluster_defaults(job_dict)
+    validate_cluster_limits(job_dict)
 
     db_job = models.Job(
         **job_dict,

@@ -11,6 +11,8 @@ __all__ = [
     "is_local_mode",
     "is_local_auth",
     "is_admin_user",
+    "apply_cluster_defaults",
+    "validate_cluster_limits",
 ]
 
 
@@ -274,3 +276,42 @@ def is_admin_user(user) -> bool:
     if is_local_auth:
         return True
     return user.feishu_open_id in admin_open_ids
+
+
+_CLUSTER_DEFAULT_FIELDS = [
+    ("cpu_count", "default_cpu_count"),
+    ("memory_demand", "default_memory_demand"),
+    ("ephemeral_storage", "default_ephemeral_storage"),
+    ("runner", "default_runner"),
+    ("container_image", "default_container_image"),
+    ("system_entry_command", "default_system_entry_command"),
+]
+
+
+def apply_cluster_defaults(data: Dict[str, Any])-> Dict[str, Any]:
+    """填充 Job/Service 提交字典中未指定的资源字段为集群默认值。In-place + return self。"""
+    cluster = magnus_config["cluster"]
+    for field, default_key in _CLUSTER_DEFAULT_FIELDS:
+        if data.get(field) is None or (field == "cpu_count" and data[field] == 0):
+            data[field] = cluster[default_key]
+    return data
+
+
+def validate_cluster_limits(data: Dict[str, Any])-> None:
+    """校验 Job/Service 提交字典中的 cpu_count / memory_demand 不超过集群上限。
+    超限抛 ValueError，由 endpoint 层转为 HTTP 400。
+    Note: lazy import _parse_size_string 以避免与 _resource_manager.py 的循环依赖
+    （_resource_manager 顶层 import 本模块的 magnus_config）。"""
+    from ._resource_manager import _parse_size_string
+
+    cluster = magnus_config["cluster"]
+
+    max_cpu = cluster["max_cpu_count"]
+    if data["cpu_count"] > max_cpu:
+        raise ValueError(f"cpu_count={data['cpu_count']} exceeds cluster limit ({max_cpu})")
+
+    max_mem_str = cluster["max_memory_demand"]
+    requested_mem = _parse_size_string(data["memory_demand"])
+    max_mem = _parse_size_string(max_mem_str)
+    if requested_mem > max_mem:
+        raise ValueError(f"memory_demand={data['memory_demand']} exceeds cluster limit ({max_mem_str})")
