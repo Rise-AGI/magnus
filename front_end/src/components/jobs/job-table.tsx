@@ -62,7 +62,11 @@ export function JobTable({
         {jobs.map((job) => {
           const isActive = ["Pending", "Preparing", "Running", "Paused"].includes(job.status);
           const isOwner = currentUser?.id === job.user?.id;
-          const canTerminate = (isOwner || currentUser?.is_admin) && isActive;
+          // External SLURM tasks are mock entries surfaced from the queue; Magnus has no
+          // record of them and cannot clone or terminate them via /api/jobs/{id}.
+          const isExternal = job.job_type === "N/A";
+          const canTerminate = (isOwner || currentUser?.is_admin) && isActive && !isExternal;
+          const canClone = !isExternal;
 
           return (
             <div
@@ -86,13 +90,15 @@ export function JobTable({
                   <UserAvatar user={job.user} subText={formatBeijingTime(job.created_at)} />
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onClone(job); }}
-                    className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
-                    title={t("jobs.cloneRerun")}
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
+                  {canClone && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onClone(job); }}
+                      className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
+                      title={t("jobs.cloneRerun")}
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  )}
                   {canTerminate && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onTerminate(job); }}
@@ -130,7 +136,11 @@ export function JobTable({
             {jobs.map((job) => {
               const isActive = ["Pending", "Preparing", "Running", "Paused"].includes(job.status);
               const isOwner = currentUser?.id === job.user?.id;
-              const canTerminate = (isOwner || currentUser?.is_admin) && isActive;
+              // External SLURM tasks are mock entries surfaced from the queue; Magnus has no
+              // record of them and cannot clone or terminate them via /api/jobs/{id}.
+              const isExternal = job.job_type === "N/A";
+              const canTerminate = (isOwner || currentUser?.is_admin) && isActive && !isExternal;
+              const canClone = !isExternal;
 
               return (
                 <tr
@@ -221,16 +231,18 @@ export function JobTable({
 
                   <td className="px-6 py-4 align-middle text-right">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onClone(job);
-                        }}
-                        className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
-                        title={t("jobs.cloneRerun")}
-                      >
-                        <RefreshCw className="w-4 h-4" />
-                      </button>
+                      {canClone && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClone(job);
+                          }}
+                          className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
+                          title={t("jobs.cloneRerun")}
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                        </button>
+                      )}
 
                       {canTerminate && (
                         <button
