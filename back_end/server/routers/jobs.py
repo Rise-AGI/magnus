@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+MAX_MARKER_PREVIEW_SIZE = 1024 * 1024
+
+
 def create_job(
     job_dict: Dict[str, Any],
     user_id: str,
@@ -82,6 +85,22 @@ def _read_marker_file(path: str, max_size: int)-> str:
         return content
     except Exception as e:
         return f"<Error reading file: {str(e)}>"
+
+
+def _resolve_marker_field(job: models.Job, attr_name: str)-> Optional[str]:
+    """Resolve a lazy marker field: if value equals sentinel `.magnus_{attr_name}`,
+    read the marker file from the job workspace; missing file or None value -> None."""
+    value = getattr(job, attr_name)
+    if value is None:
+        return None
+    sentinel = f".magnus_{attr_name}"
+    if value != sentinel:
+        return value
+    workspace = magnus_config['server']['root']
+    path = f"{workspace}/workspace/jobs/{job.id}/{sentinel}"
+    if not os.path.exists(path):
+        return None
+    return _read_marker_file(path, MAX_MARKER_PREVIEW_SIZE)
 
 
 @router.post(
@@ -153,9 +172,6 @@ def get_job_detail(
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
 ):
-
-    MAX_RESULT_PREVIEW_SIZE = 1024 * 1024
-
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -165,12 +181,12 @@ def get_job_detail(
     # Lazy-read result
     if job.result == ".magnus_result":
         result_path = f"{workspace}/workspace/jobs/{job.id}/.magnus_result"
-        job.result = _read_marker_file(result_path, MAX_RESULT_PREVIEW_SIZE)
+        job.result = _read_marker_file(result_path, MAX_MARKER_PREVIEW_SIZE)
 
     # Lazy-read action
     if job.action == ".magnus_action":
         action_path = f"{workspace}/workspace/jobs/{job.id}/.magnus_action"
-        job.action = _read_marker_file(action_path, MAX_RESULT_PREVIEW_SIZE)
+        job.action = _read_marker_file(action_path, MAX_MARKER_PREVIEW_SIZE)
 
     return job
 
@@ -185,15 +201,7 @@ def get_job_result(
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.result is None:
-        return None
-    if job.result == ".magnus_result":
-        workspace = magnus_config['server']['root']
-        path = f"{workspace}/workspace/jobs/{job.id}/.magnus_result"
-        if not os.path.exists(path):
-            return None
-        return _read_marker_file(path, 1024 * 1024)
-    return job.result
+    return _resolve_marker_field(job, "result")
 
 
 @router.get("/jobs/{job_id}/action")
@@ -206,15 +214,7 @@ def get_job_action(
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.action is None:
-        return None
-    if job.action == ".magnus_action":
-        workspace = magnus_config['server']['root']
-        path = f"{workspace}/workspace/jobs/{job.id}/.magnus_action"
-        if not os.path.exists(path):
-            return None
-        return _read_marker_file(path, 1024 * 1024)
-    return job.action
+    return _resolve_marker_field(job, "action")
 
 
 def _safe_utf8_truncate(data: bytes)-> bytes:
