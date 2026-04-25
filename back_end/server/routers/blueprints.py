@@ -62,31 +62,22 @@ def _compute_signature_hash(
     
     try:
         schema_objs = blueprint_manager.analyze_signature(code)
-        schema_dicts = []
-        for s in schema_objs:
-            if hasattr(s, "model_dump"):
-                schema_dicts.append(s.model_dump())
-            elif hasattr(s, "dict"):
-                schema_dicts.append(s.dict()) # 兼容旧版 Pydantic
-            elif isinstance(s, dict):
-                schema_dicts.append(s)
-            else:
-                schema_dicts.append(str(s)) # 兜底
-                
+        schema_dicts = [s.model_dump() for s in schema_objs]
+
         normalized_schema = _normalize_obj(schema_dicts)
-        
+
         canonical_json = json.dumps(
-            normalized_schema, 
-            sort_keys = True, 
+            normalized_schema,
+            sort_keys = True,
             separators = (',', ':'),
             ensure_ascii = False,
         )
-        
+
         final_hash = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
-        
+
         return final_hash
-        
-    except Exception as e:
+
+    except (ValueError, NameError, TypeError) as e:
         logger.error(f"❌ Hash computation failed: {e}")
         logger.error(traceback.format_exc())
         return "invalid_signature"
