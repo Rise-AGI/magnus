@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.theme import Theme
 from rich.table import Table
 from rich.status import Status
+from rich.markup import escape as rich_escape
 from datetime import datetime
 from importlib.metadata import version
 from ruamel.yaml import YAML
@@ -69,7 +70,11 @@ def print_msg(msg: str, end: str = "\n"):
     err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] {msg}", end=end, highlight=False)
 
 def print_error(msg: str):
-    err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] [magnus.error]Error:[/magnus.error] {msg or 'Unknown error'}", highlight=False)
+    # 错误消息槽里逐个把传入文本 escape：异常字符串、文件路径、
+    # _format_schema_hint 的 "Optional[str]" 形式都会流到这里，绝不能让
+    # Rich 把里面的 "[xxx]" 当 style tag 吞掉。前缀的 [magnus.prefix] /
+    # [magnus.error] 是受控样式，仍走 markup。
+    err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] [magnus.error]Error:[/magnus.error] {rich_escape(msg or 'Unknown error')}", highlight=False)
 
 
 # === Output Format Helpers ===
@@ -93,7 +98,9 @@ def _output_data(
     if fmt == "yaml":
         stream = io.StringIO()
         _yaml_dumper.dump(data, stream)
-        console.print(stream.getvalue(), end="")
+        # markup=False/highlight=False: 数据 dump 是机读文本，
+        # 不能让 Rich 把字段里的 "[str, ...]" 当成 style tag 吞掉
+        console.print(stream.getvalue(), end="", markup=False, highlight=False)
     elif fmt == "json":
         console.print_json(data=data)
 
@@ -207,9 +214,9 @@ def _show_blueprint_help(blueprint_id: str) -> None:
     console.print()
     title = bp.get("title", blueprint_id) if bp else blueprint_id
     desc = bp.get("description", "") if bp else ""
-    console.print(f"[bold cyan]{title}[/bold cyan]  [dim]({blueprint_id})[/dim]")
+    console.print(f"[bold cyan]{rich_escape(title)}[/bold cyan]  [dim]({rich_escape(blueprint_id)})[/dim]")
     if desc:
-        console.print(f"[dim]{desc}[/dim]")
+        console.print(f"[dim]{rich_escape(desc)}[/dim]")
     console.print()
 
     if not schema:
@@ -237,19 +244,20 @@ def _show_blueprint_help(blueprint_id: str) -> None:
             type_label = f"Optional[{type_label}]"
 
         flag = f"--{key.replace('_', '-')}"
+        type_label_safe = rich_escape(type_label)
         if default is not None:
-            header = f"  [green]{flag}[/green] [dim]{type_label}[/dim]  [dim](default: {default!r})[/dim]"
+            header = f"  [green]{flag}[/green] [dim]{type_label_safe}[/dim]  [dim](default: {rich_escape(repr(default))})[/dim]"
         else:
-            header = f"  [green]{flag}[/green] [dim]{type_label}[/dim]"
+            header = f"  [green]{flag}[/green] [dim]{type_label_safe}[/dim]"
         console.print(header)
 
         if desc_text:
-            console.print(f"      [dim]{desc_text}[/dim]")
+            console.print(f"      [dim]{rich_escape(desc_text)}[/dim]")
         if ptype == "select" and options:
             for o in options:
                 opt_desc = o.get("description")
                 if opt_desc:
-                    console.print(f"      [dim]{o['value']}: {opt_desc}[/dim]")
+                    console.print(f"      [dim]{rich_escape(str(o['value']))}: {rich_escape(opt_desc)}[/dim]")
 
     console.print()
     console.print("[dim]Usage: magnus run {id} -- {params}[/dim]".format(id=blueprint_id, params=" ".join(f"--{p['key'].replace('_', '-')} VALUE" for p in schema if not p.get("is_optional"))))
@@ -580,8 +588,8 @@ def show_config():
         effective_address = DEFAULT_ADDRESS
 
     console.print()
-    console.print(f"  [bold]Current:[/bold]  {effective_name}")
-    console.print(f"  [bold]Address:[/bold]  {effective_address}")
+    console.print(f"  [bold]Current:[/bold]  {rich_escape(effective_name)}")
+    console.print(f"  [bold]Address:[/bold]  {rich_escape(effective_address)}")
 
     if env_address or env_token:
         overrides = [k for k, v in [("MAGNUS_ADDRESS", env_address), ("MAGNUS_TOKEN", env_token)] if v]
@@ -596,7 +604,7 @@ def show_config():
                 marker = " [dim cyan]← fallback[/dim cyan]" if is_env_override else " [cyan]←[/cyan]"
             else:
                 marker = ""
-            console.print(f"    {name}  {sites[name]['address']}{marker}")
+            console.print(f"    {rich_escape(name)}  {rich_escape(sites[name]['address'])}{marker}")
 
     console.print(f"\n  [dim]Default:  {DEFAULT_ADDRESS}[/dim]")
     console.print()
@@ -1060,9 +1068,9 @@ def call(
             data.update(payload_args)
 
         if verbose:
-            console.print(f"[dim]Timeout: {timeout}, Payload: {data}[/dim]")
+            console.print(f"[dim]Timeout: {timeout}, Payload: {rich_escape(repr(data))}[/dim]")
 
-        print_msg(f"Calling service [bold cyan]{service_id}[/bold cyan]...")
+        print_msg(f"Calling service [bold cyan]{rich_escape(service_id)}[/bold cyan]...")
 
         response = call_service(
             service_id=service_id,
@@ -1073,7 +1081,7 @@ def call(
         if isinstance(response, (dict, list)):
             console.print_json(data=response)
         else:
-            console.print(response)
+            console.print(response, markup=False, highlight=False)
 
     except MagnusError as e:
         print_error(str(e))
@@ -1514,8 +1522,8 @@ def list_services_cmd(
             is_active = svc.get("is_active", False)
             active_str = "[green]✓[/green]" if is_active else "[dim]-[/dim]"
             table.add_row(
-                svc.get("id", "")[:20],
-                (svc.get("name") or "-")[:25],
+                rich_escape(svc.get("id", "")[:20]),
+                rich_escape((svc.get("name") or "-")[:25]),
                 active_str,
                 str(svc.get("gpu_count", 0)),
                 _format_time(svc.get("updated_at")),
@@ -1684,9 +1692,9 @@ def blueprint_list_cmd(
         for bp in items:
             user = bp.get("user") or {}
             table.add_row(
-                bp.get("id", "")[:25],
-                (bp.get("title") or "-")[:30],
-                (user.get("name") or "-")[:15],
+                rich_escape(bp.get("id", "")[:25]),
+                rich_escape((bp.get("title") or "-")[:30]),
+                rich_escape((user.get("name") or "-")[:15]),
                 _format_time(bp.get("updated_at")),
             )
 
@@ -1747,10 +1755,10 @@ def blueprint_get_cmd(
 
         user = bp.get("user") or {}
         console.print()
-        console.rule(f"[bold]Blueprint: {bp.get('id', 'N/A')}[/bold]")
-        console.print(f"  [bold]Title:[/bold]       {bp.get('title', '-')}")
-        console.print(f"  [bold]Description:[/bold] {bp.get('description', '-')}")
-        console.print(f"  [bold]Creator:[/bold]     {user.get('name', '-')}")
+        console.rule(f"[bold]Blueprint: {rich_escape(bp.get('id', 'N/A'))}[/bold]")
+        console.print(f"  [bold]Title:[/bold]       {rich_escape(bp.get('title', '-'))}")
+        console.print(f"  [bold]Description:[/bold] {rich_escape(bp.get('description', '-'))}")
+        console.print(f"  [bold]Creator:[/bold]     {rich_escape(user.get('name', '-'))}")
         console.print(f"  [bold]Updated:[/bold]     {_format_time(bp.get('updated_at'))}")
         console.print()
         console.rule("[bold cyan]Code[/bold cyan]")
@@ -1917,11 +1925,11 @@ def blueprint_launch_cmd(
 
         if cli_config["verbose"]:
             console.rule("[dim]DEBUG: Argument Partition[/dim]")
-            console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
-            console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
+            console.print(f"[dim]CLI Config (Typed): {rich_escape(repr(cli_config))}[/dim]")
+            console.print(f"[dim]Blueprint Args (String): {rich_escape(repr(bp_args))}[/dim]")
             console.rule()
 
-        print_msg(f"Launching blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
+        print_msg(f"Launching blueprint [bold cyan]{rich_escape(blueprint_id)}[/bold cyan]...")
 
         job_id = launch_blueprint(
             blueprint_id=blueprint_id,
@@ -1971,11 +1979,11 @@ def blueprint_run_cmd(
 
         if cli_config["verbose"]:
             console.rule("[dim]DEBUG: Argument Partition[/dim]")
-            console.print(f"[dim]CLI Config (Typed): {cli_config}[/dim]")
-            console.print(f"[dim]Blueprint Args (String): {bp_args}[/dim]")
+            console.print(f"[dim]CLI Config (Typed): {rich_escape(repr(cli_config))}[/dim]")
+            console.print(f"[dim]Blueprint Args (String): {rich_escape(repr(bp_args))}[/dim]")
             console.rule()
 
-        print_msg(f"Running blueprint [bold cyan]{blueprint_id}[/bold cyan]...")
+        print_msg(f"Running blueprint [bold cyan]{rich_escape(blueprint_id)}[/bold cyan]...")
 
         from .. import default_client
 
@@ -2081,9 +2089,9 @@ def job_list_cmd(
 
             table.add_row(
                 str(-(idx + 1)),
-                job.get("id", ""),
-                (job.get("task_name") or "-")[:30],
-                f"[{status_color}]{status}[/{status_color}]",
+                rich_escape(job.get("id", "")),
+                rich_escape((job.get("task_name") or "-")[:30]),
+                f"[{status_color}]{rich_escape(status)}[/{status_color}]",
                 str(job.get("gpu_count", 0)),
                 _format_time(job.get("created_at")),
             )
@@ -2108,11 +2116,11 @@ def _do_job_status(job_ref: str) -> None:
         status_color = STATUS_COLORS.get(status, "white")
 
         console.print()
-        console.rule(f"[bold]Job: {job.get('id', 'N/A')}[/bold]")
-        console.print(f"  [bold]Task:[/bold]    {job.get('task_name', '-')}")
-        console.print(f"  [bold]Status:[/bold]  [{status_color}]{status}[/{status_color}]")
+        console.rule(f"[bold]Job: {rich_escape(job.get('id', 'N/A'))}[/bold]")
+        console.print(f"  [bold]Task:[/bold]    {rich_escape(job.get('task_name', '-'))}")
+        console.print(f"  [bold]Status:[/bold]  [{status_color}]{rich_escape(status)}[/{status_color}]")
         console.print(f"  [bold]GPU:[/bold]     {job.get('gpu_count', 0)}")
-        console.print(f"  [bold]Type:[/bold]    {job.get('job_type', '-')}")
+        console.print(f"  [bold]Type:[/bold]    {rich_escape(str(job.get('job_type', '-')))}")
         console.print(f"  [bold]Created:[/bold] {_format_time(job.get('created_at'))}")
         console.print(f"  [bold]Started:[/bold] {_format_time(job.get('start_time'))}")
 
@@ -2422,11 +2430,11 @@ def _do_job_metric_streams(job_ref: str, fmt: OutputFormat) -> None:
             labels = s.get("labels") or {}
             label_str = ",".join(f"{k}={v}" for k, v in sorted(labels.items())) or "-"
             table.add_row(
-                str(s.get("name", "")),
-                str(s.get("kind", "")),
-                str(s.get("unit") or "-"),
-                str(s.get("step_domain") or "-"),
-                label_str,
+                rich_escape(str(s.get("name", ""))),
+                rich_escape(str(s.get("kind", ""))),
+                rich_escape(str(s.get("unit") or "-")),
+                rich_escape(str(s.get("step_domain") or "-")),
+                rich_escape(label_str),
                 str(s.get("point_count", 0)),
             )
         console.print(table)
@@ -2803,9 +2811,9 @@ def skill_list_cmd(
             user = sk.get("user") or {}
             files = sk.get("files") or []
             table.add_row(
-                sk.get("id", "")[:25],
-                (sk.get("title") or "-")[:30],
-                (user.get("name") or "-")[:15],
+                rich_escape(sk.get("id", "")[:25]),
+                rich_escape((sk.get("title") or "-")[:30]),
+                rich_escape((user.get("name") or "-")[:15]),
                 str(len(files)),
                 _format_time(sk.get("updated_at")),
             )
@@ -2869,10 +2877,10 @@ def skill_get_cmd(
         user = sk.get("user") or {}
         files = sk.get("files") or []
         console.print()
-        console.rule(f"[bold]Skill: {sk.get('id', 'N/A')}[/bold]")
-        console.print(f"  [bold]Title:[/bold]       {sk.get('title', '-')}")
-        console.print(f"  [bold]Description:[/bold] {sk.get('description', '-')}")
-        console.print(f"  [bold]Creator:[/bold]     {user.get('name', '-')}")
+        console.rule(f"[bold]Skill: {rich_escape(sk.get('id', 'N/A'))}[/bold]")
+        console.print(f"  [bold]Title:[/bold]       {rich_escape(sk.get('title', '-'))}")
+        console.print(f"  [bold]Description:[/bold] {rich_escape(sk.get('description', '-'))}")
+        console.print(f"  [bold]Creator:[/bold]     {rich_escape(user.get('name', '-'))}")
         console.print(f"  [bold]Updated:[/bold]     {_format_time(sk.get('updated_at'))}")
         console.print()
         console.rule("[bold cyan]Files[/bold cyan]")
@@ -2882,7 +2890,7 @@ def skill_get_cmd(
                 size_str = f"{size} B"
             else:
                 size_str = f"{size / 1024:.1f} KB"
-            console.print(f"  {f['path']}  [dim]({size_str})[/dim]")
+            console.print(f"  {rich_escape(f['path'])}  [dim]({size_str})[/dim]")
         if not files:
             console.print("  [dim](no files)[/dim]")
         console.rule()
@@ -3088,10 +3096,10 @@ def image_list_cmd(
 
             table.add_row(
                 id_str,
-                (img.get("uri") or "-")[:55],
-                (user.get("name") or "-")[:12],
+                rich_escape((img.get("uri") or "-")[:55]),
+                rich_escape((user.get("name") or "-")[:12]),
                 _format_size(img.get("size_bytes", 0)),
-                f"[{status_color}]{status}[/{status_color}]",
+                f"[{status_color}]{rich_escape(status)}[/{status_color}]",
                 _format_time(img.get("updated_at")),
             )
 
