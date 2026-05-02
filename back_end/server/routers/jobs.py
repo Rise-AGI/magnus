@@ -235,6 +235,7 @@ def get_job_logs_paginated(
         raise HTTPException(status_code=404, detail="Job not found")
 
     root_path = magnus_config['server']['root']
+    # 双模式共用：SLURM 由 sbatch --output 写，Docker 由 _scheduler._dump_docker_logs 追加。
     log_path = f"{root_path}/workspace/jobs/{job_id}/slurm/output.txt"
     try:
         if not os.path.exists(log_path):

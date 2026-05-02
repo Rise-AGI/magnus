@@ -161,6 +161,7 @@ class MagnusScheduler:
 
 
     def _dump_docker_logs(self, job_id: str, container_name: str, since: Optional[str] = None) -> Optional[str]:
+        # 与 SLURM 模式的 sbatch --output 共用同一文件，让 jobs.py 读端点不必按模式分支。
         log_path = f"{magnus_workspace_path}/jobs/{job_id}/slurm/output.txt"
         # Capture cursor BEFORE fetching logs to avoid missing lines emitted during the call
         new_cursor = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
