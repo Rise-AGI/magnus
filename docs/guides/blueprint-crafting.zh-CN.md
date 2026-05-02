@@ -2,7 +2,7 @@
 
 # Blueprint Crafting Guide
 
-本文档是 Magnus 蓝图系统的权威参考，面向人类开发者和 AI Agent（如 Claude Code）。
+本文档是 Magnus 蓝图系统的权威参考，面向人类开发者和 AI Agent。
 目标场景：在一个新项目根目录下，根据本文档将该项目接入 Magnus 蓝图。
 
 > **源码真相**：本文档所有细节均来自代码，而非二手描述。
@@ -518,7 +518,7 @@ submit_job(
 
 ## 11. AI Agent 接入 Checklist
 
-当 AI Agent（如 Claude Code）被要求"把这个项目接入 Magnus 蓝图"时，按以下步骤操作：
+当 AI Agent 被要求"把这个项目接入 Magnus 蓝图"时，按以下步骤操作：
 
 1. **理解项目**：阅读项目的 README、入口脚本、CLI 参数
 2. **确定 entry_command**：找到项目的启动命令（`python main.py ...`、`bash run.sh ...` 等）

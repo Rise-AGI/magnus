@@ -2,7 +2,7 @@
 
 # Blueprint Crafting Guide
 
-This document is the authoritative reference for the Magnus Blueprint system, aimed at human developers and AI Agents (such as Claude Code).
+This document is the authoritative reference for the Magnus Blueprint system, aimed at human developers and AI Agents.
 Target scenario: at the root of a new project, integrate that project into a Magnus Blueprint following this document.
 
 > **Source of truth**: all details in this document come from the code, not second-hand descriptions.
@@ -518,7 +518,7 @@ submit_job(
 
 ## 11. AI Agent Integration Checklist
 
-When an AI Agent (such as Claude Code) is asked to "integrate this project into a Magnus Blueprint", follow these steps:
+When an AI Agent is asked to "integrate this project into a Magnus Blueprint", follow these steps:
 
 1. **Understand the project**: read the project's README, entry scripts, and CLI arguments
 2. **Determine entry_command**: find the project's launch command (`python main.py ...`, `bash run.sh ...`, etc.)
