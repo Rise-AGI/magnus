@@ -21,6 +21,7 @@ import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { ServiceImplicitExport } from "@/lib/service-defaults";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useBackNavigation } from "@/hooks/use-back-navigation";
+import { usePolling } from "@/hooks/use-polling";
 
 import { Service } from "@/types/service";
 
@@ -62,11 +63,8 @@ export default function ServiceDetailsPage() {
     }
   }, [serviceId]);
 
-  useEffect(() => {
-    fetchService();
-    const interval = setInterval(() => fetchService(true), POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, [fetchService]);
+  useEffect(() => { fetchService(); }, [fetchService]);
+  usePolling(() => fetchService(true), POLL_INTERVAL);
 
   // Actions
   const handleToggleClick = () => {

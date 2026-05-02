@@ -9,6 +9,7 @@ import { Service } from "@/types/service";
 import { User } from "@/types/auth";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
+import { usePolling } from "@/hooks/use-polling";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ServiceTable } from "@/components/services/service-table";
@@ -112,11 +113,8 @@ export default function ServicesPage() {
     setCurrentPage(1);
   }, [debouncedQuery, selectedUserId, activeOnly, sortBy]);
 
-  useEffect(() => {
-    fetchServices();
-    const intervalId = setInterval(() => fetchServices(true), POLL_INTERVAL);
-    return () => clearInterval(intervalId);
-  }, [fetchServices]);
+  useEffect(() => { fetchServices(); }, [fetchServices]);
+  usePolling(() => fetchServices(true), POLL_INTERVAL);
 
   // Handlers
   const handleCreate = () => {

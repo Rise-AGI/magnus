@@ -9,6 +9,7 @@ import { Job } from "@/types/job";
 import { User } from "@/types/auth";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
+import { usePolling } from "@/hooks/use-polling";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { JobDrawer } from "@/components/jobs/job-drawer";
@@ -103,11 +104,8 @@ export default function JobsPage() {
     setCurrentPage(1);
   }, [debouncedQuery, selectedUserId]);
 
-  useEffect(() => {
-    fetchJobs();
-    const intervalId = setInterval(() => fetchJobs(true), POLL_INTERVAL);
-    return () => clearInterval(intervalId);
-  }, [fetchJobs]); 
+  useEffect(() => { fetchJobs(); }, [fetchJobs]);
+  usePolling(() => fetchJobs(true), POLL_INTERVAL);
 
   return (
     <div className="relative min-h-[calc(100vh-8rem)] pb-20"> 

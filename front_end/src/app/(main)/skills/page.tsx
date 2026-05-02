@@ -11,6 +11,7 @@ import { POLL_INTERVAL } from "@/lib/config";
 import { getUserInitials } from "@/lib/user-display";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
+import { usePolling } from "@/hooks/use-polling";
 
 import { User } from "@/types/auth";
 import { Skill } from "@/types/skill";
@@ -70,7 +71,8 @@ export default function SkillsPage() {
     } catch (e) { console.error(e); } finally { if (!isBackground) setLoading(false); }
   }, [currentPage, pageSize, debouncedQuery, selectedUserId, allUsers]);
 
-  useEffect(() => { fetchSkills(); const i = setInterval(() => fetchSkills(true), POLL_INTERVAL); return () => clearInterval(i); }, [fetchSkills]);
+  useEffect(() => { fetchSkills(); }, [fetchSkills]);
+  usePolling(() => fetchSkills(true), POLL_INTERVAL);
 
   const handleClone = (skill: Skill) => {
       setEditorData({

@@ -13,6 +13,7 @@ import { POLL_INTERVAL } from "@/lib/config";
 import { getUserInitials } from "@/lib/user-display";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
+import { usePolling } from "@/hooks/use-polling";
 import { formatBeijingTime } from "@/lib/utils";
 
 import { User } from "@/types/auth";
@@ -75,11 +76,8 @@ export default function ImagesPage() {
     }
   }, [currentPage, pageSize, debouncedQuery, selectedUserId]);
 
-  useEffect(() => {
-    fetchImages();
-    const i = setInterval(() => fetchImages(true), POLL_INTERVAL);
-    return () => clearInterval(i);
-  }, [fetchImages]);
+  useEffect(() => { fetchImages(); }, [fetchImages]);
+  usePolling(() => fetchImages(true), POLL_INTERVAL);
 
   // Preheat
   const openPreheat = () => {

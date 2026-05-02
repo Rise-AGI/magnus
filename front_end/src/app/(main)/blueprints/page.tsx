@@ -12,6 +12,7 @@ import { DEFAULT_CODE_TEMPLATE } from "@/lib/blueprint-defaults";
 import { getUserInitials } from "@/lib/user-display";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
+import { usePolling } from "@/hooks/use-polling";
 
 import { User } from "@/types/auth";
 import { Blueprint } from "@/types/blueprint";
@@ -84,7 +85,8 @@ export default function BlueprintsPage() {
     } catch (e) { console.error(e); } finally { if (!isBackground) setLoading(false); }
   }, [currentPage, pageSize, debouncedQuery, selectedUserId, allUsers]);
 
-  useEffect(() => { fetchBlueprints(); const i = setInterval(() => fetchBlueprints(true), POLL_INTERVAL); return () => clearInterval(i); }, [fetchBlueprints]);
+  useEffect(() => { fetchBlueprints(); }, [fetchBlueprints]);
+  usePolling(() => fetchBlueprints(true), POLL_INTERVAL);
 
   const handleOpenRun = (bp: Blueprint) => setSelectedBlueprint(bp);
   

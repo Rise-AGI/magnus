@@ -11,6 +11,7 @@ import { useLanguage } from "@/context/language-context";
 import { JobDrawer } from "@/components/jobs/job-drawer";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useJobOperations } from "@/hooks/use-job-operations";
+import { usePolling } from "@/hooks/use-polling";
 import { JobTable } from "@/components/jobs/job-table";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 
@@ -100,11 +101,8 @@ export default function ClusterPage() {
     onClickTerminate
   } = useJobOperations({ onSuccess: fetchData });
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(() => fetchData(true), POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+  usePolling(() => fetchData(true), POLL_INTERVAL);
 
   const formatMem = (mb: number) => mb >= 1024 ? `${(mb / 1024).toFixed(0)} GB` : `${mb} MB`;
 
