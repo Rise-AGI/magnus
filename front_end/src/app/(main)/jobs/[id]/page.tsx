@@ -22,6 +22,7 @@ import { JobDrawer } from "@/components/jobs/job-drawer";
 import { useJobOperations } from "@/hooks/use-job-operations";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { NotFound } from "@/components/ui/not-found";
+import { PageLoader } from "@/components/ui/page-loader";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { useBackNavigation } from "@/hooks/use-back-navigation";
@@ -236,7 +237,11 @@ export default function JobDetailsPage() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-[50vh] text-zinc-500">{t("jobDetail.loading")}</div>;
+    return (
+      <div className="h-[50vh]">
+        <PageLoader fullHeight label={t("jobDetail.loading")} />
+      </div>
+    );
   }
 
   if (!job) {

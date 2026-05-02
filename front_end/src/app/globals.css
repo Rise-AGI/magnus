@@ -83,3 +83,13 @@ body {
 .animate-recording-pulse {
   animation: recording-pulse 1.5s ease-in-out infinite;
 }
+
+/* PageLoader 延迟淡入：120ms 内完成的加载完全无 flash，避免 spinner 闪一下的毛坯感 */
+@keyframes magnus-loader-in {
+  0%   { opacity: 0; transform: scale(0.96); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.magnus-loader-in {
+  opacity: 0;
+  animation: magnus-loader-in 360ms ease-out 120ms forwards;
+}

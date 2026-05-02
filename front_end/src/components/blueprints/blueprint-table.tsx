@@ -2,9 +2,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Play, RefreshCw, Trash2, FileCode, Loader2 } from "lucide-react";
+import { Play, RefreshCw, Trash2, FileCode } from "lucide-react";
 import { formatBeijingTime } from "@/lib/utils";
 import { CopyableText } from "@/components/ui/copyable-text";
+import { PageLoader } from "@/components/ui/page-loader";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useLanguage } from "@/context/language-context";
 import { Blueprint } from "@/types/blueprint";
@@ -35,12 +36,7 @@ export function BlueprintTable({
   const isMobile = useIsMobile();
 
   if (loading) {
-    return (
-      <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 gap-3 min-h-[400px]">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <p className="text-sm font-medium">{t("blueprints.fetching")}</p>
-      </div>
-    );
+    return <PageLoader variant="card" label={t("blueprints.fetching")} />;
   }
 
   if (data.length === 0) {

@@ -5,15 +5,14 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { API_BASE, DEFAULT_ROUTE } from "@/lib/config";
 import { LoginResponse } from "@/types/auth";
-import { Loader2 } from "lucide-react";
+import { PageLoader } from "@/components/ui/page-loader";
 import { useLanguage } from "@/context/language-context";
 
 function LoadingState() {
   const { t } = useLanguage();
   return (
-    <div className="flex flex-col items-center justify-center h-screen space-y-4">
-      <Loader2 className="w-10 h-10 animate-spin text-blue-600" />
-      <p className="text-gray-500">{t("auth.authenticating")}</p>
+    <div className="h-screen w-screen bg-[#050505]">
+      <PageLoader fullHeight size="lg" label={t("auth.authenticating")} />
     </div>
   );
 }

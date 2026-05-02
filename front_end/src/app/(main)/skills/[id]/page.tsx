@@ -6,13 +6,14 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Clock, Dna, RefreshCw,
-  Trash2, Loader2, FileText, Check, Copy, ImageIcon
+  Trash2, FileText, Check, Copy, ImageIcon
 } from "lucide-react";
 
 import { client } from "@/lib/api";
 import { formatBeijingTime } from "@/lib/utils";
 import { useLanguage } from "@/context/language-context";
 import { NotFound } from "@/components/ui/not-found";
+import { PageLoader } from "@/components/ui/page-loader";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { SkillEditor } from "@/components/skills/skill-editor";
@@ -181,7 +182,7 @@ export default function SkillDetailPage() {
     },
   }), [skillId, handleFileLink]);
 
-  if (loading) return <div className="flex h-[50vh] items-center justify-center text-zinc-500"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
+  if (loading) return <div className="h-[50vh]"><PageLoader fullHeight label={t("skills.fetching")} /></div>;
 
   if (notFound || !skill) {
     return (

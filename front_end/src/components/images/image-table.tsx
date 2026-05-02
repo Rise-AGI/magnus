@@ -5,6 +5,7 @@ import { RefreshCw, Trash2, Container, Loader2 } from "lucide-react";
 import { formatBeijingTime } from "@/lib/utils";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { CopyableText } from "@/components/ui/copyable-text";
+import { PageLoader } from "@/components/ui/page-loader";
 import { useLanguage } from "@/context/language-context";
 import { User } from "@/types/auth";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -69,12 +70,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
   const isMobile = useIsMobile();
 
   if (loading) {
-    return (
-      <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 gap-3 min-h-[400px]">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <p className="text-sm font-medium">{t("images.fetching")}</p>
-      </div>
-    );
+    return <PageLoader variant="card" label={t("images.fetching")} />;
   }
 
   if (data.length === 0) {

@@ -12,6 +12,7 @@ import { client } from "@/lib/api";
 import { formatBeijingTime, computeStableHash } from "@/lib/utils";
 import { useLanguage } from "@/context/language-context";
 import { NotFound } from "@/components/ui/not-found";
+import { PageLoader } from "@/components/ui/page-loader";
 
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -213,7 +214,7 @@ export default function BlueprintDetailsPage() {
     }
   };
 
-  if (loading) return <div className="flex h-[50vh] items-center justify-center text-zinc-500"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
+  if (loading) return <div className="h-[50vh]"><PageLoader fullHeight label={t("blueprints.fetching")} /></div>;
 
   if (notFound || !blueprint) {
     return (

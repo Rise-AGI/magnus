@@ -7,6 +7,7 @@ import { client } from "@/lib/api";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { PageLoader } from "@/components/ui/page-loader";
 import { formatRelativeTime } from "@/lib/utils";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import type { ConversationListItem, PagedConversationResponse } from "@/types/chat";
@@ -197,8 +198,8 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
           )}
 
           {!initialLoaded && (
-            <div className="flex justify-center py-8">
-              <Loader2 className="w-4 h-4 animate-spin text-zinc-600" />
+            <div className="py-8">
+              <PageLoader size="sm" tone="neutral" />
             </div>
           )}
 

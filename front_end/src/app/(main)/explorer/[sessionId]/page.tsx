@@ -6,6 +6,7 @@ import { ArrowDown, Loader2, Pencil, ChevronDown, ChevronRight, X, FileText, Ima
 import { client } from "@/lib/api";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { NotFound } from "@/components/ui/not-found";
+import { PageLoader } from "@/components/ui/page-loader";
 import { MessageInput } from "@/components/ui/message-input";
 import type { ExplorerSessionWithMessages, ExplorerMessage, Attachment } from "@/types/explore";
 import { API_BASE } from "@/lib/config";
@@ -835,11 +836,7 @@ export default function SessionPage() {
   }
 
   if (!session) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
-      </div>
-    );
+    return <PageLoader fullHeight tone="neutral" className="flex-1" />;
   }
 
   const hasMessages = session.messages.length > 0 || isStreaming || pendingUserMessage;

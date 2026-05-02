@@ -8,6 +8,7 @@ import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { PageLoader } from "@/components/ui/page-loader";
 import { getUserInitials } from "@/lib/user-display";
 import type { ConversationType, PagedConversationResponse } from "@/types/chat";
 
@@ -115,11 +116,7 @@ export default function ChatPage() {
   const canCreate = selectedMembers.length > 0 && (type === "p2p" || type === "group");
 
   if (!redirectChecked) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="w-5 h-5 animate-spin text-zinc-600" />
-      </div>
-    );
+    return <PageLoader fullHeight size="sm" tone="neutral" className="flex-1" />;
   }
 
   return (

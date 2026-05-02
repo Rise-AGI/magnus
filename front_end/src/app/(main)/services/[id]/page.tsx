@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Server, Clock, GitBranch, Cpu, Box, Terminal, RefreshCw,
-  Power, Trash2, Loader2, FileQuestion, ExternalLink, Copy, Check, AlignLeft
+  Power, Trash2, FileQuestion, ExternalLink, Copy, Check, AlignLeft
 } from "lucide-react";
 
 import { client } from "@/lib/api";
@@ -16,6 +16,7 @@ import { POLL_INTERVAL } from "@/lib/config";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { NotFound } from "@/components/ui/not-found";
+import { PageLoader } from "@/components/ui/page-loader";
 import { ServiceDrawer } from "@/components/services/service-drawer";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { ServiceImplicitExport } from "@/lib/service-defaults";
@@ -161,8 +162,8 @@ export default function ServiceDetailsPage() {
   // Loading State
   if (loading) {
     return (
-      <div className="flex h-[50vh] items-center justify-center text-zinc-500">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      <div className="h-[50vh]">
+        <PageLoader fullHeight tone="teal" label={t("services.fetching")} />
       </div>
     );
   }

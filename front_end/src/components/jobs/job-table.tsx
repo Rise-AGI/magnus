@@ -2,11 +2,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Box, Loader2, RefreshCw, SquareX } from "lucide-react";
+import { Box, RefreshCw, SquareX } from "lucide-react";
 import { Job } from "@/types/job";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { CopyableText } from "@/components/ui/copyable-text";
+import { PageLoader } from "@/components/ui/page-loader";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { UserAvatar } from "@/components/ui/user-avatar";
@@ -39,12 +40,7 @@ export function JobTable({
   const isMobile = useIsMobile();
 
   if (loading) {
-    return (
-      <div className={cn("border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col items-center justify-center text-zinc-500 gap-3", className)}>
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <p className="text-sm font-medium">{t("jobs.fetchingJobs")}</p>
-      </div>
-    );
+    return <PageLoader variant="card" label={t("jobs.fetchingJobs")} className={className} />;
   }
 
   if (jobs.length === 0) {

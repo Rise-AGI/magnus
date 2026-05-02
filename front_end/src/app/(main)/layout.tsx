@@ -7,7 +7,7 @@ import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { LoginRequired } from "@/components/auth/login-required";
 import { LoginDialog } from "@/components/auth/login-dialog";
-import { Loader2 } from "lucide-react";
+import { PageLoader } from "@/components/ui/page-loader";
 import { usePathname } from "next/navigation";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
@@ -30,10 +30,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         {/* 修改点 3: 确保 main 也是 flex 布局的一部分，且通过 relative 建立层叠上下文 */}
         <main className={isExplorePage ? "flex-1 min-h-0 min-w-0 overflow-hidden relative" : "flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto"}>
           {isLoading ? (
-            <div className="h-full flex items-center justify-center text-zinc-500 gap-2">
-              <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
-              <span className="text-sm font-medium">{t("auth.verifyingAccess")}</span>
-            </div>
+            <PageLoader fullHeight label={t("auth.verifyingAccess")} />
           ) : !user ? (
             <LoginRequired />
           ) : (

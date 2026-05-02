@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { Users, Check, Loader2 } from "lucide-react";
 import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
+import { PageLoader } from "@/components/ui/page-loader";
 import { useLanguage } from "@/context/language-context";
 import type { ConversationListItem } from "@/types/chat";
 
@@ -73,9 +74,8 @@ export function GroupInviteDialog({
         </p>
 
         {loading ? (
-          <div className="flex items-center justify-center py-8 text-zinc-500 gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span className="text-sm">{t("common.loading")}</span>
+          <div className="py-8">
+            <PageLoader size="sm" tone="neutral" label={t("common.loading")} />
           </div>
         ) : groups.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-zinc-600">
