@@ -1,4 +1,15 @@
 # back_end/server/routers/jobs.py
+"""
+Job 权限模型：
+
+* **读**（detail / result / action / logs / list）—— 任何登录用户都可访问任意 job。
+  Magnus 是协作型平台，job 输出对全员透明是产品定位，不是 authz 漏洞。
+  因此读 endpoint 用 `_: User = Depends(get_current_user)` 仅做"已登录"门槛，
+  不做 ownership 校验。`get_jobs` 的 `all_users=True` 同理对全员开放。
+* **写**（terminate 等）—— owner 或 admin。下方 `terminate_job` 是参考实现。
+
+如果未来要引入"私有 job"，再来收紧读 endpoint。
+"""
 import os
 import logging
 from typing import List, Optional, Dict, Any
