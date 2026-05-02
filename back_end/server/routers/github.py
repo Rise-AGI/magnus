@@ -22,7 +22,8 @@ _git_env["GIT_TERMINAL_PROMPT"] = "0"
 for _k in ("GIT_ASKPASS", "SSH_ASKPASS"):
     _git_env.pop(_k, None)
 
-_GIT_TIMEOUT = 15
+_GIT_LS_REMOTE_TIMEOUT = 15
+_GIT_CLONE_TIMEOUT = 30
 
 # in-flight 去重：同 key 的并发请求共享同一个 Future（同一次 git 进程的结果）。
 # 失败也合并以避免雪崩；首个 Future settle 后立刻从 dict 移除（finally），
@@ -112,7 +113,7 @@ async def _git_ls_remote_branches(ns: str, repo: str) -> List[Dict[str, str]]:
         env=_git_env,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_GIT_TIMEOUT)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_GIT_LS_REMOTE_TIMEOUT)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -159,7 +160,7 @@ async def _git_fetch_commits(
             env=_git_env,
         )
         try:
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=_GIT_CLONE_TIMEOUT)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
