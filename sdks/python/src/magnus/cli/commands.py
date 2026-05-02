@@ -77,6 +77,15 @@ def print_error(msg: str):
     err_console.print(f"[magnus.prefix][Magnus][/magnus.prefix] [magnus.error]Error:[/magnus.error] {rich_escape(msg or 'Unknown error')}", highlight=False)
 
 
+def _job_view_link_msg(job_id: str)-> str:
+    """构造 'View: <link>' 文本。显示文本 escape；URL 作为 link attribute
+    不会被 markup parse（IPv6 字面量含 ']' 的边角 case 会让 tag 破裂，但
+    site address 几乎都是 hostname 或 IPv4，不影响主线）。"""
+    from .. import default_client
+    url = f"{default_client.address}/jobs/{job_id}"
+    return f"View: [link={url}]{rich_escape(url)}[/link]"
+
+
 # === Output Format Helpers ===
 
 OutputFormat = Literal["table", "yaml", "json"]
@@ -742,7 +751,7 @@ def login_cmd(
             print_msg("[yellow]Warning:[/yellow] Could not verify connection. Saving anyway.")
 
         config_path = save_site(site, address, token, set_current=True)
-        print_msg(f"Saved [bold]{site}[/bold] to [cyan]{config_path}[/cyan]")
+        print_msg(f"Saved [bold]{rich_escape(site)}[/bold] to [cyan]{rich_escape(str(config_path))}[/cyan]")
         _warn_env_overrides()
         return
 
@@ -753,9 +762,9 @@ def login_cmd(
             ok, _ = _verify_connection(existing["address"], existing["token"])
         if ok:
             set_current_site(site)
-            print_msg(f"[green]Switched to [bold]{site}[/bold][/green] ({existing['address']})")
+            print_msg(f"[green]Switched to [bold]{rich_escape(site)}[/bold][/green] ({rich_escape(existing['address'])})")
         else:
-            print_msg(f"[yellow]Warning:[/yellow] Could not verify {site}. Switched anyway.")
+            print_msg(f"[yellow]Warning:[/yellow] Could not verify {rich_escape(site)}. Switched anyway.")
             set_current_site(site)
         _warn_env_overrides()
         return
@@ -766,7 +775,7 @@ def login_cmd(
     # Site name
     if site:
         name = site
-        print_msg(f"Creating new site [bold]{name}[/bold]...")
+        print_msg(f"Creating new site [bold]{rich_escape(name)}[/bold]...")
     else:
         print_msg("Site name: ", end="")
         name = input().strip()
@@ -797,7 +806,7 @@ def login_cmd(
         print_msg("[yellow]Warning:[/yellow] Could not verify connection. Saving anyway.")
 
     config_path = save_site(name, address, token, set_current=True)
-    print_msg(f"Saved [bold]{name}[/bold] to [cyan]{config_path}[/cyan]")
+    print_msg(f"Saved [bold]{rich_escape(name)}[/bold] to [cyan]{rich_escape(str(config_path))}[/cyan]")
     _warn_env_overrides()
     console.print()
 
@@ -828,9 +837,9 @@ def logout_cmd(
 
     was_current = config.get("current") == site
     new_current = remove_site(site)
-    print_msg(f"Removed site [bold]{site}[/bold].")
+    print_msg(f"Removed site [bold]{rich_escape(site)}[/bold].")
     if was_current:
-        print_msg(f"Switched to [cyan]{new_current}[/cyan].")
+        print_msg(f"Switched to [cyan]{rich_escape(new_current)}[/cyan].")
     console.print()
 
 
@@ -1596,7 +1605,7 @@ def receive_cmd(
     try:
         with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Downloading..."):
             result_path = _download_file(secret, target_path=output)
-        print_msg(f"Saved to [cyan]{result_path}[/cyan]")
+        print_msg(f"Saved to [cyan]{rich_escape(str(result_path))}[/cyan]")
     except KeyboardInterrupt:
         pass
     except MagnusError as e:
@@ -1738,13 +1747,13 @@ def blueprint_get_cmd(
                 code=bp.get("code", ""),
             )
             output.write_text(yaml_str, encoding="utf-8")
-            print_msg(f"Blueprint exported to [cyan]{output}[/cyan]")
+            print_msg(f"Blueprint exported to [cyan]{rich_escape(str(output))}[/cyan]")
             return
 
         if code_file is not None:
             code = bp.get("code", "")
             code_file.write_text(code, encoding="utf-8")
-            print_msg(f"Code exported to [cyan]{code_file}[/cyan]")
+            print_msg(f"Code exported to [cyan]{rich_escape(str(code_file))}[/cyan]")
             return
 
         fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
@@ -1865,7 +1874,7 @@ def blueprint_save_cmd(
             description=final_description,
             code=code,
         )
-        print_msg(f"Blueprint [bold cyan]{result.get('id', blueprint_id)}[/bold cyan] saved.")
+        print_msg(f"Blueprint [bold cyan]{rich_escape(result.get('id', blueprint_id))}[/bold cyan] saved.")
 
     except MagnusError as e:
         print_error(str(e))
@@ -1898,7 +1907,7 @@ def blueprint_delete_cmd(
                 return
 
         api_delete_blueprint(blueprint_id)
-        print_msg(f"Blueprint [bold]{blueprint_id}[/bold] deleted.")
+        print_msg(f"Blueprint [bold]{rich_escape(blueprint_id)}[/bold] deleted.")
 
     except MagnusError as e:
         print_error(str(e))
@@ -1941,8 +1950,7 @@ def blueprint_launch_cmd(
         )
 
         print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
-        from .. import default_client
-        print_msg(f"View: [link={default_client.address}/jobs/{job_id}]{default_client.address}/jobs/{job_id}[/link]")
+        print_msg(_job_view_link_msg(job_id))
 
     except MagnusError as e:
         print_error(str(e))
@@ -2009,7 +2017,7 @@ def blueprint_run_cmd(
         print_msg("Job finished.")
 
         _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
-        print_msg(f"View: [link={default_client.address}/jobs/{job_id}]{default_client.address}/jobs/{job_id}[/link]")
+        print_msg(_job_view_link_msg(job_id))
 
     except MagnusError as e:
         print_error(str(e))
@@ -2313,7 +2321,7 @@ def _do_kill_job(job_ref: str, force: bool = False) -> None:
 
         result = api_terminate_job(resolved_id)
         new_status = result.get("status", "Unknown")
-        print_msg(f"Job [bold]{resolved_id}[/bold] terminated. Status: [magenta]{new_status}[/magenta]")
+        print_msg(f"Job [bold]{rich_escape(str(resolved_id))}[/bold] terminated. Status: [magenta]{rich_escape(str(new_status))}[/magenta]")
 
     except MagnusError as e:
         print_error(str(e))
@@ -2467,7 +2475,7 @@ def _do_job_metric_points(
                     labels=labels_dict, step_domain=step_domain,
                     max_points=max_points,
                 )
-                print_msg(f"Saved chart to [green]{output}[/green]")
+                print_msg(f"Saved chart to [green]{rich_escape(str(output))}[/green]")
             except MagnusError as e:
                 print_error(str(e))
                 raise typer.Exit(code=1)
@@ -2508,7 +2516,7 @@ def _do_job_metric_points(
         except OSError as e:
             print_error(f"Failed to write {output}: {e}")
             raise typer.Exit(code=1)
-        print_msg(f"Wrote {len(points)} points to [green]{output}[/green]")
+        print_msg(f"Wrote {len(points)} points to [green]{rich_escape(str(output))}[/green]")
         return
 
     _output_data({"name": name, "points": points}, fmt)
@@ -2653,7 +2661,7 @@ def job_submit_subcmd(ctx: typer.Context):
         cli_config = apply_cli_defaults(cli_config, command_type="submit")
         _validate_job_params(job_params)
 
-        print_msg(f"Submitting job [bold cyan]{job_params['task_name']}[/bold cyan]...")
+        print_msg(f"Submitting job [bold cyan]{rich_escape(str(job_params['task_name']))}[/bold cyan]...")
 
         job_id = api_submit_job(
             timeout=cli_config["timeout"],
@@ -2661,8 +2669,7 @@ def job_submit_subcmd(ctx: typer.Context):
         )
 
         print_msg(f"Job submitted. ID: [green]{job_id}[/green] (use [cyan]-1[/cyan] to reference)")
-        from .. import default_client
-        print_msg(f"View: [link={default_client.address}/jobs/{job_id}]{default_client.address}/jobs/{job_id}[/link]")
+        print_msg(_job_view_link_msg(job_id))
 
     except MagnusError as e:
         print_error(str(e))
@@ -2685,7 +2692,7 @@ def job_execute_subcmd(ctx: typer.Context):
         cli_config = apply_cli_defaults(cli_config, command_type="run")
         _validate_job_params(job_params)
 
-        print_msg(f"Executing job [bold cyan]{job_params['task_name']}[/bold cyan]...")
+        print_msg(f"Executing job [bold cyan]{rich_escape(str(job_params['task_name']))}[/bold cyan]...")
 
         from .. import default_client
 
@@ -2705,7 +2712,7 @@ def job_execute_subcmd(ctx: typer.Context):
         print_msg("Job finished.")
 
         _display_job_result(result, default_client.last_job_id, cli_config["execute_action"])
-        print_msg(f"View: [link={default_client.address}/jobs/{job_id}]{default_client.address}/jobs/{job_id}[/link]")
+        print_msg(_job_view_link_msg(job_id))
 
     except MagnusError as e:
         print_error(str(e))
@@ -2865,7 +2872,7 @@ def skill_get_cmd(
                 else:
                     fp.write_text(f["content"], encoding="utf-8")
                 written += 1
-            print_msg(f"Exported {written} file(s) to [cyan]{output_dir}[/cyan]")
+            print_msg(f"Exported {written} file(s) to [cyan]{rich_escape(str(output_dir))}[/cyan]")
             return
 
         fmt: OutputFormat = format if format in ("table", "yaml", "json") else _auto_format()
@@ -2954,10 +2961,10 @@ def skill_save_cmd(
                 rel = str(bp.relative_to(source)) if source.is_dir() else bp.name
                 default_client.upload_skill_resource(skill_id, bp)
                 file_count += 1
-                print_msg(f"  Uploaded resource: [cyan]{rel}[/cyan]")
+                print_msg(f"  Uploaded resource: [cyan]{rich_escape(str(rel))}[/cyan]")
 
         print_msg(
-            f"Skill [bold cyan]{result.get('id', skill_id)}[/bold cyan] saved "
+            f"Skill [bold cyan]{rich_escape(result.get('id', skill_id))}[/bold cyan] saved "
             f"({file_count} file(s))."
         )
 
@@ -2992,7 +2999,7 @@ def skill_delete_cmd(
                 return
 
         api_delete_skill(skill_id)
-        print_msg(f"Skill [bold]{skill_id}[/bold] deleted.")
+        print_msg(f"Skill [bold]{rich_escape(skill_id)}[/bold] deleted.")
 
     except MagnusError as e:
         print_error(str(e))
@@ -3472,14 +3479,14 @@ def local_start():
         if not (project_root / "back_end" / "server" / "main.py").exists():
             print_error(f"Cloned repository at {repo_target} does not contain a valid Magnus project.")
             raise typer.Exit(1)
-        print_msg(f"Cloned Magnus to {repo_target}")
+        print_msg(f"Cloned Magnus to {rich_escape(str(repo_target))}")
 
     back_end_path = project_root / "back_end"
     front_end_path = project_root / "front_end"
 
     # Generate config
     config_path = _generate_local_config()
-    print_msg(f"Config generated: {config_path}")
+    print_msg(f"Config generated: {rich_escape(str(config_path))}")
 
     # Save previous SDK site for restore on stop
     from ..config import _load_config
@@ -3631,7 +3638,7 @@ def local_start():
     if registered:
         print_msg(f"Registered {len(registered)} bundled blueprint(s):")
         for bp_id, bp_title in registered:
-            print_msg(f"  - {bp_title} ({bp_id})")
+            print_msg(f"  - {rich_escape(str(bp_title))} ({rich_escape(str(bp_id))})")
 
     # Register bundled skills
     with SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Registering bundled skills..."):
@@ -3639,7 +3646,7 @@ def local_start():
     if registered_skills:
         print_msg(f"Registered {len(registered_skills)} bundled skill(s):")
         for sk_id, sk_title in registered_skills:
-            print_msg(f"  - {sk_title} ({sk_id})")
+            print_msg(f"  - {rich_escape(str(sk_title))} ({rich_escape(str(sk_id))})")
 
     print_msg("")
     if frontend_started:
@@ -3680,7 +3687,7 @@ def local_stop():
         if previous_site:
             from ..config import set_current_site
             set_current_site(previous_site)
-            print_msg(f"Restored SDK site to '{previous_site}'.")
+            print_msg(f"Restored SDK site to '{rich_escape(previous_site)}'.")
         LOCAL_PREVIOUS_SITE_FILE.unlink(missing_ok=True)
 
 
