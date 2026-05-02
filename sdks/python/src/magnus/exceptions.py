@@ -43,6 +43,8 @@ class ExecutionError(MagnusError):
     pass
 
 
-class _ServerError(Exception):
-    """5xx — transient, worth retrying. Internal use only."""
+class _ServerError(MagnusError):
+    """5xx — transient, worth retrying. Internal marker for retry loops;
+    not exported. Inherits MagnusError so that if a retry loop exhausts
+    its budget and re-raises, `except MagnusError` still catches it."""
     pass
