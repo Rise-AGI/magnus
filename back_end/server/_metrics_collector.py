@@ -53,13 +53,35 @@ _DOCKER_INSPECT_TIMEOUT = 5
 # ─────────────────────────── cgroup helpers (host-side) ───────────────────────────
 # Mirror of the parsing logic embedded in wrapper.py's _metrics_sidecar / _check_oom.
 
+def _is_pure_v2() -> bool:
+    """True when /sys/fs/cgroup is the cgroup v2 mount AND no v1 cgroup is mounted.
+
+    On hybrid systems v2 is mounted elsewhere (e.g. /sys/fs/cgroup/unified) and
+    SLURM / systemd typically place tasks under v1 controllers; the "0::" line in
+    /proc/<pid>/cgroup there points to a v2 path that isn't authoritative for the
+    task's cpu/memory accounting. Caller must read v1 controller paths in that case.
+    """
+    v2_at: Optional[str] = None
+    has_v1 = False
+    try:
+        with open("/proc/mounts", "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                if parts[2] == "cgroup2":
+                    v2_at = parts[1]
+                elif parts[2] == "cgroup":
+                    has_v1 = True
+    except OSError:
+        return True
+    return v2_at == "/sys/fs/cgroup" and not has_v1
+
+
 def _read_proc_cgroup_for_pid(pid: int) -> Tuple[Optional[str], Optional[str]]:
     """Return (v2_rel, v1_memory_rel) from /proc/<pid>/cgroup. Either may be None.
 
-    For v2 ("0::<rel>"), v2_rel is set and v1_memory_rel is None.
-    For v1 (multiple "<id>:<controllers>:<rel>" lines), v2_rel is None and
-    v1_memory_rel is the memory controller's relative path.
-    On hybrid systems, prefer v2 if a "0::" line is present.
+    Both can be populated on hybrid systems; caller picks based on _is_pure_v2().
     """
     try:
         with open(f"/proc/{pid}/cgroup", "r") as f:
@@ -69,7 +91,6 @@ def _read_proc_cgroup_for_pid(pid: int) -> Tuple[Optional[str], Optional[str]]:
 
     v2_rel: Optional[str] = None
     v1_mem: Optional[str] = None
-    v1_cpu: Optional[str] = None
     for line in lines:
         if line.startswith("0::"):
             v2_rel = line[3:]
@@ -80,14 +101,8 @@ def _read_proc_cgroup_for_pid(pid: int) -> Tuple[Optional[str], Optional[str]]:
             controllers = cols[1].split(",")
             if "memory" in controllers and v1_mem is None:
                 v1_mem = cols[2]
-            if ("cpuacct" in controllers or "cpu" in controllers) and v1_cpu is None:
-                v1_cpu = cols[2]
 
-    # We only return memory-rel for v1; cpu-rel is computed inline by callers
-    # that need both. Caller distinguishes v1 vs v2 by which value is set.
-    if v2_rel is not None:
-        return v2_rel, None
-    return None, v1_mem
+    return v2_rel, v1_mem
 
 
 def _read_v1_cpu_rel(pid: int) -> Optional[str]:
@@ -126,8 +141,10 @@ def _read_v1_cpu_rel(pid: int) -> Optional[str]:
 
 def _read_cpu_usage_usec(pid: int) -> Optional[int]:
     """Return cumulative cpu usage in microseconds for the cgroup containing pid."""
-    v2_rel, _ = _read_proc_cgroup_for_pid(pid)
-    if v2_rel is not None:
+    if _is_pure_v2():
+        v2_rel, _ = _read_proc_cgroup_for_pid(pid)
+        if v2_rel is None:
+            return None
         path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/cpu.stat"
         try:
             with open(path, "r") as f:
@@ -153,29 +170,45 @@ def _read_cpu_usage_usec(pid: int) -> Optional[int]:
 
 
 def _read_memory_used_bytes(pid: int) -> Optional[int]:
-    """Return current memory usage in bytes for the cgroup containing pid."""
+    """Return memory usage in bytes for the cgroup containing pid, minus
+    reclaimable file-backed page cache. Mirrors `docker stats` semantics so
+    IO-heavy tasks don't appear to be near their memory limit just from cache."""
     v2_rel, v1_mem = _read_proc_cgroup_for_pid(pid)
-    if v2_rel is not None:
-        path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/memory.current"
-        try:
-            with open(path, "r") as f:
-                return int(f.read().strip())
-        except (OSError, ValueError):
+    if _is_pure_v2():
+        if v2_rel is None:
             return None
-    if v1_mem is None:
-        return None
-    path = "/sys/fs/cgroup/memory" + v1_mem.rstrip("/") + "/memory.usage_in_bytes"
+        cgroup_dir = "/sys/fs/cgroup" + v2_rel.rstrip("/")
+        usage_file = "memory.current"
+    else:
+        if v1_mem is None:
+            return None
+        cgroup_dir = "/sys/fs/cgroup/memory" + v1_mem.rstrip("/")
+        usage_file = "memory.usage_in_bytes"
+
     try:
-        with open(path, "r") as f:
-            return int(f.read().strip())
+        with open(cgroup_dir + "/" + usage_file, "r") as f:
+            usage = int(f.read().strip())
     except (OSError, ValueError):
         return None
+
+    inactive_file = 0
+    try:
+        with open(cgroup_dir + "/memory.stat", "r") as f:
+            for line in f:
+                if line.startswith("inactive_file "):
+                    inactive_file = int(line.split()[1])
+                    break
+    except (OSError, ValueError):
+        pass
+    return max(0, usage - inactive_file)
 
 
 def _read_allocated_cpus(pid: int) -> Optional[float]:
     """Read CPU quota allocated to the cgroup, in fractional cores. None if unlimited/error."""
-    v2_rel, _ = _read_proc_cgroup_for_pid(pid)
-    if v2_rel is not None:
+    if _is_pure_v2():
+        v2_rel, _ = _read_proc_cgroup_for_pid(pid)
+        if v2_rel is None:
+            return None
         path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/cpu.max"
         try:
             with open(path, "r") as f:

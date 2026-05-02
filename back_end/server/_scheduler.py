@@ -920,8 +920,35 @@ import json
 # back_end/server/_metrics_collector.py (host-side Docker collector).
 # Wrapper.py is built by f-string templating and cannot import that module
 # at runtime on the compute node. Keep both impls behaviorally equivalent.
+def _is_pure_v2():
+    """True when /sys/fs/cgroup is the cgroup v2 mount AND no v1 cgroup is mounted.
+
+    On hybrid systems v2 is mounted elsewhere (e.g. /sys/fs/cgroup/unified) and
+    SLURM / systemd typically place tasks under v1 controllers; the "0::" line in
+    /proc/self/cgroup there points to a v2 path that isn't authoritative for the
+    task's cpu/memory accounting. Caller must read v1 controller paths in that case.
+    """
+    v2_at = None
+    has_v1 = False
+    try:
+        with open("/proc/mounts") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                if parts[2] == "cgroup2":
+                    v2_at = parts[1]
+                elif parts[2] == "cgroup":
+                    has_v1 = True
+    except Exception:
+        return True
+    return v2_at == "/sys/fs/cgroup" and not has_v1
+
 def _cg_paths():
-    """Return (v2_rel, v1_mem_rel, v1_cpu_rel) for /proc/self. Any may be None."""
+    """Return (v2_rel, v1_mem_rel, v1_cpu_rel) for /proc/self. Any may be None.
+    Both v2_rel and v1_* can be populated on hybrid systems; caller picks based
+    on _is_pure_v2().
+    """
     v2_rel = None
     v1_mem = None
     v1_cpu = None
@@ -949,7 +976,9 @@ def _cg_paths():
 def _read_cpu_usage_usec():
     """Cumulative cpu usage in microseconds for our cgroup. None on failure."""
     v2_rel, _, v1_cpu = _cg_paths()
-    if v2_rel is not None:
+    if _is_pure_v2():
+        if v2_rel is None:
+            return None
         path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/cpu.stat"
         try:
             with open(path) as f:
@@ -971,22 +1000,37 @@ def _read_cpu_usage_usec():
         return None
 
 def _read_memory_used_bytes():
+    """Memory usage in bytes for our cgroup, minus reclaimable file-backed page
+    cache (mirrors `docker stats`). Without this, IO-heavy tasks look like
+    they're near their memory limit just from cache."""
     v2_rel, v1_mem, _ = _cg_paths()
-    if v2_rel is not None:
-        path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/memory.current"
-        try:
-            with open(path) as f:
-                return int(f.read().strip())
-        except Exception:
+    if _is_pure_v2():
+        if v2_rel is None:
             return None
-    if v1_mem is None:
-        return None
-    path = "/sys/fs/cgroup/memory" + v1_mem.rstrip("/") + "/memory.usage_in_bytes"
+        cgroup_dir = "/sys/fs/cgroup" + v2_rel.rstrip("/")
+        usage_file = "memory.current"
+    else:
+        if v1_mem is None:
+            return None
+        cgroup_dir = "/sys/fs/cgroup/memory" + v1_mem.rstrip("/")
+        usage_file = "memory.usage_in_bytes"
+
     try:
-        with open(path) as f:
-            return int(f.read().strip())
+        with open(cgroup_dir + "/" + usage_file) as f:
+            usage = int(f.read().strip())
     except Exception:
         return None
+
+    inactive_file = 0
+    try:
+        with open(cgroup_dir + "/memory.stat") as f:
+            for line in f:
+                if line.startswith("inactive_file "):
+                    inactive_file = int(line.split()[1])
+                    break
+    except Exception:
+        pass
+    return max(0, usage - inactive_file)
 
 def _allocated_cpus():
     """Return CPU count this task is entitled to. Falls back conservatively."""
@@ -1096,14 +1140,11 @@ def _check_oom():
     # victim first, and wrapper.py memory footprint is tiny. Fail-open on every
     # error so OOM detection cannot break the wrapper main flow.
     try:
-        with open("/proc/self/cgroup") as f:
-            line = f.readline().strip()
-        if not line:
-            return False, 0
-        if line.startswith("0::"):
-            # cgroup v2: "0::<rel-path>"
-            rel = line[3:]
-            events_path = "/sys/fs/cgroup" + rel.rstrip("/") + "/memory.events"
+        v2_rel, v1_mem, _ = _cg_paths()
+        if _is_pure_v2():
+            if v2_rel is None:
+                return False, 0
+            events_path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/memory.events"
             try:
                 with open(events_path) as ef:
                     for ev_line in ef:
@@ -1114,17 +1155,9 @@ def _check_oom():
             except Exception:
                 return False, 0
             return False, 0
-        # cgroup v1: each line is "<id>:<controllers>:<rel-path>"
-        rel = None
-        with open("/proc/self/cgroup") as f:
-            for raw in f:
-                cols = raw.strip().split(":", 2)
-                if len(cols) == 3 and "memory" in cols[1].split(","):
-                    rel = cols[2]
-                    break
-        if not rel:
+        if v1_mem is None:
             return False, 0
-        oom_ctrl_path = "/sys/fs/cgroup/memory" + rel.rstrip("/") + "/memory.oom_control"
+        oom_ctrl_path = "/sys/fs/cgroup/memory" + v1_mem.rstrip("/") + "/memory.oom_control"
         try:
             with open(oom_ctrl_path) as ef:
                 for ev_line in ef:
