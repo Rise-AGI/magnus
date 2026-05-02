@@ -284,6 +284,17 @@ class CustodyEntry:
 
 
 class FileCustodyManager:
+    """文件托管管理器（进程内单例）。
+
+    ``threading.Lock``：临界区做 dict / 计数 / 极短 syscall，以及永久条目
+    增删时的 manifest dump（需要遍历 ``self._entries``，必须在锁内）；耗时
+    I/O（chunked write、rmtree）一律在 lock 外。``shutdown()`` 在进程退出
+    阶段同步调用。
+
+    async endpoint 调用 ``store_file`` / ``delete_entry`` 应包
+    ``asyncio.to_thread``；``get_entry`` / ``get_file_path`` 锁内只做 dict
+    查找加一次 ``Path.exists`` 的 stat，可直接调。
+    """
 
     def __init__(self):
         config = magnus_config["server"]["file_custody"]

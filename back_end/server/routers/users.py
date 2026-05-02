@@ -1,4 +1,5 @@
 # back_end/server/routers/users.py
+import asyncio
 import io
 import logging
 from typing import List, Optional, Dict, Any
@@ -541,13 +542,14 @@ async def upload_avatar(
     old_url = target.avatar_url or ""
     if "/api/files/download/" in old_url:
         old_token = old_url.rsplit("/", 1)[-1]
-        file_custody_manager.delete_entry(old_token)
+        await asyncio.to_thread(file_custody_manager.delete_entry, old_token)
 
     content = await file.read()
     if len(content) > _MAX_AVATAR_SIZE:
         raise HTTPException(status_code=400, detail="Avatar file too large (max 2 MB)")
     assert file.filename is not None
-    token = file_custody_manager.store_file(
+    token = await asyncio.to_thread(
+        file_custody_manager.store_file,
         filename=file.filename,
         file_obj=io.BytesIO(content),
         permanent=True,
