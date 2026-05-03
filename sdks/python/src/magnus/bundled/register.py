@@ -127,7 +127,7 @@ def _collect_skill_files(source: Path) -> Tuple[List[Dict[str, str]], List[Path]
             content = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        text_files.append({"path": str(p.relative_to(source)), "content": content})
+        text_files.append({"path": p.relative_to(source).as_posix(), "content": content})
     return text_files, binary_paths
 
 
@@ -192,7 +192,7 @@ def register_bundled_skills(
 
         # Upload binary resources after text save succeeds
         for bp in binary_paths:
-            rel = str(bp.relative_to(skill_dir))
+            rel = bp.relative_to(skill_dir).as_posix()
             try:
                 with open(bp, "rb") as f:
                     resp = httpx.post(

@@ -66,7 +66,7 @@ def _discover_resource_files(skill_id: str) -> List[SkillFileResponse]:
     for p in sorted(resources_dir.rglob("*")):
         if not p.is_file():
             continue
-        rel = str(p.relative_to(resources_dir))
+        rel = p.relative_to(resources_dir).as_posix()
         results.append(SkillFileResponse(
             path=rel,
             content="",
@@ -404,13 +404,14 @@ def download_skill_archive(
         seen: set[str] = set()
 
         for f in skill.files:
+            normalized = f.path.replace("\\", "/").lstrip("/")
             data = f.content.encode("utf-8")
-            info = tarfile.TarInfo(name=f"{root}/{f.path}")
+            info = tarfile.TarInfo(name=f"{root}/{normalized}")
             info.size = len(data)
             info.mtime = int(mtime)
             info.mode = 0o644
             tar.addfile(info, io.BytesIO(data))
-            seen.add(f.path)
+            seen.add(normalized)
 
         resources_dir = _skill_resources_dir(skill_id)
         if resources_dir.exists():

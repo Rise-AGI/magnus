@@ -72,6 +72,16 @@ async function fetchSkillArchive(skillId: string): Promise<{ blob: Blob; rootNam
   return { blob, archiveName, rootName: deriveRootName(archiveName) };
 }
 
+const FS_INVALID_CHARS = /[\x00-\x1f<>:"/\\|?*]/g;
+const FS_RESERVED_WINDOWS = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+function sanitizeSegment(name: string): string {
+  let cleaned = name.replace(FS_INVALID_CHARS, "_").replace(/\.+$/, "_").replace(/\s+$/, "_");
+  if (cleaned === "") cleaned = "_";
+  if (FS_RESERVED_WINDOWS.test(cleaned)) cleaned = `_${cleaned}`;
+  return cleaned;
+}
+
 async function writeEntriesIntoDirectory(
   parent: FileSystemDirectoryHandleLike,
   entries: ExtractedTarEntry[],
@@ -91,7 +101,7 @@ async function writeEntriesIntoDirectory(
   };
 
   for (const entry of entries) {
-    const parts = entry.path.split("/").filter(Boolean);
+    const parts = entry.path.split("/").filter(Boolean).map(sanitizeSegment);
     if (parts.length === 0) continue;
 
     const dirSegments = parts.slice(0, -1);

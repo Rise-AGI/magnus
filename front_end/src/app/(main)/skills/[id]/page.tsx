@@ -275,20 +275,20 @@ export default function SkillDetailPage() {
 
              <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center gap-2">
                 <button
-                    onClick={handleDownload}
-                    disabled={isDownloading}
-                    className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm disabled:cursor-wait disabled:opacity-60"
-                    title={isDownloading ? t("skillDetail.downloading") : t("skillDetail.download")}
-                >
-                    {isDownloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <FolderDown className="w-5 h-5" />}
-                </button>
-
-                <button
                     onClick={() => { setEditorOpen(true); }}
                     className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
                     title={skill.can_manage ? t("skillDetail.editClone") : t("skills.clone")}
                 >
                     <RefreshCw className="w-5 h-5" />
+                </button>
+
+                <button
+                    onClick={handleDownload}
+                    disabled={isDownloading}
+                    className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={isDownloading ? t("skillDetail.downloading") : t("skillDetail.download")}
+                >
+                    {isDownloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <FolderDown className="w-5 h-5" />}
                 </button>
 
                 {skill.can_manage && (

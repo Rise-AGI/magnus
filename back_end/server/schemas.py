@@ -350,12 +350,12 @@ class SkillFileCreate(BaseModel):
     @field_validator("path")
     @classmethod
     def validate_path(cls, v: str) -> str:
-        v = v.strip()
+        v = v.strip().replace("\\", "/")
         if not v:
             raise ValueError("path must not be empty")
         if "\x00" in v:
             raise ValueError("path must not contain null bytes")
-        if v.startswith("/") or v.startswith("\\"):
+        if v.startswith("/"):
             raise ValueError("path must be relative")
         if ".." in v.split("/"):
             raise ValueError("path must not contain '..'")

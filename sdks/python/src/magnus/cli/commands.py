@@ -2760,7 +2760,7 @@ def _collect_skill_files(source: Path) -> Tuple[List[Dict[str, str]], List[Path]
     for p in sorted(source.rglob("*")):
         if not p.is_file():
             continue
-        rel = str(p.relative_to(source))
+        rel = p.relative_to(source).as_posix()
         ext = p.suffix.lower()
         if ext in _RESOURCE_EXTENSIONS:
             binary_paths.append(p)
@@ -2958,7 +2958,7 @@ def skill_save_cmd(
         if binary_paths:
             from .. import default_client
             for bp in binary_paths:
-                rel = str(bp.relative_to(source)) if source.is_dir() else bp.name
+                rel = bp.relative_to(source).as_posix() if source.is_dir() else bp.name
                 default_client.upload_skill_resource(skill_id, bp)
                 file_count += 1
                 print_msg(f"  Uploaded resource: [cyan]{rich_escape(str(rel))}[/cyan]")
