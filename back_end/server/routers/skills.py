@@ -1,13 +1,17 @@
 # back_end/server/routers/skills.py
+import io
 import logging
+import re
 import shutil
+import tarfile
 import mimetypes
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import quote
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import or_, case
@@ -360,3 +364,77 @@ def serve_skill_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     return PlainTextResponse(skill_file.content, media_type="text/plain; charset=utf-8")
+
+
+# ── Archive download ──────────────────────────────────────────────────────────
+
+
+_ARCHIVE_NAME_FALLBACK = "skill"
+_ARCHIVE_NAME_INVALID = re.compile(r'[\x00-\x1f\\/:*?"<>|]+')
+
+
+def _archive_root_name(skill: models.Skill) -> str:
+    for candidate in (skill.title or "", skill.id or ""):
+        cleaned = _ARCHIVE_NAME_INVALID.sub("_", candidate).strip(" .")
+        if cleaned:
+            return cleaned[:120]
+    return _ARCHIVE_NAME_FALLBACK
+
+
+@router.get("/skills/{skill_id}/archive")
+def download_skill_archive(
+    skill_id: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    skill = db.query(models.Skill)\
+        .options(joinedload(models.Skill.files))\
+        .filter(models.Skill.id == skill_id)\
+        .first()
+
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    root = _archive_root_name(skill)
+    now = datetime.now(timezone.utc)
+    mtime = now.timestamp()
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.USTAR_FORMAT) as tar:
+        seen: set[str] = set()
+
+        for f in skill.files:
+            data = f.content.encode("utf-8")
+            info = tarfile.TarInfo(name=f"{root}/{f.path}")
+            info.size = len(data)
+            info.mtime = int(mtime)
+            info.mode = 0o644
+            tar.addfile(info, io.BytesIO(data))
+            seen.add(f.path)
+
+        resources_dir = _skill_resources_dir(skill_id)
+        if resources_dir.exists():
+            base = resources_dir.resolve()
+            for p in sorted(resources_dir.rglob("*")):
+                if not p.is_file():
+                    continue
+                resolved = p.resolve()
+                if not resolved.is_relative_to(base):
+                    continue
+                rel = resolved.relative_to(base).as_posix()
+                if rel in seen:
+                    continue
+                info = tarfile.TarInfo(name=f"{root}/{rel}")
+                info.size = resolved.stat().st_size
+                info.mtime = int(resolved.stat().st_mtime)
+                info.mode = 0o644
+                with resolved.open("rb") as fh:
+                    tar.addfile(info, fh)
+
+    buffer.seek(0)
+    filename = f"{root}.tar.gz"
+    encoded = quote(filename, safe="")
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{filename.encode('ascii', 'replace').decode('ascii')}\"; filename*=UTF-8''{encoded}",
+    }
+    return StreamingResponse(buffer, media_type="application/gzip", headers=headers)

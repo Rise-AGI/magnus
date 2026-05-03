@@ -966,6 +966,16 @@ def blueprint(
     en: "Are you sure you want to delete skill \"{title}\"?"
   },
   "skillDetail.editClone": { zh: "编辑 / 克隆", en: "Edit / Clone" },
+  "skillDetail.download": { zh: "下载到本地", en: "Download to local" },
+  "skillDetail.downloading": { zh: "正在下载...", en: "Downloading..." },
+  "skillDetail.downloadFolderHint": {
+    zh: "已写入选定目录下的「{name}」。",
+    en: "Saved to \"{name}\" inside the selected folder."
+  },
+  "skillDetail.downloadArchiveHint": {
+    zh: "当前浏览器不支持直接保存到文件夹，已下载为 {name}，请手动解压。",
+    en: "This browser cannot save folders directly. Downloaded {name} instead — please unpack it manually."
+  },
 
   // Skills Editor
   "skillEditor.create": { zh: "新建技能", en: "Create Skill" },

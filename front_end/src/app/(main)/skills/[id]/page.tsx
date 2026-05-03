@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Clock, Dna, RefreshCw,
-  Trash2, FileText, Check, Copy, ImageIcon
+  Trash2, FileText, Check, Copy, ImageIcon, FolderDown, Loader2
 } from "lucide-react";
 
 import { client } from "@/lib/api";
@@ -22,6 +22,7 @@ import RenderMarkdown from "@/components/ui/render-markdown";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useBackNavigation } from "@/hooks/use-back-navigation";
 import { Skill, SkillFile } from "@/types/skill";
+import { downloadSkillToFolder, SkillDownloadCancelled } from "@/lib/skill-download";
 
 export default function SkillDetailPage() {
   const params = useParams();
@@ -44,6 +45,9 @@ export default function SkillDetailPage() {
 
   const [copiedDesc, setCopiedDesc] = useState(false);
   const [copiedFile, setCopiedFile] = useState(false);
+
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadHint, setDownloadHint] = useState<string | null>(null);
 
   const fetchSkill = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
@@ -102,6 +106,23 @@ export default function SkillDetailPage() {
     } catch (e: any) {
       setErrorMessage(e.message || t("common.operationFailed"));
       setIsDeleting(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!skill || isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const result = await downloadSkillToFolder(skill.id);
+      const key = result.mode === "folder" ? "skillDetail.downloadFolderHint" : "skillDetail.downloadArchiveHint";
+      const name = result.mode === "folder" ? result.rootName : `${result.rootName}.tar.gz`;
+      setDownloadHint(t(key, { name }));
+    } catch (e: unknown) {
+      if (e instanceof SkillDownloadCancelled) return;
+      const message = e instanceof Error ? e.message : t("common.operationFailed");
+      setErrorMessage(message);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -253,6 +274,15 @@ export default function SkillDetailPage() {
              />
 
              <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center gap-2">
+                <button
+                    onClick={handleDownload}
+                    disabled={isDownloading}
+                    className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm disabled:cursor-wait disabled:opacity-60"
+                    title={isDownloading ? t("skillDetail.downloading") : t("skillDetail.download")}
+                >
+                    {isDownloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <FolderDown className="w-5 h-5" />}
+                </button>
+
                 <button
                     onClick={() => { setEditorOpen(true); }}
                     className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"
@@ -417,6 +447,16 @@ export default function SkillDetailPage() {
         confirmText={t("common.ok")}
         mode="alert"
         variant="danger"
+      />
+
+      <ConfirmationDialog
+        isOpen={!!downloadHint}
+        onClose={() => setDownloadHint(null)}
+        title={t("skillDetail.download")}
+        description={downloadHint}
+        confirmText={t("common.ok")}
+        mode="alert"
+        variant="info"
       />
     </div>
   );
