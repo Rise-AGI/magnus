@@ -1335,12 +1335,13 @@ fi
         print(f"Magnus Execution Error: {{error}}\\nTraceback: \\n{{traceback.format_exc()}}", file=sys.stderr)
         sys.exit(1)
     finally:
-        # Clean up overlay
-        try:
-            if os.path.exists(overlay_path):
-                os.remove(overlay_path)
-        except Exception:
-            pass
+        # Clean up overlay (.img 与 .ext3 两种 apptainer 落盘命名都尝试删)
+        for _candidate in (overlay_path, overlay_path + ".ext3"):
+            try:
+                if os.path.exists(_candidate):
+                    os.remove(_candidate)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     main()
@@ -1405,7 +1406,11 @@ if __name__ == "__main__":
             delete_file(os.path.join(job_working_table, ".magnus_success"))
             delete_file(os.path.join(job_working_table, ".magnus_oom"))
             delete_file(os.path.join(job_working_table, ".magnus_user_script.sh"))
+            # apptainer overlay create 在不同 apptainer 版本下落盘文件名不同：
+            # 部分版本写 ephemeral_overlay.img，部分版本自动追加 .ext3 后缀。
+            # 双删兜住两种情况，避免漏掉孤儿 sparse 文件。
             delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
+            delete_file(os.path.join(job_working_table, "ephemeral_overlay.img.ext3"))
             delete_file(os.path.join(job_working_table, ".magnus_tmp"))
             delete_file(os.path.join(job_working_table, ".magnus_cache"))
             # metrics/ 不清理，与 slurm/output.txt 同策略，供 job 结束后回看

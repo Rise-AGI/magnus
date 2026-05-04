@@ -5,6 +5,7 @@ import time
 import shutil
 import asyncio
 import logging
+import tempfile
 import functools
 import subprocess
 from typing import Dict, List, Optional, Tuple
@@ -229,6 +230,19 @@ class ResourceManager:
             except OSError as e:
                 logger.warning(f"Failed to evict repo {path}: {e}")
 
+    def recover_stale_pull_caches(self)-> None:
+        """启动时调用：清理上次进程异常退出残留的 per-pull tempdir。
+        正常路径在 _ensure_image_apptainer 的 finally 里就 rmtree 了；
+        这里只兜底 SIGKILL / OOM 这种来不及走 finally 的情况。"""
+        if is_local_mode or not os.path.isdir(magnus_apptainer_cache_path):
+            return
+        for name in os.listdir(magnus_apptainer_cache_path):
+            if not name.startswith("pull-"):
+                continue
+            path = os.path.join(magnus_apptainer_cache_path, name)
+            shutil.rmtree(path, ignore_errors=True)
+            logger.info(f"Cleaned up stale pull cache: {name}")
+
     async def ensure_image(self, image: str, force: bool = False)-> Tuple[bool, Optional[str]]:
         """
         确保镜像可用。返回 (success, error_msg)
@@ -329,53 +343,60 @@ class ResourceManager:
             max_retries = 3
             base_retry_delay = 10
 
-            for attempt in range(max_retries):
-                env = os.environ.copy()
-                env["APPTAINER_CACHEDIR"] = magnus_apptainer_cache_path
-                env["GODEBUG"] = "http2client=0"
-                proc = await asyncio.create_subprocess_exec(
-                    "apptainer", "pull", pull_dest, pull_image,
-                    stdout = asyncio.subprocess.PIPE,
-                    stderr = asyncio.subprocess.PIPE,
-                    env = env,
-                )
-                try:
-                    _, stderr = await proc.communicate()
-                except asyncio.CancelledError:
-                    # 优雅关闭：终止子进程，避免孤儿 apptainer 进程
-                    proc.terminate()
-                    await proc.wait()
+            # apptainer pull 写入的 OCI scratch（blob、oci-tmp、oras）随次单调增长，
+            # 实测达到 sif 库存的 2~4 倍后仍无 GC。每次 pull 用独立 tempdir 隔离，
+            # 走完 finally 清理，磁盘占用自然有界。
+            pull_cache_dir = tempfile.mkdtemp(prefix="pull-", dir=magnus_apptainer_cache_path)
+            try:
+                for attempt in range(max_retries):
+                    env = os.environ.copy()
+                    env["APPTAINER_CACHEDIR"] = pull_cache_dir
+                    env["GODEBUG"] = "http2client=0"
+                    proc = await asyncio.create_subprocess_exec(
+                        "apptainer", "pull", pull_dest, pull_image,
+                        stdout = asyncio.subprocess.PIPE,
+                        stderr = asyncio.subprocess.PIPE,
+                        env = env,
+                    )
+                    try:
+                        _, stderr = await proc.communicate()
+                    except asyncio.CancelledError:
+                        # 优雅关闭：终止子进程，避免孤儿 apptainer 进程
+                        proc.terminate()
+                        await proc.wait()
+                        if os.path.exists(pull_dest):
+                            try:
+                                os.remove(pull_dest)
+                            except OSError:
+                                pass
+                        raise
+
+                    if proc.returncode == 0:
+                        break
+
+                    # 清理残留的不完整 .tmp
                     if os.path.exists(pull_dest):
                         try:
                             os.remove(pull_dest)
                         except OSError:
                             pass
-                    raise
 
-                if proc.returncode == 0:
-                    break
+                    error_msg = stderr.decode().strip()
+                    error_lower = error_msg.lower()
 
-                # 清理残留的不完整 .tmp
-                if os.path.exists(pull_dest):
-                    try:
-                        os.remove(pull_dest)
-                    except OSError:
-                        pass
+                    if any(p in error_lower for p in non_transient_patterns):
+                        logger.error(f"Failed to pull image {image} (non-transient): {error_msg}")
+                        return False, error_msg
 
-                error_msg = stderr.decode().strip()
-                error_lower = error_msg.lower()
-
-                if any(p in error_lower for p in non_transient_patterns):
-                    logger.error(f"Failed to pull image {image} (non-transient): {error_msg}")
-                    return False, error_msg
-
-                if attempt < max_retries - 1:
-                    retry_delay = base_retry_delay * (2 ** attempt)
-                    logger.warning(f"Pull attempt {attempt + 1}/{max_retries} failed, retrying in {retry_delay}s: {error_msg}")
-                    await asyncio.sleep(retry_delay)
-                else:
-                    logger.error(f"Failed to pull image {image} after {max_retries} attempts: {error_msg}")
-                    return False, error_msg
+                    if attempt < max_retries - 1:
+                        retry_delay = base_retry_delay * (2 ** attempt)
+                        logger.warning(f"Pull attempt {attempt + 1}/{max_retries} failed, retrying in {retry_delay}s: {error_msg}")
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        logger.error(f"Failed to pull image {image} after {max_retries} attempts: {error_msg}")
+                        return False, error_msg
+            finally:
+                shutil.rmtree(pull_cache_dir, ignore_errors=True)
 
             # 先 chmod 再 rename：rename 保留权限，若在两者之间断电，
             # .sif 会以 umask 默认权限（可能是 0600）落盘，其他 runner 无法读取

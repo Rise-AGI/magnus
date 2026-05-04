@@ -106,6 +106,8 @@ def recover_stuck_images() -> None:
                 except OSError:
                     pass
 
+    resource_manager.recover_stale_pull_caches()
+
     db = database.SessionLocal()
     try:
         stuck = db.query(models.CachedImage).filter(
