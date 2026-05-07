@@ -28,7 +28,7 @@ from ..schemas import (
     PagedExplorerSessionResponse,
 )
 from .._magnus_config import magnus_config, is_admin_user
-from .._resource_manager import _parse_size_string
+from .._size_utils import _parse_size_string
 from .auth import get_current_user
 
 

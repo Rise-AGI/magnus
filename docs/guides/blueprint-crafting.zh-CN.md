@@ -6,7 +6,7 @@
 目标场景：在一个新项目根目录下，根据本文档将该项目接入 Magnus 蓝图。
 
 > **源码真相**：本文档所有细节均来自代码，而非二手描述。
-> 核心文件：`back_end/server/_blueprint_manager.py`、`back_end/server/schemas.py`。
+> 核心文件：`back_end/server/_blueprint_manager/`、`back_end/server/schemas/`。
 
 ---
 

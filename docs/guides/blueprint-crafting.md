@@ -6,7 +6,7 @@ This document is the authoritative reference for the Magnus Blueprint system, ai
 Target scenario: at the root of a new project, integrate that project into a Magnus Blueprint following this document.
 
 > **Source of truth**: all details in this document come from the code, not second-hand descriptions.
-> Core files: `back_end/server/_blueprint_manager.py`, `back_end/server/schemas.py`.
+> Core files: `back_end/server/_blueprint_manager/`, `back_end/server/schemas/`.
 
 ---
 

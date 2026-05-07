@@ -1,5 +1,6 @@
 # back_end/server/_feishu_client.py
-from library import *
+"""项目相关的 FeishuClient 单例。FeishuClient 类本身在 library/functional/feishu_tools.py。"""
+from library.functional.feishu_tools import FeishuClient
 from ._magnus_config import magnus_config, is_local_auth
 
 

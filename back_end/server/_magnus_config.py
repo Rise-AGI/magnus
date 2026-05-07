@@ -3,6 +3,7 @@ import sys
 import logging
 from typing import Set, Type
 from library import *
+from ._size_utils import _parse_size_string
 
 
 __all__ = [
@@ -299,11 +300,7 @@ def apply_cluster_defaults(data: Dict[str, Any])-> Dict[str, Any]:
 
 def validate_cluster_limits(data: Dict[str, Any])-> None:
     """校验 Job/Service 提交字典中的 cpu_count / memory_demand 不超过集群上限。
-    超限抛 ValueError，由 endpoint 层转为 HTTP 400。
-    Note: lazy import _parse_size_string 以避免与 _resource_manager.py 的循环依赖
-    （_resource_manager 顶层 import 本模块的 magnus_config）。"""
-    from ._resource_manager import _parse_size_string
-
+    超限抛 ValueError，由 endpoint 层转为 HTTP 400。"""
     cluster = magnus_config["cluster"]
 
     max_cpu = cluster["max_cpu_count"]

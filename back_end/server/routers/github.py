@@ -16,7 +16,7 @@ from .._magnus_config import is_local_mode
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# git subprocess 使用的干净环境（与 _resource_manager.py 保持一致）
+# git subprocess 使用的干净环境（与 _resource_manager 保持一致）
 _git_env = os.environ.copy()
 _git_env["GIT_TERMINAL_PROMPT"] = "0"
 for _k in ("GIT_ASKPASS", "SSH_ASKPASS"):

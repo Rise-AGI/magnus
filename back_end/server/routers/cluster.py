@@ -81,7 +81,7 @@ def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int,
 def _scheduler_sort_key(job):
     """
     复刻调度器排序逻辑：优先级 (A1>A2>B1>B2) > 时间 (FIFO)
-    保持此逻辑与 _scheduler.py 一致至关重要，否则前端展示顺序会误导用户
+    保持此逻辑与 _scheduler/_decisions.py 一致至关重要，否则前端展示顺序会误导用户
     """
     priority_map = {
         JobType.A1: 4,

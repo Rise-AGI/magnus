@@ -103,7 +103,7 @@ def submit_job(
     """
     提交新任务。
     注意：此接口只负责将任务写入数据库并标记为 PREPARING。
-    后续的资源准备、调度决策和 sbatch 提交由后台 _scheduler.py 负责。
+    后续的资源准备、调度决策和 sbatch 提交由后台 _scheduler 负责。
     """
     try:
         db_job = create_job(job_data.model_dump(), current_user.id, db)

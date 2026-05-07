@@ -177,7 +177,7 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 entry_command = env_cmd,
                 status = JobStatus.PREPARING,
                 job_type = service.job_type,
-                # NOTE: Service.container_image is schema-nullable (models.py: Mapped[str | None]),
+                # NOTE: Service.container_image is schema-nullable (models/_service.py: Mapped[str | None]),
                 # while Job.container_image is NOT NULL. New services route through apply_cluster_defaults,
                 # but legacy rows predating that helper may still hold NULL — keep this fallback as defense in depth.
                 container_image = service.container_image or magnus_config["cluster"]["default_container_image"],

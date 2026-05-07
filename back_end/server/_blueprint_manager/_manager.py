@@ -1,101 +1,22 @@
-# back_end/server/_blueprint_manager.py
+# back_end/server/_blueprint_manager/_manager.py
+"""BlueprintManager 主类：解析签名、运行时执行 + 类型转换。"""
 import inspect
-import logging
-from typing import Any, Dict, List, Optional, Union, Annotated, Literal, get_origin, get_args
+from typing import Any, Dict, List, Optional, Annotated, Literal, get_origin, get_args
 
-from pydantic import ValidationError, create_model, ConfigDict, GetCoreSchemaHandler
-from pydantic_core import CoreSchema, core_schema
+from pydantic import ValidationError, create_model, ConfigDict
 
-from .models import JobType
-from .schemas import JobSubmission, BlueprintParamSchema, BlueprintParamOption
-
-logger = logging.getLogger(__name__)
-
-
-class _BlueprintCapture(Exception):
-    """submit_job 劫持用内部异常，捕获用户传入的 payload"""
-    def __init__(self, payload: Dict[str, Any]):
-        self.payload = payload
-
-
-class FileSecret(str):
-    """
-    文件传输凭证类型。
-
-    用于蓝图参数，表示该参数需要一个文件/文件夹。
-    值必须以 "magnus-secret:" 开头，后跟 download token。
-
-    示例：magnus-secret:7919-calm-boat-fire
-
-    SDK 端支持语法糖：直接传文件路径，SDK 会自动上传并转换为 secret 格式。
-    """
-
-    MAGIC_PREFIX = "magnus-secret:"
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls,
-        _source_type: Any,
-        _handler: GetCoreSchemaHandler,
-    )-> CoreSchema:
-        return core_schema.no_info_after_validator_function(
-            cls._validate,
-            core_schema.str_schema(),
-        )
-
-    @classmethod
-    def _validate(cls, v: str)-> "FileSecret":
-        if not v.startswith(cls.MAGIC_PREFIX):
-            raise ValueError(f"FileSecret must start with '{cls.MAGIC_PREFIX}'")
-        return cls(v)
-
-    @property
-    def token(self)-> str:
-        return self[len(self.MAGIC_PREFIX):]
-
-
-def _is_optional_type(tp)-> bool:
-    """检查类型是否是 Optional[X]，即 Union[X, None]"""
-    if get_origin(tp) is Union:
-        args = get_args(tp)
-        return type(None) in args and len(args) == 2
-    return False
-
-
-def _unwrap_optional(tp):
-    """从 Optional[X] 中提取 X"""
-    if _is_optional_type(tp):
-        args = get_args(tp)
-        for arg in args:
-            if arg is not type(None):
-                return arg
-    return tp
-
-
-def _is_list_type(tp)-> bool:
-    """检查类型是否是 List[X]"""
-    return get_origin(tp) is list
-
-
-def _unwrap_list(tp):
-    """从 List[X] 中提取 X"""
-    if _is_list_type(tp):
-        args = get_args(tp)
-        return args[0] if args else Any
-    return tp
-
-
-def _type_display_name(tp) -> str:
-    if get_origin(tp) is Annotated:
-        tp = get_args(tp)[0]
-    if _is_optional_type(tp):
-        return f"Optional[{_type_display_name(_unwrap_optional(tp))}]"
-    if _is_list_type(tp):
-        return f"List[{_type_display_name(_unwrap_list(tp))}]"
-    if get_origin(tp) is Literal:
-        values = get_args(tp)
-        return " | ".join(repr(v) for v in values)
-    return getattr(tp, "__name__", str(tp))
+from ..models import JobType
+from ..schemas import JobSubmission, BlueprintParamSchema, BlueprintParamOption
+from ._types import (
+    FileSecret,
+    _BlueprintCapture,
+    _is_optional_type,
+    _unwrap_optional,
+    _is_list_type,
+    _unwrap_list,
+    _type_display_name,
+)
+from ._sandbox import _compile_code
 
 
 class BlueprintManager:
@@ -107,7 +28,7 @@ class BlueprintManager:
     """
 
     def __init__(self):
-        def _hijacked_submit_job(**kwargs: Any)-> None:
+        def _hijacked_submit_job(**kwargs: Any) -> None:
             raise _BlueprintCapture(kwargs)
 
         self.execution_globals = {
@@ -122,109 +43,13 @@ class BlueprintManager:
             "Any": Any,
         }
 
-    def _compile_code(
-        self,
-        code: str,
-        extra_globals: Dict[str, Any],
-    )-> Dict[str, Any]:
-        # 允许导入的模块白名单
-        allowed_modules = {
-            "typing": __import__("typing"),
-        }
-
-        def restricted_import(
-            name: str,
-            _globals: Optional[Dict[str, Any]] = None,
-            _locals: Optional[Dict[str, Any]] = None,
-            _fromlist: tuple = (),
-            _level: int = 0,
-        )-> Any:
-            if name in allowed_modules:
-                return allowed_modules[name]
-            raise ImportError(f"Import of '{name}' is not allowed in Blueprint")
-
-        # 受限 builtins：允许安全操作，阻止危险操作
-        safe_builtins: Dict[str, Any] = {
-            # 常量
-            "True": True,
-            "False": False,
-            "None": None,
-            # 类型
-            "str": str,
-            "int": int,
-            "float": float,
-            "bool": bool,
-            "list": list,
-            "dict": dict,
-            "tuple": tuple,
-            "set": set,
-            "frozenset": frozenset,
-            "type": type,
-            "object": object,
-            # 函数
-            "len": len,
-            "range": range,
-            "enumerate": enumerate,
-            "zip": zip,
-            "map": map,
-            "filter": filter,
-            "sorted": sorted,
-            "reversed": reversed,
-            "sum": sum,
-            "min": min,
-            "max": max,
-            "abs": abs,
-            "round": round,
-            "pow": pow,
-            "divmod": divmod,
-            "any": any,
-            "all": all,
-            "isinstance": isinstance,
-            "issubclass": issubclass,
-            "hasattr": hasattr,
-            "getattr": getattr,
-            "setattr": setattr,
-            "callable": callable,
-            "repr": repr,
-            "hash": hash,
-            "id": id,
-            "print": print,
-            # 受限 import
-            "__import__": restricted_import,
-            # 异常
-            "Exception": Exception,
-            "ValueError": ValueError,
-            "TypeError": TypeError,
-            "KeyError": KeyError,
-            "IndexError": IndexError,
-            "AttributeError": AttributeError,
-            "RuntimeError": RuntimeError,
-        }
-
-        scope: Dict[str, Any] = {"__builtins__": safe_builtins}
-        scope.update(self.execution_globals)
-        if extra_globals:
-            scope.update(extra_globals)
-
-        try:
-            exec(code, scope)
-        except SyntaxError as e:
-            raise ValueError(f"Syntax Error in Blueprint: {e}")
-        except Exception as e:
-            raise ValueError(f"Runtime Error in Blueprint: {e}")
-
-        if "blueprint" not in scope:
-            raise ValueError("Blueprint must define a function named 'blueprint'")
-
-        return scope
-
-    def analyze_signature(self, code: str)-> List[BlueprintParamSchema]:
+    def analyze_signature(self, code: str) -> List[BlueprintParamSchema]:
         """
         静态分析 blueprint 函数签名，提取参数元数据（包括 Annotated 中的 UI 配置）。
         支持类型：T, Optional[T], List[T], Optional[List[T]]
         其中 T 为基础类型：int, float, bool, str, Literal[...]
         """
-        local_scope = self._compile_code(code, extra_globals={})
+        local_scope = _compile_code(code, self.execution_globals)
         func = local_scope["blueprint"]
         sig = inspect.signature(func)
         params_schema = []
@@ -338,13 +163,13 @@ class BlueprintManager:
 
         return params_schema
 
-    def execute(self, code: str, inputs: Dict[str, Any])-> JobSubmission:
+    def execute(self, code: str, inputs: Dict[str, Any]) -> JobSubmission:
         """
         执行蓝图代码。
         劫持机制：blueprint() 内调用 submit_job() 时抛出 _BlueprintCapture，
         捕获传入的 kwargs，构造 JobSubmission 返回。
         """
-        local_scope = self._compile_code(code, extra_globals={})
+        local_scope = _compile_code(code, self.execution_globals)
         func = local_scope.get("blueprint")
 
         if not func or not callable(func):
@@ -420,6 +245,3 @@ class BlueprintManager:
             raise ValueError(f"Blueprint logic error: {e}")
         except Exception as e:
             raise ValueError(f"Runtime Error in Blueprint: {e}")
-
-
-blueprint_manager = BlueprintManager()

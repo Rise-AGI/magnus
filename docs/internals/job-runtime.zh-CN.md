@@ -33,7 +33,7 @@ SUCCESS / FAILED
 
 ## wrapper.py: 三层结构
 
-`_scheduler.py` 的 `_build_wrapper_content()` 生成 `wrapper.py`，它是 SLURM 实际执行的入口。wrapper 内含三个嵌套层次：
+`_scheduler/_wrapper_template.py` 的 `_build_wrapper_content()` 生成 `wrapper.py`，它是 SLURM 实际执行的入口。wrapper 内含三个嵌套层次：
 
 ```
 wrapper.py (Python, SLURM 直接运行)
@@ -371,11 +371,11 @@ cluster:
 
 | 文件 | 职责 |
 |------|------|
-| `back_end/server/_scheduler.py` | 调度器核心：心跳、状态同步、wrapper 生成、SLURM 提交 |
-| `back_end/server/_slurm_manager.py` | SLURM CLI 封装 (sbatch/squeue/scancel/sinfo) |
-| `back_end/server/_resource_manager.py` | 镜像拉取 + 仓库克隆，带 LRU 缓存 |
+| `back_end/server/_scheduler/` | 调度器核心：心跳、状态同步、wrapper 生成、SLURM 提交 |
+| `back_end/server/_slurm_manager/` | SLURM CLI 封装 (sbatch/squeue/scancel/sinfo) |
+| `back_end/server/_resource_manager/` | 镜像拉取 + 仓库克隆，带 LRU 缓存 |
 | `back_end/server/routers/jobs.py` | Job CRUD API，惰性读取 .magnus_result/.magnus_action |
-| `back_end/server/models.py` | Job 模型 (SQLAlchemy) |
+| `back_end/server/models/` | Job 模型 (SQLAlchemy) |
 | `configs/magnus_config.yaml` | 配置源 |
 | `docker/magnus-runtime/Dockerfile` | 子 Magnus 运行时镜像 |
 | `scripts/setup_single_node_slurm.sh` | 容器内 SLURM 引导脚本 |

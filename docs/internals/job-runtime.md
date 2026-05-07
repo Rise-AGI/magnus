@@ -33,7 +33,7 @@ SUCCESS / FAILED
 
 ## wrapper.py: three-layer structure
 
-`_build_wrapper_content()` in `_scheduler.py` generates `wrapper.py`, which is the actual entry point executed by SLURM. The wrapper contains three nested layers:
+`_build_wrapper_content()` in `_scheduler/_wrapper_template.py` generates `wrapper.py`, which is the actual entry point executed by SLURM. The wrapper contains three nested layers:
 
 ```
 wrapper.py (Python, run directly by SLURM)
@@ -371,11 +371,11 @@ cluster:
 
 | File | Responsibility |
 |------|------|
-| `back_end/server/_scheduler.py` | Scheduler core: heartbeat, state sync, wrapper generation, SLURM submission |
-| `back_end/server/_slurm_manager.py` | SLURM CLI wrapper (sbatch/squeue/scancel/sinfo) |
-| `back_end/server/_resource_manager.py` | Image pull + repo clone, with LRU cache |
+| `back_end/server/_scheduler/` | Scheduler core: heartbeat, state sync, wrapper generation, SLURM submission |
+| `back_end/server/_slurm_manager/` | SLURM CLI wrapper (sbatch/squeue/scancel/sinfo) |
+| `back_end/server/_resource_manager/` | Image pull + repo clone, with LRU cache |
 | `back_end/server/routers/jobs.py` | Job CRUD API, lazy reading of .magnus_result/.magnus_action |
-| `back_end/server/models.py` | Job model (SQLAlchemy) |
+| `back_end/server/models/` | Job model (SQLAlchemy) |
 | `configs/magnus_config.yaml` | Configuration source |
 | `docker/magnus-runtime/Dockerfile` | Child Magnus runtime image |
 | `scripts/setup_single_node_slurm.sh` | In-container SLURM bootstrap script |

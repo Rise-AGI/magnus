@@ -195,6 +195,6 @@ CMD ["/bin/bash"]
 
 1. **uv: command not found** — the uv install script places a symlink under `/root/.local/bin/`, which rootlesskit + containall swallow along with `/root`. Fix: `cp` to `/usr/local/bin/`.
 2. **No space left on device (/tmp)** — `--containall` by default mounts a 64MB tmpfs on `/tmp` (`sessiondir max size`), unrelated to job memory. Fix: `--no-mount tmp`, so that `/tmp` falls onto the ephemeral overlay.
-3. **unexpected EOF during apptainer pull** — network jitter while downloading a large image (~4.5GB SIF). Fix: 3 retries with exponential backoff in `_resource_manager.py`; non-transient errors (unauthorized, not found) fail immediately.
+3. **unexpected EOF during apptainer pull** — network jitter while downloading a large image (~4.5GB SIF). Fix: 3 retries with exponential backoff in `_resource_manager/_images.py`; non-transient errors (unauthorized, not found) fail immediately.
 4. **hardlink across filesystems fails** — the cache on SIF (squashfs) and the venv on the bind mount are on different filesystems. Fix: `UV_LINK_MODE=copy`.
 5. **`uv pip install` cache does not work for `uv sync`** — the archive caches of the two installers do not recognize each other. After preheating via `uv pip install`, `uv sync` at job runtime reports everything uncached, effectively installing nothing. Fix: change warmup to `uv sync --frozen`, COPY the real lockfile into the image, ensuring the cache format is consistent with job runtime.

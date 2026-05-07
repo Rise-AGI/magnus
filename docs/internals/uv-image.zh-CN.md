@@ -195,6 +195,6 @@ CMD ["/bin/bash"]
 
 1. **uv: command not found** — uv 安装脚本在 `/root/.local/bin/` 下放 symlink，rootlesskit + containall 吞掉 `/root`。解法：`cp` 到 `/usr/local/bin/`。
 2. **No space left on device (/tmp)** — `--containall` 默认在 `/tmp` 挂 64MB tmpfs（`sessiondir max size`），与 job memory 无关。解法：`--no-mount tmp`，让 `/tmp` 落到 ephemeral overlay。
-3. **unexpected EOF during apptainer pull** — 大镜像（~4.5GB SIF）下载时网络抖动。解法：`_resource_manager.py` 中 3 次重试 + 指数退避，非瞬态错误（unauthorized, not found）直接失败。
+3. **unexpected EOF during apptainer pull** — 大镜像（~4.5GB SIF）下载时网络抖动。解法：`_resource_manager/_images.py` 中 3 次重试 + 指数退避，非瞬态错误（unauthorized, not found）直接失败。
 4. **hardlink 跨文件系统失败** — SIF (squashfs) 上的 cache 和 bind mount 上的 venv 跨文件系统。解法：`UV_LINK_MODE=copy`。
 5. **`uv pip install` 缓存对 `uv sync` 无效** — 两套 installer 的 archive cache 互不识别。warmup 用 `uv pip install` 预热后，job 运行时 `uv sync` 全部报 uncached，等于白装。解法：warmup 改用 `uv sync --frozen`，COPY 真实 lockfile 进镜像，确保缓存格式和 job 运行时一致。
