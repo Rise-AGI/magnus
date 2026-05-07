@@ -182,12 +182,13 @@ def get_cluster_stats(
 
     sorted_all_running = magnus_group + external_group
 
-    # 计算资源 (必须使用分页前的全量数据)
-    n1_free = slurm_manager.get_cluster_free_gpus()
-    n2_used = sum(job.gpu_count for job in sorted_all_running)
-    display_total = n1_free + n2_used
-
-    cpu_mem = slurm_manager.get_cpu_and_memory()
+    # 资源数字全部来自单次 scontrol 快照 + 单次 squeue --json（即 all_slurm_tasks）。
+    # used 直接从 squeue 派生的 running 列表派生，total 取 SLURM 报告的 capacity；
+    # 两者来源同时刻，保证 total = free + used 且 used == sum(running.gpu_count)。
+    node_snap = slurm_manager.get_node_snapshot()
+    used_gpus = sum(job.gpu_count for job in sorted_all_running)
+    display_total = max(node_snap.total_gpus, used_gpus)
+    free_gpus = max(0, display_total - used_gpus)
 
     # --- 5. Running 列表分页切片 ---
     total_running = len(sorted_all_running)
@@ -231,12 +232,12 @@ def get_cluster_stats(
             "node": _node_name,
             "gpu_model": _gpu_model,
             "total": display_total,
-            "free": n1_free,
-            "used": n2_used,
-            "cpu_total": cpu_mem["cpu_total"],
-            "cpu_free": cpu_mem["cpu_total"] - cpu_mem["cpu_alloc"],
-            "mem_total_mb": cpu_mem["mem_total_mb"],
-            "mem_free_mb": cpu_mem["mem_total_mb"] - cpu_mem["mem_alloc_mb"],
+            "free": free_gpus,
+            "used": used_gpus,
+            "cpu_total": node_snap.cpu_total,
+            "cpu_free": max(0, node_snap.cpu_total - node_snap.cpu_alloc),
+            "mem_total_mb": node_snap.mem_total_mb,
+            "mem_free_mb": max(0, node_snap.mem_total_mb - node_snap.mem_alloc_mb),
         },
         "running_jobs": paginated_running,
         "total_running": total_running,

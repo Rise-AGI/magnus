@@ -76,11 +76,43 @@ export default function ClusterPage() {
         }),
       ]);
 
+      // 跨 panel 状态归一：cluster.running_jobs 走 SLURM 实时视图，my-active 走 DB；
+      // scheduler 还没把 DB 推到 RUNNING 时，同一 job 会以 SLURM=Running、DB=Pending/Preparing
+      // 的形态同时出现在两个 panel。两次 fetch 同一前端轮询里完成，时间窗口几乎重合，
+      // 用 cluster.running 的 slurm_job_id 集合反向覆盖 my-active 状态即可消除矛盾。
+      const slurmRunningIds = new Set<string>(
+        ((clusterData?.running_jobs ?? []) as Job[])
+          .map(job => job.slurm_job_id)
+          .filter((id): id is string => Boolean(id)),
+      );
+
+      const reconcileMyActive = (jobs: Job[]): Job[] => {
+        const reconciled = jobs.map(job =>
+          job.slurm_job_id
+          && slurmRunningIds.has(job.slurm_job_id)
+          && job.status !== "Running"
+            ? { ...job, status: "Running" }
+            : job
+        );
+        // 与 server `running_orm + queued_orm + preparing_orm` 一致的桶序：
+        // Running 先、Pending/Paused 次之、Preparing 最后。Array.sort 在 ES2019
+        // 起稳定，桶内保持 server 给的原始顺序。
+        const bucketOrder: Record<string, number> = {
+          "Running": 0,
+          "Pending": 1,
+          "Paused": 1,
+          "Preparing": 2,
+        };
+        return reconciled.sort(
+          (a, b) => (bucketOrder[a.status] ?? 99) - (bucketOrder[b.status] ?? 99)
+        );
+      };
+
       if (myJobsData && myJobsData.items) {
-        setActiveJobs(myJobsData.items);
+        setActiveJobs(reconcileMyActive(myJobsData.items));
         setTotalMyJobs(myJobsData.total);
       } else if (Array.isArray(myJobsData)) {
-        setActiveJobs(myJobsData);
+        setActiveJobs(reconcileMyActive(myJobsData));
         setTotalMyJobs(myJobsData.length);
       }
 

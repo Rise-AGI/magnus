@@ -3,10 +3,26 @@
 import json
 import subprocess
 import traceback
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Tuple
 
 from . import logger
+
+
+@dataclass(frozen=True)
+class NodeSnapshot:
+    """一次 ``scontrol show node`` 解析得到的全部静态/动态资源数字。
+
+    Cluster stats endpoint 用这个快照让 GPU 总量、CPU、内存来自同一时刻的
+    SLURM 视图，避免分别查询带来的 race（free + used ≠ total）。
+    """
+
+    total_gpus: int
+    cpu_total: int
+    cpu_alloc: int
+    mem_total_mb: int
+    mem_alloc_mb: int
 
 
 class _ResourceQueryMixin:
@@ -79,10 +95,12 @@ class _ResourceQueryMixin:
             logger.error(f"Error querying cluster resources: {error}")
             return 0, 0
 
-    def get_cpu_and_memory(self) -> Dict[str, int]:
-        """从 scontrol show node 解析 CPU 和内存的总量与已分配量。
+    def get_node_snapshot(self) -> NodeSnapshot:
+        """单次 ``scontrol show node`` 同时拉 GPU 容量 / CPU / 内存。
 
-        返回 {"cpu_total", "cpu_alloc", "mem_total_mb", "mem_alloc_mb"}。
+        Cluster stats endpoint 用这个快照让所有派生数字（free, used, total,
+        cpu_*, mem_*）在同一时刻的 SLURM 视图下保持自洽：``total = free + used``、
+        ``used == sum(running_jobs[*].gpu_count)``，无 race 窗口。
         """
         try:
             result = subprocess.run(
@@ -97,6 +115,7 @@ class _ResourceQueryMixin:
                 check = True,
             )
 
+            total_gpus = 0
             cpu_total = 0
             cpu_alloc = 0
             mem_total = 0
@@ -104,6 +123,12 @@ class _ResourceQueryMixin:
 
             for line in result.stdout.split('\n'):
                 line = line.strip()
+                if line.startswith("Gres=") and "gpu" in line:
+                    try:
+                        gres_part = line.split("Gres=")[1].split()[0].split('(')[0]
+                        total_gpus += int(gres_part.split(':')[-1])
+                    except (ValueError, IndexError):
+                        pass
                 if "CPUTot=" in line:
                     # 同行布局：CPUAlloc=34 CPUEfctv=192 CPUTot=192 CPULoad=...
                     for part in line.split():
@@ -119,20 +144,22 @@ class _ResourceQueryMixin:
                         elif part.startswith("AllocMem="):
                             mem_alloc += int(part.split("=")[1])
 
-            return {
-                "cpu_total": cpu_total,
-                "cpu_alloc": cpu_alloc,
-                "mem_total_mb": mem_total,
-                "mem_alloc_mb": mem_alloc,
-            }
+            return NodeSnapshot(
+                total_gpus = total_gpus,
+                cpu_total = cpu_total,
+                cpu_alloc = cpu_alloc,
+                mem_total_mb = mem_total,
+                mem_alloc_mb = mem_alloc,
+            )
         except Exception as error:
-            logger.error(f"Error querying CPU/memory: {error}")
-            return {
-                "cpu_total": 0,
-                "cpu_alloc": 0,
-                "mem_total_mb": 0,
-                "mem_alloc_mb": 0,
-            }
+            logger.error(f"Error querying node snapshot: {error}")
+            return NodeSnapshot(
+                total_gpus = 0,
+                cpu_total = 0,
+                cpu_alloc = 0,
+                mem_total_mb = 0,
+                mem_alloc_mb = 0,
+            )
 
     def get_cluster_free_gpus(self) -> int:
         cap, alloc = self._get_capacity_and_usage()

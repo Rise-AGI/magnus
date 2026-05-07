@@ -14,9 +14,11 @@ logger = logging.getLogger(__name__)
 
 from ._errors import SlurmError, SlurmResourceError
 from ._manager import SlurmManager
+from ._resource_query import NodeSnapshot
 
 __all__ = [
     "SlurmManager",
     "SlurmError",
     "SlurmResourceError",
+    "NodeSnapshot",
 ]
