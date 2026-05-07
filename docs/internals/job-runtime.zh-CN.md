@@ -14,10 +14,12 @@ PREPARING ─── 异步资源准备（并行）
   │             ├── ensure_image: docker:// → .sif (LRU cache, 80G)
   │             └── ensure_repo:  git clone → copy → checkout → setfacl
   ▼
-PENDING ───── 队头挂号调度
+PENDING ───── EASY backfill 调度 (Lifka 1995)
   │             ├── 按优先级排序: A1(4) > A2(3) > B1(2) > B2(1), 同级 FIFO
   │             ├── A 类可抢占 RUNNING 的 B 类 (B2 优先, LIFO)
-  │             └── SLURM 队列中只允许一个 QUEUED job
+  │             ├── 队头能跑 → 严格优先级贪心提交全部装得下的 job
+  │             └── 队头在等 → 后续候选满足 demand+head.demand ≤ cluster_total
+  │                          可旁路启动（数学保证不延迟队头）
   ▼
 QUEUED ────── SLURM sbatch 已提交
   │             └── sbatch 脚本: python3 {workspace}/jobs/{id}/wrapper.py

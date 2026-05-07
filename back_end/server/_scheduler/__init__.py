@@ -4,7 +4,7 @@
 主类 MagnusScheduler 由若干 mixin 组装，每个 mixin 一个文件：
 
 - _core.py:             MagnusScheduler 主类（组装所有 mixin、tick、terminate_job）
-- _decisions.py:        队头挂号 + 抢占决策
+- _decisions.py:        EASY backfill + 抢占决策
 - _sync.py:             SLURM/Docker 真实状态同步到 DB + 集群快照
 - _submit.py:           PENDING job 提交到 SLURM/Docker
 - _resources.py:        镜像拉取 + 仓库 clone（Preparing → Pending）

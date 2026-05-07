@@ -27,7 +27,7 @@ class MagnusScheduler(
     职责按 mixin 拆分：
     - _SyncMixin: 把 SLURM/Docker 真实状态拉回数据库 + 集群快照
     - _SubmitMixin: 把 PENDING job 提交到后端
-    - _DecisionsMixin: 队头挂号 + 抢占
+    - _DecisionsMixin: EASY backfill + 抢占
     - _ResourcesMixin: 镜像拉取 + 仓库 clone (Preparing → Pending)
     - _JobLifecycleMixin: success/OOM marker、working table 清理
     """

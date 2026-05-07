@@ -14,10 +14,12 @@ PREPARING ─── Async resource preparation (parallel)
   │             ├── ensure_image: docker:// → .sif (LRU cache, 80G)
   │             └── ensure_repo:  git clone → copy → checkout → setfacl
   ▼
-PENDING ───── Head-of-queue scheduling
+PENDING ───── EASY backfill scheduling (Lifka 1995)
   │             ├── Priority sort: A1(4) > A2(3) > B1(2) > B2(1), same-level FIFO
   │             ├── A-class can preempt RUNNING B-class (B2 first, LIFO)
-  │             └── Only one QUEUED job is allowed in the SLURM queue
+  │             ├── Head fits in free → strict-priority greedy admit all that fit
+  │             └── Head waiting → any candidate with demand+head.demand ≤
+  │                                cluster_total may bypass (provably no head delay)
   ▼
 QUEUED ────── SLURM sbatch submitted
   │             └── sbatch script: python3 {workspace}/jobs/{id}/wrapper.py

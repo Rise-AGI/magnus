@@ -1,36 +1,71 @@
 # back_end/server/_scheduler/_decisions.py
-"""调度决策：按 (job_type 优先级, 创建时间) 排序取队头提交，A 类任务可抢占 B 类。"""
+"""调度决策：EASY backfill 模式 — 队头优先级保留，后续不延迟队头者旁路启动。"""
 import asyncio
+from typing import Tuple
+
 from sqlalchemy.orm import Session
+
+from library.fundamental.scheduling import (
+    BackfillCandidate,
+    ResourceVector,
+    select_easy_backfill,
+)
 from ..database import SessionLocal
 from ..models import Job, JobStatus, JobType
 from .._magnus_config import is_local_mode
+from .._size_utils import _parse_size_string
 from . import logger
+
+
+_BYTES_PER_MEGABYTE = 1024 * 1024
+
+
+def _job_to_resource_vector(job: Job) -> ResourceVector:
+    """把 Job 资源诉求映射成 ``(gpu, cpu_cores, memory_mb)`` 三维向量。
+
+    维度顺序与 ``_DecisionsMixin._compute_cluster_resources`` 严格对应，
+    任何一处加维度（如 ephemeral_storage）必须同步另一处。
+    """
+    if job.memory_demand is None:
+        memory_mb = 0
+    else:
+        memory_mb = _parse_size_string(job.memory_demand) // _BYTES_PER_MEGABYTE
+    return ResourceVector(
+        components = (
+            job.gpu_count,
+            job.cpu_count or 0,
+            memory_mb,
+        ),
+    )
 
 
 class _DecisionsMixin:
 
     async def _make_decisions(self):
         """
-        调度决策 - 队头挂号模式
+        调度决策 — EASY backfill 模式
 
         状态流转：Preparing → Pending → Queued → Running
         - Preparing: 系统正在准备资源（镜像、仓库）
-        - Pending: 资源就绪，等待调度决策
-        - Queued: 已提交到 SLURM，等待执行
-        - Running: SLURM 正在执行
+        - Pending:   资源就绪，等待调度决策
+        - Queued:    已提交到 SLURM，等待执行
+        - Running:   SLURM 正在执行
 
-        核心逻辑：
+        调度核心：
         1. 新任务以 Preparing 状态进入，启动异步资源准备
         2. 资源准备完成后变为 Pending
-        3. 调度器从 Pending 任务中选择队头提交到 SLURM
-        4. A 类任务可以抢占 RUNNING 的 B 类任务
-        5. 被抢占的 B 类任务回到 Preparing 重新准备资源
+        3. 按 (priority, time) 排序 Pending 队列，队头是 A 类时抢占 B 类释放 GPU
+        4. EASY backfill 选出当下可启动的子集 — 队头自身能跑则按严格优先级贪心，
+           队头在等则挑后续不延迟队头的候选旁路 — 全部一次提交到 SLURM。
+           调度逻辑全部在 magnus 内决策，SLURM 只接收已被 backfill 验证过资源
+           的提交，不再承担排队 / 优先级仲裁工作
         """
         with SessionLocal() as db:
             priority_map = {
-                JobType.A1: 4, JobType.A2: 3,
-                JobType.B1: 2, JobType.B2: 1,
+                JobType.A1: 4,
+                JobType.A2: 3,
+                JobType.B1: 2,
+                JobType.B2: 1,
             }
 
             # Phase 1: 启动 Preparing 任务的资源准备
@@ -63,7 +98,7 @@ class _DecisionsMixin:
             if paused_jobs:
                 db.commit()
 
-            # Phase 3: 调度 Pending 任务（资源已就绪，等待提交到 SLURM）
+            # Phase 3: 调度 Pending 任务
             schedulable_jobs = db.query(Job).filter(
                 Job.status == JobStatus.PENDING
             ).all()
@@ -71,7 +106,6 @@ class _DecisionsMixin:
             if not schedulable_jobs:
                 return
 
-            # 按优先级排序
             schedulable_jobs.sort(
                 key = lambda x: (priority_map.get(x.job_type, 0), -x.created_at.timestamp()),
                 reverse = True,
@@ -79,19 +113,58 @@ class _DecisionsMixin:
 
             head_job = schedulable_jobs[0]
 
-            # 如果队头是 A 类任务，检查是否需要抢占 RUNNING 的 B 类任务
+            # 队头是 A 类时先尝试抢占 B 类，让 backfill 拿到可能更大的 free
             if not is_local_mode and head_job.job_type in [JobType.A1, JobType.A2]:
                 self._handle_preemption_for_job(db, head_job)
 
             if is_local_mode:
-                # local 模式：直接提交，不排队
+                # local 模式只跑队头，docker run 自身非阻塞，多容器自然并行
                 self._submit_to_docker(db, head_job)
             else:
-                # 只有当没有任务在 SLURM 队列中等待时，才提交队头
-                slurm_queued_count = db.query(Job).filter(Job.status == JobStatus.QUEUED).count()
+                cluster_total, cluster_free = self._compute_cluster_resources()
+                candidates = [
+                    BackfillCandidate(
+                        payload = job,
+                        demand = _job_to_resource_vector(job),
+                    )
+                    for job in schedulable_jobs
+                ]
+                selected = select_easy_backfill(
+                    candidates = candidates,
+                    cluster_total = cluster_total,
+                    cluster_free = cluster_free,
+                )
+                for job in selected:
+                    self._submit_to_slurm(db, job)
 
-                if slurm_queued_count == 0:
-                    self._submit_to_slurm(db, head_job)
+    def _compute_cluster_resources(self) -> Tuple[ResourceVector, ResourceVector]:
+        """从 SLURM 一次性派生 ``(total, free)`` 资源向量。
+
+        维度顺序固定为 ``(gpu, cpu_cores, memory_mb)``，与
+        ``_job_to_resource_vector`` 对齐。一次 scontrol（NodeSnapshot 提供
+        cpu/mem/gpu 容量 + cpu/mem 占用）+ 一次 squeue（running tasks 派生
+        GPU 占用），让 free 与 total 来自同一时刻 SLURM 视图，无 race。
+        """
+        assert self.slurm_manager is not None
+        node_snap = self.slurm_manager.get_node_snapshot()
+        running_tasks = self.slurm_manager.get_all_running_tasks()
+        alloc_gpus = sum(task["gpu_count"] for task in running_tasks)
+
+        cluster_total = ResourceVector(
+            components = (
+                node_snap.total_gpus,
+                node_snap.cpu_total,
+                node_snap.mem_total_mb,
+            ),
+        )
+        cluster_free = ResourceVector(
+            components = (
+                max(0, node_snap.total_gpus - alloc_gpus),
+                max(0, node_snap.cpu_total - node_snap.cpu_alloc),
+                max(0, node_snap.mem_total_mb - node_snap.mem_alloc_mb),
+            ),
+        )
+        return cluster_total, cluster_free
 
     def _handle_preemption_for_job(self, db: Session, job: Job):
         """为指定的 A 类任务处理抢占逻辑"""
