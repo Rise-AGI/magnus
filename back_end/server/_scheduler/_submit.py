@@ -75,10 +75,10 @@ class _SubmitMixin:
         try:
             with open(wrapper_path, "w", encoding="utf-8") as f:
                 f.write(wrapper_content)
-        except IOError as e:
-            logger.error(f"Failed to write wrapper script for Job {job.id}: {e}")
+        except IOError as error:
+            logger.error(f"Failed to write wrapper script for Job {job.id}: {error}")
             job.status = JobStatus.FAILED
-            job.result = f"Failed to write wrapper script: {e}"
+            job.result = f"Failed to write wrapper script: {error}"
             db.commit()
             return False
 

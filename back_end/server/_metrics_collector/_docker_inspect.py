@@ -13,8 +13,15 @@ _DOCKER_INSPECT_TIMEOUT = 5
 def _docker_inspect_container_pid(container_name: str) -> Optional[int]:
     try:
         result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.State.Pid}}", container_name],
-            capture_output=True, text=True, timeout=_DOCKER_INSPECT_TIMEOUT,
+            [
+                "docker",
+                "inspect",
+                "--format", "{{.State.Pid}}",
+                container_name,
+            ],
+            capture_output = True,
+            text = True,
+            timeout = _DOCKER_INSPECT_TIMEOUT,
         )
         if result.returncode != 0:
             return None
@@ -35,8 +42,15 @@ def _docker_inspect_visible_gpus(container_name: str) -> Optional[List[str]]:
     """
     try:
         result = subprocess.run(
-            ["docker", "inspect", "--format", "{{json .Config.Env}}", container_name],
-            capture_output=True, text=True, timeout=_DOCKER_INSPECT_TIMEOUT,
+            [
+                "docker",
+                "inspect",
+                "--format", "{{json .Config.Env}}",
+                container_name,
+            ],
+            capture_output = True,
+            text = True,
+            timeout = _DOCKER_INSPECT_TIMEOUT,
         )
         if result.returncode != 0:
             return None
@@ -49,9 +63,11 @@ def _docker_inspect_visible_gpus(container_name: str) -> Optional[List[str]]:
                 if value in ("none", ""):
                     return []
                 if value in ("all", "void"):
-                    return None  # ambiguous — sample nothing, conservative
+                    # 模糊语义（all/void）下保守跳过：宁可少采样，也不混入别的 job 的数据
+                    return None
                 indices = [s.strip() for s in value.split(",") if s.strip().isdigit()]
                 return indices if indices else []
-        return []  # env var absent → no GPU access
+        # env var 缺失 → 容器没有 GPU 访问
+        return []
     except (OSError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError):
         return None

@@ -32,6 +32,8 @@ guarantee_file_exist(magnus_uv_cache_path, is_directory=True)
 # 因此这里的 import 必须放在常量定义之后。
 from ._core import MagnusScheduler
 
-__all__ = ["scheduler"]
+__all__ = [
+    "scheduler",
+]
 
 scheduler = MagnusScheduler()

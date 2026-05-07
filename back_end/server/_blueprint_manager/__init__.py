@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 from ._types import FileSecret
 from ._manager import BlueprintManager
 
-__all__ = ["blueprint_manager", "FileSecret", "BlueprintManager"]
+__all__ = [
+    "blueprint_manager",
+    "FileSecret",
+    "BlueprintManager",
+]
 
 blueprint_manager = BlueprintManager()

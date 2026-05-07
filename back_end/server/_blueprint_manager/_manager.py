@@ -107,31 +107,43 @@ class BlueprintManager:
 
             if base_type is int:
                 schema.type = "number"
-                if "min" in meta_dict: schema.min = meta_dict["min"]
-                if "max" in meta_dict: schema.max = meta_dict["max"]
+                if "min" in meta_dict:
+                    schema.min = meta_dict["min"]
+                if "max" in meta_dict:
+                    schema.max = meta_dict["max"]
 
             elif base_type is float:
                 schema.type = "float"
-                if "min" in meta_dict: schema.min = meta_dict["min"]
-                if "max" in meta_dict: schema.max = meta_dict["max"]
-                if "placeholder" in meta_dict: schema.placeholder = meta_dict["placeholder"]
+                if "min" in meta_dict:
+                    schema.min = meta_dict["min"]
+                if "max" in meta_dict:
+                    schema.max = meta_dict["max"]
+                if "placeholder" in meta_dict:
+                    schema.placeholder = meta_dict["placeholder"]
 
             elif base_type is bool:
                 schema.type = "boolean"
 
             elif base_type is str:
                 schema.type = "text"
-                if "allow_empty" in meta_dict: schema.allow_empty = bool(meta_dict["allow_empty"])
-                if "placeholder" in meta_dict: schema.placeholder = meta_dict["placeholder"]
-                if "color" in meta_dict: schema.color = meta_dict["color"]
-                if "border_color" in meta_dict: schema.border_color = meta_dict["border_color"]
-                if "multi_line" in meta_dict: schema.multi_line = bool(meta_dict["multi_line"])
-                if "min_lines" in meta_dict: schema.min_lines = int(meta_dict["min_lines"])
+                if "allow_empty" in meta_dict:
+                    schema.allow_empty = bool(meta_dict["allow_empty"])
+                if "placeholder" in meta_dict:
+                    schema.placeholder = meta_dict["placeholder"]
+                if "color" in meta_dict:
+                    schema.color = meta_dict["color"]
+                if "border_color" in meta_dict:
+                    schema.border_color = meta_dict["border_color"]
+                if "multi_line" in meta_dict:
+                    schema.multi_line = bool(meta_dict["multi_line"])
+                if "min_lines" in meta_dict:
+                    schema.min_lines = int(meta_dict["min_lines"])
 
             elif base_type is FileSecret or (isinstance(base_type, type) and issubclass(base_type, FileSecret)):  # type: ignore[arg-type]
                 schema.type = "file_secret"
                 schema.allow_empty = False
-                if "placeholder" in meta_dict: schema.placeholder = meta_dict["placeholder"]
+                if "placeholder" in meta_dict:
+                    schema.placeholder = meta_dict["placeholder"]
 
             elif origin_base is Literal:
                 schema.type = "select"
@@ -221,9 +233,9 @@ class BlueprintManager:
         try:
             validated_data_obj = DynamicModel(**processed_inputs)
             validated_args = validated_data_obj.model_dump()
-        except ValidationError as e:
+        except ValidationError as error:
             messages = []
-            for err in e.errors():
+            for err in error.errors():
                 field = ".".join(str(x) for x in err["loc"])
                 expected_type = field_definitions.get(field, (None,))[0]
                 type_hint = _type_display_name(expected_type) if expected_type else "unknown"
@@ -234,14 +246,14 @@ class BlueprintManager:
             func(**validated_args)
             raise ValueError("Blueprint function must call submit_job()")
         except _BlueprintCapture as capture:
-            # 将 JobType enum 值转为字符串以通过 Pydantic 验证
+            # JobType enum 实例 Pydantic 不识别，转 str 后再走 schema 验证
             payload = capture.payload
             if "job_type" in payload and isinstance(payload["job_type"], JobType):
                 payload["job_type"] = payload["job_type"].value
             return JobSubmission(**payload)
         except ValueError:
             raise
-        except TypeError as e:
-            raise ValueError(f"Blueprint logic error: {e}")
-        except Exception as e:
-            raise ValueError(f"Runtime Error in Blueprint: {e}")
+        except TypeError as error:
+            raise ValueError(f"Blueprint logic error: {error}")
+        except Exception as error:
+            raise ValueError(f"Runtime Error in Blueprint: {error}")

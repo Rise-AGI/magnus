@@ -15,4 +15,8 @@ logger = logging.getLogger(__name__)
 from ._errors import SlurmError, SlurmResourceError
 from ._manager import SlurmManager
 
-__all__ = ["SlurmManager", "SlurmError", "SlurmResourceError"]
+__all__ = [
+    "SlurmManager",
+    "SlurmError",
+    "SlurmResourceError",
+]

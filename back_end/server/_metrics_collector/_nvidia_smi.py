@@ -13,9 +13,14 @@ def _sample_nvidia_smi() -> Optional[Dict[str, Tuple[float, float]]]:
     """Return {gpu_idx: (util_pct, mem_used_bytes)} or None on failure."""
     try:
         out = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used",
-             "--format=csv,noheader,nounits"],
-            timeout=_NVIDIA_SMI_TIMEOUT, text=True, stderr=subprocess.DEVNULL,
+            [
+                "nvidia-smi",
+                "--query-gpu=index,utilization.gpu,memory.used",
+                "--format=csv,noheader,nounits",
+            ],
+            timeout = _NVIDIA_SMI_TIMEOUT,
+            text = True,
+            stderr = subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
         return None

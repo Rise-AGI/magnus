@@ -40,8 +40,8 @@ class _SyncMixin:
                 db.commit()
                 logger.debug(f"Recorded Cluster Snapshot: Total={snapshot.total_gpus}, Used={snapshot.slurm_used_gpus}, Magnus={magnus_usage}")
             self.last_snapshot_time = now
-        except Exception as e:
-            logger.error(f"Failed to record cluster snapshot: {e}")
+        except Exception as error:
+            logger.error(f"Failed to record cluster snapshot: {error}")
 
     def _dump_docker_logs(self, job_id: str, container_name: str, since: Optional[str] = None) -> Optional[str]:
         # 与 SLURM 模式的 sbatch --output 共用同一文件，让 jobs.py 读端点不必按模式分支。
@@ -49,12 +49,21 @@ class _SyncMixin:
         # Capture cursor BEFORE fetching logs to avoid missing lines emitted during the call
         new_cursor = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
-            cmd = ["docker", "logs", container_name]
+            command = [
+                "docker",
+                "logs",
+                container_name,
+            ]
             if since:
-                cmd.extend(["--since", since])
-            result = subprocess.run(cmd, capture_output=True, text=True)
+                command.extend(["--since", since])
+            result = subprocess.run(
+                command,
+                capture_output = True,
+                text = True,
+            )
             if result.returncode != 0:
-                return since  # container gone or docker error, skip
+                # container 已不存在 / docker 出错，本次跳过
+                return since
             output = result.stdout
             if result.stderr:
                 output += result.stderr
@@ -63,8 +72,8 @@ class _SyncMixin:
                 with open(log_path, mode, encoding="utf-8") as f:
                     f.write(output)
             return new_cursor
-        except Exception as e:
-            logger.warning(f"Failed to dump Docker logs for {job_id}: {e}")
+        except Exception as error:
+            logger.warning(f"Failed to dump Docker logs for {job_id}: {error}")
             return since
 
     def _sync_reality(self):
@@ -108,8 +117,8 @@ class _SyncMixin:
                     "container_name": container_name,
                     "db_status": db_status,
                 }
-            except Exception as e:
-                logger.error(f"Failed to check Docker job {job_id}: {e}")
+            except Exception as error:
+                logger.error(f"Failed to check Docker job {job_id}: {error}")
 
         # Phase 3 — 批量更新（短 session）
         with SessionLocal() as db:
@@ -177,8 +186,8 @@ class _SyncMixin:
                             self._clean_up_working_table(job.id)
                             self._docker_log_cursors.pop(job_id, None)
 
-                except Exception as e:
-                    logger.error(f"Failed to sync Docker job {job_id}: {e}")
+                except Exception as error:
+                    logger.error(f"Failed to sync Docker job {job_id}: {error}")
 
             db.commit()
 
@@ -233,8 +242,8 @@ class _SyncMixin:
                         job.slurm_job_id = None
                         self._clean_up_working_table(job.id)
                     # else: SLURM 仍在排队（PD）或状态未知，保持 QUEUED
-                except Exception as e:
-                    logger.error(f"Failed to sync QUEUED job {job_id}: {e}")
+                except Exception as error:
+                    logger.error(f"Failed to sync QUEUED job {job_id}: {error}")
 
             for job_id, slurm_job_id in running_info:
                 try:
@@ -260,7 +269,7 @@ class _SyncMixin:
                             job.result = f"Scheduler reported {real_status} during execution"
                         job.slurm_job_id = None
                         self._clean_up_working_table(job.id)
-                except Exception as e:
-                    logger.error(f"Failed to sync RUNNING job {job_id}: {e}")
+                except Exception as error:
+                    logger.error(f"Failed to sync RUNNING job {job_id}: {error}")
 
             db.commit()

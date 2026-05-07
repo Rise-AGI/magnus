@@ -29,6 +29,8 @@ guarantee_file_exist(magnus_apptainer_cache_path, is_directory=True)
 from ._helpers import _image_to_sif_filename
 from ._manager import ResourceManager
 
-__all__ = ["resource_manager"]
+__all__ = [
+    "resource_manager",
+]
 
 resource_manager = ResourceManager()

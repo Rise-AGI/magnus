@@ -59,8 +59,8 @@ class _CacheMixin:
                 os.remove(path)
                 logger.info(f"LRU evicted image: {path}")
                 total_size -= size
-            except OSError as e:
-                logger.warning(f"Failed to evict image {path}: {e}")
+            except OSError as error:
+                logger.warning(f"Failed to evict image {path}: {error}")
 
     def _evict_lru_repos(self):
         """LRU 清理：按访问时间淘汰旧仓库"""
@@ -77,8 +77,8 @@ class _CacheMixin:
                 shutil.rmtree(path)
                 logger.info(f"LRU evicted repo: {path}")
                 total_size -= size
-            except OSError as e:
-                logger.warning(f"Failed to evict repo {path}: {e}")
+            except OSError as error:
+                logger.warning(f"Failed to evict repo {path}: {error}")
 
     def recover_stale_pull_caches(self) -> None:
         """启动时调用：清理上次进程异常退出残留的 per-pull tempdir。

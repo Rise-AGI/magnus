@@ -93,10 +93,10 @@ def _compile_code(
 
     try:
         exec(code, scope)
-    except SyntaxError as e:
-        raise ValueError(f"Syntax Error in Blueprint: {e}")
-    except Exception as e:
-        raise ValueError(f"Runtime Error in Blueprint: {e}")
+    except SyntaxError as error:
+        raise ValueError(f"Syntax Error in Blueprint: {error}")
+    except Exception as error:
+        raise ValueError(f"Runtime Error in Blueprint: {error}")
 
     if "blueprint" not in scope:
         raise ValueError("Blueprint must define a function named 'blueprint'")

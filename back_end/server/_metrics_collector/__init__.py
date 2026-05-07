@@ -38,4 +38,6 @@ logger = logging.getLogger(__name__)
 
 from ._collector import DockerMetricsCollector
 
-__all__ = ["DockerMetricsCollector"]
+__all__ = [
+    "DockerMetricsCollector",
+]

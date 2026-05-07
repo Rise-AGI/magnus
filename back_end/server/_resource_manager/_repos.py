@@ -106,8 +106,8 @@ class _ReposMixin:
         try:
             with open(self._cache_fetch_ts_path(cache_path), "w") as f:
                 f.write(str(time.time()))
-        except OSError as e:
-            logger.warning(f"Failed to write fetch timestamp for {cache_path}: {e}")
+        except OSError as error:
+            logger.warning(f"Failed to write fetch timestamp for {cache_path}: {error}")
 
     async def _cache_has_commit(self, cache_path: str, sha: str) -> bool:
         """检查 cache 的 object db 中是否已有该 commit。
@@ -301,12 +301,12 @@ class _ReposMixin:
                     None,
                     functools.partial(shutil.copytree, cache_path, target_dir, symlinks=True),
                 )
-            except Exception as e:
+            except Exception as error:
                 # 清掉可能的半成品 target_dir，否则入口 `if os.path.exists(target_dir)` 短路条件
                 # 会在下次调度时把残留副本误判为"已就绪"，跑在不完整代码上
                 shutil.rmtree(target_dir, ignore_errors=True)
-                logger.error(f"Failed to copy repo cache: {e}")
-                return False, f"copy cache failed: {e}", None
+                logger.error(f"Failed to copy repo cache: {error}")
+                return False, f"copy cache failed: {error}", None
 
         # Phase 3: 解析 commit_sha 语义并 checkout（无需 fetch——cache 上一步已刷新，
         # target_dir 是隔离副本，origin/<branch> 与 cache 保持一致）
@@ -320,9 +320,9 @@ class _ReposMixin:
             pattern_str = commit_sha[4:].strip()
             try:
                 pattern = re.compile(pattern_str)
-            except re.error as e:
+            except re.error as error:
                 shutil.rmtree(target_dir, ignore_errors=True)
-                return False, f"Invalid commit message regex '{pattern_str}': {e}", None
+                return False, f"Invalid commit message regex '{pattern_str}': {error}", None
 
             max_commit_search = 200
             proc = await asyncio.create_subprocess_exec(
@@ -381,15 +381,19 @@ class _ReposMixin:
         if not is_local_mode:
             default_runner = magnus_config["cluster"]["default_runner"]
             try:
-                subprocess.run([
-                    "setfacl", "-R",
-                    "-m", f"u:{runner}:rwx",
-                    "-d", "-m", f"u:{default_runner}:rwx",
-                    "-d", "-m", f"u:{runner}:rwx",
-                    job_working_dir,
-                ], check=True, capture_output=True)
-            except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                logger.warning(f"setfacl failed: {e}")
+                subprocess.run(
+                    [
+                        "setfacl", "-R",
+                        "-m", f"u:{runner}:rwx",
+                        "-d", "-m", f"u:{default_runner}:rwx",
+                        "-d", "-m", f"u:{runner}:rwx",
+                        job_working_dir,
+                    ],
+                    check = True,
+                    capture_output = True,
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError) as error:
+                logger.warning(f"setfacl failed: {error}")
 
         elapsed = time.time() - start_time
         logger.info(f"Repo ready: {target_dir} ({elapsed:.1f}s)")

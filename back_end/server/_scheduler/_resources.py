@@ -51,8 +51,16 @@ def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
             try:
                 docker_image = re.sub(r'^[a-z]+://', '', image_uri)
                 result = subprocess.run(
-                    ["docker", "image", "inspect", "--format", "{{.Size}}", docker_image],
-                    capture_output=True, text=True, timeout=10,
+                    [
+                        "docker",
+                        "image",
+                        "inspect",
+                        "--format", "{{.Size}}",
+                        docker_image,
+                    ],
+                    capture_output = True,
+                    text = True,
+                    timeout = 10,
                 )
                 if result.returncode == 0:
                     img.size_bytes = int(result.stdout.strip())
@@ -85,8 +93,8 @@ class _ResourcesMixin:
             image_ok, image_err = await resource_manager.ensure_image(image_uri)
         except asyncio.CancelledError:
             raise  # 服务器关停，由 recover_stuck_images 善后
-        except Exception as e:
-            image_ok, image_err = False, str(e)
+        except Exception as error:
+            image_ok, image_err = False, str(error)
         finally:
             self._image_pull_tasks.pop(image_uri, None)
         if owns_db_lifecycle:

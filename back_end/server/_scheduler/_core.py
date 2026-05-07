@@ -42,8 +42,8 @@ class MagnusScheduler(
             try:
                 self.slurm_manager = SlurmManager()
                 self.enabled = True
-            except RuntimeError as e:
-                logger.critical(f"Scheduler disabled due to missing SLURM: {e}")
+            except RuntimeError as error:
+                logger.critical(f"Scheduler disabled due to missing SLURM: {error}")
                 self.slurm_manager = None
                 self.enabled = False
             self.docker_manager = None
@@ -53,14 +53,15 @@ class MagnusScheduler(
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
 
     async def tick(self):
-        if not self.enabled: return
+        if not self.enabled:
+            return
         try:
-            # subprocess calls (docker logs / slurm queries) run in a thread to avoid blocking the event loop
+            # subprocess 调用（docker logs / slurm queries）放线程池，避免阻塞 event loop
             await asyncio.to_thread(self._sync_reality)
             await self._make_decisions()
             self._record_snapshot()
-        except Exception as e:
-            logger.error(f"Scheduler tick failed: {e}", exc_info=True)
+        except Exception as error:
+            logger.error(f"Scheduler tick failed: {error}", exc_info=True)
 
     def terminate_job(self, db: Session, job: Job) -> None:
         """API endpoint for user-initiated job termination"""

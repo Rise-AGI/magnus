@@ -80,8 +80,8 @@ class DockerMetricsCollector:
             while True:
                 try:
                     await asyncio.to_thread(self._tick)
-                except Exception as e:
-                    logger.warning(f"Docker metrics tick failed: {e}")
+                except Exception as error:
+                    logger.warning(f"Docker metrics tick failed: {error}")
                 await asyncio.sleep(_SAMPLE_INTERVAL_SECONDS)
         except asyncio.CancelledError:
             logger.info("Docker metrics collector stopped")
@@ -120,8 +120,8 @@ class DockerMetricsCollector:
         for job_id in running_ids:
             try:
                 self._sample_job(job_id, get_gpu_snapshot, now_ms)
-            except Exception as e:
-                logger.debug(f"Sample failed for docker job {job_id}: {e}")
+            except Exception as error:
+                logger.debug(f"Sample failed for docker job {job_id}: {error}")
 
     def _sample_job(
         self,
