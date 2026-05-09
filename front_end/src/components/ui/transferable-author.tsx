@@ -116,7 +116,8 @@ export function TransferableAuthor({
 
   return (
     <>
-      <div className="flex items-center gap-1">
+      {/* gap-1.5 比 gap-1 多 2px：让"看人"主体和"转让"caret 视觉上微微分开 */}
+      <div className="flex items-center gap-1.5">
         {mainBlock}
 
         <DropdownMenu.Root onOpenChange={handleOpenChange}>

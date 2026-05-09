@@ -14,7 +14,6 @@ import {
   Container,
   ExternalLink,
   MessageCircle,
-  UserPlus,
   Loader2,
 } from "lucide-react";
 import { client } from "@/lib/api";
@@ -23,7 +22,6 @@ import { useAuth } from "@/context/auth-context";
 import { formatBeijingTime } from "@/lib/utils";
 import type { UserDetail } from "@/types/auth";
 import { AvatarCircle } from "./user-avatar";
-import { GroupInviteDialog } from "@/components/chat/group-invite-dialog";
 
 
 /** 头像 / 名字渲染时附带的"warm"信息，open 之前先用，open 后被 fetch 到的 detail 覆盖 */
@@ -49,10 +47,13 @@ interface PersonHoverCardProps {
  * - 触发即 lazy fetch /api/users/{id}，失败时 fall-back 到 warm 数据；
  * - 5 个 entity 计数 chip 直接是 link，去对应列表页带 ?owner_id 筛选 —— 这是
  *   主探索路径（"看 alice 最近在跑什么"）；
- * - 三个 action：去 People 页 / 私信 / 邀请入群。社交不是热链路，所以排在 entity 之后。
+ * - 两个 action：去 People 页 / 私信。社交不是热链路。
  *
  * 不内置头像渲染：children 自己负责长什么样，HoverCard 只承担"点开 -> 看人"语义。
  * 这样 TransferableAuthor、AvatarCircle 各种现有皮肤都能直接套。
+ *
+ * 上级展示是纯静态：avatar + 名字。原本递归套 PersonHoverCard 可顺链上看，但视觉
+ * 像"套娃"，且组织链一般不深，需要时走"去人事"按钮即可。
  */
 export function PersonHoverCard({
   userId,
@@ -72,7 +73,6 @@ export function PersonHoverCard({
 
   const [open, setOpen] = useState(false);
   const [isCreatingDm, setIsCreatingDm] = useState(false);
-  const [showInviteDialog, setShowInviteDialog] = useState(false);
 
   const isSelf = currentUser?.id === userId;
 
@@ -117,183 +117,162 @@ export function PersonHoverCard({
   const headAvatarUrl = detail?.avatar_url ?? warm?.avatar_url ?? null;
 
   return (
-    <>
-      <Popover.Root open={open} onOpenChange={handleOpenChange}>
-        <Popover.Trigger asChild>
-          {/* button reset：阻止 click 冒泡到外层（行点击导航 / 行删除等），只触发 popover */}
-          <button
-            type="button"
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center text-left cursor-pointer focus:outline-none rounded-lg transition-colors"
-          >
-            {children}
-          </button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content
-            align={align}
-            side={side}
-            sideOffset={8}
-            collisionPadding={12}
-            // React 合成事件穿透 Portal 沿组件树冒泡：浮卡内 chip/button click
-            // 否则会触发祖先（如 jobs-table 行的 router.push）的 onClick，劫持导航
-            onClick={(e) => e.stopPropagation()}
-            className="w-[320px] bg-[#0A0A0C] border border-zinc-800 rounded-xl shadow-2xl z-[210] overflow-hidden ring-1 ring-white/5 animate-in fade-in zoom-in-95 duration-100"
-          >
-            {/* Header: avatar + name + admin badge */}
-            <div className="px-5 pt-5 pb-4 flex items-center gap-4">
-              <AvatarCircle
-                user={{ name: headName, avatar_url: headAvatarUrl }}
-                size="lg"
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-base font-bold text-zinc-100 tracking-tight truncate">
-                    {headName || "—"}
+    <Popover.Root open={open} onOpenChange={handleOpenChange}>
+      <Popover.Trigger asChild>
+        {/*
+         * button 兼任两个职责：
+         * 1) stopPropagation 阻断 click 冒泡到外层（行点击导航 / 行删除等）；
+         * 2) hover:opacity-80 提供"可点击"视觉信号，与 Magnus 既有 hover 反馈对齐
+         *    （不加 bg 是因为有些挂载位是裸头像，加方框会突兀）。
+         */}
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center text-left cursor-pointer focus:outline-none rounded-lg transition hover:opacity-80"
+        >
+          {children}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align={align}
+          side={side}
+          sideOffset={8}
+          collisionPadding={12}
+          // React 合成事件穿透 Portal 沿组件树冒泡：浮卡内 chip/button click
+          // 否则会触发祖先（如 jobs-table 行的 router.push）的 onClick，劫持导航
+          onClick={(e) => e.stopPropagation()}
+          className="w-[320px] bg-[#0A0A0C] border border-zinc-800 rounded-xl shadow-2xl z-[210] overflow-hidden ring-1 ring-white/5 animate-in fade-in zoom-in-95 duration-100"
+        >
+          {/* Header: avatar + name + admin badge */}
+          <div className="px-5 pt-5 pb-4 flex items-center gap-4">
+            <AvatarCircle
+              user={{ name: headName, avatar_url: headAvatarUrl }}
+              size="lg"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-base font-bold text-zinc-100 tracking-tight truncate">
+                  {headName || "—"}
+                </span>
+                {detail?.is_admin && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50">
+                    <Shield className="w-2.5 h-2.5" />
+                    {t("people.role.admin")}
                   </span>
-                  {detail?.is_admin && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50">
-                      <Shield className="w-2.5 h-2.5" />
-                      {t("people.role.admin")}
-                    </span>
-                  )}
-                </div>
-                {detail && (
-                  <div className="mt-1 text-[11px] text-zinc-600 font-mono">
-                    {t("people.drawer.created")} · {formatBeijingTime(detail.created_at)}
-                  </div>
                 )}
               </div>
+              {detail && (
+                <div className="mt-1 text-[11px] text-zinc-600 font-mono">
+                  {t("people.drawer.created")} · {formatBeijingTime(detail.created_at)}
+                </div>
+              )}
             </div>
+          </div>
 
-            {/* Leader (核心动力)：自己也是一个 PersonHoverCard，可顺着上级链一路看上去 */}
-            <div className="px-5 py-3 border-t border-zinc-800/70 flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold shrink-0">
-                {t("people.table.leader")}
-              </span>
-              {detail?.parent_id && detail.parent_name ? (
-                <PersonHoverCard
-                  userId={detail.parent_id}
-                  warm={{
+          {/* Leader：纯静态展示 avatar + 名字。组织链一般不深，需要继续看上级走"去人事"按钮。 */}
+          <div className="px-5 py-3 border-t border-zinc-800/70 flex items-center gap-3">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold shrink-0">
+              {t("people.table.leader")}
+            </span>
+            {detail?.parent_name ? (
+              <div className="inline-flex items-center gap-2 min-w-0">
+                <AvatarCircle
+                  user={{
                     name: detail.parent_name,
                     avatar_url: detail.parent_avatar_url ?? null,
                   }}
-                >
-                  <div className="inline-flex items-center gap-2 cursor-pointer rounded-md -mx-1 px-1 py-0.5 hover:bg-zinc-800/50 transition-colors">
-                    <AvatarCircle
-                      user={{
-                        name: detail.parent_name,
-                        avatar_url: detail.parent_avatar_url ?? null,
-                      }}
-                      size="sm"
-                    />
-                    <span className="text-sm font-medium text-zinc-200 truncate">
-                      {detail.parent_name}
-                    </span>
-                  </div>
-                </PersonHoverCard>
-              ) : fetching ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-600" />
-              ) : fetchError ? (
-                <span className="text-sm text-zinc-700 italic">—</span>
-              ) : (
-                <span className="text-sm text-zinc-700 italic">
-                  {detail ? t("people.leader.void") : ""}
+                  size="sm"
+                />
+                <span className="text-sm font-medium text-zinc-200 truncate">
+                  {detail.parent_name}
                 </span>
-              )}
-            </div>
+              </div>
+            ) : fetching ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-600" />
+            ) : fetchError ? (
+              <span className="text-sm text-zinc-700 italic">—</span>
+            ) : (
+              <span className="text-sm text-zinc-700 italic">
+                {detail ? t("people.leader.void") : ""}
+              </span>
+            )}
+          </div>
 
-            {/* Entity counts: 5 chips, 每个是去对应列表页带 owner_id 的 link */}
-            <div className="px-5 py-3 border-t border-zinc-800/70 grid grid-cols-5 gap-1.5">
-              <CountChip
-                href={`/jobs?owner_id=${userId}`}
-                icon={<Box className="w-3.5 h-3.5" />}
-                count={detail?.job_count}
-                label={t("personCard.jobs")}
-                onNavigate={() => setOpen(false)}
-                tone="zinc"
-                fetching={fetching}
-                fetchError={fetchError}
-              />
-              <CountChip
-                href={`/blueprints?owner_id=${userId}`}
-                icon={<DraftingCompass className="w-3.5 h-3.5" />}
-                count={detail?.blueprint_count}
-                label={t("personCard.blueprints")}
-                onNavigate={() => setOpen(false)}
-                tone="blue"
-                fetching={fetching}
-                fetchError={fetchError}
-              />
-              <CountChip
-                href={`/services?owner_id=${userId}`}
-                icon={<Activity className="w-3.5 h-3.5" />}
-                count={detail?.service_count}
-                label={t("personCard.services")}
-                onNavigate={() => setOpen(false)}
-                tone="teal"
-                fetching={fetching}
-                fetchError={fetchError}
-              />
-              <CountChip
-                href={`/skills?owner_id=${userId}`}
-                icon={<Dna className="w-3.5 h-3.5" />}
-                count={detail?.skill_count}
-                label={t("personCard.skills")}
-                onNavigate={() => setOpen(false)}
-                tone="violet"
-                fetching={fetching}
-                fetchError={fetchError}
-              />
-              <CountChip
-                href={`/images?owner_id=${userId}`}
-                icon={<Container className="w-3.5 h-3.5" />}
-                count={detail?.image_count}
-                label={t("personCard.images")}
-                onNavigate={() => setOpen(false)}
-                tone="zinc"
-                fetching={fetching}
-                fetchError={fetchError}
-              />
-            </div>
+          {/* Entity counts: 5 chips, 每个是去对应列表页带 owner_id 的 link */}
+          <div className="px-5 py-3 border-t border-zinc-800/70 grid grid-cols-5 gap-1.5">
+            <CountChip
+              href={`/jobs?owner_id=${userId}`}
+              icon={<Box className="w-3.5 h-3.5" />}
+              count={detail?.job_count}
+              label={t("personCard.jobs")}
+              onNavigate={() => setOpen(false)}
+              tone="zinc"
+              fetching={fetching}
+              fetchError={fetchError}
+            />
+            <CountChip
+              href={`/blueprints?owner_id=${userId}`}
+              icon={<DraftingCompass className="w-3.5 h-3.5" />}
+              count={detail?.blueprint_count}
+              label={t("personCard.blueprints")}
+              onNavigate={() => setOpen(false)}
+              tone="blue"
+              fetching={fetching}
+              fetchError={fetchError}
+            />
+            <CountChip
+              href={`/services?owner_id=${userId}`}
+              icon={<Activity className="w-3.5 h-3.5" />}
+              count={detail?.service_count}
+              label={t("personCard.services")}
+              onNavigate={() => setOpen(false)}
+              tone="teal"
+              fetching={fetching}
+              fetchError={fetchError}
+            />
+            <CountChip
+              href={`/skills?owner_id=${userId}`}
+              icon={<Dna className="w-3.5 h-3.5" />}
+              count={detail?.skill_count}
+              label={t("personCard.skills")}
+              onNavigate={() => setOpen(false)}
+              tone="violet"
+              fetching={fetching}
+              fetchError={fetchError}
+            />
+            <CountChip
+              href={`/images?owner_id=${userId}`}
+              icon={<Container className="w-3.5 h-3.5" />}
+              count={detail?.image_count}
+              label={t("personCard.images")}
+              onNavigate={() => setOpen(false)}
+              tone="zinc"
+              fetching={fetching}
+              fetchError={fetchError}
+            />
+          </div>
 
-            {/* Actions */}
-            <div className="border-t border-zinc-800/70 bg-zinc-900/40 px-3 py-2.5 flex items-center gap-1.5">
+          {/* Actions */}
+          <div className="border-t border-zinc-800/70 bg-zinc-900/40 px-3 py-2.5 flex items-center gap-1.5">
+            <ActionButton
+              onClick={handleOpenInPeople}
+              icon={<ExternalLink className="w-3.5 h-3.5" />}
+              label={t("personCard.openInPeople")}
+            />
+            {!isSelf && (
               <ActionButton
-                onClick={handleOpenInPeople}
-                icon={<ExternalLink className="w-3.5 h-3.5" />}
-                label={t("personCard.openInPeople")}
+                onClick={handleDirectMessage}
+                icon={isCreatingDm ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageCircle className="w-3.5 h-3.5" />}
+                label={t("chat.directMessage")}
+                disabled={isCreatingDm}
+                tone="blue"
               />
-              {!isSelf && (
-                <>
-                  <ActionButton
-                    onClick={handleDirectMessage}
-                    icon={isCreatingDm ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageCircle className="w-3.5 h-3.5" />}
-                    label={t("chat.directMessage")}
-                    disabled={isCreatingDm}
-                    tone="blue"
-                  />
-                  <ActionButton
-                    onClick={() => { setOpen(false); setShowInviteDialog(true); }}
-                    icon={<UserPlus className="w-3.5 h-3.5" />}
-                    label={t("chat.inviteToGroup")}
-                    tone="violet"
-                  />
-                </>
-              )}
-            </div>
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
-
-      {/* Invite dialog 在 popover 之外渲染，避免被 portal/close 拆解 */}
-      <GroupInviteDialog
-        isOpen={showInviteDialog}
-        onClose={() => setShowInviteDialog(false)}
-        targetUserId={userId}
-        targetUserName={detail?.name ?? warm?.name ?? ""}
-      />
-    </>
+            )}
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -353,12 +332,11 @@ function CountChip({
 }
 
 
-type ActionTone = "neutral" | "blue" | "violet";
+type ActionTone = "neutral" | "blue";
 
 const ACTION_TONE: Record<ActionTone, string> = {
   neutral: "text-zinc-300 hover:bg-zinc-800 hover:text-white border-zinc-700/50",
   blue: "text-blue-300 hover:bg-blue-600/30 hover:text-blue-200 border-blue-700/40",
-  violet: "text-violet-300 hover:bg-violet-600/30 hover:text-violet-200 border-violet-700/40",
 };
 
 function ActionButton({
