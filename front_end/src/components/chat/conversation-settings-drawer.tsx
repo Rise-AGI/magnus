@@ -9,6 +9,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import { getUserInitials } from "@/lib/user-display";
 import type { ConversationDetail, ConversationMember } from "@/types/chat";
 
@@ -235,7 +236,14 @@ export function ConversationSettingsDrawer({
                     key={member.user_id}
                     className="flex items-center gap-3 px-3 py-2 rounded-lg bg-zinc-900/60 border border-zinc-800/50 group hover:border-zinc-700/50 transition-colors"
                   >
-                    <AvatarCircle user={member.user ? { name, avatar_url: member.user.avatar_url } : null} size="sm" />
+                    <PersonHoverCard
+                      userId={member.user_id}
+                      warm={{ name, avatar_url: member.user?.avatar_url ?? null }}
+                    >
+                      <span className="inline-flex">
+                        <AvatarCircle user={member.user ? { name, avatar_url: member.user.avatar_url } : null} size="sm" />
+                      </span>
+                    </PersonHoverCard>
 
                     {/* Name */}
                     <div className="flex-1 min-w-0">

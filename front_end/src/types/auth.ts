@@ -23,6 +23,8 @@ export interface UserDetail {
   blueprint_count: number;
   service_count: number;
   skill_count: number;
+  job_count: number;
+  image_count: number;
   created_at: string;
 }
 

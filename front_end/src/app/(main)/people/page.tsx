@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Search, Plus } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -19,6 +19,7 @@ import { UserDetail } from "@/types/auth";
 export default function PeoplePage() {
   const { t } = useLanguage();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [users, setUsers] = useState<UserDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalItems, setTotalItems] = useState(0);
@@ -30,6 +31,8 @@ export default function PeoplePage() {
 
   // UI state
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
+  // 通过 ?focus= 直拉的用户 id —— 这种用户不一定在当前 roster 分页里，roster 同步逻辑要避让
+  const [focusedUserId, setFocusedUserId] = useState<string | null>(null);
   const [showRecruit, setShowRecruit] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<UserDetail | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -55,9 +58,40 @@ export default function PeoplePage() {
   useEffect(() => {
     if (!selectedUser) return;
     const fresh = users.find((u) => u.id === selectedUser.id);
-    if (fresh) setSelectedUser(fresh);
-    else setSelectedUser(null);
-  }, [users]);  // eslint-disable-line react-hooks/exhaustive-deps
+    if (fresh) {
+      setSelectedUser(fresh);
+    } else if (selectedUser.id === focusedUserId) {
+      // ?focus= 拉来的用户不一定在当前 roster 页里，drawer 留住，等用户主动关
+    } else {
+      // 之前选中的人离开了当前 roster（搜索/翻页 或 被删），关掉 drawer
+      setSelectedUser(null);
+    }
+  }, [users, focusedUserId]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ?focus=<userId>: 直接打开 PeopleDrawer。该用户可能不在当前分页里，单点 fetch。
+  useEffect(() => {
+    const focusId = searchParams.get("focus");
+    if (!focusId) return;
+    if (selectedUser?.id === focusId) return;
+
+    let cancelled = false;
+    client(`/api/users/${focusId}`)
+      .then((u: UserDetail) => {
+        if (cancelled) return;
+        setSelectedUser(u);
+        setFocusedUserId(u.id);
+      })
+      .catch((e) => console.error("Failed to focus user", e))
+      .finally(() => {
+        // 清理 URL：drawer 一旦打开就不再需要 query，避免刷新重复触发
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("focus");
+        const next = params.toString();
+        router.replace(next ? `?${next}` : "?", { scroll: false });
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const totalPages = Math.ceil(totalItems / pageSize);
 

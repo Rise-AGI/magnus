@@ -123,6 +123,20 @@ def _build_roster(
         .group_by(models.Skill.user_id)
         .all()
     }
+    # Job.user_id 可空（外部 SLURM 任务无 owner），filter 掉避免 None key
+    job_counts: Dict[str, int] = {
+        uid: cnt for uid, cnt in
+        db.query(models.Job.user_id, func.count())
+        .filter(models.Job.user_id.isnot(None))
+        .group_by(models.Job.user_id)
+        .all()
+    }
+    image_counts: Dict[str, int] = {
+        uid: cnt for uid, cnt in
+        db.query(models.CachedImage.user_id, func.count())
+        .group_by(models.CachedImage.user_id)
+        .all()
+    }
 
     user_map: Dict[str, models.User] = {u.id: u for u in all_users}
     children_map: Dict[str, List[str]] = {}
@@ -130,10 +144,12 @@ def _build_roster(
         if u.parent_id:
             children_map.setdefault(u.parent_id, []).append(u.id)
 
-    # 递归汇总 blueprint / service / skill 计数
+    # 递归汇总 blueprint / service / skill / job / image 计数
     agg_bp: Dict[str, int] = {}
     agg_svc: Dict[str, int] = {}
     agg_skill: Dict[str, int] = {}
+    agg_job: Dict[str, int] = {}
+    agg_image: Dict[str, int] = {}
 
     def _aggregate(uid: str) -> None:
         if uid in agg_bp:
@@ -141,14 +157,20 @@ def _build_roster(
         own_bp = bp_counts.get(uid, 0)
         own_svc = svc_counts.get(uid, 0)
         own_skill = skill_counts.get(uid, 0)
+        own_job = job_counts.get(uid, 0)
+        own_image = image_counts.get(uid, 0)
         for cid in children_map.get(uid, []):
             _aggregate(cid)
             own_bp += agg_bp[cid]
             own_svc += agg_svc[cid]
             own_skill += agg_skill[cid]
+            own_job += agg_job[cid]
+            own_image += agg_image[cid]
         agg_bp[uid] = own_bp
         agg_svc[uid] = own_svc
         agg_skill[uid] = own_skill
+        agg_job[uid] = own_job
+        agg_image[uid] = own_image
 
     for u in all_users:
         _aggregate(u.id)
@@ -188,6 +210,8 @@ def _build_roster(
             blueprint_count=agg_bp.get(u.id, 0),
             service_count=agg_svc.get(u.id, 0),
             skill_count=agg_skill.get(u.id, 0),
+            job_count=agg_job.get(u.id, 0),
+            image_count=agg_image.get(u.id, 0),
             created_at=u.created_at,
         ))
 
@@ -292,6 +316,27 @@ def get_user_roster(
     items = roster[start:start + page_size]
 
     return PagedUserResponse(total=total, items=items)
+
+
+@router.get(
+    "/users/{user_id}",
+    response_model=UserDetail,
+)
+def get_user_detail(
+    user_id: str,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
+) -> UserDetail:
+    """单用户花名册条目，供 PersonHoverCard 等需要"看这个人是谁"的入口使用。
+
+    复用 _build_roster 保证语义与 People 页严格一致。代价是每次单查都跑一遍
+    全表 group-by + 递归汇总（5 个计数）；lab 规模下可忽略，量级显著增长再
+    抽 _build_one_detail 走子树聚合。
+    """
+    detail = next((u for u in _build_roster(db) if u.id == user_id), None)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return detail
 
 
 # ─── Agent 管理 ─────────────────────────────────────────────────────────

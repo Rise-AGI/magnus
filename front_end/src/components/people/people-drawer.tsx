@@ -9,6 +9,7 @@ import { CopyableText } from "@/components/ui/copyable-text";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { TokenInput, MAGNUS_TOKEN_LENGTH, validateToken } from "@/components/ui/token-input";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
 import { formatBeijingTime } from "@/lib/utils";
@@ -285,11 +286,16 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
                 {/* +1 Leader */}
                 <div className="flex items-center gap-5">
                   <span className="text-sm font-medium text-zinc-300 shrink-0">{t("people.table.leader")}</span>
-                  {user.parent_name ? (
-                    <div className="flex items-center gap-1.5">
-                      <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
-                      <span className="text-sm text-zinc-400">{user.parent_name}</span>
-                    </div>
+                  {user.parent_name && user.parent_id ? (
+                    <PersonHoverCard
+                      userId={user.parent_id}
+                      warm={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }}
+                    >
+                      <div className="inline-flex items-center gap-1.5 cursor-pointer rounded-md -mx-1 px-1 py-0.5 hover:bg-zinc-800/50 transition-colors">
+                        <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
+                        <span className="text-sm text-zinc-400">{user.parent_name}</span>
+                      </div>
+                    </PersonHoverCard>
                   ) : (
                     <span className="text-sm text-zinc-600 italic">{t("people.leader.void")}</span>
                   )}

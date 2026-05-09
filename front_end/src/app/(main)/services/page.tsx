@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Plus, Activity, ArrowUpDown } from "lucide-react";
 import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
@@ -19,6 +20,8 @@ import { getUserInitials } from "@/lib/user-display";
 
 export default function ServicesPage() {
   const { t } = useLanguage();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // 排序选项配置
   const SORT_OPTIONS = [
@@ -33,7 +36,7 @@ export default function ServicesPage() {
   // Filters & Sorting
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
-  const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState(searchParams.get("owner_id") ?? "");
   // [Magnus Update] 新增筛选和排序状态
   const [activeOnly, setActiveOnly] = useState(false);
   const [sortBy, setSortBy] = useState<string>("activity");
@@ -112,6 +115,23 @@ export default function ServicesPage() {
   useEffect(() => {
     setCurrentPage(1);
   }, [debouncedQuery, selectedUserId, activeOnly, sortBy]);
+
+  // owner_id 双向同步：state → URL（SearchableSelect）；URL → state（外部链接落地或
+  // 自页 PersonHoverCard chip 跳同 route）。idempotent。
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (selectedUserId) params.set("owner_id", selectedUserId);
+    else params.delete("owner_id");
+    const next = params.toString();
+    router.replace(next ? `?${next}` : "?", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUserId]);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("owner_id") ?? "";
+    if (fromUrl !== selectedUserId) setSelectedUserId(fromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => { fetchServices(); }, [fetchServices]);
   usePolling(() => fetchServices(true), POLL_INTERVAL);

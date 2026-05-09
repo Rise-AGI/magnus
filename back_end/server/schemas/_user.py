@@ -32,6 +32,8 @@ class UserDetail(BaseModel):
     blueprint_count: int = 0
     service_count: int = 0
     skill_count: int = 0
+    job_count: int = 0
+    image_count: int = 0
     created_at: datetime
     class Config: from_attributes = True
 

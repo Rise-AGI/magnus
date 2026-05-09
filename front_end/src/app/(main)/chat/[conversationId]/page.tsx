@@ -10,6 +10,7 @@ import { useAuth } from "@/context/auth-context";
 import { formatBeijingTime } from "@/lib/utils";
 import { ConversationSettingsDrawer } from "@/components/chat/conversation-settings-drawer";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import type { ConversationDetail, PagedMessageResponse, OptimisticChatMessage } from "@/types/chat";
 
 const MESSAGE_PAGE_SIZE = 50;
@@ -490,7 +491,16 @@ export default function ConversationPage() {
                   {/* Left avatar (others) */}
                   {!isMe && (
                     <div className="w-7 flex-shrink-0 mr-2 self-start mt-0.5">
-                      {showAvatar ? (
+                      {showAvatar && msg.sender?.id ? (
+                        <PersonHoverCard
+                          userId={msg.sender.id}
+                          warm={{ name: msg.sender.name || "?", avatar_url: msg.sender.avatar_url ?? null }}
+                        >
+                          <span className="inline-flex">
+                            <AvatarCircle user={msg.sender} size="xs" />
+                          </span>
+                        </PersonHoverCard>
+                      ) : showAvatar ? (
                         <AvatarCircle user={msg.sender} size="xs" />
                       ) : null}
                     </div>

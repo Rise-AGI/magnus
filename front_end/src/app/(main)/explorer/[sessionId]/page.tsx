@@ -13,6 +13,7 @@ import { API_BASE } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { PersonHoverCard } from "@/components/ui/person-hover-card";
 
 
 function parseThinkingContent(content: string): { thinking: string | null; response: string } {
@@ -305,6 +306,7 @@ function UserMessageWithActions({
   isLastUserMessage,
   sessionId,
   user,
+  userId,
   onEdit,
   onImageClick,
 }: {
@@ -313,6 +315,7 @@ function UserMessageWithActions({
   isLastUserMessage: boolean;
   sessionId: string;
   user: { name: string; avatar_url?: string | null } | null;
+  userId?: string;
   onEdit: () => void;
   onImageClick: (src: string, alt: string) => void;
 }) {
@@ -358,7 +361,19 @@ function UserMessageWithActions({
           onImageClick={onImageClick}
         />
       </div>
-      <AvatarCircle user={user} size="xs" className="mt-1" />
+      {userId && user ? (
+        <PersonHoverCard
+          userId={userId}
+          warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}
+          align="end"
+        >
+          <span className="inline-flex mt-1">
+            <AvatarCircle user={user} size="xs" />
+          </span>
+        </PersonHoverCard>
+      ) : (
+        <AvatarCircle user={user} size="xs" className="mt-1" />
+      )}
     </div>
   );
 }
@@ -952,6 +967,7 @@ export default function SessionPage() {
                     isLastUserMessage={index === session.messages.map(m => m.role).lastIndexOf("user")}
                     sessionId={sessionId}
                     user={session.user ?? user}
+                    userId={session.user?.id ?? user?.id}
                     onEdit={() => startEditingMessage(index, message.content)}
                     onImageClick={(src, alt) => setPreviewImage({ src, alt })}
                   />

@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Plus, Container, Loader2, RefreshCw, Clock } from "lucide-react";
 import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
@@ -9,6 +10,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Drawer } from "@/components/ui/drawer";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import { POLL_INTERVAL } from "@/lib/config";
 import { getUserInitials } from "@/lib/user-display";
 import { useLanguage } from "@/context/language-context";
@@ -22,12 +24,14 @@ import { ImageTable, CachedImage, formatSize, extractImageName, STATUS_STYLES, S
 
 export default function ImagesPage() {
   const { t } = useLanguage();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [images, setImages] = useState<CachedImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState(searchParams.get("owner_id") ?? "");
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -58,6 +62,23 @@ export default function ImagesPage() {
   ], [allUsers, t]);
 
   useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);
+
+  // owner_id 双向同步：state → URL（SearchableSelect）；URL → state（外部链接落地或
+  // 自页 PersonHoverCard chip 跳同 route）。idempotent。
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (selectedUserId) params.set("owner_id", selectedUserId);
+    else params.delete("owner_id");
+    const next = params.toString();
+    router.replace(next ? `?${next}` : "?", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUserId]);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("owner_id") ?? "";
+    if (fromUrl !== selectedUserId) setSelectedUserId(fromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const fetchImages = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
@@ -285,10 +306,15 @@ export default function ImagesPage() {
                 <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("images.table.owner")}</label>
                 <div className="flex items-center gap-3 mt-1">
                   {viewingImage.user ? (
-                    <>
-                      <AvatarCircle user={viewingImage.user} size="sm" />
-                      <span className="text-sm font-medium text-zinc-200">{viewingImage.user.name}</span>
-                    </>
+                    <PersonHoverCard
+                      userId={viewingImage.user.id}
+                      warm={{ name: viewingImage.user.name, avatar_url: viewingImage.user.avatar_url ?? null }}
+                    >
+                      <div className="flex items-center gap-3 cursor-pointer rounded-md -mx-1 px-1 py-0.5 hover:bg-zinc-800/50 transition-colors">
+                        <AvatarCircle user={viewingImage.user} size="sm" />
+                        <span className="text-sm font-medium text-zinc-200">{viewingImage.user.name}</span>
+                      </div>
+                    </PersonHoverCard>
                   ) : (
                     <span className="text-sm text-zinc-500">-</span>
                   )}

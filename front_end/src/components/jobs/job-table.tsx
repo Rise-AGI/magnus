@@ -11,6 +11,7 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { UserAvatar } from "@/components/ui/user-avatar";
+import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import { formatBeijingTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -83,7 +84,18 @@ export function JobTable({
 
               <div className="flex items-center justify-between mt-3">
                 <div className="flex items-center gap-2 min-w-0">
-                  <UserAvatar user={job.user} subText={formatBeijingTime(job.created_at)} />
+                  {job.user ? (
+                    <PersonHoverCard
+                      userId={job.user.id}
+                      warm={{ name: job.user.name, avatar_url: job.user.avatar_url ?? null }}
+                    >
+                      <span className="inline-flex">
+                        <UserAvatar user={job.user} subText={formatBeijingTime(job.created_at)} />
+                      </span>
+                    </PersonHoverCard>
+                  ) : (
+                    <UserAvatar user={job.user} subText={formatBeijingTime(job.created_at)} />
+                  )}
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   {canClone && (
@@ -218,10 +230,24 @@ export function JobTable({
 
                   <td className="px-6 py-4 align-top">
                     <div>
-                      <UserAvatar
-                        user={job.user}
-                        subText={formatBeijingTime(job.created_at)}
-                      />
+                      {job.user ? (
+                        <PersonHoverCard
+                          userId={job.user.id}
+                          warm={{ name: job.user.name, avatar_url: job.user.avatar_url ?? null }}
+                        >
+                          <span className="inline-flex">
+                            <UserAvatar
+                              user={job.user}
+                              subText={formatBeijingTime(job.created_at)}
+                            />
+                          </span>
+                        </PersonHoverCard>
+                      ) : (
+                        <UserAvatar
+                          user={job.user}
+                          subText={formatBeijingTime(job.created_at)}
+                        />
+                      )}
                     </div>
                   </td>
 

@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search, Plus } from "lucide-react";
 import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
@@ -21,12 +22,14 @@ import { SkillEditor, DEFAULT_EDITOR_DATA } from "@/components/skills/skill-edit
 
 export default function SkillsPage() {
   const { t } = useLanguage();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState(searchParams.get("owner_id") ?? "");
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -51,6 +54,23 @@ export default function SkillsPage() {
   ], [allUsers, t]);
 
   useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);
+
+  // owner_id 双向同步：state → URL（SearchableSelect）；URL → state（外部链接落地或
+  // 自页 PersonHoverCard chip 跳同 route）。idempotent。
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (selectedUserId) params.set("owner_id", selectedUserId);
+    else params.delete("owner_id");
+    const next = params.toString();
+    router.replace(next ? `?${next}` : "?", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUserId]);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("owner_id") ?? "";
+    if (fromUrl !== selectedUserId) setSelectedUserId(fromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const fetchSkills = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);

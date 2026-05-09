@@ -10,6 +10,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { PageLoader } from "@/components/ui/page-loader";
 import { formatRelativeTime } from "@/lib/utils";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import type { ConversationListItem, PagedConversationResponse } from "@/types/chat";
 
 const PAGE_SIZE = 20;
@@ -23,11 +24,20 @@ function ConvAvatar({ conv }: { conv: ConversationListItem }) {
     );
   }
   const other = conv.other_user;
-  return (
+  const avatar = (
     <AvatarCircle
       user={other ? { name: other.name || "?", avatar_url: other.avatar_url } : null}
       size="sm"
     />
+  );
+  if (!other?.id) return avatar;
+  return (
+    <PersonHoverCard
+      userId={other.id}
+      warm={{ name: other.name || "?", avatar_url: other.avatar_url ?? null }}
+    >
+      <span className="inline-flex flex-shrink-0">{avatar}</span>
+    </PersonHoverCard>
   );
 }
 

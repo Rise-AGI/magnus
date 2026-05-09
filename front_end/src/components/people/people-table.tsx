@@ -3,6 +3,7 @@
 
 import { MessageCircle, RefreshCw, UserMinus, Users, Shield, UserPlus } from "lucide-react";
 import { AvatarCircle } from "@/components/ui/user-avatar";
+import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import { PageLoader } from "@/components/ui/page-loader";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
@@ -57,7 +58,11 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
               className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4"
             >
               <div className="flex items-center gap-3 mb-3">
-                <AvatarCircle user={user} size="sm" />
+                <PersonHoverCard userId={user.id} warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}>
+                  <span className="inline-flex">
+                    <AvatarCircle user={user} size="sm" />
+                  </span>
+                </PersonHoverCard>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-zinc-200 text-sm truncate">{user.name}</span>
@@ -138,7 +143,11 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <AvatarCircle user={user} size="sm" />
+                      <PersonHoverCard userId={user.id} warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}>
+                        <span className="inline-flex">
+                          <AvatarCircle user={user} size="sm" />
+                        </span>
+                      </PersonHoverCard>
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-zinc-200">{user.name}</span>
                         {user.is_admin && (
@@ -151,11 +160,16 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                     </div>
                   </td>
                   <td className="px-6 py-4 text-zinc-400 text-sm">
-                    {user.parent_name ? (
-                      <div className="flex items-center gap-1.5">
-                        <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
-                        <span>{user.parent_name}</span>
-                      </div>
+                    {user.parent_name && user.parent_id ? (
+                      <PersonHoverCard
+                        userId={user.parent_id}
+                        warm={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }}
+                      >
+                        <div className="inline-flex items-center gap-1.5 cursor-pointer rounded-md -mx-1 px-1 py-0.5 hover:bg-zinc-800/50 transition-colors">
+                          <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
+                          <span>{user.parent_name}</span>
+                        </div>
+                      </PersonHoverCard>
                     ) : (
                       <span className="text-zinc-600 italic">{t("people.leader.void")}</span>
                     )}

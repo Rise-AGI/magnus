@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Search } from "lucide-react";
 import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
@@ -20,14 +21,17 @@ import { getUserInitials } from "@/lib/user-display";
 
 export default function JobsPage() {
   const { t } = useLanguage();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
-  const [selectedUserId, setSelectedUserId] = useState(""); 
+  // owner_id 从 URL 初始化，使 PersonHoverCard "看其作品"链接生效
+  const [selectedUserId, setSelectedUserId] = useState(searchParams.get("owner_id") ?? "");
   
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -103,6 +107,23 @@ export default function JobsPage() {
   useEffect(() => {
     setCurrentPage(1);
   }, [debouncedQuery, selectedUserId]);
+
+  // owner_id 双向同步：state → URL（用户改 SearchableSelect）；URL → state（外部
+  // 链接落地或自页 PersonHoverCard chip 跳同 route）。两个方向都会写同一个值，幂等不死循环。
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (selectedUserId) params.set("owner_id", selectedUserId);
+    else params.delete("owner_id");
+    const next = params.toString();
+    router.replace(next ? `?${next}` : "?", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUserId]);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("owner_id") ?? "";
+    if (fromUrl !== selectedUserId) setSelectedUserId(fromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
   usePolling(() => fetchJobs(true), POLL_INTERVAL);

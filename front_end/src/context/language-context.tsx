@@ -1106,6 +1106,15 @@ def blueprint(
   "chat.renameGroup": { zh: "修改群名", en: "Rename Group" },
   "chat.groupNamePlaceholder": { zh: "输入群名称...", en: "Enter group name..." },
   "chat.renameSaved": { zh: "已保存", en: "Saved" },
+
+  // ===== Person Hover Card =====
+  "personCard.jobs": { zh: "任务", en: "Jobs" },
+  "personCard.blueprints": { zh: "蓝图", en: "BPs" },
+  "personCard.services": { zh: "服务", en: "Svcs" },
+  "personCard.skills": { zh: "技能", en: "Skills" },
+  "personCard.images": { zh: "镜像", en: "Images" },
+  "personCard.openInPeople": { zh: "去人事", en: "People" },
+  "personCard.transferOwner": { zh: "转让所有权", en: "Transfer" },
 } as const;
 
 
