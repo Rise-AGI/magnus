@@ -21,6 +21,7 @@ import { CodeEditor } from "@/components/ui/code-editor";
 import RenderMarkdown from "@/components/ui/render-markdown";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useBackNavigation } from "@/hooks/use-back-navigation";
+import { useFromHref } from "@/hooks/use-from-href";
 import { Skill, SkillFile } from "@/types/skill";
 import { downloadSkillToFolder, SkillDownloadCancelled } from "@/lib/skill-download";
 
@@ -30,6 +31,7 @@ export default function SkillDetailPage() {
   const { t } = useLanguage();
   const skillId = params.id as string;
   const { backLabel, goBack } = useBackNavigation("/skills", t("skillDetail.backTo"));
+  const buildFromHref = useFromHref();
 
   const [skill, setSkill] = useState<Skill | null>(null);
   const [loading, setLoading] = useState(true);
@@ -139,8 +141,7 @@ export default function SkillDetailPage() {
   const handleFileLink = useCallback((href: string) => {
     if (href.startsWith("magnus:///")) {
       const target = "/" + href.slice("magnus:///".length);
-      const sep = target.includes("?") ? "&" : "?";
-      router.push(`${target}${sep}from=/skills/${skillId}`);
+      router.push(buildFromHref(target));
       return;
     }
     if (!skill) return;
@@ -153,7 +154,7 @@ export default function SkillDetailPage() {
     }
     const target = skill.files.find(f => f.path === resolved.join("/"));
     if (target) setActiveFile(target);
-  }, [skill, activeFile, router, skillId]);
+  }, [skill, activeFile, router, buildFromHref]);
 
   const sortedFiles = useMemo(() => {
     if (!skill) return [];
@@ -168,8 +169,7 @@ export default function SkillDetailPage() {
     a: ({ href, children, ...props }: any) => {
       if (href?.startsWith("magnus:///")) {
         const target = "/" + href.slice("magnus:///".length);
-        const sep = target.includes("?") ? "&" : "?";
-        const fullPath = `${target}${sep}from=/skills/${skillId}`;
+        const fullPath = buildFromHref(target);
         return (
           <Link
             href={fullPath}
@@ -201,7 +201,7 @@ export default function SkillDetailPage() {
       // eslint-disable-next-line @next/next/no-img-element
       return <img src={imgSrc} alt={alt || ""} className={`rounded-md border border-zinc-800 bg-zinc-950 max-w-full h-auto ${className || ""}`} {...props} />;
     },
-  }), [skillId, handleFileLink]);
+  }), [skillId, handleFileLink, buildFromHref]);
 
   if (loading) return <div className="h-[50vh]"><PageLoader fullHeight label={t("skills.fetching")} /></div>;
 

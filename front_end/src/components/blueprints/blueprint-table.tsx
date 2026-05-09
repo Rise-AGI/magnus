@@ -10,6 +10,7 @@ import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useLanguage } from "@/context/language-context";
 import { Blueprint } from "@/types/blueprint";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useFromHref } from "@/hooks/use-from-href";
 
 interface BlueprintTableProps {
   data: Blueprint[];
@@ -34,6 +35,7 @@ export function BlueprintTable({
   const router = useRouter();
   const { t } = useLanguage();
   const isMobile = useIsMobile();
+  const buildFromHref = useFromHref();
 
   if (loading) {
     return <PageLoader variant="card" label={t("blueprints.fetching")} />;
@@ -54,7 +56,7 @@ export function BlueprintTable({
         {data.map((bp) => (
           <div
             key={bp.id}
-            onClick={() => router.push(`/blueprints/${bp.id}`)}
+            onClick={() => router.push(buildFromHref(`/blueprints/${bp.id}`))}
             className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
           >
             <div className="flex items-start justify-between gap-2 mb-2">
@@ -115,7 +117,7 @@ export function BlueprintTable({
                   onClick={() => {
                     const sel = window.getSelection();
                     if (sel && sel.toString().length > 0) return;
-                    router.push(`/blueprints/${bp.id}`);
+                    router.push(buildFromHref(`/blueprints/${bp.id}`));
                   }}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >

@@ -11,6 +11,7 @@ import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { formatBeijingTime } from "@/lib/utils";
 import { useLanguage } from "@/context/language-context";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useFromHref } from "@/hooks/use-from-href";
 
 interface ServiceTableProps {
   services: Service[];
@@ -36,6 +37,7 @@ export function ServiceTable({
   const { t } = useLanguage();
   const router = useRouter();
   const isMobile = useIsMobile();
+  const buildFromHref = useFromHref();
 
   if (loading) {
     return <PageLoader variant="card" tone="teal" label={t("services.fetching")} className={className} />;
@@ -59,7 +61,7 @@ export function ServiceTable({
           return (
             <div
               key={svc.id}
-              onClick={() => router.push(`/services/${svc.id}`)}
+              onClick={() => router.push(buildFromHref(`/services/${svc.id}`))}
               className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
             >
               <div className="flex items-start justify-between gap-2 mb-2">
@@ -169,7 +171,7 @@ export function ServiceTable({
                   <div
                     onClick={(e) => {
                       e.stopPropagation();
-                      router.push(`/jobs/${svc.current_job!.id}?from=/services`);
+                      router.push(buildFromHref(`/jobs/${svc.current_job!.id}`));
                     }}
                     className="cursor-pointer hover:opacity-80 transition-opacity block"
                   >
@@ -184,7 +186,7 @@ export function ServiceTable({
                   onClick={() => {
                     const sel = window.getSelection();
                     if (sel && sel.toString().length > 0) return;
-                    router.push(`/services/${svc.id}`);
+                    router.push(buildFromHref(`/services/${svc.id}`));
                   }}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >

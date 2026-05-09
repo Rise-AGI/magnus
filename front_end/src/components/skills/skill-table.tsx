@@ -10,6 +10,7 @@ import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useLanguage } from "@/context/language-context";
 import { Skill } from "@/types/skill";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useFromHref } from "@/hooks/use-from-href";
 
 interface SkillTableProps {
   data: Skill[];
@@ -32,6 +33,7 @@ export function SkillTable({
   const router = useRouter();
   const { t } = useLanguage();
   const isMobile = useIsMobile();
+  const buildFromHref = useFromHref();
 
   if (loading) {
     return <PageLoader variant="card" label={t("skills.fetching")} />;
@@ -52,7 +54,7 @@ export function SkillTable({
         {data.map((skill) => (
           <div
             key={skill.id}
-            onClick={() => router.push(`/skills/${skill.id}`)}
+            onClick={() => router.push(buildFromHref(`/skills/${skill.id}`))}
             className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
           >
             <div className="flex items-start justify-between gap-2 mb-2">
@@ -110,7 +112,7 @@ export function SkillTable({
                   onClick={() => {
                     const sel = window.getSelection();
                     if (sel && sel.toString().length > 0) return;
-                    router.push(`/skills/${skill.id}`);
+                    router.push(buildFromHref(`/skills/${skill.id}`));
                   }}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >

@@ -22,6 +22,7 @@ import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { ServiceImplicitExport } from "@/lib/service-defaults";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { useBackNavigation } from "@/hooks/use-back-navigation";
+import { useFromHref } from "@/hooks/use-from-href";
 import { usePolling } from "@/hooks/use-polling";
 
 import { Service } from "@/types/service";
@@ -32,6 +33,7 @@ export default function ServiceDetailsPage() {
   const { t } = useLanguage();
   const serviceId = params.id as string;
   const { backLabel, goBack } = useBackNavigation("/services", t("serviceDetail.backTo"));
+  const buildFromHref = useFromHref();
 
   // Data States
   const [service, setService] = useState<Service | null>(null);
@@ -202,7 +204,7 @@ export default function ServiceDetailsPage() {
   } else if (hasLiveJob) {
     statusNode = (
       <div
-        onClick={() => router.push(`/jobs/${service.current_job!.id}?from=/services/${service.id}`)}
+        onClick={() => router.push(buildFromHref(`/jobs/${service.current_job!.id}`))}
         className="cursor-pointer hover:opacity-80 transition-opacity"
       >
         <JobStatusBadge status={currentJobStatus!} size="md" />

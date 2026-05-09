@@ -15,6 +15,7 @@ import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import { formatBeijingTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useFromHref } from "@/hooks/use-from-href";
 
 interface JobTableProps {
   jobs: Job[];
@@ -23,7 +24,6 @@ interface JobTableProps {
   onTerminate: (job: Job) => void;
   emptyMessage?: string;
   className?: string;
-  fromSource?: string;
 }
 
 export function JobTable({
@@ -33,12 +33,12 @@ export function JobTable({
   onTerminate,
   emptyMessage,
   className = "min-h-[400px]",
-  fromSource = "/jobs",
 }: JobTableProps) {
   const router = useRouter();
   const { user: currentUser } = useAuth();
   const { t } = useLanguage();
   const isMobile = useIsMobile();
+  const buildFromHref = useFromHref();
 
   if (loading) {
     return <PageLoader variant="card" label={t("jobs.fetchingJobs")} className={className} />;
@@ -68,7 +68,7 @@ export function JobTable({
           return (
             <div
               key={job.id}
-              onClick={() => router.push(`/jobs/${job.id}?from=${fromSource}`)}
+              onClick={() => router.push(buildFromHref(`/jobs/${job.id}`))}
               className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
             >
               <div className="flex items-start justify-between gap-2 mb-2">
@@ -156,7 +156,7 @@ export function JobTable({
                   onClick={() => {
                     const sel = window.getSelection();
                     if (sel && sel.toString().length > 0) return;
-                    router.push(`/jobs/${job.id}?from=${fromSource}`);
+                    router.push(buildFromHref(`/jobs/${job.id}`));
                   }}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >
