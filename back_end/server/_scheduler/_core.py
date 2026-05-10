@@ -80,9 +80,11 @@ class MagnusScheduler(
                 container_name = f"magnus-job-{job.id}"
                 logger.info(f"Terminating job {job.id} (Docker: {container_name}) by user request.")
                 # timeout=0 → docker stop 立即发 SIGKILL，跳过 SIGTERM grace。对偶
-                # SLURM kill_job 的 `scancel --signal=KILL --full`：因为 user_script
-                # 全链 SIG_IGN（详见 _scheduler/_submit.py:_render_docker_user_script），
-                # 默认的 10s SIGTERM grace 会完全空转，破坏 terminate"瞬时"语义。
+                # SLURM kill_job 的 `scancel --signal=KILL --full`：user_script 外层
+                # bash 装了 trap 不会因 SIGTERM 自死、子壳 SIG_DFL 用户进程被默认
+                # disposition 终止 / handler 进程自己处理 —— 默认 10s grace 既不能
+                # 让 magnus 即时清场，又会撞上用户 handler 还在持有资源的中间状态。
+                # SIGKILL 直发恢复 terminate "no coordination window" 的语义。
                 self.docker_manager.stop_container(container_name, timeout = 0)
                 self.docker_manager.remove_container(container_name)
             else:
@@ -103,11 +105,11 @@ class MagnusScheduler(
     def signal_job(self, job: Job) -> None:
         """向运行中的 job 进程发送 SIGTERM。
 
-        信号转发器，不动 DB、不清理工作目录、不改 job 状态。给装了 SIGTERM
-        处理器的用户代码一个自定义清理入口（典型场景：CUDA / NCCL teardown、
-        保存检查点）。用户进程响应自然退出后由 _sync_reality 常规路径走
-        Success / Failed；忽略信号则 DB 状态保持 Running，由用户决定是否
-        再点 terminate 强制结束。
+        信号转发器，不动 DB、不清理工作目录、不改 job 状态。SIGTERM 实际会送到
+        用户进程：装了 handler 的代码可以做自定义清理（CUDA / NCCL teardown、
+        保存检查点等），写 `$MAGNUS_RESULT` + `sys.exit(0)` 让 _sync_reality 收
+        敛到 Success；没装 handler 的用户进程被默认 disposition 终止、收敛到
+        Failed。详见 docs/internals/job-runtime.md "Signaling and Termination"。
         """
         if not self.enabled:
             logger.warning("Scheduler disabled, skipping signal logic.")

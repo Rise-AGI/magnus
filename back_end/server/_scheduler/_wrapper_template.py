@@ -290,18 +290,33 @@ def _check_oom():
         return False, 0
 
 def main():
-    # SIGTERM 设为 SIG_IGN：让 wrapper.py 自己以及它后续起的所有子孙
-    # （subprocess shell → apptainer → 容器内 bash → 用户进程）一起忽略
-    # SIGTERM。POSIX 规定 SIG_IGN 通过 fork+exec 继承，一行覆盖整条下游。
-    # 上游（slurmstepd 启动的外层 bash → wrapper.py）由 sbatch 入口的
-    # `trap '' TERM\\nexec wrapper.py` 把 SIG_IGN inherit 进 wrapper.py 进程
-    # （见 _slurm_manager/_control.py:submit_job_simple）。这里再装一次是
-    # 防御性 idempotent：保证不依赖外层装载方式，wrapper.py 自身的 disposition
-    # 总是正确的。用户代码用 signal.signal() 显式覆盖来响应（Python 直接调
-    # sigaction，不受继承的 SIG_IGN 影响）。kill_job 走 scancel --signal=KILL
-    # --full 与本设计互锁，详见 docs/internals/job-runtime.md "Signaling and
-    # Termination"。
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    # SIGTERM 处理：wrapper.py 自己装 handler 记录 _signaled，subprocess 通过
+    # preexec_fn 显式 set SIG_IGN 让"subprocess shell + 它的 fork 子孙"通过 POSIX
+    # exec inheritance 一路 SIG_IGN。这两件事互锁：
+    #
+    # * wrapper 装 handler 而不是 SIG_IGN —— wrapper 必须知道"是否被信号过"，否则
+    #   分不清 apptainer ret 非 0 是程序自身错误还是被信号杀。
+    # * apptainer 自身有 SIGTERM handler（无 flag 可关，1.x 各版本一致），所以
+    #   apptainer 收到 SIGTERM 必然杀容器、退 143。SIG_IGN inherit 链断在 apptainer
+    #   这一层是 hard barrier —— magnus 不依赖 apptainer 行为。
+    # * 用户代码 signal.signal(SIGTERM, handler) 自己装 handler 处理收尾，写
+    #   .magnus_result 表达"已成功保存 partial state"，exit 0。
+    # * Phase 3 做 success marker 决策时，ret 非 0 + _signaled + .magnus_result 存在
+    #   作为 fallback 仍写 marker → magnus 标 SUCCESS。
+    #
+    # 上游（slurmstepd 外层 bash → wrapper.py）由 sbatch 入口 `trap '' TERM\\nexec
+    # wrapper.py` 把 SIG_IGN inherit 进 wrapper.py 启动期；signal.signal(handler)
+    # 覆盖之后才有 _signaled 可观测。kill_job 走 scancel --signal=KILL --full 与本
+    # 设计互锁，详见 docs/internals/job-runtime.md "Signaling and Termination"。
+    _signaled = [False]
+    def _on_sigterm(_signum, _frame):
+        _signaled[0] = True
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
+    def _child_ignore_sigterm():
+        # POSIX: SIG_IGN 通过 exec 继承到 child；wrapper 自己保留 handler 不影响
+        # 子进程链。preexec_fn 在 fork 后 exec 前执行。
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
     work_dir = {repr(job_working_table)}
     repo_dir = {repr(repo_dir)}
@@ -437,7 +452,10 @@ else
     $APPTAINER_CMD
 fi
 """
-        ret_code = subprocess.call(shell_cmd, shell=True, executable="/bin/bash")
+        ret_code = subprocess.call(
+            shell_cmd, shell=True, executable="/bin/bash",
+            preexec_fn=_child_ignore_sigterm,
+        )
 
         # Stop metrics sidecar
         _stop_metrics.set()
@@ -455,10 +473,28 @@ fi
             except Exception:
                 pass
 
-        # Phase 3: Epilogue - only write success marker if user command succeeded
+        # Phase 3: Epilogue — success marker decision.
+        #
+        # 1) ret_code == 0：正常完成，写 marker、wrapper 退 0 → SLURM COMPLETED →
+        #    _finalize_completed_job 读 marker → SUCCESS。
+        # 2) ret_code != 0 + _signaled[0] + .magnus_result 存在：
+        #    用户进程收到 SIGTERM 时 handler 处理完写了 .magnus_result 表达"已成功
+        #    保存 partial state"。apptainer 自身被信号杀掉、subprocess.call ret 非 0；
+        #    用户的收尾是成功的，写 marker 并 **wrapper 自己退 0**让 SLURM 优先
+        #    收敛到 COMPLETED。即便 SLURM 实际上把 state 标 FAILED / CANCELLED
+        #    （某些 SLURM 版本 / 配置在 batch step 收过 SIGTERM 时会这样标），
+        #    _sync_reality_slurm 在 FAILED / CANCELLED 分支也先看 marker，
+        #    构成 wrapper 与 sync 双层 defense-in-depth。
+        # 3) 其它情况：不写 marker，原样透传 ret_code → SLURM FAILED → magnus FAILED。
+        result_path = os.path.join(work_dir, ".magnus_result")
         if ret_code == 0:
             with open(success_marker_path, "w") as f:
                 f.write("success")
+            sys.exit(0)
+        if _signaled[0] and os.path.exists(result_path):
+            with open(success_marker_path, "w") as f:
+                f.write("success-after-signal")
+            sys.exit(0)
         sys.exit(ret_code)
 
     except Exception as error:

@@ -908,15 +908,19 @@ class MagnusClient:
         job_id: str,
         timeout: float = 10.0,
     ) -> Dict[str, Any]:
-        """Send SIGTERM to a running job without terminating it.
+        """Send SIGTERM to a running job without forcibly terminating it.
 
-        Unlike :meth:`terminate_job`, which is an irreversible hard cancel
-        marking the job Terminated, this method only delivers SIGTERM, leaving
-        the job's status untouched so user code with a SIGTERM handler can run
-        its own teardown (saving intermediate results / checkpoints, releasing
-        GPU memory and NCCL resources, closing external connections, flushing
-        output buffers, etc.). When the process exits in response the regular
-        sync loop reconciles the job.
+        Unlike :meth:`terminate_job`, which is an irreversible hard cancel that
+        marks the job Terminated, this method only delivers SIGTERM. The job
+        status is unchanged at the magnus side; the user process actually
+        receives the signal. User code with a SIGTERM handler can use the
+        window for its own teardown (saving intermediate results / checkpoints,
+        releasing GPU and NCCL resources, closing external connections,
+        flushing buffers); writing ``$MAGNUS_RESULT`` and calling
+        ``sys.exit(0)`` from the handler lets magnus reconcile the job to
+        Success even if the surrounding process tree is forced down by the
+        signal. User code without a handler is terminated by the default
+        disposition and the job reconciles to Failed.
 
         Requires the job to be in Running status.
         """

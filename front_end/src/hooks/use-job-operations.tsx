@@ -24,6 +24,10 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
   const [jobToTerminate, setJobToTerminate] = useState<Job | null>(null);
   const [isTerminating, setIsTerminating] = useState(false);
 
+  // --- Signal Dialog State ---
+  const [jobToSignal, setJobToSignal] = useState<Job | null>(null);
+  const [isSignaling, setIsSignaling] = useState(false);
+
   // --- Error Dialog State ---
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -87,13 +91,23 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
     }
   };
 
-  // 发送 SIGTERM：fire-and-forget，不弹确认弹窗，不修改 job 状态
-  const onClickSignal = async (job: Job) => {
+  // 打开发送 SIGTERM 确认弹窗（对齐 terminate UX，避免无交互感的误触）
+  const onClickSignal = (job: Job) => {
+    setJobToSignal(job);
+  };
+
+  // 执行发送 SIGTERM API
+  const executeSignal = async () => {
+    if (!jobToSignal) return;
+    setIsSignaling(true);
     try {
-      await client(`/api/jobs/${job.id}/signal`, { method: "POST" });
+      await client(`/api/jobs/${jobToSignal.id}/signal`, { method: "POST" });
+      setJobToSignal(null);
     } catch (e) {
       setErrorMessage(t("jobOps.signalFailed"));
       console.error(e);
+    } finally {
+      setIsSignaling(false);
     }
   };
 
@@ -128,6 +142,21 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
       ) : null,
       confirmText: t("jobOps.terminateBtn"),
       variant: "danger" as const,
+    },
+    // Signal Dialog 属性，对齐 terminate UX：先确认再发送
+    signalDialogProps: {
+      isOpen: !!jobToSignal,
+      onClose: () => setJobToSignal(null),
+      onConfirm: executeSignal,
+      isLoading: isSignaling,
+      title: t("jobOps.signalTitle"),
+      description: jobToSignal ? (
+        <span>
+          {t("jobOps.signalDesc", { name: jobToSignal.task_name })}
+        </span>
+      ) : null,
+      confirmText: t("jobOps.signalBtn"),
+      variant: "default" as const,
     },
     // Error Dialog 属性
     errorDialogProps: {

@@ -330,7 +330,7 @@ magnus.terminate_job("abc123")
 Send SIGTERM to a running job's process **without** terminating the job. Complementary to `terminate_job`:
 
 - `terminate_job` is an irreversible hard cancel: status is set to `Terminated` immediately, the process gets no coordination window.
-- `signal_job` is just a signal forwarder: the job's status is unchanged. User code with a SIGTERM handler can use the window for its own teardown (saving intermediate results / checkpoints, releasing GPU memory and NCCL resources, closing external connections, flushing output buffers, etc.); when the process exits in response, the regular sync loop reconciles the job to `Success` or `Failed`.
+- `signal_job` is just a signal forwarder: the job's status is unchanged and the user process actually receives SIGTERM. User code **with** a SIGTERM handler can use the window for its own teardown — save intermediate results / checkpoints, release GPU / NCCL, close external connections, flush buffers; if the handler writes `$MAGNUS_RESULT` and `sys.exit(0)`, magnus reconciles the job to `Success` (even if the surrounding process tree is forced down by the signal). User code **without** a handler is terminated by SIGTERM's default disposition and reconciles to `Failed`.
 
 ```python
 import magnus
@@ -343,7 +343,7 @@ magnus.signal_job("abc123")
 
 **Precondition**: the job must be in `Running` status. Other states return 409.
 
-**Typical use**: before forcibly terminating, call `signal_job` first as a graceful nudge, watch the logs to see whether the process is shutting down, and fall back to `terminate_job` only if it isn't.
+**Typical use**: when your code installs a SIGTERM handler that persists state, call `signal_job` to trigger the handler, then either let `_sync_reality` reconcile the job to `Success` (if the handler wrote `$MAGNUS_RESULT`) or follow up with `terminate_job` to clean up if the user process didn't respond as expected.
 
 > **Admin Privilege**: Same as `terminate_job` — administrators can signal anyone's job.
 
@@ -1245,7 +1245,7 @@ All synchronous APIs have a corresponding `_async` async version.
 | `get_metric_chart(job_id, name, ...)` | Server-rendered metric PNG | `bytes` |
 | `save_metric_chart(job_id, name, output, ...)` | Server-rendered PNG written to disk | `Path` |
 | `terminate_job(job_id)` | Terminate a job (irreversible, sets status to Terminated) | Status info |
-| `signal_job(job_id)` | Send SIGTERM to the job's process (does not terminate, requires user-defined handler) | Status info |
+| `signal_job(job_id)` | Send SIGTERM to the job's process (handler-aware code can converge to Success; handler-less is terminated) | Status info |
 | `launch_blueprint(id, args, ...)` | Submit a blueprint job, return immediately | Job ID |
 | `run_blueprint(id, args, timeout, ...)` | Submit a blueprint and wait for completion | `Optional[str]` |
 | `list_blueprints(limit, search)` | List blueprints | `{total, items}` |
@@ -1285,7 +1285,7 @@ magnus jobs              # List jobs
 magnus status <ref>      # View job details
 magnus logs <ref>        # View job logs
 magnus kill <ref>        # Terminate a job
-magnus signal <ref>      # Send SIGTERM to a job's process (does not terminate)
+magnus signal <ref>      # Send SIGTERM to a job's process (does not force-terminate at magnus side)
 magnus launch <id>       # Submit a blueprint (Fire & Forget)
 magnus run <id>          # Submit a blueprint and wait for completion
 magnus list              # List blueprints
@@ -1461,14 +1461,14 @@ magnus job kill -1 -f            # skip confirmation
 
 #### magnus job signal
 
-Send SIGTERM to a job's process. Does **not** terminate the job and does not modify the job's status: it is purely a signal forwarder, intended as a hook for user code that installs a SIGTERM handler to run custom cleanup (NCCL teardown, CUDA context release, checkpointing, etc.).
+Send SIGTERM to a job's process. magnus does **not** force-terminate the job at its side and does not pre-emptively flip the job status: it is purely a signal forwarder. The user process actually receives SIGTERM — code with a SIGTERM handler can do its own cleanup (NCCL teardown, CUDA context release, checkpointing, etc.); code without a handler is terminated by SIGTERM's default disposition.
 
 ```bash
 magnus job signal abc123
 magnus job signal -1             # latest job
 ```
 
-If the process exits in response, the regular sync loop reconciles the job to `Success` or `Failed`. If the user code ignores the signal, the job keeps running; you may then `magnus job kill` to force-terminate.
+SIGTERM is delivered to the user process. With a handler that writes `$MAGNUS_RESULT` and exits cleanly the job converges to `Success`; without a handler the user process is terminated by default disposition and the job converges to `Failed`. If the user process appears stuck, follow up with `magnus job kill` to force-terminate.
 
 The job must be in `Running` status.
 

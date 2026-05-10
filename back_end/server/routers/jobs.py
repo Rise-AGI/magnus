@@ -320,10 +320,11 @@ def signal_job(
 ):
     """向 job 进程发送 SIGTERM。
 
-    信号转发器，不修改 DB 状态：给装了 SIGTERM handler 的用户代码一个自定义收尾
-    入口（保存中间结果、释放外部资源、刷新缓冲等）。用户进程响应自然退出后由
-    _sync_reality 走常规收尾；忽略信号则 job 继续 Running，由用户决定是否再点
-    terminate 强制结束。
+    信号转发器，不修改 DB 状态。SIGTERM 实际会送到用户进程：装了 handler 的代码
+    可做自定义收尾（保存中间结果、释放外部资源、刷新缓冲等），写 `$MAGNUS_RESULT`
+    + `sys.exit(0)` 让 _sync_reality 收敛到 Success；没装 handler 的用户进程被
+    默认 disposition 终止、收敛到 Failed。详见 docs/internals/job-runtime.md
+    "Signaling and Termination"。
     """
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:

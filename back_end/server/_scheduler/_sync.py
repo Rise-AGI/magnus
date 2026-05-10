@@ -1,4 +1,5 @@
 # back_end/server/_scheduler/_sync.py
+import os
 import subprocess
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -267,14 +268,27 @@ class _SyncMixin(_SyncMixinBase):
                     if real_status == "COMPLETED":
                         self._finalize_completed_job(job)
                     elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
-                        logger.warning(f"Job {job.id} failed in SLURM (Status: {real_status}).")
-                        job.status = JobStatus.FAILED
-                        if self._has_oom_marker(job.id):
-                            job.result = self._format_oom_message(job.memory_demand)
+                        # Marker 优先于 SLURM state：signal_job 路径下用户 handler
+                        # 处理后写了 .magnus_result，wrapper 写 success marker 并
+                        # `sys.exit(0)` 让 SLURM 优先报 COMPLETED；但实测某些 SLURM
+                        # 版本 / 配置下 batch step 收过 SIGTERM 仍会被标 FAILED /
+                        # CANCELLED。这里先看 marker 兜底：marker 存在 → finalize
+                        # 走 SUCCESS；不存在 → SLURM state 是真 failure（含 OOM
+                        # 检测，保留 SLURM state info 进 result）。这一层与
+                        # _wrapper_template.py Phase 3 的 sys.exit(0) 形成 defense
+                        # -in-depth。
+                        marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
+                        if os.path.exists(marker_path):
+                            self._finalize_completed_job(job)
                         else:
-                            job.result = f"Scheduler reported {real_status} during execution"
-                        job.slurm_job_id = None
-                        self._clean_up_working_table(job.id)
+                            logger.warning(f"Job {job.id} failed in SLURM (Status: {real_status}).")
+                            job.status = JobStatus.FAILED
+                            if self._has_oom_marker(job.id):
+                                job.result = self._format_oom_message(job.memory_demand)
+                            else:
+                                job.result = f"Scheduler reported {real_status} during execution"
+                            job.slurm_job_id = None
+                            self._clean_up_working_table(job.id)
                 except Exception as error:
                     logger.error(f"Failed to sync RUNNING job {job_id}: {error}")
 

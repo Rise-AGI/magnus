@@ -514,7 +514,7 @@ job_app = typer.Typer(
         "  result    Show job result (JSON)\n"
         "  action    Show or execute the job's MAGNUS_ACTION script\n"
         "  kill      Terminate a running job\n"
-        "  signal    Send SIGTERM to a running job (graceful, requires user handler)\n"
+        "  signal    Send SIGTERM to a running job (handler-aware code can converge to Success)\n"
         "  submit    Submit a job directly (fire & forget)\n"
         "  execute   Submit a job and wait for completion\n\n"
         "Jobs can be referenced by negative index: -1 = newest, -2 = second newest.\n"
@@ -1274,11 +1274,14 @@ def kill_job_cmd(
 @app.command(name="signal", context_settings=_JOB_REF_CTX)
 def signal_job_cmd(ctx: typer.Context):
     """
-    Send SIGTERM to a running job without terminating it.
+    Send SIGTERM to a running job without forcibly terminating it.
 
-    Shortcut for 'magnus job signal'. Lets user code run its SIGTERM handler
-    (e.g., NCCL teardown, CUDA cleanup, checkpointing) before exiting. Job
-    status is unchanged; if the process ignores the signal use 'kill' instead.
+    Shortcut for 'magnus job signal'. SIGTERM is delivered to the user process:
+    code with a SIGTERM handler can run its own teardown (NCCL teardown, CUDA
+    cleanup, checkpointing) and converge the job to Success by writing
+    $MAGNUS_RESULT and calling sys.exit(0); code without a handler is terminated
+    by the default disposition and the job converges to Failed. Use 'kill' if
+    the user process appears stuck.
 
     JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
@@ -2391,14 +2394,16 @@ def _do_signal_job(job_ref: str) -> None:
 @job_app.command(name="signal", context_settings=_JOB_REF_CTX)
 def job_signal_subcmd(ctx: typer.Context):
     """
-    Send SIGTERM to a running job without terminating it.
+    Send SIGTERM to a running job without forcibly terminating it.
 
-    The job's status is not changed; user code with a SIGTERM handler can use
-    the window for its own teardown (saving intermediate results / checkpoints,
-    releasing GPU memory, closing connections, flushing buffers, etc.). When
-    the process exits in response, the regular sync loop reconciles the job to
-    Success or Failed. If the process ignores the signal the job keeps running
-    and you may invoke 'kill' to force-terminate.
+    The job status is not changed at the magnus side; the user process actually
+    receives SIGTERM. With a handler installed, the user code can run its own
+    teardown (saving intermediate results / checkpoints, releasing GPU memory,
+    closing connections, flushing buffers, etc.); writing $MAGNUS_RESULT and
+    calling sys.exit(0) from the handler lets the regular sync loop converge
+    the job to Success. Without a handler the user process is terminated by
+    SIGTERM's default disposition and the job converges to Failed. If the user
+    process appears stuck, follow up with 'kill' to force-terminate.
 
     Only Running jobs can be signaled.
 

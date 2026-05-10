@@ -92,7 +92,7 @@ export default function JobDetailsPage() {
     }
   }, [jobId, isSlurmTask]);
 
-  const { drawerProps, handleCloneJob, onClickTerminate, onClickSignal, terminateDialogProps, errorDialogProps } = useJobOperations({
+  const { drawerProps, handleCloneJob, onClickTerminate, onClickSignal, terminateDialogProps, signalDialogProps, errorDialogProps } = useJobOperations({
     onSuccess: () => {
       sessionStorage.setItem('magnus_new_job', '1');
       router.push("/jobs");
@@ -713,6 +713,7 @@ export default function JobDetailsPage() {
 
       <JobDrawer {...drawerProps} />
       <ConfirmationDialog {...terminateDialogProps} />
+      <ConfirmationDialog {...signalDialogProps} />
       <ConfirmationDialog {...errorDialogProps} />
     </div>
   );
