@@ -3,7 +3,7 @@ import os
 import re
 import asyncio
 import subprocess
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pywheels.file_tools import guarantee_file_exist
@@ -12,6 +12,12 @@ from ..models import Job, JobStatus, CachedImage
 from .._magnus_config import magnus_config, is_local_mode
 from .._resource_manager import resource_manager, _image_to_sif_filename
 from . import logger, magnus_workspace_path, magnus_container_cache_path
+
+if TYPE_CHECKING:
+    from ._typing import _SchedulerProtocol
+    _ResourcesMixinBase = _SchedulerProtocol
+else:
+    _ResourcesMixinBase = object
 
 
 def _register_image_pulling(db: Session, image_uri: str, user_id: str) -> bool:
@@ -78,7 +84,7 @@ def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
     db.commit()
 
 
-class _ResourcesMixin:
+class _ResourcesMixin(_ResourcesMixinBase):
     """Job 资源准备：镜像拉取（共享 task）、仓库 clone、Preparing → Pending 状态推进。"""
 
     async def _pull_image_shared(self, image_uri: str, user_id: Optional[str]) -> Tuple[bool, Optional[str]]:

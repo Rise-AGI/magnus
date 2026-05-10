@@ -85,6 +85,8 @@ __all__ = [
     "save_metric_chart_async",
     "terminate_job",
     "terminate_job_async",
+    "signal_job",
+    "signal_job_async",
     "get_cluster_stats",
     "get_cluster_stats_async",
     "list_blueprints",
@@ -207,6 +209,12 @@ def terminate_job(job_id: str, timeout: float = 10.0) -> Dict[str, Any]:
 
 async def terminate_job_async(job_id: str, timeout: float = 10.0) -> Dict[str, Any]:
     return await default_client.terminate_job_async(job_id, timeout)
+
+def signal_job(job_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return default_client.signal_job(job_id, timeout)
+
+async def signal_job_async(job_id: str, timeout: float = 10.0) -> Dict[str, Any]:
+    return await default_client.signal_job_async(job_id, timeout)
 
 def get_job_logs(job_id: str, page: int = -1, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.get_job_logs(job_id, page, timeout)

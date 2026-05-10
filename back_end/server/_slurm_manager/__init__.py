@@ -4,21 +4,18 @@
 主类 SlurmManager 由两个 mixin 组装：
 
 - _resource_query.py:   只读查询（scontrol/squeue → 容量、占用、任务列表、单任务状态）
-- _control.py:          任务提交 / 终止（sbatch / scancel）
+- _control.py:          任务提交 / 终止 / 信号转发（sbatch / scancel）
 
-公共面：`SlurmManager`、`SlurmError`、`SlurmResourceError`。
+公共面：`SlurmManager`、`NodeSnapshot`。
 """
 import logging
 
 logger = logging.getLogger(__name__)
 
-from ._errors import SlurmError, SlurmResourceError
 from ._manager import SlurmManager
 from ._resource_query import NodeSnapshot
 
 __all__ = [
     "SlurmManager",
-    "SlurmError",
-    "SlurmResourceError",
     "NodeSnapshot",
 ]

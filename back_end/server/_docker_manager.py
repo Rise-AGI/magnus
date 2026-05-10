@@ -42,8 +42,13 @@ class DockerManager:
         network_mode: Optional[str] = None,
     ) -> str:
         image = _normalize_image_uri(image)
+        # --init 让 docker 自带的 tini 当 PID 1：reap 容器内孤儿进程，并把
+        # SIGTERM 转发给直接子进程（外层 bash）；信号再经 user_script 里的
+        # trap + wait（见 _scheduler/_submit.py 的 _render_docker_user_script）
+        # 继续转发到下游用户进程。
         command = [
             "docker", "run", "-d",
+            "--init",
             "--name", container_name,
             "-w", working_dir,
         ]
@@ -174,6 +179,27 @@ class DockerManager:
             )
         except Exception as e:
             logger.warning(f"docker rm failed for '{container_name}': {e}")
+
+    def send_signal(self, container_name: str, signal_name: str) -> None:
+        """向容器 PID 1 发送指定信号，不终止容器。
+
+        run_container 已加 --init 让 tini 当 PID 1，tini 会把 SIGTERM 等信号转发给
+        bash 子进程，bash 再传给用户进程，给装了信号处理器的代码自定义清理的机会。
+        """
+        try:
+            result = subprocess.run(
+                ["docker", "kill", f"--signal={signal_name}", container_name],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                logger.error(
+                    f"docker kill --signal={signal_name} failed for '{container_name}': "
+                    f"{result.stderr.strip()}"
+                )
+        except Exception as e:
+            logger.error(f"docker kill --signal={signal_name} failed for '{container_name}': {e}")
 
     def pull_image(self, image: str) -> bool:
         image = _normalize_image_uri(image)

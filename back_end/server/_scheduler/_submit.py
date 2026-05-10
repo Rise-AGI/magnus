@@ -3,7 +3,7 @@ import os
 import re
 import sys
 import traceback
-from typing import List
+from typing import TYPE_CHECKING, List
 from sqlalchemy.orm import Session
 from pywheels.file_tools import guarantee_file_exist
 from ..models import Job, JobStatus
@@ -12,8 +12,64 @@ from .._resource_manager import resource_manager
 from . import logger, magnus_workspace_path
 from ._wrapper_template import _build_wrapper_content
 
+if TYPE_CHECKING:
+    from ._typing import _SchedulerProtocol
+    _SubmitMixinBase = _SchedulerProtocol
+else:
+    _SubmitMixinBase = object
 
-class _SubmitMixin:
+
+def _render_docker_user_script(entry_command: str) -> str:
+    """生成 Docker 模式的 .magnus_user_script.sh 内容。
+
+    设计目标：跟 SLURM 模式 SIGTERM 语义对等 —— 没装 handler 的用户进程沉默继续跑、
+    装了 handler 的进程响应自己处理。两层接力：
+
+    1. 子壳里装 `trap '' TERM` 把 disposition 设为 SIG_IGN。子壳内单一长跑命令
+       会被 bash exec 优化成"子壳 PID 直接替换为用户进程"（典型 entry 模式
+       `pip install ... && python train.py` 的最后命令满足此条件）；POSIX 规定
+       SIG_IGN 通过 exec 继承，所以用户进程默认 disposition 是 SIG_IGN。用户代码
+       用 `signal.signal()` 显式覆盖来响应（Python 直接调 sigaction，不受继承的
+       SIG_IGN 影响）。
+    2. 外层 bash 装 `trap 'kill -TERM "$_magnus_pid"' TERM`：tini 把 SIGTERM 转发
+       给 PID 1 的 bash，bash trap 主动把信号转发给子壳/用户进程 PID（tini 默认
+       不广播给容器内全员，所以这层显式转发不可省）。bash 装了 trap 不会 deferred
+       terminate，会等 wait 完成后按 trap 行为继续（即 forward 后继续等子壳真退）。
+
+    子壳后台跑 + 外层 wait + while 循环：wait 被信号中断时返回 128+sig，重发 wait
+    直到子壳真退；bash 在子进程已 reap 后仍 remember 该 PID 的 exit status，最后一次
+    wait 拿到的 `$?` 就是用户进程真实退出码（已 bash 5.x 实测）。
+
+    entry_command 整体逐行原样嵌入子壳，不做缩进 —— bash heredoc 的结束符
+    （`EOF` 等）必须出现在行首（非 `<<-` 形式），任何前导空格都会让结束符失效；
+    用户 entry_command 包含 heredoc 的场景虽不常见，但回归不可接受。视觉对齐让位
+    于语义透传。
+
+    SLURM 模式信号链路不在这里，那边由 sbatch batch script 入口装 `trap '' TERM`
+    + `exec wrapper.py`、wrapper.py main() 再装一次 SIG_IGN 共同覆盖（见
+    _slurm_manager/_control.py:submit_job_simple 与 _wrapper_template.py）。两边
+    能力对等。
+    """
+    return (
+        "set -e\n"
+        "export HOME=$MAGNUS_HOME\n"
+        "\n"
+        "(\n"
+        "trap '' TERM\n"
+        "set -e\n"
+        f"{entry_command}\n"
+        ") &\n"
+        "_magnus_pid=$!\n"
+        "trap 'kill -TERM \"$_magnus_pid\" 2>/dev/null || true' TERM\n"
+        "while kill -0 \"$_magnus_pid\" 2>/dev/null; do\n"
+        "  wait \"$_magnus_pid\" 2>/dev/null || true\n"
+        "done\n"
+        "wait \"$_magnus_pid\" 2>/dev/null\n"
+        "exit $?\n"
+    )
+
+
+class _SubmitMixin(_SubmitMixinBase):
     """提交决策已经做完的 PENDING job 到 SLURM 或 Docker 后端。"""
 
     def _submit_to_slurm(self, db: Session, job: Job) -> bool:
@@ -135,10 +191,7 @@ class _SubmitMixin:
             # 准备用户脚本（强制 LF：脚本在 Linux 容器内执行）
             user_script_path = os.path.join(job_working_table, ".magnus_user_script.sh")
             with open(user_script_path, "w", newline="\n") as f:
-                f.write("set -e\n")
-                f.write("export HOME=$MAGNUS_HOME\n")
-                f.write(job.entry_command)
-                f.write("\n")
+                f.write(_render_docker_user_script(job.entry_command))
             os.chmod(user_script_path, 0o755)
 
             # 构造 bind mounts

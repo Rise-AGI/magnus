@@ -87,6 +87,16 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
     }
   };
 
+  // 发送 SIGTERM：fire-and-forget，不弹确认弹窗，不修改 job 状态
+  const onClickSignal = async (job: Job) => {
+    try {
+      await client(`/api/jobs/${job.id}/signal`, { method: "POST" });
+    } catch (e) {
+      setErrorMessage(t("jobOps.signalFailed"));
+      console.error(e);
+    }
+  };
+
   return {
     // Drawer 相关属性，直接传递给 JobDrawer
     drawerProps: {
@@ -133,5 +143,6 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
     handleNewJob,
     handleCloneJob,
     onClickTerminate,
+    onClickSignal,
   };
 }

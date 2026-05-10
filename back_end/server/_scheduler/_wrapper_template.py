@@ -25,6 +25,7 @@ def _build_wrapper_content(
     success_marker_path = f"{job_working_table}/.magnus_success"
 
     return f'''import os
+import signal
 import sys
 import traceback
 import subprocess
@@ -289,6 +290,19 @@ def _check_oom():
         return False, 0
 
 def main():
+    # SIGTERM 设为 SIG_IGN：让 wrapper.py 自己以及它后续起的所有子孙
+    # （subprocess shell → apptainer → 容器内 bash → 用户进程）一起忽略
+    # SIGTERM。POSIX 规定 SIG_IGN 通过 fork+exec 继承，一行覆盖整条下游。
+    # 上游（slurmstepd 启动的外层 bash → wrapper.py）由 sbatch 入口的
+    # `trap '' TERM\\nexec wrapper.py` 把 SIG_IGN inherit 进 wrapper.py 进程
+    # （见 _slurm_manager/_control.py:submit_job_simple）。这里再装一次是
+    # 防御性 idempotent：保证不依赖外层装载方式，wrapper.py 自身的 disposition
+    # 总是正确的。用户代码用 signal.signal() 显式覆盖来响应（Python 直接调
+    # sigaction，不受继承的 SIG_IGN 影响）。kill_job 走 scancel --signal=KILL
+    # --full 与本设计互锁，详见 docs/internals/job-runtime.md "Signaling and
+    # Termination"。
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
     work_dir = {repr(job_working_table)}
     repo_dir = {repr(repo_dir)}
     success_marker_path = {repr(success_marker_path)}

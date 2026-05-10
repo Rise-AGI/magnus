@@ -96,6 +96,39 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 
 **cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。`slurm/output.txt` 不被清理。
 
+## 信号与终止
+
+Magnus 区分两种针对运行中 job 的外部干预：
+
+| 操作 | 入口 | 后端实现 | DB 状态变化 |
+|------|------|----------|-------------|
+| 终止 (terminate) | `POST /api/jobs/{id}/terminate`、`magnus job kill` | SLURM: `scancel --signal=KILL --full` + 裸 `scancel`；Docker: `docker stop -t 0 && docker rm -f` | 立即置为 `Terminated`，清理工作目录 |
+| 发送信号 (signal) | `POST /api/jobs/{id}/signal`、`magnus job signal`（仅 Running） | SLURM: `scancel --signal=TERM --full <jobid>`；Docker: `docker kill --signal=TERM` | 不修改任何状态 |
+
+**两个动作的分工**：终止是不可逆的硬取消，调度器立刻把 job 移出运行状态、释放占位、清理工作目录，应用层进程没有协调窗口；发送信号则是纯转发器，DB 不动、调度器视角下 job 仍在运行，把"收到 SIGTERM 之后做什么"完全交给用户代码。装了 SIGTERM 处理器的用户进程可以借这个窗口做自己的收尾（保存中间结果 / 检查点、释放 GPU 显存与 NCCL 资源、关闭外部连接、刷新输出缓冲等），适用于 AI 训练、长跑数值仿真、流式数据处理等任何持有外部资源的场景。
+
+**SLURM 链路（signal）**：必须带 `--full`，否则 `scancel --signal` 只发给非 batch step；wrapper.py 是 sbatch 直接拉起的 batch script（不走 srun）。proctrack 按 cgroup / proc 树扩散信号给每个 PID，到达性由 SLURM 自己保证。链路 `外层 bash (sbatch shebang) → wrapper.py → subprocess shell → apptainer → 容器内 bash → 用户进程` 必须共享同一个 SIGTERM disposition（SIG_IGN），否则任何中间节点收到 SIGTERM 自身 deferred terminate exit 143，会盖掉用户进程的真实退出码。POSIX 规定 SIG_IGN 通过 fork+exec 继承，链路顶端装一次就覆盖整条下游。我们装了两次做对称兜底：
+
+- sbatch batch script（由 `submit_job_simple` 渲染）写成 `#!/bin/bash\ntrap '' TERM\n\nexec <wrapper>`。`trap '' TERM` 把外层 bash disposition 设为 SIG_IGN；`exec` 立刻让 wrapper.py 替换该 bash 进程，POSIX SIG_IGN inheritance 把 disposition 带进 wrapper.py。这一行是关键：没有它，外层 bash 收到 SIGTERM 会 deferred terminate exit 143，即便 wrapper.py exit 0 也会让 SLURM 把 job state 标成 FAILED / CANCELLED。
+- `wrapper.py main()` 自己在入口再调一次 `signal.signal(SIGTERM, SIG_IGN)` —— 在外层 bash 已经把 SIG_IGN inherit 进来的前提下是 idempotent，但保留作为 defense-in-depth：让 wrapper.py 的 disposition 不依赖外层的拉起方式。
+
+用户代码用 `signal.signal()` 显式覆盖来响应（Python 直接调 sigaction，不受继承的 SIG_IGN 影响）。装了 handler 的进程响应信号后 exit 0 → wrapper 写 success marker → DB 收敛 `Success`；没装 handler 的进程跟随 SIG_IGN 沉默继续跑 → 符合"温柔提醒"语义，由用户决定是否再点 terminate 强制结束。
+
+**SLURM 链路（terminate / 抢占）**：`kill_job` 因此必须改用 `scancel --signal=KILL --full` 直接 SIGKILL 全员清场（SIGKILL 在内核侧不可被 ignore），再裸 `scancel <jobid>` 让 SLURM 把 job state 转为 CANCELLED。如果走默认的 `scancel <jobid>`（KillSignal=SIGTERM、KillWait 后 SIGKILL），前 KillWait 秒会因为全链 SIG_IGN 完全空转，破坏抢占的"瞬时让出 GPU"承诺。SIGKILL 直发让 terminate 与抢占的延迟回到秒级。
+
+**Docker 链路**：信号穿透由两层接力完成，对齐 SLURM 模式 SIG_IGN 链路的语义：
+
+1. `docker run` 启用 `--init` 让 docker 自带的 tini 当 PID 1，reap 孤儿进程并把 SIGTERM 转发给直接子进程（外层 bash）。tini **不**像 SLURM proctrack 那样广播给容器内全员，只送给外层 bash —— 这正是为什么需要下面的脚本层接力。
+2. `.magnus_user_script.sh` 由 `_scheduler/_submit.py` 的 `_render_docker_user_script` 渲染：把用户的 entry_command 整体放进 `( trap '' TERM; set -e; ... ) &` 子壳后台跑，子壳 disposition 是 SIG_IGN。当子壳的最后一个命令是单一长跑进程（典型 `pip install ... && python train.py` 模式），bash exec 替换让"子壳 PID 直接变成用户进程 PID"，POSIX SIG_IGN inheritance 把 disposition 带到用户进程。外层 bash 装 `trap 'kill -TERM "$_magnus_pid"' TERM` + `while ... wait` 循环：tini → 外层 bash 收到 SIGTERM，trap 主动把信号转发给子壳/用户 PID；wait 被信号中断后返回 128+sig，循环重发 wait 直到子进程真退，最后用 `exit $?` 透传子进程真实退出码。
+
+合起来：没装 handler 的用户代码在 kernel 层面收到 SIG_IGN 处理（跟 SLURM 一致）；装了 `signal.signal(SIGTERM, ...)` 的代码自己覆盖 disposition 触发 handler（跟 SLURM 一致）；用户进程的真实 exit code 通过 docker container 的 exit code 透传，让 `_sync_reality_docker` 正确收敛到 `Success` / `Failed`。entry_command 内部多层嵌套 shell 仍需各自显式 trap 才能继续接力 —— 这跟 SLURM 模式 apptainer 子壳的限制相同。两边能力对等。
+
+**Docker 链路（terminate）**：对偶 SLURM SIGKILL 直发的设计，`terminate_job` 调 `stop_container(container_name, timeout=0)` 让 `docker stop -t 0` 立即发 SIGKILL，跳过 docker stop 默认 10 秒 SIGTERM grace。如果不传 `timeout=0`，这 10 秒会因为上面建立的全链 SIG_IGN 完全空转，破坏 terminate"无协调窗口"的语义。
+
+**状态收敛**：`signal_job` 不动 DB。用户进程响应 SIGTERM 自然退出后，由 `_sync_reality` 走常规路径（success marker / 退出码）收敛到 `Success` 或 `Failed`。用户代码忽略信号则 job 继续 `Running`，由用户决定是否再点终止强制结束。
+
+**抢占语义不变**：`_decisions._kill_and_pause` 仍走 `kill_job`，瞬时让出 GPU 的承诺由上面 SIGKILL 直发的设计兜底。要给 B 类任务保存检查点的能力，需要单独设计抢占预通知机制，本次不在范围内。
+
 ### 容器内侧
 
 ```

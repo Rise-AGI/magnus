@@ -1,7 +1,8 @@
 # back_end/server/database.py
+from typing import Iterator
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from pywheels.file_tools import guarantee_file_exist
 from ._magnus_config import *
 
@@ -30,9 +31,9 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.close()
-SessionLocal = sessionmaker(
-    autocommit = False, 
-    autoflush = False, 
+SessionLocal: sessionmaker[Session] = sessionmaker(
+    autocommit = False,
+    autoflush = False,
     bind = engine,
 )
 
@@ -40,7 +41,7 @@ SessionLocal = sessionmaker(
 Base = declarative_base()
 
 
-def get_db():
+def get_db() -> Iterator[Session]:
     db = SessionLocal()
     try:
         yield db

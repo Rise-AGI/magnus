@@ -11,7 +11,7 @@
 - _job_lifecycle.py:    success/OOM marker、working table 清理
 - _wrapper_template.py: SLURM compute node 上 wrapper.py 源码生成器
 
-公共面：单例 `scheduler`、`scheduler.tick()`、`scheduler.terminate_job()`。
+公共面：单例 `scheduler`、`scheduler.tick()`、`scheduler.terminate_job()`、`scheduler.signal_job()`。
 """
 import logging
 from pywheels.file_tools import guarantee_file_exist

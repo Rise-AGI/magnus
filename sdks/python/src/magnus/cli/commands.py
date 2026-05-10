@@ -39,6 +39,7 @@ from .. import (
     get_metric_points as api_get_metric_points,
     save_metric_chart as api_save_metric_chart,
     terminate_job as api_terminate_job,
+    signal_job as api_signal_job,
     get_cluster_stats as api_get_cluster_stats,
     list_blueprints as api_list_blueprints,
     get_blueprint as api_get_blueprint,
@@ -138,8 +139,9 @@ class SignalSafeSpinner:
         self._status.start()
 
         if os.name != "nt":
-            self._old_sigtstp = signal.signal(signal.SIGTSTP, self._handle_sigtstp)
-            self._old_sigcont = signal.signal(signal.SIGCONT, self._handle_sigcont)
+            # SIGTSTP / SIGCONT POSIX-only；运行时由 os.name 守门
+            self._old_sigtstp = signal.signal(signal.SIGTSTP, self._handle_sigtstp)  # type: ignore[attr-defined]
+            self._old_sigcont = signal.signal(signal.SIGCONT, self._handle_sigcont)  # type: ignore[attr-defined]
 
         return self
 
@@ -150,18 +152,18 @@ class SignalSafeSpinner:
 
         if os.name != "nt":
             if self._old_sigtstp is not None:
-                signal.signal(signal.SIGTSTP, self._old_sigtstp)
+                signal.signal(signal.SIGTSTP, self._old_sigtstp)  # type: ignore[attr-defined]
             if self._old_sigcont is not None:
-                signal.signal(signal.SIGCONT, self._old_sigcont)
+                signal.signal(signal.SIGCONT, self._old_sigcont)  # type: ignore[attr-defined]
 
     def _handle_sigtstp(self, signum: int, frame: Any) -> None:
         if self._status:
             self._status.stop()
-        signal.signal(signal.SIGTSTP, signal.SIG_DFL)
-        os.kill(os.getpid(), signal.SIGTSTP)
+        signal.signal(signal.SIGTSTP, signal.SIG_DFL)  # type: ignore[attr-defined]
+        os.kill(os.getpid(), signal.SIGTSTP)  # type: ignore[attr-defined]
 
     def _handle_sigcont(self, signum: int, frame: Any) -> None:
-        signal.signal(signal.SIGTSTP, self._handle_sigtstp)
+        signal.signal(signal.SIGTSTP, self._handle_sigtstp)  # type: ignore[attr-defined]
         if self._status:
             self._status.start()
 
@@ -512,11 +514,12 @@ job_app = typer.Typer(
         "  result    Show job result (JSON)\n"
         "  action    Show or execute the job's MAGNUS_ACTION script\n"
         "  kill      Terminate a running job\n"
+        "  signal    Send SIGTERM to a running job (graceful, requires user handler)\n"
         "  submit    Submit a job directly (fire & forget)\n"
         "  execute   Submit a job and wait for completion\n\n"
         "Jobs can be referenced by negative index: -1 = newest, -2 = second newest.\n"
         "Indices are shared across terminals and shift as new jobs arrive; use the job ID for stability.\n\n"
-        "Top-level shortcuts: magnus jobs, magnus status, magnus logs, magnus kill.\n\n"
+        "Top-level shortcuts: magnus jobs, magnus status, magnus logs, magnus kill, magnus signal.\n\n"
         "Examples:\n"
         "  magnus job list\n"
         "  magnus job status -1\n"
@@ -1268,6 +1271,24 @@ def kill_job_cmd(
     _do_kill_job(job_ref=_extract_job_ref(ctx), force=force)
 
 
+@app.command(name="signal", context_settings=_JOB_REF_CTX)
+def signal_job_cmd(ctx: typer.Context):
+    """
+    Send SIGTERM to a running job without terminating it.
+
+    Shortcut for 'magnus job signal'. Lets user code run its SIGTERM handler
+    (e.g., NCCL teardown, CUDA cleanup, checkpointing) before exiting. Job
+    status is unchanged; if the process ignores the signal use 'kill' instead.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
+
+    Examples:
+      magnus signal -1
+      magnus signal <job-id>
+    """
+    _do_signal_job(job_ref=_extract_job_ref(ctx))
+
+
 # === Session Management Commands ===
 
 TARGET_DEBUG_JOB_NAME = "Magnus Debug"
@@ -1387,7 +1408,8 @@ def disconnect_cmd():
 
     ppid = os.getppid()
     try:
-        os.kill(ppid, signal.SIGHUP)
+        # SIGHUP POSIX-only；该路径仅在 SLURM session 里触发，运行时只走 Linux
+        os.kill(ppid, signal.SIGHUP)  # type: ignore[attr-defined]
     except OSError as e:
         print_error(f"Failed to send SIGHUP: {e}")
         raise typer.Exit(code=1)
@@ -2350,6 +2372,43 @@ def job_kill_subcmd(
       magnus job kill <job-id>
     """
     _do_kill_job(job_ref=_extract_job_ref(ctx), force=force)
+
+
+def _do_signal_job(job_ref: str) -> None:
+    try:
+        resolved_id = _resolve_job_ref(job_ref)
+        api_signal_job(resolved_id)
+        print_msg(f"SIGTERM sent to job [bold]{rich_escape(str(resolved_id))}[/bold]. Waiting for the process to respond.")
+
+    except MagnusError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        raise typer.Exit(code=1)
+
+
+@job_app.command(name="signal", context_settings=_JOB_REF_CTX)
+def job_signal_subcmd(ctx: typer.Context):
+    """
+    Send SIGTERM to a running job without terminating it.
+
+    The job's status is not changed; user code with a SIGTERM handler can use
+    the window for its own teardown (saving intermediate results / checkpoints,
+    releasing GPU memory, closing connections, flushing buffers, etc.). When
+    the process exits in response, the regular sync loop reconciles the job to
+    Success or Failed. If the process ignores the signal the job keeps running
+    and you may invoke 'kill' to force-terminate.
+
+    Only Running jobs can be signaled.
+
+    JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
+
+    Examples:
+      magnus job signal -1
+      magnus job signal <job-id>
+    """
+    _do_signal_job(job_ref=_extract_job_ref(ctx))
 
 
 # === Metric subcommand ===

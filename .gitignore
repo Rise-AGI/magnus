@@ -40,6 +40,10 @@ back_end/pictures/
 *__pycache__*
 !back_end/python_scripts/blueprints/magnus-slurm.py
 !back_end/python_scripts/magnus_slurm.py
+!back_end/server/_slurm_manager
+!back_end/server/_slurm_manager/**
+back_end/server/_slurm_manager/**/__pycache__
+back_end/server/_slurm_manager/**/__pycache__/**
 !scripts/setup_single_node_slurm.sh
 *CLAUDE*
 *Claude*

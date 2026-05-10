@@ -96,6 +96,39 @@ All paths are based on `{magnus_root}/workspace/jobs/{job_id}/` (abbreviated bel
 
 **cleanup** refers to `_clean_up_working_table()`, called when the job ends (SUCCESS/FAILED/TERMINATED/PAUSED). `slurm/output.txt` is not cleaned.
 
+## Signaling and Termination
+
+Magnus distinguishes two external interventions on a running job:
+
+| Action | Entry points | Backend impl | DB state change |
+|--------|-------------|--------------|-----------------|
+| terminate | `POST /api/jobs/{id}/terminate`, `magnus job kill` | SLURM: `scancel --signal=KILL --full` + bare `scancel`; Docker: `docker stop -t 0 && docker rm -f` | Status set to `Terminated` immediately; working dir cleaned |
+| signal | `POST /api/jobs/{id}/signal`, `magnus job signal` (Running only) | SLURM: `scancel --signal=TERM --full <jobid>`; Docker: `docker kill --signal=TERM` | No state change |
+
+**Roles of the two actions**: terminate is an irreversible hard cancel — the scheduler immediately removes the job from running state, releases the slot, and cleans up the working directory; application-level processes get no coordination window. Signal is a pure forwarder — DB is untouched, the scheduler still considers the job running, and "what to do on SIGTERM" is left entirely to user code. A user process with a SIGTERM handler can use the window to perform its own teardown (save intermediate results / checkpoints, release GPU memory and NCCL resources, close external connections, flush output buffers, etc.). Applies broadly: AI training, long-running numerical simulations, streaming data processing — any workload that holds external resources.
+
+**SLURM path (signal)**: `--full` is mandatory, otherwise `scancel --signal` only targets non-batch steps; wrapper.py is the batch script started directly by sbatch (no srun). proctrack propagates the signal down the cgroup / proc tree to every PID — delivery is guaranteed by SLURM itself. The chain `outer bash (sbatch shebang) → wrapper.py → subprocess shell → apptainer → in-container bash → user process` must therefore all share the same SIGTERM disposition (SIG_IGN), or some intermediary will exit 143 and bury the user process's real status. POSIX guarantees SIG_IGN is inherited across fork+exec, so a SIG_IGN installed once at the top of the chain covers everything below. We install it twice for belt-and-suspenders symmetry:
+
+- The sbatch batch script (rendered by `submit_job_simple`) is `#!/bin/bash\ntrap '' TERM\n\nexec <wrapper>`. `trap '' TERM` makes the outer bash's disposition SIG_IGN before any work; `exec` immediately replaces that bash with `wrapper.py`, inheriting SIG_IGN per POSIX. This is the load-bearing line: without it, the outer bash would deferred-terminate on SIGTERM and exit 143 even if wrapper.py exits 0, flipping the SLURM job state to FAILED / CANCELLED.
+- `wrapper.py main()` itself calls `signal.signal(SIGTERM, SIG_IGN)` at the top — idempotent given the inheritance from the outer bash, but kept as defense-in-depth so wrapper.py is correct independent of how it was launched.
+
+User code overrides via `signal.signal()` (Python calls sigaction directly, bypassing the inherited SIG_IGN). With a handler the user process can teardown and exit 0 → wrapper writes the success marker → DB converges to `Success`. Without a handler the user process silently inherits SIG_IGN and keeps running — consistent with the "graceful nudge" semantics; the caller can follow up with terminate if needed.
+
+**SLURM path (terminate / preemption)**: `kill_job` therefore must use `scancel --signal=KILL --full` to deliver SIGKILL to all PIDs immediately (SIGKILL cannot be ignored at the kernel level), followed by a bare `scancel <jobid>` to flip the SLURM job state to CANCELLED. Falling back to the default `scancel <jobid>` (KillSignal=SIGTERM, KillWait grace before SIGKILL) would waste the entire grace period spinning on SIG_IGN'd SIGTERMs, breaking preemption's "yield GPUs immediately" promise. SIGKILL-direct keeps terminate and preemption latencies in the seconds range.
+
+**Docker path**: signal delivery is a two-layer relay designed to mirror the SLURM SIG_IGN-everywhere semantics:
+
+1. `docker run` enables `--init` so docker's bundled tini becomes PID 1. tini reaps orphans and forwards SIGTERM to its direct child (the outer bash). tini does **not** broadcast to all container PIDs the way SLURM proctrack does — only the outer bash receives it, which is why the script-level relay below is necessary.
+2. `.magnus_user_script.sh` is rendered by `_render_docker_user_script` in `_scheduler/_submit.py`. It places the user's entry_command inside `( trap '' TERM; set -e; ... ) &` — a backgrounded subshell whose disposition is SIG_IGN. When the subshell's last command is a single long-running process (the typical `pip install ... && python train.py` pattern), bash exec's the subshell PID into that process, and POSIX SIG_IGN inheritance carries to the user process. The outer bash installs `trap 'kill -TERM "$_magnus_pid"' TERM` plus a `while ... wait` loop: tini → outer bash receives SIGTERM, the trap actively forwards it to the subshell/user PID; the loop re-waits after a signal-interrupted wait (which returns 128+sig) and propagates the child's real exit status through `exit $?`.
+
+Together: handler-less user code sees SIG_IGN at the kernel level (matching SLURM); user code with `signal.signal(SIGTERM, ...)` overrides and runs its handler (matching SLURM); the user process's real exit code propagates back through Docker's container exit code so `_sync_reality_docker` reconciles to `Success` or `Failed` correctly. Deeper nested shells inside `entry_command` would need their own traps to keep relaying — same caveat as SLURM's apptainer subshells. The two backends end up with equivalent capability.
+
+**Docker path (terminate)**: symmetric to the SLURM SIGKILL-direct rationale, `terminate_job` invokes `stop_container(container_name, timeout=0)` which renders as `docker stop -t 0`, sending SIGKILL immediately instead of the default 10-second SIGTERM grace. Without `timeout=0` the entire grace would spin uselessly against the SIG_IGN chain established above, leaving terminate's "no coordination window" promise unmet.
+
+**State convergence**: `signal_job` never touches the DB. After user code responds to SIGTERM and exits, `_sync_reality` reconciles the job to `Success` or `Failed` via the regular path (success marker / exit code). If user code ignores the signal the job stays `Running` and the user can decide whether to follow up with terminate.
+
+**Preemption semantics preserved**: `_decisions._kill_and_pause` still calls `kill_job`; the "yield GPUs immediately" promise is upheld by the SIGKILL-direct design above. Granting B-class jobs a checkpointing window requires a separate preemption-pre-notification design and is out of scope here.
+
 ### Container side
 
 ```

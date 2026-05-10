@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
-  ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX,
+  ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX, Send,
   BarChart3, Package,
 } from "lucide-react";
 import { AnsiUp } from "ansi_up";
@@ -92,7 +92,7 @@ export default function JobDetailsPage() {
     }
   }, [jobId, isSlurmTask]);
 
-  const { drawerProps, handleCloneJob, onClickTerminate, terminateDialogProps } = useJobOperations({
+  const { drawerProps, handleCloneJob, onClickTerminate, onClickSignal, terminateDialogProps, errorDialogProps } = useJobOperations({
     onSuccess: () => {
       sessionStorage.setItem('magnus_new_job', '1');
       router.push("/jobs");
@@ -345,6 +345,16 @@ export default function JobDetailsPage() {
               >
                 <RefreshCw className="w-5 h-5" />
               </button>
+              {/* Send SIGTERM Button：仅 Running 下可见，其他状态没有运行中的进程可投递 */}
+              {(user?.id === job.user?.id || user?.is_admin) && job.status === "Running" && (
+                <button
+                  onClick={() => onClickSignal(job)}
+                  className="ml-2 p-2 bg-amber-950/30 hover:bg-amber-900/50 text-amber-400 hover:text-amber-300 rounded-lg transition-colors border border-amber-900/30"
+                  title={t("jobDetail.sendSigterm")}
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              )}
               {/* Terminate Button */}
               {(user?.id === job.user?.id || user?.is_admin) && ["Pending", "Preparing", "Running", "Paused"].includes(job.status) && (
                 <button
@@ -703,6 +713,7 @@ export default function JobDetailsPage() {
 
       <JobDrawer {...drawerProps} />
       <ConfirmationDialog {...terminateDialogProps} />
+      <ConfirmationDialog {...errorDialogProps} />
     </div>
   );
 }

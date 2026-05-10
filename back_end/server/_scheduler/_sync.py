@@ -1,14 +1,20 @@
 # back_end/server/_scheduler/_sync.py
 import subprocess
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from ..database import SessionLocal
 from ..models import Job, JobStatus, ClusterSnapshot
 from .._magnus_config import magnus_config, is_local_mode
 from . import logger, magnus_workspace_path
 
+if TYPE_CHECKING:
+    from ._typing import _SchedulerProtocol
+    _SyncMixinBase = _SchedulerProtocol
+else:
+    _SyncMixinBase = object
 
-class _SyncMixin:
+
+class _SyncMixin(_SyncMixinBase):
     """状态同步：把 SLURM / Docker 真实状态拉回数据库；周期性写集群快照。"""
 
     def _record_snapshot(self):

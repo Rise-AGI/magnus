@@ -1,13 +1,19 @@
 # back_end/server/_scheduler/_job_lifecycle.py
 import os
 import traceback
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from pywheels.file_tools import delete_file
 from ..models import Job, JobStatus
 from . import logger, magnus_workspace_path
 
+if TYPE_CHECKING:
+    from ._typing import _SchedulerProtocol
+    _JobLifecycleMixinBase = _SchedulerProtocol
+else:
+    _JobLifecycleMixinBase = object
 
-class _JobLifecycleMixin:
+
+class _JobLifecycleMixin(_JobLifecycleMixinBase):
     """Job 收尾相关：success/result 标记、OOM 检测、working table 清理。"""
 
     def _write_success_marker(self, job_id: str) -> None:

@@ -903,6 +903,39 @@ class MagnusClient:
     ) -> Dict[str, Any]:
         return await asyncio.to_thread(self.terminate_job, job_id, timeout)
 
+    def signal_job(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Send SIGTERM to a running job without terminating it.
+
+        Unlike :meth:`terminate_job`, which is an irreversible hard cancel
+        marking the job Terminated, this method only delivers SIGTERM, leaving
+        the job's status untouched so user code with a SIGTERM handler can run
+        its own teardown (saving intermediate results / checkpoints, releasing
+        GPU memory and NCCL resources, closing external connections, flushing
+        output buffers, etc.). When the process exits in response the regular
+        sync loop reconciles the job.
+
+        Requires the job to be in Running status.
+        """
+        try:
+            resp = self.http.post(f"/jobs/{job_id}/signal", timeout=timeout)
+            self._handle_error(resp)
+            return resp.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while signaling job.")
+        except httpx.TransportError as e:
+            raise self._network_error("signaling job", e)
+
+    async def signal_job_async(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.signal_job, job_id, timeout)
+
     def get_job_logs(
         self,
         job_id: str,

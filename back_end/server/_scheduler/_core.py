@@ -79,7 +79,11 @@ class MagnusScheduler(
                 assert self.docker_manager is not None
                 container_name = f"magnus-job-{job.id}"
                 logger.info(f"Terminating job {job.id} (Docker: {container_name}) by user request.")
-                self.docker_manager.stop_container(container_name)
+                # timeout=0 → docker stop 立即发 SIGKILL，跳过 SIGTERM grace。对偶
+                # SLURM kill_job 的 `scancel --signal=KILL --full`：因为 user_script
+                # 全链 SIG_IGN（详见 _scheduler/_submit.py:_render_docker_user_script），
+                # 默认的 10s SIGTERM grace 会完全空转，破坏 terminate"瞬时"语义。
+                self.docker_manager.stop_container(container_name, timeout = 0)
                 self.docker_manager.remove_container(container_name)
             else:
                 assert self.slurm_manager is not None
@@ -95,3 +99,34 @@ class MagnusScheduler(
         job.slurm_job_id = None
         job.start_time = None
         db.commit()
+
+    def signal_job(self, job: Job) -> None:
+        """向运行中的 job 进程发送 SIGTERM。
+
+        信号转发器，不动 DB、不清理工作目录、不改 job 状态。给装了 SIGTERM
+        处理器的用户代码一个自定义清理入口（典型场景：CUDA / NCCL teardown、
+        保存检查点）。用户进程响应自然退出后由 _sync_reality 常规路径走
+        Success / Failed；忽略信号则 DB 状态保持 Running，由用户决定是否
+        再点 terminate 强制结束。
+        """
+        if not self.enabled:
+            logger.warning("Scheduler disabled, skipping signal logic.")
+            return
+
+        if not job.slurm_job_id:
+            return
+
+        if is_local_mode:
+            assert self.docker_manager is not None
+            container_name = f"magnus-job-{job.id}"
+            logger.info(f"Sending SIGTERM to job {job.id} (Docker: {container_name}).")
+            self.docker_manager.send_signal(container_name, "TERM")
+        else:
+            assert self.slurm_manager is not None
+            logger.info(f"Sending SIGTERM to job {job.id} (SLURM: {job.slurm_job_id}).")
+            self.slurm_manager.send_signal(
+                job.slurm_job_id,
+                signal_name = "TERM",
+                runner = job.runner if job.runner is not None else "magnus",
+                token = job.user.token if job.user.token is not None else "",
+            )

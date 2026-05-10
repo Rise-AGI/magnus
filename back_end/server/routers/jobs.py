@@ -310,3 +310,41 @@ def terminate_job(
     db.refresh(job)
 
     return {"message": "Job terminated", "status": job.status}
+
+
+@router.post("/jobs/{job_id}/signal")
+def signal_job(
+    job_id: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """向 job 进程发送 SIGTERM。
+
+    信号转发器，不修改 DB 状态：给装了 SIGTERM handler 的用户代码一个自定义收尾
+    入口（保存中间结果、释放外部资源、刷新缓冲等）。用户进程响应自然退出后由
+    _sync_reality 走常规收尾；忽略信号则 job 继续 Running，由用户决定是否再点
+    terminate 强制结束。
+    """
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.user_id != current_user.id and not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to signal this job")
+
+    # 只允许 Running：QUEUED 在 SLURM PD 下 scancel --signal 是 no-op、Docker
+    # created 状态下 docker kill 会失败，两边都是 misleading 200。Pending /
+    # Preparing / Paused 没有运行中的进程可以投递信号。
+    if job.status != JobStatus.RUNNING:
+        raise HTTPException(
+            status_code = 409,
+            detail = f"Cannot signal job in status {job.status}; only Running.",
+        )
+
+    try:
+        scheduler.signal_job(job)
+    except Exception as e:
+        logger.error(f"Error signaling job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to signal job")
+
+    return {"message": "SIGTERM sent", "status": job.status}

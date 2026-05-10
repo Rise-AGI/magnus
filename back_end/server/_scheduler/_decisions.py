@@ -1,7 +1,7 @@
 # back_end/server/_scheduler/_decisions.py
 """调度决策：EASY backfill 模式 — 队头优先级保留，后续不延迟队头者旁路启动。"""
 import asyncio
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,12 @@ from ..models import Job, JobStatus, JobType
 from .._magnus_config import is_local_mode
 from .._size_utils import _parse_size_string
 from . import logger
+
+if TYPE_CHECKING:
+    from ._typing import _SchedulerProtocol
+    _DecisionsMixinBase = _SchedulerProtocol
+else:
+    _DecisionsMixinBase = object
 
 
 _BYTES_PER_MEGABYTE = 1024 * 1024
@@ -39,7 +45,7 @@ def _job_to_resource_vector(job: Job) -> ResourceVector:
     )
 
 
-class _DecisionsMixin:
+class _DecisionsMixin(_DecisionsMixinBase):
 
     async def _make_decisions(self):
         """

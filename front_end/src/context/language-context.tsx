@@ -345,6 +345,7 @@ const translations = {
   // ===== Job Detail Page =====
   "jobDetail.cloneJob": { zh: "克隆此任务", en: "Clone this job" },
   "jobDetail.terminateTask": { zh: "终止任务", en: "Terminate Task" },
+  "jobDetail.sendSigterm": { zh: "发送 SIGTERM 信号（不终止任务，需任务代码自行处理）", en: "Send SIGTERM (does not terminate, requires user-defined handler)" },
   "jobDetail.openRepoGithub": { zh: "在 GitHub 中打开仓库", en: "Open Repository in GitHub" },
   "jobDetail.viewBranchTree": { zh: "查看分支树", en: "View Branch Tree" },
   "jobDetail.viewCommitDetails": { zh: "查看提交详情", en: "View Commit Details" },
@@ -373,6 +374,7 @@ const translations = {
   "jobOps.terminateDesc": { zh: "确定要终止 {name} 吗？此操作将立即停止进程且不可撤销。", en: "Are you sure you want to terminate {name}? This action will stop the process immediately and cannot be undone." },
   "jobOps.terminateBtn": { zh: "终止", en: "Terminate" },
   "jobOps.terminateFailed": { zh: "终止任务失败", en: "Failed to terminate job" },
+  "jobOps.signalFailed": { zh: "发送 SIGTERM 失败", en: "Failed to send SIGTERM" },
 
   // ===== Common Actions =====
   "action.copy": { zh: "复制", en: "Copy" },
