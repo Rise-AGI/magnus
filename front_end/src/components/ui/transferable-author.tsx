@@ -102,7 +102,7 @@ export function TransferableAuthor({
               {label}
             </span>
           )}
-          <span className={`${nameClass} break-words`}>{user.name}</span>
+          <span className={`${nameClass} break-words leading-tight`}>{user.name}</span>
           {subText && (
             <span className="text-xs text-zinc-500 font-mono tracking-tight leading-none mt-0.5 whitespace-nowrap">
               {subText}

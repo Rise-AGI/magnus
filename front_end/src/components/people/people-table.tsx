@@ -153,7 +153,7 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                       <div className="flex items-center gap-3 min-w-0">
                         <AvatarCircle user={user} size="sm" />
                         <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                          <span className="font-medium text-zinc-200 break-words">{user.name}</span>
+                          <span className="font-medium text-zinc-200 break-words leading-tight">{user.name}</span>
                           {user.is_admin && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50 whitespace-nowrap">
                               <Shield className="w-2.5 h-2.5" />
@@ -172,7 +172,7 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                       >
                         <div className="inline-flex items-center gap-1.5 min-w-0">
                           <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
-                          <span className="break-words">{user.parent_name}</span>
+                          <span className="break-words leading-tight">{user.parent_name}</span>
                         </div>
                       </PersonHoverCard>
                     ) : (

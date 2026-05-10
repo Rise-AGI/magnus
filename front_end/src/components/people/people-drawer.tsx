@@ -299,7 +299,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
                     >
                       <div className="inline-flex items-center gap-1.5">
                         <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
-                        <span className="text-sm text-zinc-400">{user.parent_name}</span>
+                        <span className="text-sm text-zinc-400 break-words leading-tight">{user.parent_name}</span>
                       </div>
                     </PersonHoverCard>
                   ) : (
