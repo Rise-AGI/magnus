@@ -291,7 +291,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
                       userId={user.parent_id}
                       warm={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }}
                     >
-                      <div className="inline-flex items-center gap-1.5 cursor-pointer rounded-md -mx-1 px-1 py-0.5 hover:bg-zinc-800/50 transition-colors">
+                      <div className="inline-flex items-center gap-1.5">
                         <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
                         <span className="text-sm text-zinc-400">{user.parent_name}</span>
                       </div>

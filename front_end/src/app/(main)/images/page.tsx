@@ -310,7 +310,7 @@ export default function ImagesPage() {
                       userId={viewingImage.user.id}
                       warm={{ name: viewingImage.user.name, avatar_url: viewingImage.user.avatar_url ?? null }}
                     >
-                      <div className="flex items-center gap-3 cursor-pointer rounded-md -mx-1 px-1 py-0.5 hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
                         <AvatarCircle user={viewingImage.user} size="sm" />
                         <span className="text-sm font-medium text-zinc-200">{viewingImage.user.name}</span>
                       </div>

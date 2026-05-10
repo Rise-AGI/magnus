@@ -326,7 +326,7 @@ export default function JobDetailsPage() {
                 userId={job.user.id}
                 warm={{ name: job.user.name, avatar_url: job.user.avatar_url ?? null }}
               >
-                <div className="flex items-center gap-3 md:ml-4 md:pl-4 md:border-l border-zinc-700/50 cursor-pointer rounded-lg -m-1 p-1 hover:bg-zinc-800/40 transition-colors">
+                <div className="flex items-center gap-3 md:ml-4 md:pl-4 md:border-l border-zinc-700/50">
                   <AvatarCircle user={job.user} size="sm" />
                   <div className="flex flex-col">
                     <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.creator")}</span>

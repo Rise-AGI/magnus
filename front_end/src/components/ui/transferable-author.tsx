@@ -91,7 +91,7 @@ export function TransferableAuthor({
       userId={user.id}
       warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}
     >
-      <div className="flex items-center gap-3 cursor-pointer rounded-lg -m-1.5 p-1.5 hover:bg-zinc-800/50 transition-colors">
+      <div className="flex items-center gap-3">
         <AvatarCircle user={user} size={avatarSize} />
         <div className="flex flex-col text-left">
           {label && (

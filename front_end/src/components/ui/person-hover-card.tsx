@@ -116,19 +116,23 @@ export function PersonHoverCard({
   const headName = detail?.name ?? warm?.name ?? "";
   const headAvatarUrl = detail?.avatar_url ?? warm?.avatar_url ?? null;
 
+  // modal=true：浮卡打开期间外部 pointer-events 屏蔽。一次点击只关浮卡、不
+  // 同时触发外部祖先 onClick（如 jobs-table 行的 router.push 导航）。也提供
+  // 焦点 trap 与 ESC 关闭。
   return (
-    <Popover.Root open={open} onOpenChange={handleOpenChange}>
+    <Popover.Root open={open} onOpenChange={handleOpenChange} modal>
       <Popover.Trigger asChild>
         {/*
          * button 兼任两个职责：
          * 1) stopPropagation 阻断 click 冒泡到外层（行点击导航 / 行删除等）；
-         * 2) hover:opacity-80 提供"可点击"视觉信号，与 Magnus 既有 hover 反馈对齐
-         *    （不加 bg 是因为有些挂载位是裸头像，加方框会突兀）。
+         * 2) hover:bg-zinc-800/50 + 半透明方框是 Magnus 既有的"可点击"hover 反馈
+         *    样式。-m-1.5 p-1.5 让方框向外微扩 6px 但不撑开布局，统一所有挂载位
+         *    的视觉。callsite 内层不要再叠 hover-bg，否则颜色会复合变深。
          */}
         <button
           type="button"
           onClick={(e) => e.stopPropagation()}
-          className="inline-flex items-center text-left cursor-pointer focus:outline-none rounded-lg transition hover:opacity-80"
+          className="inline-flex items-center text-left cursor-pointer focus:outline-none rounded-lg -m-1.5 p-1.5 transition-colors hover:bg-zinc-800/50"
         >
           {children}
         </button>
