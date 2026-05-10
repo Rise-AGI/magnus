@@ -169,7 +169,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                   <td className="px-6 py-4 align-top whitespace-normal break-all">
                     <CopyableText text={img.uri} variant="text" className="font-semibold text-zinc-200 text-base" />
                   </td>
-                  <td className="px-6 py-4 align-top">
+                  <td className="px-6 py-4 align-top whitespace-normal break-words">
                     <div>
                       {displayUser && img.id !== null ? (
                         <TransferableAuthor

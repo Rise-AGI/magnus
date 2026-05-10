@@ -88,6 +88,12 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
     currentUser.is_admin || user.parent_id === currentUser.id
   );
 
+  // 离职按后端 _can_manage 语义（admin 或 ancestor），前端用 1 层 parent_id
+  // 近似（同 canEditHeadcount pattern）。倾向 over-strict 不暴露不可点击入口。
+  const canOffboard = user && currentUser && user.user_type === "agent" && (
+    currentUser.is_admin || user.parent_id === currentUser.id
+  );
+
   const canAccessToken = user && currentUser && (
     user.id === currentUser.id || currentUser.is_admin || user.parent_id === currentUser.id
   );
@@ -354,7 +360,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
             </div>
 
             {/* Footer: Offboard (managed agent only) */}
-            {user.user_type === "agent" && (
+            {canOffboard && (
               <div className="mt-auto pt-6 border-t border-zinc-800 flex justify-end pb-1">
                 <button
                   onClick={() => setShowDeleteConfirm(true)}

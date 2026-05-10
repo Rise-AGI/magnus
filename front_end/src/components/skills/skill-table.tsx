@@ -133,7 +133,7 @@ export function SkillTable({
                       <p className="text-zinc-600 text-sm italic">{t("skills.table.noDescription")}</p>
                     )}
                   </td>
-                  <td className="px-6 py-4 align-top">
+                  <td className="px-6 py-4 align-top whitespace-normal break-words">
                     <div>
                       <TransferableAuthor
                         user={{

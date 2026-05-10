@@ -74,12 +74,12 @@ export function UserAvatar({ user, subText, size = "sm" }: UserAvatarProps) {
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-3 min-w-0">
       <AvatarCircle user={user} size={size} />
-      <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium text-zinc-200 leading-none">{user.name}</span>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-sm font-medium text-zinc-200 leading-none break-words">{user.name}</span>
         {subText && (
-          <span className="text-xs text-zinc-500 font-mono tracking-tight leading-none">{subText}</span>
+          <span className="text-xs text-zinc-500 font-mono tracking-tight leading-none whitespace-nowrap">{subText}</span>
         )}
       </div>
     </div>

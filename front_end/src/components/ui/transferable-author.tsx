@@ -86,22 +86,25 @@ export function TransferableAuthor({
   );
 
   // 主体（avatar + 名字 + 副文）— 一律走 PersonHoverCard
+  // min-w-0 + break-words 链：放在窄列（如 table 15% 列）下让长名字自动换行
+  // 而非溢出盖右边。flex children 默认 min-width = auto 不能 shrink，必须显式
+  // min-w-0 才让 break-words 生效。subText 是时间戳保留 nowrap 不强行裂开。
   const mainBlock = (
     <PersonHoverCard
       userId={user.id}
       warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 min-w-0">
         <AvatarCircle user={user} size={avatarSize} />
-        <div className="flex flex-col text-left">
+        <div className="flex flex-col text-left min-w-0">
           {label && (
             <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">
               {label}
             </span>
           )}
-          <span className={nameClass}>{user.name}</span>
+          <span className={`${nameClass} break-words`}>{user.name}</span>
           {subText && (
-            <span className="text-xs text-zinc-500 font-mono tracking-tight leading-none mt-0.5">
+            <span className="text-xs text-zinc-500 font-mono tracking-tight leading-none mt-0.5 whitespace-nowrap">
               {subText}
             </span>
           )}
@@ -117,7 +120,7 @@ export function TransferableAuthor({
   return (
     <>
       {/* gap-1.5 比 gap-1 多 2px：让"看人"主体和"转让"caret 视觉上微微分开 */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 min-w-0">
         {mainBlock}
 
         <DropdownMenu.Root onOpenChange={handleOpenChange}>

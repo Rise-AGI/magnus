@@ -29,6 +29,13 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
   const canManage = (row: UserDetail) =>
     currentUser?.is_admin || row.id === currentUser?.id || row.parent_id === currentUser?.id;
 
+  // 离职按后端 `_can_manage` 语义：admin 或 target 的（递归）上级。前端没有
+  // 完整 ancestor chain，用直系 parent 近似：admin 或 1 层 parent_id。覆盖
+  // 绝大多数场景；万一是祖辈关系会前端隐藏后端允许，倾向 over-strict 不暴露
+  // 不可点击的入口。同 pattern：people-drawer.tsx canEditHeadcount。
+  const canOffboard = (row: UserDetail) =>
+    row.user_type === "agent" && (currentUser?.is_admin || row.parent_id === currentUser?.id);
+
   const headcountDisplay = (u: UserDetail) => {
     if (u.headcount == null) return "\u221E";
     const avail = u.available_headcount ?? u.headcount;
@@ -104,7 +111,7 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                   >
                     <UserPlus className="w-4 h-4" />
                   </button>
-                  {user.user_type === "agent" && (
+                  {canOffboard(user) && (
                     <button
                       onClick={() => onDelete(user)}
                       className="p-3 bg-red-950/30 text-red-400 rounded-lg border border-red-900/30 active:scale-95"
@@ -141,14 +148,14 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                   key={user.id}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >
-                  <td className="px-6 py-4">
+                  <td className="px-6 py-4 whitespace-normal break-words">
                     <PersonHoverCard userId={user.id} warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <AvatarCircle user={user} size="sm" />
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-zinc-200">{user.name}</span>
+                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                          <span className="font-medium text-zinc-200 break-words">{user.name}</span>
                           {user.is_admin && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50 whitespace-nowrap">
                               <Shield className="w-2.5 h-2.5" />
                               {t("people.role.admin")}
                             </span>
@@ -157,15 +164,15 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                       </div>
                     </PersonHoverCard>
                   </td>
-                  <td className="px-6 py-4 text-zinc-400 text-sm">
+                  <td className="px-6 py-4 text-zinc-400 text-sm whitespace-normal break-words">
                     {user.parent_name && user.parent_id ? (
                       <PersonHoverCard
                         userId={user.parent_id}
                         warm={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }}
                       >
-                        <div className="inline-flex items-center gap-1.5">
+                        <div className="inline-flex items-center gap-1.5 min-w-0">
                           <AvatarCircle user={{ name: user.parent_name, avatar_url: user.parent_avatar_url ?? null }} size="xs" />
-                          <span>{user.parent_name}</span>
+                          <span className="break-words">{user.parent_name}</span>
                         </div>
                       </PersonHoverCard>
                     ) : (
@@ -207,7 +214,7 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                           </button>
                         </>
                       )}
-                      {user.user_type === "agent" && (
+                      {canOffboard(user) && (
                         <button
                           onClick={(e) => { e.stopPropagation(); onDelete(user); }}
                           className="p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"

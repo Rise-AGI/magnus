@@ -221,7 +221,7 @@ export function ServiceTable({
                   </td>
 
                   {/* Column 4: Creator / Updated at */}
-                  <td className="px-6 py-4 align-top">
+                  <td className="px-6 py-4 align-top whitespace-normal break-words">
                     <div>
                       <TransferableAuthor
                         user={{

@@ -228,7 +228,7 @@ export function JobTable({
                     </div>
                   </td>
 
-                  <td className="px-6 py-4 align-top">
+                  <td className="px-6 py-4 align-top whitespace-normal break-words">
                     <div>
                       {job.user ? (
                         <PersonHoverCard
