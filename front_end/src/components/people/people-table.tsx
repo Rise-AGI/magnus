@@ -57,26 +57,26 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
               key={user.id}
               className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4"
             >
-              <div className="flex items-center gap-3 mb-3">
+              <div className="mb-3">
                 <PersonHoverCard userId={user.id} warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}>
-                  <span className="inline-flex">
+                  <div className="flex items-center gap-3 min-w-0">
                     <AvatarCircle user={user} size="sm" />
-                  </span>
-                </PersonHoverCard>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-zinc-200 text-sm truncate">{user.name}</span>
-                    {user.is_admin && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50">
-                        <Shield className="w-2.5 h-2.5" />
-                        {t("people.role.admin")}
-                      </span>
-                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-zinc-200 text-sm truncate">{user.name}</span>
+                        {user.is_admin && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50">
+                            <Shield className="w-2.5 h-2.5" />
+                            {t("people.role.admin")}
+                          </span>
+                        )}
+                      </div>
+                      {user.parent_name && (
+                        <span className="text-xs text-zinc-500">{t("people.table.leader")}: {user.parent_name}</span>
+                      )}
+                    </div>
                   </div>
-                  {user.parent_name && (
-                    <span className="text-xs text-zinc-500">{t("people.table.leader")}: {user.parent_name}</span>
-                  )}
-                </div>
+                </PersonHoverCard>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex gap-3 text-xs text-zinc-500">
@@ -142,22 +142,20 @@ export function PeopleTable({ data, loading, onManage, onDelete, onChat, onInvit
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <PersonHoverCard userId={user.id} warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}>
-                        <span className="inline-flex">
-                          <AvatarCircle user={user} size="sm" />
-                        </span>
-                      </PersonHoverCard>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-zinc-200">{user.name}</span>
-                        {user.is_admin && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50">
-                            <Shield className="w-2.5 h-2.5" />
-                            {t("people.role.admin")}
-                          </span>
-                        )}
+                    <PersonHoverCard userId={user.id} warm={{ name: user.name, avatar_url: user.avatar_url ?? null }}>
+                      <div className="flex items-center gap-3">
+                        <AvatarCircle user={user} size="sm" />
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-zinc-200">{user.name}</span>
+                          {user.is_admin && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-900/30 text-amber-400 border border-amber-800/50">
+                              <Shield className="w-2.5 h-2.5" />
+                              {t("people.role.admin")}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    </PersonHoverCard>
                   </td>
                   <td className="px-6 py-4 text-zinc-400 text-sm">
                     {user.parent_name && user.parent_id ? (
