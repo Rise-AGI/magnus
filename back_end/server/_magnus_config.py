@@ -299,8 +299,13 @@ def apply_cluster_defaults(data: Dict[str, Any])-> Dict[str, Any]:
 
 
 def validate_cluster_limits(data: Dict[str, Any])-> None:
-    """校验 Job/Service 提交字典中的 cpu_count / memory_demand 不超过集群上限。
-    超限抛 ValueError，由 endpoint 层转为 HTTP 400。"""
+    """校验 Job/Service 提交字典中 cpu_count / memory_demand / gpu_type 与本站集群匹配。
+    不匹配抛 ValueError，由 endpoint 层转为 HTTP 400。
+
+    GPU 类型校验是 fast-fail：SLURM 在 gres 不严格的站点会照样跑 a100 任务到 rtx5090
+    卡上（用户透过 SDK 提交时尤甚，UI form 走 SearchableSelect 看不到非法选项），
+    所以服务端必须把住，错误信息里列出本站实际支持哪些类型让用户改。
+    """
     cluster = magnus_config["cluster"]
 
     max_cpu = cluster["max_cpu_count"]
@@ -312,3 +317,12 @@ def validate_cluster_limits(data: Dict[str, Any])-> None:
     max_mem = _parse_size_string(max_mem_str)
     if requested_mem > max_mem:
         raise ValueError(f"memory_demand={data['memory_demand']} exceeds cluster limit ({max_mem_str})")
+
+    raw_gpu_type = data.get("gpu_type") or "cpu"
+    gpu_type = raw_gpu_type.strip().lower()
+    allowed_gpu_types = {"cpu"} | {g["value"].lower() for g in cluster["gpus"]}
+    if gpu_type not in allowed_gpu_types:
+        raise ValueError(
+            f"gpu_type={raw_gpu_type!r} not available on this station; "
+            f"available: {sorted(allowed_gpu_types)}"
+        )
