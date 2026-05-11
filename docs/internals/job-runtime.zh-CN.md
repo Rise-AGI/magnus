@@ -85,6 +85,7 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 | `{work}/wrapper.py` | submit → cleanup | scheduler | SLURM | 生成的执行入口 |
 | `{work}/slurm/output.txt` | submit → 永久 | SLURM | API (日志) | sbatch --output 指向此处 |
 | `{work}/.magnus_user_script.sh` | wrapper 执行 → cleanup | wrapper.py | 容器 (bind) | 用户入口脚本 |
+| `{work}/.magnus_user_root` | 用户脚本入口写 → cleanup | 容器内 bash (`echo $$`) | wrapper.py (SIGTERM handler) | 跑 user entry_command 的 bash PID，是 Magnus user-root convention 的锚点；wrapper 收到 SIGTERM 后据此定位 user 子树做 fan-out |
 | `{work}/.magnus_success` | epilogue → sync_reality | wrapper.py | scheduler | 成功标记，存在即 SUCCESS |
 | `{work}/.magnus_oom` | epilogue（仅在 ret≠0 时写）→ sync_reality / cleanup | wrapper.py（探测 cgroup memory.events） | scheduler | OOM 标记，存在即表示 job 所在 cgroup 内发生过内核 OOM-kill；调度器据此把 `job.result` 改写为内存超限提示，覆盖通用 FAILED 字符串。Docker 模式改用 `docker inspect .State.OOMKilled` 取代此文件。 |
 | `{work}/.magnus_result` | 容器内用户写入 → API 读取 | 用户代码 | routers/jobs.py | 任务结果内容 |
@@ -109,20 +110,21 @@ Magnus 区分两种针对运行中 job 的外部干预：
 
 handler 想让自己保存的 partial state 算 success，就在 handler 里写 `$MAGNUS_RESULT`（容器内挂载在 `$MAGNUS_HOME/workspace/.magnus_result`），再 `sys.exit(0)`。即便外层进程树被信号强行带走，magnus 也会把 job 收敛到 `Success` —— 详见下方"状态收敛"。
 
-**SLURM 链路（signal）**：`scancel --signal=TERM --full <jobid>` —— `--full` 必须带，否则 `scancel --signal` 只发给非 batch step，而 wrapper.py 是 sbatch 直接拉起的 batch script（不走 srun）。proctrack 按 cgroup 扩散信号给每个 PID。链路 `外层 bash (sbatch shebang) → wrapper.py → subprocess shell → apptainer → 容器内 bash → 用户进程` 一半 SIG_IGN、一半不 SIG_IGN，是有意设计：
+**SLURM 链路（signal）**：`scancel --signal=TERM --full <jobid>` —— `--full` 必须带，否则 `scancel --signal` 只发给非 batch step，而 wrapper.py 是 sbatch 直接拉起的 batch script（不走 srun）。SLURM 用 `killpg` 把信号投到 batch step 的 process group，而不是 cgroup 里的每个 PID。中间命令调用 `setsid` / `setpgid` 创建自己的 pgrp 时，它后面的用户代码就跳出了 batch step 的 pgrp —— GNU `timeout` 默认就这么干（`timeout 20s python main.py` 把 python 放进 timeout 的 pgrp），apptainer 的 starter 和 rootlesskit 同款。Magnus 用一个对用户透明的隐式协议把这层 gap 补齐：
 
-- **wrapper.py 及其下游 SIG_IGN** 通过 POSIX exec 继承：sbatch batch script 写成 `#!/bin/bash\ntrap '' TERM\n\nexec <wrapper>`，外层 bash 装 SIG_IGN 后立即被 wrapper.py exec 替换；wrapper.py main() 装 `signal.signal(SIGTERM, _on_sigterm)`（一个简单 handler，记录信号到达过的事实）；wrapper.py 跑 `subprocess.call(shell_cmd, ..., preexec_fn=_child_ignore_sigterm)` 时 preexec_fn 在 child 里重装 SIG_IGN，让 subprocess bash 与它后续 exec 的所有进程的 disposition 都是 SIG_IGN。wrapper.py 自己活下来（handler 干净吞掉信号）。这个"handler vs SIG_IGN"分割是关键：wrapper 必须**观测到**信号才能做后续 success marker 决策，而下游链路必须 SIG_IGN 否则 subprocess shell 会 deferred terminate exit 143，盖掉用户的真实退出码。
-- **apptainer 是 hard signal barrier**，magnus 不假设掉它。apptainer 1.x 自己装了 SIGTERM handler（无 flag 可关），收到 SIGTERM 时拆容器、退 ~143。magnus **不**依赖 apptainer 特定版本或它内部 handler 行为 —— apptainer 死它的，链路上下两端各自适应。
-- **容器内的用户进程 disposition 是 SIG_DFL**（apptainer 要么转发要么清空 disposition；无论哪种容器内链路都是默认行为）。没装 handler 的进程被终止；装了 `signal.signal(SIGTERM, …)` handler 的用户代码自己跑收尾、自己定 exit code。
+- **Magnus user-root convention**：`.magnus_user_script.sh`（由 `_wrapper_template.py` 渲染）的第一条可执行指令是 `echo $$ > "$MAGNUS_HOME/workspace/.magnus_user_root"` —— 跑用户 `entry_command` 的那个 bash 把自己 PID 写进 workspace 里的 `.magnus_user_root` marker（workspace 通过 bind mount 在 host 端等于 job 工作目录）。apptainer 默认不创新 PID namespace，`$$` 就是 host-visible PID。这个 marker 是 Magnus 定义的"用户进程树根"：所有从这个 bash fork 出来的进程，不管中间有多少层 setpgid，都是"用户的 entry_command"。
+- **启动期窗口防御**：sbatch batch script 写成 `#!/bin/bash\ntrap '' TERM\n\nexec <wrapper>`，外层 bash 在做任何事之前装 SIG_IGN，再由 POSIX exec 继承把 SIG_IGN 带进 wrapper.py 进程。从 wrapper.py 启动到 `main()` 里 `signal.signal(SIGTERM, _on_sigterm)` 之间那个极短窗口被覆盖 —— 这期间到达的信号被吞掉而不是按 SIG_DFL 杀掉 wrapper.py。
+- **wrapper-side fan-out**：`_on_sigterm` 先把 `_signaled[0]` 置为 `True`（forward 失败 Phase 3 marker fallback 仍能触发），然后调 `_signal_user_subtree(SIGTERM, marker_path)`。该 helper 读 `.magnus_user_root` 拿到 user-root PID，读本 job 的 cgroup.procs，用 /proc/<pid>/task/<pid>/children BFS 出 user-root 在 cgroup 内的所有后代，对子树**全员**（user-root 自己 + 所有后代）发 SIGTERM。user `entry_command` fork 出的任何东西 —— main 进程、fork children、MPI workers、嵌套 shell —— 都收到信号。apptainer starter / appinit / subprocess shell 是 user-root 的祖先而不是后代，不被信号，容器不会被拆；fuse-overlayfs / squashfuse_ll daemonize 后 PPid 出 cgroup，也落在 BFS 之外。整个 helper 在 IO 和单个 kill 粒度都 fail-open —— procfs 读失败、marker 还没写（job 起的极短 race 窗口）、或 kill 失败 continue，handler 不抛回 main。
+- **用户进程**：容器内用户进程的 SIGTERM disposition 是 SIG_DFL。没装 handler 的进程被 wrapper 转发的 SIGTERM 终止；装了 `signal.signal(SIGTERM, …)`（或 C 的 `sigaction(2)`、Fortran 的 `SIGNAL` intrinsic 等）的用户代码自己跑收尾、自己定 exit code；handler 里写 `.magnus_result` 让 `sys.exit(0)` 算成功（见下方"状态收敛"）。Python / C / Fortran / 任何 POSIX 进程行为一致 —— 协议送的是一发普通的 SIGTERM，用户那边走标准 `sigaction(2)` 语义。
 
-**SLURM 链路（terminate / 抢占）**：`kill_job` 因此用 `scancel --signal=KILL --full` 直接 SIGKILL 全员清场（SIGKILL 在内核侧不可被 ignore），再裸 `scancel <jobid>` 让 SLURM 把 job state 转为 CANCELLED。如果走默认的 `scancel <jobid>`（KillSignal=SIGTERM、KillWait 后 SIGKILL），前 KillWait 秒会因为下游 SIG_IGN 完全空转，破坏抢占的"瞬时让出 GPU"承诺。SIGKILL 直发让 terminate 与抢占的延迟回到秒级。
+**SLURM 链路（terminate / 抢占）**：`kill_job` 因此用 `scancel --signal=KILL --full` 直接 SIGKILL 全员清场（SIGKILL 在内核侧不可被 ignore），再裸 `scancel <jobid>` 让 SLURM 把 job state 转为 CANCELLED。如果走默认的 `scancel <jobid>`（KillSignal=SIGTERM、KillWait 后 SIGKILL），整个 KillWait 窗口都会被烧掉 —— wrapper.py 的 handler 不退而是 forward，handler-aware 的用户代码会用这段 grace 跑自己的 graceful shutdown，而不是立刻让出资源。SIGKILL 直发让 terminate 与抢占的延迟回到秒级。
 
 **Docker 链路（signal）**：两层接力，跟 SLURM 在用户进程层面对等：
 
 1. `docker run --init` 让 docker 自带的 tini 当 PID 1，reap 孤儿进程并把 SIGTERM 转发给直接子进程（外层 bash）。tini **不**像 SLURM proctrack 那样广播给容器内全员，只送给外层 bash —— 这正是为什么需要下面的脚本层接力。
-2. `.magnus_user_script.sh`（由 `_scheduler/_submit.py` 的 `_render_docker_user_script` 渲染）把用户的 entry_command 放进 `( set -e; ... ) &` 子壳后台跑，子壳 disposition 默认 SIG_DFL。子壳的最后一个命令是单一长跑进程时（典型 `pip install ... && python train.py`），bash exec-tail-call 让"子壳 PID 直接变成用户进程 PID"，SIG_DFL 透传过去。外层 bash 装 `trap 'kill -TERM "$_magnus_pid"' TERM` + `while ... wait` 循环：wait 被信号中断后返回 128+sig，循环重发 wait 直到子进程真退，最后用 `exit $?` 透传子进程真实退出码。外层 bash 装了非空 trap 不会 deferred terminate。
+2. `.magnus_user_script.sh`（由 `_scheduler/_submit.py` 的 `_render_docker_user_script` 渲染）开头 `set -m` 启用 bash monitor mode，然后把用户的 entry_command 放进 `( set -e; ... ) &` 后台子壳里 —— 在 `set -m` 下子壳自动 setpgid 成为新的 pgrp leader（`_magnus_pid` 同时是 PID 和 pgid）。不开 monitor mode 的非交互 bash 默认让后台子壳继承外层 pgid，负 PID kill 会指向一个不存在的 pgrp，转发被吞。外层 bash 装 `trap 'kill -TERM -- -$_magnus_pid' TERM`，SIGTERM 通过 `killpg` 转给整个 user pgrp —— main、fork 子进程、MPI workers、嵌套 shell 全员收到。`while ... wait` 循环：wait 被信号中断后返回 128+sig，重发 wait 直到子进程真退，最后用 `exit $?` 透传子进程真实退出码。外层 bash 装了非空 trap 不会 deferred terminate。
 
-合起来两边在用户进程层面行为一致：没装 handler 的代码被 SIGTERM 终止；装了 handler 的代码自己跑 handler、自己定 exit。entry_command 内部多层嵌套 shell 仍需各自显式 trap 才能继续接力 —— 跟 SLURM 模式 apptainer 同款限制。
+合起来两边在用户进程层面行为一致：没装 handler 的代码被 SIGTERM 终止；装了 handler 的代码自己跑 handler、自己定 exit。pgrp 转发把 entry_command 内部多层嵌套 shell 也覆盖到了 —— 用户代码不需要自己显式装 trap 转发。
 
 **Docker 链路（terminate）**：对偶 SLURM SIGKILL 直发的设计，`terminate_job` 调 `stop_container(container_name, timeout=0)` 让 `docker stop -t 0` 立即发 SIGKILL，跳过 docker stop 默认 10 秒 SIGTERM grace。如果不传 `timeout=0`，docker 会先发 SIGTERM 给外层 bash，外层 bash 只转发不死，10 秒后才 SIGKILL —— 破坏 terminate"无协调窗口"的语义。
 
@@ -140,6 +142,7 @@ ${MAGNUS_HOME}/                              默认 /magnus
 ${MAGNUS_HOME}/workspace/                    bind mount ← {work}/
 ${MAGNUS_HOME}/workspace/repository/         git checkout, 也是 --pwd
 ${MAGNUS_HOME}/workspace/.magnus_user_script.sh
+${MAGNUS_HOME}/workspace/.magnus_user_root   user-root PID 标记 (用户脚本入口写)
 ${MAGNUS_HOME}/workspace/.magnus_result      $MAGNUS_RESULT
 ${MAGNUS_HOME}/workspace/.magnus_action      $MAGNUS_ACTION
 ${MAGNUS_HOME}/workspace/metrics/            $MAGNUS_METRICS_DIR (Metrics Protocol v1)

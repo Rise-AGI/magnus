@@ -289,36 +289,168 @@ def _check_oom():
     except Exception:
         return False, 0
 
+def _cgroup_procs_path():
+    """绝对路径定位本进程所属 cgroup 的 cgroup.procs 文件。
+
+    与本文件 _cg_paths() 同源解析 /proc/self/cgroup：hybrid 系统优先 v1 freezer
+    （SLURM 21.08 在 hybrid Ubuntu 默认 attach 这层 controller 做 proctrack），
+    无 v1 时退到 pure v2 unified hierarchy。任一步失败返 None。
+    """
+    v2_rel = None
+    freezer_rel = None
+    try:
+        with open("/proc/self/cgroup") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line:
+                    continue
+                if line.startswith("0::"):
+                    v2_rel = line[3:]
+                    continue
+                cols = line.split(":", 2)
+                if len(cols) != 3:
+                    continue
+                if "freezer" in cols[1].split(","):
+                    freezer_rel = cols[2]
+    except Exception:
+        return None
+    if freezer_rel is not None:
+        return "/sys/fs/cgroup/freezer" + freezer_rel.rstrip("/") + "/cgroup.procs"
+    if v2_rel is not None:
+        return "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/cgroup.procs"
+    return None
+
+def _read_user_root_pid(user_root_marker_path):
+    """读 .magnus_user_root marker 拿 user entry_command 的 root PID。
+
+    marker 由 .magnus_user_script.sh 入口第一行 `echo $$ > ...` 写入；容器内
+    bash 的 $$ 在 apptainer 不创新 PID namespace 时即是 host-visible PID。
+    handler 触发时若 marker 还没写（job 刚起的几毫秒窗口），返 None。
+    """
+    try:
+        with open(user_root_marker_path) as f:
+            value = f.read().strip()
+        if not value:
+            return None
+        return int(value)
+    except (OSError, ValueError):
+        return None
+
+def _signal_user_subtree(sig, user_root_marker_path):
+    """SIGTERM handler 内调用：向 user entry_command 进程子树全员转发 sig。
+
+    Magnus user-root convention（对用户透明）：.magnus_user_script.sh 入口
+    `echo $$ > .magnus_user_root` 把 user entry_command 的进程树根 PID 落到
+    workspace marker；wrapper handler 读 marker 拿 user_root_pid，BFS 这棵
+    子树（限制在 cgroup 内、用 /proc/<pid>/task/<pid>/children 重建父子
+    关系），对子树**全员**发 sig。
+
+    这样 user 视角下"我 entry_command 的所有进程都收到 SIGTERM"，包括 user
+    `python main.py` 自己 fork 的 workers —— main 在子树根、workers 在子树叶
+    都收到。
+
+    边界外的 apptainer starter / appinit / subprocess shell / fuse-overlayfs
+    / squashfuse_ll 不在 user 子树内（它们是 user_root 的 ancestor 或在
+    cgroup 但 PPid 出 cgroup），自然不被信号 —— wrapper 不依赖 apptainer 任何
+    版本的 SIGTERM 行为，也不会因杀 FUSE helpers 让容器 mountpoint 崩。
+
+    全程 fail-open：marker 没写 / cgroup 读失败 / kill 失败任一步 continue，
+    handler 不抛回 main；Phase 3 marker 决策仍能凭 _signaled[0] 触发。
+    """
+    user_root_pid = _read_user_root_pid(user_root_marker_path)
+    if user_root_pid is None:
+        return
+    procs_file = _cgroup_procs_path()
+    if procs_file is None:
+        return
+    try:
+        with open(procs_file) as f:
+            cgroup_pids = set()
+            for raw in f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    cgroup_pids.add(int(raw))
+                except ValueError:
+                    continue
+    except OSError:
+        return
+    if user_root_pid not in cgroup_pids:
+        return
+
+    children_of = {{}}
+    for pid in cgroup_pids:
+        try:
+            with open(f"/proc/{{pid}}/task/{{pid}}/children") as f:
+                kids_raw = f.read().split()
+        except OSError:
+            continue
+        for c in kids_raw:
+            try:
+                cpid = int(c)
+            except ValueError:
+                continue
+            if cpid in cgroup_pids:
+                children_of.setdefault(pid, set()).add(cpid)
+
+    subtree = {{user_root_pid}}
+    queue = [user_root_pid]
+    while queue:
+        p = queue.pop(0)
+        for c in children_of.get(p, ()):
+            if c not in subtree:
+                subtree.add(c)
+                queue.append(c)
+
+    for pid in subtree:
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            continue
+
 def main():
-    # SIGTERM 处理：wrapper.py 自己装 handler 记录 _signaled，subprocess 通过
-    # preexec_fn 显式 set SIG_IGN 让"subprocess shell + 它的 fork 子孙"通过 POSIX
-    # exec inheritance 一路 SIG_IGN。这两件事互锁：
+    # SIGTERM 处理：Magnus user-root convention 把 user entry_command 进程树
+    # 的根 PID 落到 .magnus_user_root marker（由 .magnus_user_script.sh 入口
+    # 第一行 `echo $$ > ...` 写入，对用户透明）；wrapper SIGTERM handler 读
+    # 这个 marker，BFS user 子树、对全员发 SIGTERM —— 这样 user 视角下"我
+    # entry_command 的所有进程都收到 SIGTERM"（main / fork 出的 workers / 任
+    # 何中间命令 fork 的子进程），跨语言一致。
     #
-    # * wrapper 装 handler 而不是 SIG_IGN —— wrapper 必须知道"是否被信号过"，否则
-    #   分不清 apptainer ret 非 0 是程序自身错误还是被信号杀。
-    # * apptainer 自身有 SIGTERM handler（无 flag 可关，1.x 各版本一致），所以
-    #   apptainer 收到 SIGTERM 必然杀容器、退 143。SIG_IGN inherit 链断在 apptainer
-    #   这一层是 hard barrier —— magnus 不依赖 apptainer 行为。
-    # * 用户代码 signal.signal(SIGTERM, handler) 自己装 handler 处理收尾，写
-    #   .magnus_result 表达"已成功保存 partial state"，exit 0。
-    # * Phase 3 做 success marker 决策时，ret 非 0 + _signaled + .magnus_result 存在
-    #   作为 fallback 仍写 marker → magnus 标 SUCCESS。
+    # 为什么需要 wrapper-side fan-out 而不依赖 SLURM 自己广播：SLURM
+    # `scancel --signal=TERM` 走 killpg 投到 batch step 的 process group；
+    # GNU timeout / apptainer starter / rootlesskit 等中间命令 setpgid 创建
+    # 独立 pgrp 时 user 进程跳出 wrapper.pgrp 收不到信号（bug 报告里
+    # `timeout 20s python main.py` 就这个 case）。读 marker 锚到 user 子树
+    # 的好处：跳过 apptainer starter / appinit / subprocess shell 等中间层
+    # 不被信号（它们 default disposition terminate 会拆容器），FUSE helpers
+    # 因 daemonize 后 PPid 出 cgroup 自然落在子树外，user 视角语义干净。
     #
-    # 上游（slurmstepd 外层 bash → wrapper.py）由 sbatch 入口 `trap '' TERM\\nexec
-    # wrapper.py` 把 SIG_IGN inherit 进 wrapper.py 启动期；signal.signal(handler)
-    # 覆盖之后才有 _signaled 可观测。kill_job 走 scancel --signal=KILL --full 与本
-    # 设计互锁，详见 docs/internals/job-runtime.md "Signaling and Termination"。
+    # 分工：
+    # * _on_sigterm 先置 _signaled[0] 再 forward —— forward 抛错（marker 还没
+    #   写 / procfs 读失败等）也不影响 Phase 3 fallback 能不能触发。
+    # * _signal_user_subtree 全程 fail-open，每个 os.kill 独立 try/except。
+    # * 用户代码 signal.signal(SIGTERM, handler) 自己装 handler 做收尾、写
+    #   .magnus_result 表达 partial state、sys.exit(0)。
+    # * Phase 3 marker 决策：ret==0 写 marker；ret!=0 + _signaled + .magnus_result
+    #   作 fallback 仍写 marker → magnus 标 SUCCESS。
+    #
+    # 上游 sbatch script 入口 `trap '' TERM\\nexec wrapper.py` 用 SIG_IGN
+    # inheritance 关闭 wrapper 启动期窗口（main() 进 signal.signal 之前那几毫秒
+    # 若收信号会按 default disposition 死掉）。kill_job 走 scancel --signal=KILL
+    # --full，SIGKILL 内核侧不可 ignore，由 proctrack 广播全员清场；详见
+    # docs/internals/job-runtime.md "Signaling and Termination"。
+    work_dir = {repr(job_working_table)}
+    user_root_marker_path = os.path.join(work_dir, ".magnus_user_root")
     _signaled = [False]
     def _on_sigterm(_signum, _frame):
         _signaled[0] = True
+        try:
+            _signal_user_subtree(signal.SIGTERM, user_root_marker_path)
+        except Exception:
+            pass
     signal.signal(signal.SIGTERM, _on_sigterm)
 
-    def _child_ignore_sigterm():
-        # POSIX: SIG_IGN 通过 exec 继承到 child；wrapper 自己保留 handler 不影响
-        # 子进程链。preexec_fn 在 fork 后 exec 前执行。
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-
-    work_dir = {repr(job_working_table)}
     repo_dir = {repr(repo_dir)}
     success_marker_path = {repr(success_marker_path)}
     sif_path = {repr(sif_path)}
@@ -349,10 +481,17 @@ def main():
         _metrics_thread = None
 
     # Phase 1: Prepare user script
+    #
+    # 入口 `echo $$ > .magnus_user_root` 把容器内 bash 自己的 PID（apptainer
+    # 不创新 PID namespace 时即是 host-visible PID）写到 workspace marker，
+    # 是 Magnus user-root convention 的发布端 —— wrapper 的 SIGTERM handler 读
+    # 这个 marker 锚定 user entry_command 的进程子树，详见 _signal_user_subtree。
+    # 协议对用户透明，user 看到的语义是"entry_command 的所有进程都收 SIGTERM"。
     user_script_path = os.path.join(work_dir, ".magnus_user_script.sh")
     with open(user_script_path, "w") as f:
         f.write("set -e\\n")
         f.write("export HOME=$MAGNUS_HOME\\n")
+        f.write('echo $$ > "$MAGNUS_HOME/workspace/.magnus_user_root"\\n')
         f.write(user_cmd_str)
         f.write("\\n")
     os.chmod(user_script_path, 0o755)
@@ -454,7 +593,6 @@ fi
 """
         ret_code = subprocess.call(
             shell_cmd, shell=True, executable="/bin/bash",
-            preexec_fn=_child_ignore_sigterm,
         )
 
         # Stop metrics sidecar
@@ -462,9 +600,10 @@ fi
         if _metrics_thread is not None:
             _metrics_thread.join(timeout=5)
 
-        # Synchronous OOM check before exit (not a daemon — must finish even if
-        # apptainer exited non-zero). Fail-open: any error skips marker write.
-        if ret_code != 0:
+        # OOM 探测：被 SIGTERM 转发后用户 handler 自行 exit non-zero 不是 OOM，
+        # _signaled[0] 为 True 时跳过避免误写 .magnus_oom（误写会让 sync 端把
+        # 用户主动 signal 的 job 在结果里展示成 OOM 杀）。
+        if ret_code != 0 and not _signaled[0]:
             try:
                 _oom, _oom_count = _check_oom()
                 if _oom:
@@ -476,15 +615,16 @@ fi
         # Phase 3: Epilogue — success marker decision.
         #
         # 1) ret_code == 0：正常完成，写 marker、wrapper 退 0 → SLURM COMPLETED →
-        #    _finalize_completed_job 读 marker → SUCCESS。
+        #    _finalize_completed_job 读 marker → SUCCESS。典型路径：scancel TERM
+        #    → handler forward 到 user leaves → user handler `sys.exit(0)` →
+        #    timeout/bash/apptainer cascade ret==0 → wrapper 写 marker。
         # 2) ret_code != 0 + _signaled[0] + .magnus_result 存在：
         #    用户进程收到 SIGTERM 时 handler 处理完写了 .magnus_result 表达"已成功
-        #    保存 partial state"。apptainer 自身被信号杀掉、subprocess.call ret 非 0；
-        #    用户的收尾是成功的，写 marker 并 **wrapper 自己退 0**让 SLURM 优先
-        #    收敛到 COMPLETED。即便 SLURM 实际上把 state 标 FAILED / CANCELLED
-        #    （某些 SLURM 版本 / 配置在 batch step 收过 SIGTERM 时会这样标），
-        #    _sync_reality_slurm 在 FAILED / CANCELLED 分支也先看 marker，
-        #    构成 wrapper 与 sync 双层 defense-in-depth。
+        #    保存 partial state"，但 cascade 上来 ret 非 0（如 timeout 自死或 user
+        #    handler 自己 exit non-zero）。写 marker 并 wrapper 自己退 0 让 SLURM
+        #    优先收敛 COMPLETED。某些 SLURM 版本 / 配置下 batch step 收过 SIGTERM
+        #    会被标 FAILED / CANCELLED，_sync_reality_slurm 的 FAILED / CANCELLED
+        #    分支也先看 marker，构成 wrapper 与 sync 双层 defense-in-depth。
         # 3) 其它情况：不写 marker，原样透传 ret_code → SLURM FAILED → magnus FAILED。
         result_path = os.path.join(work_dir, ".magnus_result")
         if ret_code == 0:

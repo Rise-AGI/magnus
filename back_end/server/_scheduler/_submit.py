@@ -22,23 +22,23 @@ else:
 def _render_docker_user_script(entry_command: str) -> str:
     """生成 Docker 模式的 .magnus_user_script.sh 内容。
 
-    设计目标：跟 SLURM 模式 SIGTERM 语义对等 —— 没装 handler 的用户进程被默认
-    terminate，装了 handler 的进程自己处理（写 .magnus_result 表达成功收尾）。
-    SLURM 模式因为 apptainer 1.x 自身装 SIGTERM handler 主动杀容器（没有 flag
-    可关），handler-less 用户进程必然被杀；Docker 模式遵循同语义，不暴露
-    "Docker 沉默继续 / SLURM 被杀"的不对等行为。
+    设计目标：与 SLURM 模式 SIGTERM 语义对等 —— Magnus user-root convention
+    下，"user entry_command 的所有进程都收到 SIGTERM"，跨语言透明：handler-less
+    进程默认 terminate，handler-aware 进程自己处理收尾（写 .magnus_result
+    表达成功收尾、sys.exit(0)）。
 
-    两层信号传递（外层 bash 显式转发 + 子壳前台命令默认 disposition）：
+    两层信号传递（外层 bash 主动转发 user pgrp + 子壳作 pgrp leader）：
 
-    1. 外层 bash 装 `trap 'kill -TERM "$_magnus_pid"' TERM`：tini 把 SIGTERM 转发
-       给 PID 1 的 bash，bash trap 主动把信号转发给子壳/用户进程 PID（tini 默认
-       不广播给容器内全员，所以这层显式转发不可省）。bash 装了 trap 不会 deferred
-       terminate，会等 wait 完成后按 trap 行为继续（即 forward 后继续等子壳真退）。
-    2. 子壳里 `( set -e; <entry> ) &` 不装 trap：disposition 默认 SIG_DFL。子壳里
-       单一长跑命令会被 bash exec 优化成"子壳 PID 直接替换为用户进程"（典型 entry
-       模式 `pip install ... && python train.py` 的最后命令满足此条件）。SIG_DFL
-       通过 exec 继承，用户进程收到 SIGTERM 默认 terminate；用户代码可以用
-       `signal.signal()` 装 handler 自己处理收尾。
+    1. `set -m` 启用 bash monitor mode —— 非交互 bash 默认 `set +m`，
+       backgrounded 子壳继承外层 bash 的 pgid，`$!` 仅是 PID 不是 pgid；
+       `set -m` 让 `( ... ) &` 自动 setpgid 让子壳成为新 pgrp leader，
+       `_magnus_pid` 同时是 PID 和 pgid。entry_command 内部的 fork / exec
+       子孙默认 inherit 这个 pgid，构成 user 进程组。
+    2. 外层 bash 装 `trap 'kill -TERM -- -$_magnus_pid' TERM`：tini 把 SIGTERM
+       转发给 PID 1 的 bash（tini 不广播容器全员，这层显式转发不可省），
+       bash trap 用负 PID 给整个 user pgrp 投递 SIGTERM —— main / workers / 嵌
+       套 shell 全员收到。bash 自己装了 trap 不 deferred terminate，会等 wait
+       完成后按 trap 行为继续（即转发后继续等子壳真退）。
 
     子壳后台跑 + 外层 wait + while 循环：wait 被信号中断时返回 128+sig，重发 wait
     直到子壳真退；bash 在子进程已 reap 后仍 remember 该 PID 的 exit status，最后一次
@@ -49,13 +49,14 @@ def _render_docker_user_script(entry_command: str) -> str:
     用户 entry_command 包含 heredoc 的场景虽不常见，但回归不可接受。视觉对齐让位
     于语义透传。
 
-    SLURM 模式由 sbatch batch script 入口 `trap '' TERM` + `exec wrapper.py` 让
-    wrapper.py 自身装 handler（见 _slurm_manager/_control.py:submit_job_simple 与
-    _wrapper_template.py）；docker-side 不需要类似 wrapper 层，因为 magnus DB
-    收敛直接看容器 exit code + .magnus_result。
+    SLURM 一侧通过 wrapper.py 读 .magnus_user_root marker 锚定 user 子树 + cgroup
+    BFS 全员发 SIGTERM 达到同样语义（详见 _wrapper_template.py:_signal_user_subtree
+    与 _slurm_manager/_control.py:send_signal）；docker 一侧不需要 wrapper 中间层，
+    bash pgrp 加 trap 已经够，magnus DB 收敛直接看容器 exit code + .magnus_result。
     """
     return (
         "set -e\n"
+        "set -m\n"
         "export HOME=$MAGNUS_HOME\n"
         "\n"
         "(\n"
@@ -63,7 +64,7 @@ def _render_docker_user_script(entry_command: str) -> str:
         f"{entry_command}\n"
         ") &\n"
         "_magnus_pid=$!\n"
-        "trap 'kill -TERM \"$_magnus_pid\" 2>/dev/null || true' TERM\n"
+        "trap 'kill -TERM -- -$_magnus_pid 2>/dev/null || true' TERM\n"
         "while kill -0 \"$_magnus_pid\" 2>/dev/null; do\n"
         "  wait \"$_magnus_pid\" 2>/dev/null || true\n"
         "done\n"
@@ -317,7 +318,7 @@ class _SubmitMixin(_SubmitMixinBase):
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
         guarantee_file_exist(f"{job_working_table}/metrics", is_directory=True)
 
-        for marker_name in [".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom"]:
+        for marker_name in [".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom", ".magnus_user_root"]:
             marker_path = f"{job_working_table}/{marker_name}"
             if os.path.exists(marker_path):
                 try:

@@ -25,16 +25,16 @@ class _ControlMixin:
         """简单提交：不做 sleep + 状态检查，让 SLURM 自己排队和调度。
 
         sbatch 把 batch script 当作 bash 脚本由 slurmstepd 拉起一个外层 bash
-        解释执行 entry_command。`scancel --signal=TERM --full` 会经 proctrack
-        把 SIGTERM 投递给 cgroup 全员，外层 bash 默认行为是 deferred terminate
-        exit 143，会盖掉 wrapper.py 的真实退出码、让 SLURM 把 job 标成 FAILED /
-        CANCELLED。所以这里在 batch script 入口装 `trap '' TERM`（disposition
-        设为 SIG_IGN），随后 `exec` 让 wrapper.py 直接替换外层 bash 进程，POSIX
-        规定 SIG_IGN 通过 exec 继承 → wrapper.py 启动期 disposition 是 SIG_IGN，
-        wrapper main() 再覆盖成观察用 handler（详见 _wrapper_template.py 与
-        docs/internals/job-runtime.md "Signaling and Termination"）。注意：apptainer
-        以下层 disposition 不依赖此处的 trap，apptainer 1.x 自身的 SIGTERM handler
-        是 hard barrier，magnus 不假设它的行为。
+        解释执行 entry_command。batch script 入口装 `trap '' TERM` 让外层 bash
+        disposition 设为 SIG_IGN，随后 `exec wrapper.py` 让 wrapper 直接替换
+        外层 bash 进程；POSIX 规定 SIG_IGN 通过 exec 继承，所以 wrapper.py 启动
+        瞬间到 main() 装上观察用 handler 之间那个时间窗口里 wrapper 也按 SIG_IGN
+        处理，不会被默认 disposition 杀。`scancel --signal=TERM` 把信号通过
+        killpg 投到 batch step 的 process group；wrapper handler 收到后按
+        Magnus user-root convention 读 .magnus_user_root marker 锚定 user
+        entry_command 的进程子树，再 BFS 子树全员发 SIGTERM（详见
+        _wrapper_template.py 的 _signal_user_subtree 与 docs/internals/job-runtime.md
+        "Signaling and Termination"）。
 
         约束：`entry_command` 必须是 single simple command（不含 `&&`、`;`、
         `|`、子壳等 shell 复合结构）。`exec <complex>` 在 bash 里只 execve 第一
@@ -96,12 +96,14 @@ class _ControlMixin:
     ) -> None:
         """硬终止 SLURM job：SIGKILL 全员 + scancel 让 SLURM 把 job 移出运行。
 
-        wrapper.py 装 handler 观察信号 + subprocess 通过 preexec_fn 让 child SIG_IGN
-        （为 signal_job 路径服务，见 _wrapper_template.py），所以默认的 scancel
-        发 SIGTERM 后 wrapper handler 不退、subprocess shell SIG_IGN 也不退，前
-        KillWait 秒完全空转才 SIGKILL，破坏 terminate / 抢占的"瞬时让出 GPU"
-        承诺。直接 --signal=KILL --full 把 SIGKILL 投给所有 PID 立刻清场（SIGKILL
-        在内核侧不可被 ignore），再裸 scancel 让 SLURM 标记 job 取消。
+        默认的裸 `scancel` 走 KillSignal=SIGTERM、KillWait 秒后才 SIGKILL。
+        signal_job 路径下 wrapper.py 装了 handler 收到 SIGTERM 不退、而是按
+        Magnus user-root convention 向 user entry_command 子树全员转发，
+        handler-aware 的 user 代码也会 try graceful shutdown，前 KillWait 秒
+        不一定立刻清场，破坏 terminate / 抢占的"瞬时让出 GPU"承诺。直接
+        --signal=KILL --full 把 SIGKILL 投给整个 batch step（cgroup 全员）
+        立刻清场（SIGKILL 在内核侧不可被 ignore，proctrack 广播覆盖所有 pgrp），
+        再裸 scancel 让 SLURM 标记 job 取消。
         """
         env: Dict[str, str] = os.environ.copy()
         env["MAGNUS_RUNNER"] = runner
@@ -148,11 +150,17 @@ class _ControlMixin:
         runner: str,
         token: str,
     ) -> None:
-        """向 SLURM job 内全部进程发送指定信号但不终止 job。
+        """向 SLURM job 的 batch step 发送指定信号但不终止 job。
 
-        --signal=<sig> 让 scancel 转为信号转发器；--full 让信号触达 batch step
-        （wrapper.py 是 sbatch 直接拉起的 batch script，没有 srun 创建的额外
-        step），proctrack 再按 proc 树扩散到 apptainer 子壳与用户进程。
+        --signal=<sig> 让 scancel 转为信号转发器（不修改 SLURM 状态）；--full
+        让信号触达 batch step（wrapper.py 是 sbatch 直接拉起的 batch script，
+        没有 srun 额外 step）。SLURM 内部对 batch step 用 killpg 投递到 batch
+        script 的 process group。中间命令如 GNU timeout / apptainer starter /
+        rootlesskit 会 setpgid 创建独立 pgrp，让 user 进程跳出 batch script
+        pgrp 收不到信号 —— wrapper.py 在 SIGTERM handler 里走 Magnus user-root
+        convention，读 .magnus_user_root marker 锚定 user entry_command 进程
+        子树，BFS 子树全员发 SIGTERM 兜底，详见 _wrapper_template.py 的
+        _signal_user_subtree。
         """
         command = [
             "scancel",

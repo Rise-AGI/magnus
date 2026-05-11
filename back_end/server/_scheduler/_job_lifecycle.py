@@ -59,6 +59,7 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
             delete_file(os.path.join(job_working_table, "wrapper.py"))
             delete_file(os.path.join(job_working_table, ".magnus_success"))
             delete_file(os.path.join(job_working_table, ".magnus_oom"))
+            delete_file(os.path.join(job_working_table, ".magnus_user_root"))
             delete_file(os.path.join(job_working_table, ".magnus_user_script.sh"))
             # apptainer overlay create 在不同 apptainer 版本下落盘文件名不同：
             # 部分版本写 ephemeral_overlay.img，部分版本自动追加 .ext3 后缀。
