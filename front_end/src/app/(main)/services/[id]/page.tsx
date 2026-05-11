@@ -267,25 +267,27 @@ export default function ServiceDetailsPage() {
           </div>
 
           {/* Status Card */}
-          <div className="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
-            {statusNode}
-            <div className="flex flex-col">
-              <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("serviceDetail.status")}</span>
-              <span className={`text-base font-bold tracking-wide ${
-                !service.is_active ? "text-zinc-400" :
-                hasLiveJob && currentJobStatus === "Running" ? "text-blue-400" :
-                hasLiveJob && currentJobStatus === "Preparing" ? "text-cyan-400" :
-                hasLiveJob && currentJobStatus === "Pending" ? "text-amber-400" :
-                "text-teal-400"
-              }`}>
-                {!service.is_active ? t("serviceDetail.inactive").toUpperCase() :
-                 hasLiveJob ? (currentJobStatus?.toUpperCase()) :
-                 t("serviceDetail.idle").toUpperCase()}
-              </span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-3 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm md:flex-shrink-0 shadow-lg shadow-black/20">
+            <div className="flex items-center gap-4">
+              {statusNode}
+              <div className="flex flex-col">
+                <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("serviceDetail.status")}</span>
+                <span className={`text-base font-bold tracking-wide ${
+                  !service.is_active ? "text-zinc-400" :
+                  hasLiveJob && currentJobStatus === "Running" ? "text-blue-400" :
+                  hasLiveJob && currentJobStatus === "Preparing" ? "text-cyan-400" :
+                  hasLiveJob && currentJobStatus === "Pending" ? "text-amber-400" :
+                  "text-teal-400"
+                }`}>
+                  {!service.is_active ? t("serviceDetail.inactive").toUpperCase() :
+                   hasLiveJob ? (currentJobStatus?.toUpperCase()) :
+                   t("serviceDetail.idle").toUpperCase()}
+                </span>
+              </div>
             </div>
 
-            {/* Owner */}
-            <div className="ml-4 pl-4 border-l border-zinc-700/50 flex items-center gap-3">
+            {/* Owner —— md 以上保留分隔线，mobile 下换行后去掉边框免得新行起头有突兀左竖线 */}
+            <div className="flex items-center gap-3 md:ml-4 md:pl-4 md:border-l md:border-zinc-700/50">
               <TransferableAuthor
                 user={displayUser}
                 label={t("serviceDetail.manager")}
@@ -298,7 +300,7 @@ export default function ServiceDetailsPage() {
               />
             </div>
 
-            <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center gap-2">
+            <div className="flex items-center gap-2 md:ml-4 md:pl-4 md:border-l md:border-zinc-700/50 md:h-full">
               {/* Clone Button */}
               <button
                 onClick={() => setIsDrawerOpen(true)}

@@ -152,14 +152,14 @@ export default function ClusterPage() {
         </div>
         <button
           onClick={handleNewJob}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50"
+          className="shrink-0 whitespace-nowrap bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20 active:scale-95 border border-blue-500/50"
         >
           <Plus className="w-4 h-4" /> {t("cluster.newJob")}
         </button>
       </div>
 
       {/* Cluster Resource Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
           <div className="flex items-center gap-2 text-cyan-400 mb-2">
             <Cpu className="w-4 h-4" />

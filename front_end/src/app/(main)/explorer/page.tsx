@@ -124,10 +124,10 @@ export default function ExplorePage() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-4 py-8">
+    <div className="flex-1 flex flex-col items-center justify-start md:justify-center px-4 py-8 pt-10 md:pt-8">
       <div className="w-full max-w-3xl">
         {/* Title */}
-        <div className="text-center mb-12">
+        <div className="text-center mb-8 md:mb-12">
           <h1 className="text-3xl md:text-4xl font-bold mb-2">
             <span className="text-zinc-100">{t("explorer.tagline1")}</span>
             <span className="text-blue-500">{t("explorer.tagline2")}</span>

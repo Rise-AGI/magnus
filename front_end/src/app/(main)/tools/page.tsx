@@ -307,10 +307,10 @@ export default function ToolsPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-6 backdrop-blur-sm">
           <div className="mb-6 flex items-center gap-3">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
+            <div className="shrink-0 rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
               <FileUp className="h-5 w-5" />
             </div>
-            <div>
+            <div className="min-w-0 flex-1">
               <h2 className="text-lg font-semibold text-white">{t("files.uploadTitle")}</h2>
               <p className="text-sm text-zinc-500 mt-1">{t("files.uploadDescription")}</p>
             </div>
@@ -428,10 +428,10 @@ export default function ToolsPage() {
 
         <section className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-6 backdrop-blur-sm">
           <div className="mb-6 flex items-center gap-3">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
+            <div className="shrink-0 rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
               <Download className="h-5 w-5" />
             </div>
-            <div>
+            <div className="min-w-0 flex-1">
               <h2 className="text-lg font-semibold text-white">{t("files.downloadTitle")}</h2>
               <p className="text-sm text-zinc-500 mt-1">{t("files.downloadDescription")}</p>
             </div>

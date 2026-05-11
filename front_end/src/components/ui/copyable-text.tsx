@@ -88,7 +88,7 @@ export function CopyableText({
       title="Click to copy"
     >
       {label && <span className="text-zinc-600 flex-shrink-0">{label}</span>}
-      <span className={`min-w-0 ${variant === "text" ? "whitespace-normal break-all" : "truncate"}`}>
+      <span className={`min-w-0 ${variant === "text" ? "whitespace-normal break-words" : "truncate"}`}>
         {text}
       </span>
       <div className="flex-shrink-0 mt-[0.15em]">

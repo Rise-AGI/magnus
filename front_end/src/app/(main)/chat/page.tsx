@@ -120,7 +120,7 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center p-6">
+    <div className="flex-1 flex items-start md:items-center justify-center p-6 pt-10 md:pt-6">
       <div className="w-full max-w-sm space-y-5">
         {/* Icon + title */}
         <div className="text-center space-y-2">
@@ -213,7 +213,7 @@ export default function ChatPage() {
         <button
           onClick={handleCreate}
           disabled={isCreating || !canCreate}
-          className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+          className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-all disabled:bg-zinc-800 disabled:text-zinc-500 disabled:opacity-100 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer shadow-sm"
         >
           {isCreating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           {t("chat.create")}

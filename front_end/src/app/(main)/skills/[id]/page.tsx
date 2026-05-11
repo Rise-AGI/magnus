@@ -262,7 +262,7 @@ export default function SkillDetailPage() {
           </div>
 
           {/* Creator Card */}
-          <div className="flex items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-3 bg-zinc-900/50 border border-zinc-800 px-6 py-4 rounded-xl backdrop-blur-sm md:flex-shrink-0 shadow-lg shadow-black/20">
              <TransferableAuthor
                user={displayUser}
                label={t("skillDetail.author")}
@@ -273,7 +273,7 @@ export default function SkillDetailPage() {
                onTransferred={(newOwner) => setSkill(prev => prev ? { ...prev, user_id: newOwner.id, user: newOwner } : prev)}
              />
 
-             <div className="ml-4 pl-4 border-l border-zinc-700/50 h-full flex items-center gap-2">
+             <div className="flex items-center gap-2 md:ml-4 md:pl-4 md:border-l md:border-zinc-700/50 md:h-full">
                 <button
                     onClick={() => { setEditorOpen(true); }}
                     className="p-2 bg-zinc-800 hover:bg-zinc-700 hover:text-white rounded-lg text-zinc-400 transition-colors border border-zinc-700/50 shadow-sm"

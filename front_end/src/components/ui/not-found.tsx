@@ -13,8 +13,8 @@ interface NotFoundProps {
 
 export function NotFound({ title, description, buttonText, onBack }: NotFoundProps) {
   return (
-    <div className="flex flex-col items-center justify-center h-[60vh] text-zinc-400 gap-6">
-      <div className="bg-zinc-900/50 p-8 rounded-2xl border border-zinc-800 text-center max-w-md shadow-2xl backdrop-blur-sm">
+    <div className="flex flex-col items-center justify-center min-h-[50vh] md:h-[60vh] text-zinc-400 gap-6 px-4">
+      <div className="w-full sm:w-auto max-w-md bg-zinc-900/50 p-6 sm:p-8 rounded-2xl border border-zinc-800 text-center shadow-2xl backdrop-blur-sm">
         <div className="w-16 h-16 bg-zinc-800/80 rounded-full flex items-center justify-center mx-auto mb-6 border border-zinc-700/50 shadow-inner">
           <FileQuestion className="w-8 h-8 text-zinc-500" />
         </div>
