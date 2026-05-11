@@ -30,11 +30,11 @@ class _ControlMixin:
         外层 bash 进程；POSIX 规定 SIG_IGN 通过 exec 继承，所以 wrapper.py 启动
         瞬间到 main() 装上观察用 handler 之间那个时间窗口里 wrapper 也按 SIG_IGN
         处理，不会被默认 disposition 杀。`scancel --signal=TERM` 把信号通过
-        killpg 投到 batch step 的 process group；wrapper handler 收到后按
-        Magnus user-root convention 读 .magnus_user_root marker 锚定 user
-        entry_command 的进程子树，再 BFS 子树全员发 SIGTERM（详见
-        _wrapper_template.py 的 _signal_user_subtree 与 docs/internals/job-runtime.md
-        "Signaling and Termination"）。
+        killpg 投到 batch step 的 process group；wrapper handler 收到后枚举本
+        job cgroup，按 `/proc/<pid>/status` 的 NSpid 字段筛出 user 容器内进程
+        （子 PID namespace 内、且不是容器 PID 1），对它们 `kill(2)` —— 详见
+        _wrapper_template.py 的 _signal_user_processes 与 docs/internals/job-runtime.md
+        "Signaling and Termination"。
 
         约束：`entry_command` 必须是 single simple command（不含 `&&`、`;`、
         `|`、子壳等 shell 复合结构）。`exec <complex>` 在 bash 里只 execve 第一
@@ -98,9 +98,9 @@ class _ControlMixin:
 
         默认的裸 `scancel` 走 KillSignal=SIGTERM、KillWait 秒后才 SIGKILL。
         signal_job 路径下 wrapper.py 装了 handler 收到 SIGTERM 不退、而是按
-        Magnus user-root convention 向 user entry_command 子树全员转发，
-        handler-aware 的 user 代码也会 try graceful shutdown，前 KillWait 秒
-        不一定立刻清场，破坏 terminate / 抢占的"瞬时让出 GPU"承诺。直接
+        NSpid 筛选枚举 cgroup 内 user 容器进程逐个转发，handler-aware 的
+        user 代码也会 try graceful shutdown，前 KillWait 秒不一定立刻清场，
+        破坏 terminate / 抢占的"瞬时让出 GPU"承诺。直接
         --signal=KILL --full 把 SIGKILL 投给整个 batch step（cgroup 全员）
         立刻清场（SIGKILL 在内核侧不可被 ignore，proctrack 广播覆盖所有 pgrp），
         再裸 scancel 让 SLURM 标记 job 取消。
@@ -157,10 +157,10 @@ class _ControlMixin:
         没有 srun 额外 step）。SLURM 内部对 batch step 用 killpg 投递到 batch
         script 的 process group。中间命令如 GNU timeout / apptainer starter /
         rootlesskit 会 setpgid 创建独立 pgrp，让 user 进程跳出 batch script
-        pgrp 收不到信号 —— wrapper.py 在 SIGTERM handler 里走 Magnus user-root
-        convention，读 .magnus_user_root marker 锚定 user entry_command 进程
-        子树，BFS 子树全员发 SIGTERM 兜底，详见 _wrapper_template.py 的
-        _signal_user_subtree。
+        pgrp 收不到信号 —— wrapper.py 在 SIGTERM handler 里枚举本 job cgroup，
+        按 `/proc/<pid>/status` 的 NSpid 字段筛出 user 容器内进程（子 PID
+        namespace 内、且不是容器 PID 1），对它们 `kill(2)` 兜底，详见
+        _wrapper_template.py 的 _signal_user_processes。
         """
         command = [
             "scancel",

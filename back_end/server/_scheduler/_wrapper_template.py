@@ -320,116 +320,94 @@ def _cgroup_procs_path():
         return "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/cgroup.procs"
     return None
 
-def _read_user_root_pid(user_root_marker_path):
-    """读 .magnus_user_root marker 拿 user entry_command 的 root PID。
+def _signal_user_processes(sig):
+    """SIGTERM handler 内调用：向 user 容器内进程全员转发 sig。
 
-    marker 由 .magnus_user_script.sh 入口第一行 `echo $$ > ...` 写入；容器内
-    bash 的 $$ 在 apptainer 不创新 PID namespace 时即是 host-visible PID。
-    handler 触发时若 marker 还没写（job 刚起的几毫秒窗口），返 None。
+    Linux PID namespace 是 host ns 后代树的不对称视图 —— host ns 看得见全部
+    task，每个 task 的 host PID 都是 host-global 标识，kill(2) 用 host PID
+    跨 PID namespace 直接生效。`/proc/<host_pid>/status` 的 NSpid 字段把每
+    层 namespace 内的 PID 列出来：
+
+        NSpid: <outer_host_pid> [<inner_pid> [...]]
+
+    本方案靠它在 cgroup.procs 全员里区分 user 容器内进程与基础设施：
+    * NSpid 单列  → 进程只在 host PID namespace：wrapper 自己 / subprocess
+                     shell / apptainer starter / fuse-overlayfs /
+                     squashfuse_ll 等 host-only 进程，跳过。
+    * NSpid 双列 + inner==1 → 容器 init (apptainer appinit)，跳过 ——
+                              给容器 PID 1 发 SIGTERM 会触发整个容器生命
+                              周期的 teardown，意外把 user 进程一起带走。
+    * NSpid 双列 + inner!=1 → user 容器内进程（user bash / timeout / python
+                              / workers 等），目标。
+
+    跟现有 magnus marker 协议（.magnus_success / .magnus_result / .magnus_oom）
+    不一样的是：本方案**零 user-script 改动、零 marker file、零协议表面**，
+    完全靠 kernel procfs 既有字段 runtime 识别。systemd `KillMode=cgroup` /
+    Kubernetes 优雅终止走同一思路。
+
+    Apptainer 不同模式（liu rootless / zhu setuid）实测 NSpid 字段行为一致。
+    单 PID kill 失败 / status 读失败任一步 fail-open continue，handler 不抛
+    回 main；Phase 3 marker 决策仍能凭 _signaled[0] 触发。
     """
-    try:
-        with open(user_root_marker_path) as f:
-            value = f.read().strip()
-        if not value:
-            return None
-        return int(value)
-    except (OSError, ValueError):
-        return None
-
-def _signal_user_subtree(sig, user_root_marker_path):
-    """SIGTERM handler 内调用：向 user entry_command 进程子树全员转发 sig。
-
-    Magnus user-root convention（对用户透明）：.magnus_user_script.sh 入口
-    `echo $$ > .magnus_user_root` 把 user entry_command 的进程树根 PID 落到
-    workspace marker；wrapper handler 读 marker 拿 user_root_pid，BFS 这棵
-    子树（限制在 cgroup 内、用 /proc/<pid>/task/<pid>/children 重建父子
-    关系），对子树**全员**发 sig。
-
-    这样 user 视角下"我 entry_command 的所有进程都收到 SIGTERM"，包括 user
-    `python main.py` 自己 fork 的 workers —— main 在子树根、workers 在子树叶
-    都收到。
-
-    边界外的 apptainer starter / appinit / subprocess shell / fuse-overlayfs
-    / squashfuse_ll 不在 user 子树内（它们是 user_root 的 ancestor 或在
-    cgroup 但 PPid 出 cgroup），自然不被信号 —— wrapper 不依赖 apptainer 任何
-    版本的 SIGTERM 行为，也不会因杀 FUSE helpers 让容器 mountpoint 崩。
-
-    全程 fail-open：marker 没写 / cgroup 读失败 / kill 失败任一步 continue，
-    handler 不抛回 main；Phase 3 marker 决策仍能凭 _signaled[0] 触发。
-    """
-    user_root_pid = _read_user_root_pid(user_root_marker_path)
-    if user_root_pid is None:
-        return
     procs_file = _cgroup_procs_path()
     if procs_file is None:
         return
     try:
         with open(procs_file) as f:
-            cgroup_pids = set()
+            cgroup_pids = []
             for raw in f:
                 raw = raw.strip()
                 if not raw:
                     continue
                 try:
-                    cgroup_pids.add(int(raw))
+                    cgroup_pids.append(int(raw))
                 except ValueError:
                     continue
     except OSError:
         return
-    if user_root_pid not in cgroup_pids:
-        return
 
-    children_of = {{}}
     for pid in cgroup_pids:
         try:
-            with open(f"/proc/{{pid}}/task/{{pid}}/children") as f:
-                kids_raw = f.read().split()
+            with open(f"/proc/{{pid}}/status") as f:
+                inner_pid = None
+                for line in f:
+                    if line.startswith("NSpid:"):
+                        cols = line.split()
+                        if len(cols) >= 3:
+                            try:
+                                inner_pid = int(cols[2])
+                            except ValueError:
+                                inner_pid = None
+                        break
         except OSError:
             continue
-        for c in kids_raw:
-            try:
-                cpid = int(c)
-            except ValueError:
-                continue
-            if cpid in cgroup_pids:
-                children_of.setdefault(pid, set()).add(cpid)
-
-    subtree = {{user_root_pid}}
-    queue = [user_root_pid]
-    while queue:
-        p = queue.pop(0)
-        for c in children_of.get(p, ()):
-            if c not in subtree:
-                subtree.add(c)
-                queue.append(c)
-
-    for pid in subtree:
+        if inner_pid is None or inner_pid == 1:
+            continue
         try:
             os.kill(pid, sig)
         except OSError:
             continue
 
 def main():
-    # SIGTERM 处理：Magnus user-root convention 把 user entry_command 进程树
-    # 的根 PID 落到 .magnus_user_root marker（由 .magnus_user_script.sh 入口
-    # 第一行 `echo $$ > ...` 写入，对用户透明）；wrapper SIGTERM handler 读
-    # 这个 marker，BFS user 子树、对全员发 SIGTERM —— 这样 user 视角下"我
-    # entry_command 的所有进程都收到 SIGTERM"（main / fork 出的 workers / 任
-    # 何中间命令 fork 的子进程），跨语言一致。
+    # SIGTERM 处理：wrapper SIGTERM handler 内枚举本 job cgroup，按
+    # /proc/<host_pid>/status 的 NSpid 字段筛选出"在子 PID namespace 内、
+    # 且不是容器 PID 1"的 user 容器内进程，对全员发 SIGTERM —— 详见
+    # _signal_user_processes。user 视角下"我 entry_command 的所有进程都
+    # 收到 SIGTERM"（main / fork 出的 workers / 任何中间命令 fork 的子进
+    # 程），跨语言一致；apptainer starter / appinit / subprocess shell /
+    # FUSE helpers 因 NSpid 单列或 inner==1 自然落在 targets 外。
     #
-    # 为什么需要 wrapper-side fan-out 而不依赖 SLURM 自己广播：SLURM
-    # `scancel --signal=TERM` 走 killpg 投到 batch step 的 process group；
-    # GNU timeout / apptainer starter / rootlesskit 等中间命令 setpgid 创建
-    # 独立 pgrp 时 user 进程跳出 wrapper.pgrp 收不到信号（bug 报告里
-    # `timeout 20s python main.py` 就这个 case）。读 marker 锚到 user 子树
-    # 的好处：跳过 apptainer starter / appinit / subprocess shell 等中间层
-    # 不被信号（它们 default disposition terminate 会拆容器），FUSE helpers
-    # 因 daemonize 后 PPid 出 cgroup 自然落在子树外，user 视角语义干净。
+    # 为什么需要 wrapper-side fan-out：SLURM `scancel --signal=TERM` 走
+    # killpg 投到 batch step 的 process group；GNU timeout / apptainer
+    # starter / rootlesskit 等中间命令 setpgid 创建独立 pgrp 时 user 进程
+    # 跳出 wrapper.pgrp 收不到信号（bug 报告 `timeout 20s python main.py`
+    # 即此 case）。同样语义见 systemd `KillMode=cgroup` 与 Kubernetes
+    # 优雅终止。
     #
     # 分工：
-    # * _on_sigterm 先置 _signaled[0] 再 forward —— forward 抛错（marker 还没
-    #   写 / procfs 读失败等）也不影响 Phase 3 fallback 能不能触发。
-    # * _signal_user_subtree 全程 fail-open，每个 os.kill 独立 try/except。
+    # * _on_sigterm 先置 _signaled[0] 再 forward —— forward 抛错（procfs
+    #   读失败等）也不影响 Phase 3 fallback 能不能触发。
+    # * _signal_user_processes 全程 fail-open，每个 os.kill 独立 try/except。
     # * 用户代码 signal.signal(SIGTERM, handler) 自己装 handler 做收尾、写
     #   .magnus_result 表达 partial state、sys.exit(0)。
     # * Phase 3 marker 决策：ret==0 写 marker；ret!=0 + _signaled + .magnus_result
@@ -441,12 +419,11 @@ def main():
     # --full，SIGKILL 内核侧不可 ignore，由 proctrack 广播全员清场；详见
     # docs/internals/job-runtime.md "Signaling and Termination"。
     work_dir = {repr(job_working_table)}
-    user_root_marker_path = os.path.join(work_dir, ".magnus_user_root")
     _signaled = [False]
     def _on_sigterm(_signum, _frame):
         _signaled[0] = True
         try:
-            _signal_user_subtree(signal.SIGTERM, user_root_marker_path)
+            _signal_user_processes(signal.SIGTERM)
         except Exception:
             pass
     signal.signal(signal.SIGTERM, _on_sigterm)
@@ -481,17 +458,10 @@ def main():
         _metrics_thread = None
 
     # Phase 1: Prepare user script
-    #
-    # 入口 `echo $$ > .magnus_user_root` 把容器内 bash 自己的 PID（apptainer
-    # 不创新 PID namespace 时即是 host-visible PID）写到 workspace marker，
-    # 是 Magnus user-root convention 的发布端 —— wrapper 的 SIGTERM handler 读
-    # 这个 marker 锚定 user entry_command 的进程子树，详见 _signal_user_subtree。
-    # 协议对用户透明，user 看到的语义是"entry_command 的所有进程都收 SIGTERM"。
     user_script_path = os.path.join(work_dir, ".magnus_user_script.sh")
     with open(user_script_path, "w") as f:
         f.write("set -e\\n")
         f.write("export HOME=$MAGNUS_HOME\\n")
-        f.write('echo $$ > "$MAGNUS_HOME/workspace/.magnus_user_root"\\n')
         f.write(user_cmd_str)
         f.write("\\n")
     os.chmod(user_script_path, 0o755)

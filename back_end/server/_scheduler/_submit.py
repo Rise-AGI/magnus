@@ -22,10 +22,10 @@ else:
 def _render_docker_user_script(entry_command: str) -> str:
     """生成 Docker 模式的 .magnus_user_script.sh 内容。
 
-    设计目标：与 SLURM 模式 SIGTERM 语义对等 —— Magnus user-root convention
-    下，"user entry_command 的所有进程都收到 SIGTERM"，跨语言透明：handler-less
-    进程默认 terminate，handler-aware 进程自己处理收尾（写 .magnus_result
-    表达成功收尾、sys.exit(0)）。
+    设计目标：与 SLURM 模式 SIGTERM 语义对等 —— "user entry_command 的所有
+    进程都收到 SIGTERM"，跨语言透明：handler-less 进程默认 terminate，
+    handler-aware 进程自己处理收尾（写 .magnus_result 表达成功收尾、
+    sys.exit(0)）。
 
     两层信号传递（外层 bash 主动转发 user pgrp + 子壳作 pgrp leader）：
 
@@ -49,8 +49,8 @@ def _render_docker_user_script(entry_command: str) -> str:
     用户 entry_command 包含 heredoc 的场景虽不常见，但回归不可接受。视觉对齐让位
     于语义透传。
 
-    SLURM 一侧通过 wrapper.py 读 .magnus_user_root marker 锚定 user 子树 + cgroup
-    BFS 全员发 SIGTERM 达到同样语义（详见 _wrapper_template.py:_signal_user_subtree
+    SLURM 一侧通过 wrapper.py 枚举 cgroup + NSpid 筛选 user 容器内进程 + kill(2)
+    跨 PID namespace 达到同样语义（详见 _wrapper_template.py:_signal_user_processes
     与 _slurm_manager/_control.py:send_signal）；docker 一侧不需要 wrapper 中间层，
     bash pgrp 加 trap 已经够，magnus DB 收敛直接看容器 exit code + .magnus_result。
     """
@@ -318,7 +318,7 @@ class _SubmitMixin(_SubmitMixinBase):
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)
         guarantee_file_exist(f"{job_working_table}/metrics", is_directory=True)
 
-        for marker_name in [".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom", ".magnus_user_root"]:
+        for marker_name in [".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom"]:
             marker_path = f"{job_working_table}/{marker_name}"
             if os.path.exists(marker_path):
                 try:
