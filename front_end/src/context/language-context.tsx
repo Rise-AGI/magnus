@@ -345,7 +345,7 @@ const translations = {
   // ===== Job Detail Page =====
   "jobDetail.cloneJob": { zh: "克隆此任务", en: "Clone this job" },
   "jobDetail.terminateTask": { zh: "终止任务", en: "Terminate Task" },
-  "jobDetail.sendSigterm": { zh: "发送 SIGTERM 信号（装 handler 的用户代码可自定义收尾，没装 handler 的代码继承 SIG_IGN，SIGTERM 是 no-op）", en: "Send SIGTERM (handler-aware code can teardown gracefully; handler-less code treats SIGTERM as no-op via inherited SIG_IGN)" },
+  "jobDetail.sendSigterm": { zh: "发送 SIGTERM 信号；装了信号处理器的任务可优雅收尾，未装的不响应", en: "Send SIGTERM; tasks with a signal handler can run a graceful teardown, those without one do not respond" },
   "jobDetail.openRepoGithub": { zh: "在 GitHub 中打开仓库", en: "Open Repository in GitHub" },
   "jobDetail.viewBranchTree": { zh: "查看分支树", en: "View Branch Tree" },
   "jobDetail.viewCommitDetails": { zh: "查看提交详情", en: "View Commit Details" },
@@ -375,7 +375,7 @@ const translations = {
   "jobOps.terminateBtn": { zh: "终止", en: "Terminate" },
   "jobOps.terminateFailed": { zh: "终止任务失败", en: "Failed to terminate job" },
   "jobOps.signalTitle": { zh: "发送 SIGTERM？", en: "Send SIGTERM?" },
-  "jobOps.signalDesc": { zh: "向「{name}」发送 SIGTERM。装了 handler 的用户代码可以借此自定义收尾；没装 handler 的代码因继承 SIG_IGN 把 SIGTERM 当 no-op，想强杀走「终止」。任务状态不会被服务端直接改写。", en: "Send SIGTERM to \"{name}\". User code with a handler can run its own teardown; user code without a handler treats SIGTERM as no-op (inherited SIG_IGN), use Terminate to force-kill. The job status is not directly changed by the server." },
+  "jobOps.signalDesc": { zh: "向「{name}」发送 SIGTERM 信号。装了信号处理器的任务可借此优雅收尾（保存进度、释放资源等）；未装处理器的任务不响应 —— 想强制结束请改用「终止」。任务状态不变。", en: "Send SIGTERM to \"{name}\". A task with a signal handler can perform a graceful teardown (save progress, release resources, etc.); a task without one does not respond — use Terminate to force-kill. The task status stays unchanged." },
   "jobOps.signalBtn": { zh: "发送", en: "Send" },
   "jobOps.signalFailed": { zh: "发送 SIGTERM 失败", en: "Failed to send SIGTERM" },
 

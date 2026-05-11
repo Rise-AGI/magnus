@@ -63,12 +63,12 @@ def _render_docker_user_script(entry_command: str) -> str:
         "\n"
         "(\n"
         "set -e\n"
-        # 子壳 SIG_IGN SIGTERM —— 跟 SLURM 模式 .magnus_user_script.sh 的 `trap '' TERM`
-        # 对等。外层 trap 把 SIGTERM killpg 给整个 user pgrp 时，子壳 bash 自己也在 pgrp
-        # 里，没这层 SIG_IGN 守卫的话子壳会按 default disposition terminate、cascade up
-        # 让外层 wait 立刻返回、tini 收 PID 1 退出杀容器，user handler 还没来得及跑完
-        # 就被 SIGKILL 带走。SIG_IGN 通过 POSIX exec 继承给 user 进程；用户代码用
-        # signal.signal(SIGTERM, …) / sigaction(2) 装 handler 会自然覆盖。
+        # 子壳 SIG_IGN SIGTERM —— 与 SLURM 模式 .magnus_user_script.sh 的
+        # `trap '' TERM` 对等。外层 trap 把 SIGTERM killpg 给整个 user pgrp 时
+        # 子壳 bash 自己也在 pgrp 里，SIG_IGN 让它不被默认 disposition 杀掉，
+        # 外层 wait 也就不会提前返回拖垮容器。SIG_IGN 通过 POSIX exec 继承给
+        # user 进程；用户代码 signal.signal(SIGTERM, …) / sigaction(2) 装
+        # handler 自然覆盖。
         "trap '' TERM\n"
         f"{entry_command}\n"
         ") &\n"

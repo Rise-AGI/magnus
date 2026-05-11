@@ -397,12 +397,13 @@ def main():
     # 程），跨语言一致；apptainer starter / appinit / subprocess shell /
     # FUSE helpers 因 NSpid 单列或 inner==1 自然落在 targets 外。
     #
-    # 为什么需要 wrapper-side fan-out：signal_job 路径用 `scancel --signal=TERM
-    # --batch` 把信号收紧到 batch step 的 shell（exec 替换后即 wrapper.py 本身）
-    # 一个 PID，避免 `--full` 广播 cgroup 全员误伤 apptainer starter / FUSE
-    # helpers 导致 mount point 拆除、user 进程 SIGBUS。代价是 SLURM 不再帮
-    # wrapper 把信号送到 user 进程，必须由 wrapper 自己枚举 cgroup + NSpid
-    # 主动 fan-out。语义等价 systemd `KillMode=cgroup` / Kubernetes 优雅终止。
+    # 为什么由 wrapper 自己 fan-out：signal_job 用 `scancel --signal=TERM --batch`
+    # 把信号收紧到 batch step 的 shell（exec 替换后即 wrapper.py 本身）一个 PID，
+    # 不让 SLURM 把 SIGTERM 广播给 cgroup 内的 apptainer starter / FUSE helpers
+    # 等容器基础设施 —— 它们没装 handler，被 SIGTERM 默认 disposition 终止会
+    # 拆掉 squashfs / overlay mount，user 进程访问内存映射时 SIGBUS。代价是
+    # 信号到 user 进程这一程要由 wrapper 自己枚举 cgroup + NSpid 接力，
+    # 语义等价 systemd `KillMode=cgroup` / Kubernetes 优雅终止。
     #
     # 分工：
     # * _on_sigterm 先置 _signaled[0] 再 forward —— forward 抛错（procfs
@@ -413,13 +414,16 @@ def main():
     # * Phase 3 marker 决策：ret==0 写 marker；ret!=0 + _signaled + .magnus_result
     #   作 fallback 仍写 marker → magnus 标 SUCCESS。
     #
-    # 上游 sbatch script 入口 `trap '' TERM\\nexec wrapper.py` 用 SIG_IGN
-    # inheritance 关闭 wrapper 启动期窗口（main() 进 signal.signal 之前那几毫秒
-    # 若收信号会按 default disposition 死掉）。下游 .magnus_user_script.sh 入口
-    # 同样 `trap '' TERM`（Phase 1 渲染时写入）把 cascade-up 链关掉：fan-out 命中
-    # user-script bash 时它 SIG_IGN 不死，user 进程通过 POSIX exec 继承 SIG_IGN，
-    # 装了 handler 的 user 代码自然覆盖。kill_job 走 scancel --signal=KILL --full，
-    # SIGKILL 内核侧不可 ignore，由 proctrack 广播全员清场；详见
+    # 上下游各装一层 `trap '' TERM` 防默认 disposition 误杀：
+    # * sbatch script 入口 `trap '' TERM\\nexec wrapper.py` 把 SIG_IGN 通过
+    #   exec 继承到 wrapper.py，覆盖 wrapper 启动到下面 signal.signal 装上
+    #   handler 之间的几毫秒窗口。
+    # * .magnus_user_script.sh 入口同样 `trap '' TERM`（Phase 1 渲染写入），
+    #   fan-out 命中 user-script bash 时它 SIG_IGN 不被打死、外层 wait 不
+    #   提前返回；SIG_IGN 通过 POSIX exec 继承给 user 进程，user 代码装的
+    #   handler 自然覆盖回去触发。
+    # 强终止走 kill_job 的 scancel --signal=KILL --full：SIGKILL 内核侧不可
+    # ignore，由 proctrack 广播 cgroup 全员瞬间清场；详见
     # docs/internals/job-runtime.md "Signaling and Termination"。
     work_dir = {repr(job_working_table)}
     _signaled = [False]
@@ -462,12 +466,11 @@ def main():
 
     # Phase 1: Prepare user script
     #
-    # `trap '' TERM` 让跑 user entry 的 bash 把 SIGTERM 设成 SIG_IGN —— wrapper
-    # 的 SIGTERM fan-out 会同时打到容器内 bash 与 user 进程（NSpid 双列 inner!=1
-    # 一并命中）；bash 没装信号 handler，被 SIGTERM 默认 disposition terminate
-    # 会先于 user handler 退出，cascade up 让 wrapper.subprocess 误以为任务结束，
-    # SLURM 再 SIGKILL 整个 step 把 user 进程一起带走。SIG_IGN 通过 POSIX exec
-    # 继承到 user 进程，user 代码用 signal.signal(SIGTERM, …) 自然覆盖回 handler。
+    # 入口 `trap '' TERM` 让跑 user entry 的 bash 把 SIGTERM 设为 SIG_IGN ——
+    # wrapper 的 fan-out 会把 NSpid 双列 inner!=1 的 PID 都信号一遍，bash 自己
+    # 也在其中；SIG_IGN 让它不被默认 disposition 杀，外层 wait 也就不会提前返
+    # 回拖垮整条进程链。SIG_IGN 通过 POSIX exec 继承到 user 进程，user 代码
+    # 用 signal.signal(SIGTERM, …) 装 handler 自然覆盖回去触发。
     user_script_path = os.path.join(work_dir, ".magnus_user_script.sh")
     with open(user_script_path, "w") as f:
         f.write("set -e\\n")

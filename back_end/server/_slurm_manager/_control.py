@@ -151,23 +151,21 @@ class _ControlMixin:
         runner: str,
         token: str,
     ) -> None:
-        """向 SLURM job 的 batch step 的 wrapper.py 发送指定信号但不终止 job。
+        """向 SLURM job 的 wrapper.py 发送指定信号但不终止 job。
 
         `--signal=<sig>` 让 scancel 转为信号转发器（不修改 SLURM 状态）；
         `--batch` 让 SLURM 只把信号投递到 batch step 的 parent process
-        （= wrapper.py），不广播 cgroup 全员 —— 这是关键，`--full` 会让
-        SLURM 把 SIGTERM 广播给 batch step cgroup 内所有 PID 包括 apptainer
-        starter / fuse-overlayfs / squashfuse_ll 等容器基础设施，它们没装
-        handler 被 default disposition terminate 后会导致 squashfs / overlay
-        mount point 崩、user 进程访问内存映射时 SIGBUS，整个容器 cascade
-        teardown。`--batch` 把信号收紧到 wrapper.py 一个 PID 上，由 wrapper
-        自己在 SIGTERM handler 里枚举本 job cgroup，按 /proc/<pid>/status
-        的 NSpid 字段筛出 user 容器内进程（子 PID namespace 内、且不是容器
-        PID 1），对它们 kill(2) —— 容器基础设施不被信号、user-script bash
-        装的 `trap '' TERM` 把 SIG_IGN 通过 POSIX exec 继承给 user 进程，
-        user 代码 signal.signal(SIGTERM, …) 装 handler 自然覆盖。详见
-        _wrapper_template.py 的 _signal_user_processes 与 user-script
-        渲染逻辑。
+        —— 即 sbatch script `exec wrapper.py` 之后的 wrapper.py 一个 PID，
+        cgroup 内的 apptainer starter / fuse-overlayfs / squashfuse_ll 等
+        容器基础设施保持不动（它们没装 handler，被信号到会按默认 disposition
+        终止、把 squashfs / overlay mount point 拆掉、user 进程访问内存映射
+        时 SIGBUS）。wrapper.py 自己在 SIGTERM handler 里枚举本 job cgroup，
+        按 `/proc/<pid>/status` 的 NSpid 字段筛出 user 容器内进程（在子 PID
+        namespace 内、且不是容器 PID 1），对它们 `kill(2)` 把信号送进去；
+        user-script bash 装的 `trap '' TERM` 让它在 fan-out 时 SIG_IGN 不死，
+        SIG_IGN 通过 POSIX exec 继承到 user 进程，user 代码 `signal.signal`
+        / `sigaction` 装 handler 自然覆盖。详见 _wrapper_template.py 的
+        _signal_user_processes 与 user-script 渲染逻辑。
         """
         command = [
             "scancel",
