@@ -322,18 +322,20 @@ export default function JobDetailsPage() {
             </div>
             {/* Owner */}
             {job.user && (
-              <PersonHoverCard
-                userId={job.user.id}
-                warm={{ name: job.user.name, avatar_url: job.user.avatar_url ?? null }}
-              >
-                <div className="flex items-center gap-3 md:ml-4 md:pl-4 md:border-l border-zinc-700/50">
-                  <AvatarCircle user={job.user} size="sm" />
-                  <div className="flex flex-col">
-                    <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.creator")}</span>
-                    <span className="text-sm font-medium text-zinc-200">{job.user.name}</span>
+              <div className="md:ml-4 md:pl-4 md:border-l border-zinc-700/50">
+                <PersonHoverCard
+                  userId={job.user.id}
+                  warm={{ name: job.user.name, avatar_url: job.user.avatar_url ?? null }}
+                >
+                  <div className="flex items-center gap-3">
+                    <AvatarCircle user={job.user} size="sm" />
+                    <div className="flex flex-col">
+                      <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.creator")}</span>
+                      <span className="text-sm font-medium text-zinc-200">{job.user.name}</span>
+                    </div>
                   </div>
-                </div>
-              </PersonHoverCard>
+                </PersonHoverCard>
+              </div>
             )}
 
             <div className="flex items-center gap-2 md:ml-4 md:pl-4 md:border-l border-zinc-700/50">
