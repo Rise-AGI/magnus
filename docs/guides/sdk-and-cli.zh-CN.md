@@ -330,7 +330,7 @@ magnus.terminate_job("abc123")
 向运行中的任务进程发送 SIGTERM 信号，但**不**终止任务。与 `terminate_job` 互补：
 
 - `terminate_job` 是不可逆的硬取消，状态立刻置为 `Terminated`，进程没有协调窗口；
-- `signal_job` 只是信号转发器，任务状态不变，**用户进程实际会收到 SIGTERM**。**装了 handler** 的用户代码可以借这个窗口跑自定义收尾（保存中间结果 / 检查点、释放 GPU / NCCL、关闭外部连接、刷新缓冲等）；handler 写 `$MAGNUS_RESULT` 再 `sys.exit(0)` 即可让 magnus 把 job 收敛为 `Success`（即便外层进程树被信号强行带走）。**没装 handler** 的用户代码被 SIGTERM 默认 disposition 终止，magnus 收敛为 `Failed`。
+- `signal_job` 只是信号转发器，任务状态不变，**用户进程实际会收到 SIGTERM**。**装了 handler** 的用户代码可以借这个窗口跑自定义收尾（保存中间结果 / 检查点、释放 GPU / NCCL、关闭外部连接、刷新缓冲等）；handler 写 `$MAGNUS_RESULT` 再 `sys.exit(0)` 即可让 magnus 把 job 收敛为 `Success`（即便外层进程树被信号强行带走）。**没装 handler** 的用户代码对 SIGTERM 不响应 —— magnus 的 user_script bash 装了 SIG_IGN 并通过 POSIX exec 传给子进程，协议契约是"发送信号给的是把优雅终止接进来的用户代码；强制杀走 `terminate_job`"。
 
 ```python
 import magnus
@@ -1245,7 +1245,7 @@ asyncio.run(run_experiments())
 | `get_metric_chart(job_id, name, ...)` | 服务器渲染指标 PNG | `bytes` |
 | `save_metric_chart(job_id, name, output, ...)` | 服务器渲染并写入磁盘 | `Path` |
 | `terminate_job(job_id)` | 终止任务（不可逆，置为 Terminated） | 状态信息 |
-| `signal_job(job_id)` | 向任务进程发送 SIGTERM（handler 用户可收敛 Success，无 handler 用户被默认终止） | 状态信息 |
+| `signal_job(job_id)` | 向任务进程发送 SIGTERM（handler 用户可收敛 Success，无 handler 用户继承 SIG_IGN 是 no-op） | 状态信息 |
 | `launch_blueprint(id, args, ...)` | 提交蓝图任务，立即返回 | Job ID |
 | `run_blueprint(id, args, timeout, ...)` | 提交蓝图并等待完成 | `Optional[str]` |
 | `list_blueprints(limit, search)` | 列出蓝图 | `{total, items}` |
@@ -1461,14 +1461,14 @@ magnus job kill -1 -f            # 跳过确认
 
 #### magnus job signal
 
-向任务进程发送 SIGTERM 信号。magnus 侧**不会**强制终止任务、也不会预先翻转任务状态：仅作为信号转发器。用户进程实际会收到 SIGTERM —— 装了 handler 的代码可以自定义清理（NCCL teardown、CUDA context 释放、保存检查点等）；没装 handler 的代码被 SIGTERM 默认 disposition 终止。
+向任务进程发送 SIGTERM 信号。magnus 侧**不会**强制终止任务、也不会预先翻转任务状态：仅作为信号转发器。用户进程实际会收到 SIGTERM —— 装了 handler 的代码可以自定义清理（NCCL teardown、CUDA context 释放、保存检查点等）；没装 handler 的代码对 SIGTERM 不响应（magnus 的 user_script bash 装了 SIG_IGN 并通过 POSIX exec 传给子进程，想强制杀走 `magnus job kill`）。
 
 ```bash
 magnus job signal abc123
 magnus job signal -1             # 最新任务
 ```
 
-SIGTERM 会送到用户进程。装了 handler 的用户代码若写了 `$MAGNUS_RESULT` 并干净退出，job 收敛为 `Success`；没装 handler 的进程会被默认 disposition 终止，job 收敛为 `Failed`。如果进程像卡住，可以再用 `magnus job kill` 强制终止。
+SIGTERM 会送到用户进程。装了 handler 的用户代码若写了 `$MAGNUS_RESULT` 并干净退出，job 收敛为 `Success`；没装 handler 的进程对 SIGTERM 不响应（继承的 SIG_IGN 把信号吸掉），job 继续跑 —— 想强制杀走 `magnus job kill`。
 
 要求任务处于 `Running` 状态。
 

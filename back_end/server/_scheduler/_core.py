@@ -79,12 +79,14 @@ class MagnusScheduler(
                 assert self.docker_manager is not None
                 container_name = f"magnus-job-{job.id}"
                 logger.info(f"Terminating job {job.id} (Docker: {container_name}) by user request.")
-                # timeout=0 → docker stop 立即发 SIGKILL，跳过 SIGTERM grace。对偶
-                # SLURM kill_job 的 `scancel --signal=KILL --full`：user_script 外层
-                # bash 装了 trap 不会因 SIGTERM 自死、子壳 SIG_DFL 用户进程被默认
-                # disposition 终止 / handler 进程自己处理 —— 默认 10s grace 既不能
-                # 让 magnus 即时清场，又会撞上用户 handler 还在持有资源的中间状态。
-                # SIGKILL 直发恢复 terminate "no coordination window" 的语义。
+                # timeout=0 → docker stop 立即发 SIGKILL，跳过 SIGTERM grace。
+                # 对偶 SLURM kill_job 的 `scancel --signal=KILL --full`：默认的
+                # 10s SIGTERM grace 期间，外层 bash trap 把 SIGTERM 转发给整个
+                # user pgrp，子壳和 handler-less 用户代码都 SIG_IGN 不死、空转
+                # 整 grace；handler-aware 代码会借这个窗口跑收尾。terminate 的
+                # 语义是"no coordination window"，不能等也不该等 user handler，
+                # 因此 SIGKILL 直发立刻清场。
+
                 self.docker_manager.stop_container(container_name, timeout = 0)
                 self.docker_manager.remove_container(container_name)
             else:
@@ -108,8 +110,9 @@ class MagnusScheduler(
         信号转发器，不动 DB、不清理工作目录、不改 job 状态。SIGTERM 实际会送到
         用户进程：装了 handler 的代码可以做自定义清理（CUDA / NCCL teardown、
         保存检查点等），写 `$MAGNUS_RESULT` + `sys.exit(0)` 让 _sync_reality 收
-        敛到 Success；没装 handler 的用户进程被默认 disposition 终止、收敛到
-        Failed。详见 docs/internals/job-runtime.md "Signaling and Termination"。
+        敛到 Success；没装 handler 的用户代码因继承 user-script bash 的 SIG_IGN
+        把 SIGTERM 当 no-op，job 继续跑，想强杀走 terminate_job 的 SIGKILL 路径。
+        详见 docs/internals/job-runtime.md "Signaling and Termination"。
         """
         if not self.enabled:
             logger.warning("Scheduler disabled, skipping signal logic.")

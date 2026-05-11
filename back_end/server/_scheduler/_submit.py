@@ -23,9 +23,11 @@ def _render_docker_user_script(entry_command: str) -> str:
     """生成 Docker 模式的 .magnus_user_script.sh 内容。
 
     设计目标：与 SLURM 模式 SIGTERM 语义对等 —— "user entry_command 的所有
-    进程都收到 SIGTERM"，跨语言透明：handler-less 进程默认 terminate，
-    handler-aware 进程自己处理收尾（写 .magnus_result 表达成功收尾、
-    sys.exit(0)）。
+    进程都收到 SIGTERM"，跨语言透明：子壳入口 `trap '' TERM` 让 user-script
+    bash SIG_IGN，handler-aware 进程用 signal.signal / sigaction 装 handler
+    覆盖 SIG_IGN、自己处理收尾（写 .magnus_result 表达成功收尾、sys.exit(0)）；
+    handler-less 进程因继承 SIG_IGN 把 SIGTERM 当 no-op，想强杀走 terminate
+    (docker stop -t 0 → SIGKILL) 路径。
 
     两层信号传递（外层 bash 主动转发 user pgrp + 子壳作 pgrp leader）：
 
@@ -61,6 +63,13 @@ def _render_docker_user_script(entry_command: str) -> str:
         "\n"
         "(\n"
         "set -e\n"
+        # 子壳 SIG_IGN SIGTERM —— 跟 SLURM 模式 .magnus_user_script.sh 的 `trap '' TERM`
+        # 对等。外层 trap 把 SIGTERM killpg 给整个 user pgrp 时，子壳 bash 自己也在 pgrp
+        # 里，没这层 SIG_IGN 守卫的话子壳会按 default disposition terminate、cascade up
+        # 让外层 wait 立刻返回、tini 收 PID 1 退出杀容器，user handler 还没来得及跑完
+        # 就被 SIGKILL 带走。SIG_IGN 通过 POSIX exec 继承给 user 进程；用户代码用
+        # signal.signal(SIGTERM, …) / sigaction(2) 装 handler 会自然覆盖。
+        "trap '' TERM\n"
         f"{entry_command}\n"
         ") &\n"
         "_magnus_pid=$!\n"

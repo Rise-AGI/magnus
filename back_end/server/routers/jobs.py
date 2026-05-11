@@ -322,9 +322,9 @@ def signal_job(
 
     信号转发器，不修改 DB 状态。SIGTERM 实际会送到用户进程：装了 handler 的代码
     可做自定义收尾（保存中间结果、释放外部资源、刷新缓冲等），写 `$MAGNUS_RESULT`
-    + `sys.exit(0)` 让 _sync_reality 收敛到 Success；没装 handler 的用户进程被
-    默认 disposition 终止、收敛到 Failed。详见 docs/internals/job-runtime.md
-    "Signaling and Termination"。
+    + `sys.exit(0)` 让 _sync_reality 收敛到 Success；没装 handler 的用户代码因
+    继承 user-script bash 的 SIG_IGN 把 SIGTERM 当 no-op，job 继续跑，想强杀走
+    terminate 路径。详见 docs/internals/job-runtime.md "Signaling and Termination"。
     """
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:

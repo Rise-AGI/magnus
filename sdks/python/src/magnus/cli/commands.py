@@ -1279,9 +1279,9 @@ def signal_job_cmd(ctx: typer.Context):
     Shortcut for 'magnus job signal'. SIGTERM is delivered to the user process:
     code with a SIGTERM handler can run its own teardown (NCCL teardown, CUDA
     cleanup, checkpointing) and converge the job to Success by writing
-    $MAGNUS_RESULT and calling sys.exit(0); code without a handler is terminated
-    by the default disposition and the job converges to Failed. Use 'kill' if
-    the user process appears stuck.
+    $MAGNUS_RESULT and calling sys.exit(0); code without a handler treats
+    SIGTERM as a no-op (the user-script bash inherits SIG_IGN and propagates
+    it via POSIX exec), so the job keeps running — use 'kill' to force-kill.
 
     JOB_REF: Job index (-1, -2, ...) or job ID. Indices are shared across terminals; prefer ID.
 
@@ -2401,9 +2401,9 @@ def job_signal_subcmd(ctx: typer.Context):
     teardown (saving intermediate results / checkpoints, releasing GPU memory,
     closing connections, flushing buffers, etc.); writing $MAGNUS_RESULT and
     calling sys.exit(0) from the handler lets the regular sync loop converge
-    the job to Success. Without a handler the user process is terminated by
-    SIGTERM's default disposition and the job converges to Failed. If the user
-    process appears stuck, follow up with 'kill' to force-terminate.
+    the job to Success. Without a handler SIGTERM is a no-op — the user-script
+    bash inherits SIG_IGN and propagates it via POSIX exec, so the job keeps
+    running; use 'kill' to force-terminate.
 
     Only Running jobs can be signaled.
 

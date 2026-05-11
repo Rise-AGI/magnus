@@ -919,8 +919,9 @@ class MagnusClient:
         flushing buffers); writing ``$MAGNUS_RESULT`` and calling
         ``sys.exit(0)`` from the handler lets magnus reconcile the job to
         Success even if the surrounding process tree is forced down by the
-        signal. User code without a handler is terminated by the default
-        disposition and the job reconciles to Failed.
+        signal. User code without a handler treats SIGTERM as a no-op (the
+        user-script bash inherits ``SIG_IGN`` and propagates it via POSIX
+        exec) — use :meth:`terminate_job` if you want to force-kill.
 
         Requires the job to be in Running status.
         """
