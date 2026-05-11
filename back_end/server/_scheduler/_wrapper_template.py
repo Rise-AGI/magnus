@@ -397,12 +397,12 @@ def main():
     # 程），跨语言一致；apptainer starter / appinit / subprocess shell /
     # FUSE helpers 因 NSpid 单列或 inner==1 自然落在 targets 外。
     #
-    # 为什么需要 wrapper-side fan-out：SLURM `scancel --signal=TERM` 走
-    # killpg 投到 batch step 的 process group；GNU timeout / apptainer
-    # starter / rootlesskit 等中间命令 setpgid 创建独立 pgrp 时 user 进程
-    # 跳出 wrapper.pgrp 收不到信号（bug 报告 `timeout 20s python main.py`
-    # 即此 case）。同样语义见 systemd `KillMode=cgroup` 与 Kubernetes
-    # 优雅终止。
+    # 为什么需要 wrapper-side fan-out：signal_job 路径用 `scancel --signal=TERM
+    # --batch` 把信号收紧到 batch step 的 shell（exec 替换后即 wrapper.py 本身）
+    # 一个 PID，避免 `--full` 广播 cgroup 全员误伤 apptainer starter / FUSE
+    # helpers 导致 mount point 拆除、user 进程 SIGBUS。代价是 SLURM 不再帮
+    # wrapper 把信号送到 user 进程，必须由 wrapper 自己枚举 cgroup + NSpid
+    # 主动 fan-out。语义等价 systemd `KillMode=cgroup` / Kubernetes 优雅终止。
     #
     # 分工：
     # * _on_sigterm 先置 _signaled[0] 再 forward —— forward 抛错（procfs

@@ -29,12 +29,13 @@ class _ControlMixin:
         disposition 设为 SIG_IGN，随后 `exec wrapper.py` 让 wrapper 直接替换
         外层 bash 进程；POSIX 规定 SIG_IGN 通过 exec 继承，所以 wrapper.py 启动
         瞬间到 main() 装上观察用 handler 之间那个时间窗口里 wrapper 也按 SIG_IGN
-        处理，不会被默认 disposition 杀。`scancel --signal=TERM` 把信号通过
-        killpg 投到 batch step 的 process group；wrapper handler 收到后枚举本
-        job cgroup，按 `/proc/<pid>/status` 的 NSpid 字段筛出 user 容器内进程
-        （子 PID namespace 内、且不是容器 PID 1），对它们 `kill(2)` —— 详见
-        _wrapper_template.py 的 _signal_user_processes 与 docs/internals/job-runtime.md
-        "Signaling and Termination"。
+        处理，不会被默认 disposition 杀。`signal_job` 走 `scancel --signal=TERM
+        --batch` 只投递到 wrapper.py 一个 PID（不广播 cgroup 全员，避免 apptainer
+        starter / FUSE helpers 等容器基础设施被默认 disposition 杀掉导致
+        mount point 崩、user 进程 SIGBUS）；wrapper handler 自己枚举 cgroup，
+        按 `/proc/<pid>/status` 的 NSpid 字段筛出 user 容器内进程，对它们
+        `kill(2)`。详见 _wrapper_template.py 的 _signal_user_processes 与
+        docs/internals/job-runtime.md "Signaling and Termination"。
 
         约束：`entry_command` 必须是 single simple command（不含 `&&`、`;`、
         `|`、子壳等 shell 复合结构）。`exec <complex>` 在 bash 里只 execve 第一
@@ -150,22 +151,28 @@ class _ControlMixin:
         runner: str,
         token: str,
     ) -> None:
-        """向 SLURM job 的 batch step 发送指定信号但不终止 job。
+        """向 SLURM job 的 batch step 的 wrapper.py 发送指定信号但不终止 job。
 
-        --signal=<sig> 让 scancel 转为信号转发器（不修改 SLURM 状态）；--full
-        让信号触达 batch step（wrapper.py 是 sbatch 直接拉起的 batch script，
-        没有 srun 额外 step）。SLURM 内部对 batch step 用 killpg 投递到 batch
-        script 的 process group。中间命令如 GNU timeout / apptainer starter /
-        rootlesskit 会 setpgid 创建独立 pgrp，让 user 进程跳出 batch script
-        pgrp 收不到信号 —— wrapper.py 在 SIGTERM handler 里枚举本 job cgroup，
-        按 `/proc/<pid>/status` 的 NSpid 字段筛出 user 容器内进程（子 PID
-        namespace 内、且不是容器 PID 1），对它们 `kill(2)` 兜底，详见
-        _wrapper_template.py 的 _signal_user_processes。
+        `--signal=<sig>` 让 scancel 转为信号转发器（不修改 SLURM 状态）；
+        `--batch` 让 SLURM 只把信号投递到 batch step 的 parent process
+        （= wrapper.py），不广播 cgroup 全员 —— 这是关键，`--full` 会让
+        SLURM 把 SIGTERM 广播给 batch step cgroup 内所有 PID 包括 apptainer
+        starter / fuse-overlayfs / squashfuse_ll 等容器基础设施，它们没装
+        handler 被 default disposition terminate 后会导致 squashfs / overlay
+        mount point 崩、user 进程访问内存映射时 SIGBUS，整个容器 cascade
+        teardown。`--batch` 把信号收紧到 wrapper.py 一个 PID 上，由 wrapper
+        自己在 SIGTERM handler 里枚举本 job cgroup，按 /proc/<pid>/status
+        的 NSpid 字段筛出 user 容器内进程（子 PID namespace 内、且不是容器
+        PID 1），对它们 kill(2) —— 容器基础设施不被信号、user-script bash
+        装的 `trap '' TERM` 把 SIG_IGN 通过 POSIX exec 继承给 user 进程，
+        user 代码 signal.signal(SIGTERM, …) 装 handler 自然覆盖。详见
+        _wrapper_template.py 的 _signal_user_processes 与 user-script
+        渲染逻辑。
         """
         command = [
             "scancel",
             f"--signal={signal_name}",
-            "--full",
+            "--batch",
             slurm_job_id,
         ]
 
