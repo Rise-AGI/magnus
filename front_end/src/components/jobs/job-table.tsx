@@ -69,7 +69,7 @@ export function JobTable({
             <div
               key={job.id}
               onClick={() => router.push(buildFromHref(`/jobs/${job.id}`))}
-              className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
+              className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 cursor-pointer active:bg-zinc-800/60 active:scale-[0.99] transition-all"
             >
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="min-w-0 flex-1">

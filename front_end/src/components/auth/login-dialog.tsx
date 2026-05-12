@@ -76,18 +76,18 @@ export function LoginDialog() {
           )}
         </div>
 
-        <div className="bg-zinc-900/50 px-6 py-4 flex items-center justify-between border-t border-zinc-800/50">
+        <div className="bg-zinc-900/50 px-6 py-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800/50">
           <button
             onClick={() => setShowTokenInput(!showTokenInput)}
-            className="text-xs text-transparent hover:text-zinc-500 transition-colors cursor-pointer"
+            className="shrink-0 whitespace-nowrap text-xs text-transparent hover:text-zinc-500 transition-colors cursor-pointer"
           >
             {showTokenInput ? t("common.cancel") : t("auth.tokenLogin")}
           </button>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={closeDialog}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+              className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
             >
               {t("common.cancel")}
             </button>
@@ -95,7 +95,7 @@ export function LoginDialog() {
               <button
                 onClick={handleTokenLogin}
                 disabled={isLoggingIn || tokenValue.length !== MAGNUS_TOKEN_LENGTH}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoggingIn && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t("auth.tokenLoginButton")}
@@ -103,7 +103,7 @@ export function LoginDialog() {
             ) : (
               <button
                 onClick={loginWithFeishu}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2"
+                className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2"
               >
                 <LogIn className="w-4 h-4" />
                 {t("auth.signInWithFeishu")}

@@ -226,20 +226,20 @@ export function Header() {
               )}
             </div>
 
-            <div className="bg-zinc-900/50 px-6 py-4 flex items-center justify-between border-t border-zinc-800/50">
+            <div className="bg-zinc-900/50 px-6 py-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800/50">
               {/* Hidden "Edit Token" button — only visible on hover */}
               <button
                 onClick={() => setShowCustomInput(!showCustomInput)}
-                className="text-xs text-transparent hover:text-zinc-500 transition-colors cursor-pointer"
+                className="shrink-0 whitespace-nowrap text-xs text-transparent hover:text-zinc-500 transition-colors cursor-pointer"
               >
                 {showCustomInput ? t("common.cancel") : t("header.editToken")}
               </button>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <button
                   onClick={closeResetDialog}
                   disabled={isRefreshing || isSavingCustom}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                  className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50"
                 >
                   {t("common.cancel")}
                 </button>
@@ -247,7 +247,7 @@ export function Header() {
                   <button
                     onClick={handleSaveCustomToken}
                     disabled={isSavingCustom || customToken.length !== MAGNUS_TOKEN_LENGTH}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isSavingCustom && <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
                     {t("header.saveCustomToken")}
@@ -256,7 +256,7 @@ export function Header() {
                   <button
                     onClick={handleRefreshToken}
                     disabled={isRefreshing}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-500 border border-red-500/50 shadow-lg shadow-red-900/20 transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                    className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-500 border border-red-500/50 shadow-lg shadow-red-900/20 transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                   >
                     {isRefreshing && <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
                     {t("header.resetToken")}

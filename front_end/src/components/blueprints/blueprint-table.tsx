@@ -7,6 +7,7 @@ import { formatBeijingTime } from "@/lib/utils";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { useLanguage } from "@/context/language-context";
 import { Blueprint } from "@/types/blueprint";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -57,7 +58,7 @@ export function BlueprintTable({
           <div
             key={bp.id}
             onClick={() => router.push(buildFromHref(`/blueprints/${bp.id}`))}
-            className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
+            className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 cursor-pointer active:bg-zinc-800/60 active:scale-[0.99] transition-all"
           >
             <div className="flex items-start justify-between gap-2 mb-2">
               <div className="min-w-0 flex-1">
@@ -68,9 +69,11 @@ export function BlueprintTable({
             {bp.description && (
               <p className="text-zinc-400 text-xs leading-relaxed line-clamp-2 mb-3">{bp.description}</p>
             )}
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-500">{formatBeijingTime(bp.updated_at)}</span>
-              <div className="flex gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                {bp.user && <UserAvatar user={bp.user} subText={formatBeijingTime(bp.updated_at)} />}
+              </div>
+              <div className="flex gap-2 shrink-0">
                 <button onClick={(e) => { e.stopPropagation(); onClone(bp); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95" title={t("blueprints.clone")}>
                   <RefreshCw className="w-4 h-4" />
                 </button>

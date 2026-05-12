@@ -264,25 +264,25 @@ export default function JobDetailsPage() {
       `}</style>
 
       {/* Top Navigation */}
-      <div className="mb-8">
+      <div className="mb-6 md:mb-8">
         <button
           onClick={() => goBack()}
-          className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors text-sm mb-6 group"
+          className="inline-flex md:flex items-center gap-2 -ml-2 px-2 py-2 rounded-lg text-zinc-400 hover:text-white active:bg-zinc-800 transition-colors text-sm mb-3 md:mb-6 md:-ml-0 md:px-0 md:py-0 md:rounded-none md:active:bg-transparent group"
         >
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
           {backLabel}
         </button>
 
         {/* Header Section */}
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-          <div className="flex-1 min-w-0 pr-8">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 md:gap-6">
+          <div className="flex-1 min-w-0 md:pr-8">
 
             {/* Task Name & Priority */}
-            <div className="flex items-center gap-4 mb-3 group">
+            <div className="flex items-center gap-3 md:gap-4 mb-2 md:mb-3 group">
               <CopyableText
                 text={job.task_name}
                 variant="text"
-                className="!w-auto text-3xl font-bold text-white tracking-tight leading-tight"
+                className="!w-auto text-xl md:text-3xl font-bold text-white tracking-tight leading-tight"
               />
               <div className="flex-shrink-0">
                 <JobPriorityBadge type={job.job_type} />
@@ -290,12 +290,12 @@ export default function JobDetailsPage() {
             </div>
 
             {/* ID & Time */}
-            <div className="flex items-center gap-1 text-sm text-zinc-500 font-mono">
+            <div className="flex flex-wrap md:flex-nowrap items-center gap-1 text-xs md:text-sm text-zinc-500 font-mono">
               <div className="flex items-center gap-2">
                 <span className="text-zinc-600">ID:</span>
                 <CopyableText text={job.id} variant="id" />
               </div>
-              <span className="text-zinc-700">|</span>
+              <span className="text-zinc-700 hidden md:inline">|</span>
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
                 {formatBeijingTime(job.created_at)}

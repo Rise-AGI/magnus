@@ -7,6 +7,7 @@ import { Service } from "@/types/service";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { formatBeijingTime } from "@/lib/utils";
 import { useLanguage } from "@/context/language-context";
@@ -62,7 +63,7 @@ export function ServiceTable({
             <div
               key={svc.id}
               onClick={() => router.push(buildFromHref(`/services/${svc.id}`))}
-              className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 active:bg-zinc-800/60 transition-colors"
+              className="border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 cursor-pointer active:bg-zinc-800/60 active:scale-[0.99] transition-all"
             >
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="min-w-0 flex-1">
@@ -82,9 +83,11 @@ export function ServiceTable({
               {svc.description && (
                 <p className="text-zinc-400 text-xs leading-relaxed line-clamp-2 mb-3">{svc.description}</p>
               )}
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-zinc-500">{formatBeijingTime(svc.updated_at)}</span>
-                <div className="flex gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  {svc.owner && <UserAvatar user={svc.owner} subText={formatBeijingTime(svc.updated_at)} />}
+                </div>
+                <div className="flex gap-2 shrink-0">
                   <button onClick={(e) => { e.stopPropagation(); onClone(svc); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95">
                     <RefreshCw className="w-4 h-4" />
                   </button>

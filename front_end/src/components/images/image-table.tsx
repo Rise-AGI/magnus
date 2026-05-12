@@ -6,6 +6,7 @@ import { formatBeijingTime } from "@/lib/utils";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { useLanguage } from "@/context/language-context";
 import { User } from "@/types/auth";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -105,10 +106,25 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                 </span>
                 <span className="text-xs text-zinc-500 font-mono">{formatSize(img.size_bytes)}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-zinc-500">{img.updated_at ? formatBeijingTime(img.updated_at) : "-"}</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  {img.user ? (
+                    <UserAvatar
+                      user={{
+                        id: img.user.id,
+                        name: img.user.name,
+                        feishu_open_id: "",
+                        email: img.user.email || undefined,
+                        avatar_url: img.user.avatar_url || undefined,
+                      } as User}
+                      subText={img.updated_at ? formatBeijingTime(img.updated_at) : "-"}
+                    />
+                  ) : (
+                    <span className="text-xs text-zinc-500">{img.updated_at ? formatBeijingTime(img.updated_at) : "-"}</span>
+                  )}
+                </div>
                 {img.id !== null && (
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 shrink-0">
                     <button
                       onClick={() => onView(img)}
                       className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95"
