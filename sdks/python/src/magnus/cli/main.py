@@ -1,8 +1,19 @@
 # sdks/python/src/magnus/cli/main.py
 import sys
 import re
+import signal
 import logging
 from .commands import app
+
+
+def _restore_default_sigpipe():
+    # Python intercepts SIGPIPE and re-raises it as BrokenPipeError + exit
+    # code 1, which makes `magnus ... | head` look like a failure under
+    # `set -o pipefail`. Restoring SIG_DFL lets the kernel terminate us
+    # with the conventional 141, matching git/kubectl/cat behavior.
+    # SIGPIPE does not exist on Windows.
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
 def _ensure_utf8_stdio():
@@ -35,6 +46,7 @@ def _preprocess_argv():
 
 
 def main():
+    _restore_default_sigpipe()
     _ensure_utf8_stdio()
     logging.getLogger("magnus").setLevel(logging.ERROR)
     _preprocess_argv()
