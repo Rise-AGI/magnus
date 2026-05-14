@@ -55,10 +55,13 @@ class _ResourceQueryMixin:
                     except (ValueError, IndexError):
                         pass
 
-            # 步骤 2：squeue 解析 RUNNING 任务的 GPU 申请总和得到当前总占用
+            # 步骤 2：squeue 解析 RUNNING + COMPLETING 任务的 GPU 申请总和得到当前总占用。
+            # COMPLETING (CG) 阶段 SLURM 物理上仍把 GPU 算 Alloc 不释放给新 job，
+            # 必须计入 used，否则 cluster snapshot 的 slurm_used_gpus 会在 epilog
+            # 跑期间瞬时低估，跟 check_job_status (CG → RUNNING) 的语义错位。
             usage_command = [
                 "squeue",
-                "--states=RUNNING",
+                "--states=RUNNING,COMPLETING",
                 "--noheader",
                 "--format=%D %b",
             ]
@@ -213,16 +216,21 @@ class _ResourceQueryMixin:
             return "UNKNOWN"
 
     def get_all_running_tasks(self) -> List[Dict]:
-        """获取所有正在运行的 SLURM 任务详情。
+        """获取所有正在运行 / 收尾中的 SLURM 任务详情。
+
+        包含 RUNNING 与 COMPLETING：CG 阶段 SLURM 物理上仍占 GPU 不释放，且本类
+        ``check_job_status`` 也把 CG 映射到 RUNNING；这里跟它对齐，避免 cluster
+        endpoint 跟 sync_reality 对同一个 job 给出 "已释放 vs 仍在跑" 的不一致快照。
+        epilog 较长（如做单卡 reset 兜底）时 CG 会停留数十秒，否则瞬时不可见。
 
         关键坑点：SLURM job-completion caching 让 ``squeue --json`` 可能返回内存中
         残留的已结束任务（即便用了 ``--states`` 过滤）。代码层面必须再显式检查
-        ``job_state`` 是否真的包含 "RUNNING"，不能信任 SLURM 自己的过滤。
+        ``job_state`` 是否真的命中 RUNNING / COMPLETING，不能信任 SLURM 自己的过滤。
         """
         default_gpu_model = "rtx5090"
         command = [
             "squeue",
-            "--states=RUNNING",
+            "--states=RUNNING,COMPLETING",
             "--json",
         ]
 
@@ -240,7 +248,7 @@ class _ResourceQueryMixin:
             for job in data.get("jobs", []):
                 try:
                     states = job.get("job_state", [])
-                    if "RUNNING" not in states:
+                    if "RUNNING" not in states and "COMPLETING" not in states:
                         continue
 
                     job_id = str(job.get("job_id"))
