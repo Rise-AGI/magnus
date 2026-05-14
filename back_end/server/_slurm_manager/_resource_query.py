@@ -7,7 +7,34 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Tuple
 
+from .._magnus_config import magnus_config
 from . import logger
+
+
+def _resolve_default_gpu_model() -> str:
+    """squeue 解析失败时的 GPU 类型 fallback。优先取 magnus_config 配置的第一
+    个 GPU 的 ``value`` 字段（如 "rtx5090" / "a100"）；缺失或异常 fallback
+    "unknown"。
+
+    历史教训：之前硬编码 "rtx5090"（只 work 在 liustation），换 zhustation
+    (a100) 后 cluster endpoint 把无法识别 gpu_type 的 SLURM job 显示成 rtx5090
+    误导用户。读站点 config 让 fallback 跟着站点走。
+
+    取 ``value`` 而非 ``label`` 是为了跟成功解析路径在下游 ``cluster.py`` 经
+    ``.lower().replace(" ","")`` 规范化后**等价**：成功路径 gres_detail 解析
+    给 "A100" / "RTX 5090"，规范化后 "a100" / "rtx5090"；本 fallback 直接给
+    "a100" / "rtx5090"，规范化幂等。如果取 ``label`` ("NVIDIA GeForce RTX 5090")
+    会被规范化成 "nvidiageforcertx5090"，跟前端 PHYSICAL_GPUS 枚举完全对不上。
+    """
+    try:
+        gpus = magnus_config.get("cluster", {}).get("gpus") or []
+        if gpus and isinstance(gpus[0], dict):
+            value = gpus[0].get("value")
+            if value:
+                return str(value).lower()
+    except Exception:
+        pass
+    return "unknown"
 
 
 def _unwrap_slurm_int(value) -> int:
@@ -170,6 +197,58 @@ class _ResourceQueryMixin:
                 mem_total_mb = 0,
             )
 
+    def has_schedulable_node(self) -> bool:
+        """集群里是否至少有一个节点处于可调度状态。
+
+        可调度 = base state ∈ {IDLE, MIXED, ALLOCATED} 且无 DRAIN/DOWN/MAINT/FAIL/
+        REBOOT 修饰。给 submit 入口的 precheck 用：杜绝节点全部 drain/reboot 期间
+        用户提交"看似成功但永不开始"的 ghost job (前端反复点提交都返回 200，DB 堆
+        积一片 PENDING，cluster 视图被污染)。
+
+        失败时 fail-open 返回 True：让 SLURM 自己 PENDING 兜底，不引入新故障路径。
+        """
+        try:
+            result = subprocess.run(
+                [
+                    "scontrol",
+                    "show",
+                    "node",
+                    "--oneliner",
+                ],
+                capture_output = True,
+                text = True,
+                check = True,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            logger.warning(f"has_schedulable_node fail-open: scontrol failed: {error}")
+            return True
+
+        bad_modifiers = {
+            "DRAIN", "DRAINING", "DRAINED",
+            "DOWN", "DOWNED",
+            "MAINT",
+            "FAIL", "FAILING",
+            "REBOOT_REQUESTED", "REBOOT_ISSUED",
+            "NOT_RESPONDING",
+        }
+        ok_base = {"IDLE", "MIXED", "ALLOCATED"}
+
+        for line in result.stdout.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            for token in line.split():
+                if not token.startswith("State="):
+                    continue
+                state = token.split('=', 1)[1].upper()
+                base = state.split('+')[0]
+                modifiers = set(state.split('+')[1:])
+                if base in ok_base and not (modifiers & bad_modifiers):
+                    return True
+                break
+
+        return False
+
     def get_cluster_free_gpus(self) -> int:
         cap, alloc = self._get_capacity_and_usage()
         return max(0, cap - alloc)
@@ -233,7 +312,7 @@ class _ResourceQueryMixin:
         残留的已结束任务（即便用了 ``--states`` 过滤）。代码层面必须再显式检查
         ``job_state`` 是否真的命中 RUNNING / COMPLETING，不能信任 SLURM 自己的过滤。
         """
-        default_gpu_model = "rtx5090"
+        default_gpu_model = _resolve_default_gpu_model()
         command = [
             "squeue",
             "--states=RUNNING,COMPLETING",

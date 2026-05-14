@@ -22,7 +22,7 @@ from .. import database
 from .. import models
 from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
-from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, validate_cluster_limits
+from .._magnus_config import magnus_config, is_admin_user, is_local_mode, apply_cluster_defaults, validate_cluster_limits
 from .._scheduler import scheduler
 from .auth import get_current_user
 from library import escape_like
@@ -43,10 +43,24 @@ def create_job(
     """
     共享的 Job 创建逻辑。
     SDK /jobs/submit 和 Blueprint /run 都收敛到这里。
-    负责：填充集群默认值、校验资源上限、创建 ORM 对象、写入数据库。
+    负责：填充集群默认值、校验资源上限、节点可用性 precheck、创建 ORM 对象、写入数据库。
     """
     apply_cluster_defaults(job_dict)
     validate_cluster_limits(job_dict)
+
+    # 节点可用性 precheck：杜绝节点全部 drain/down/reboot 期间用户提交"看似成功
+    # 但永远 PENDING"的 ghost job——前端反复点提交都返回 200、SDK 用户脚本累积一片
+    # PENDING、cluster 视图被污染。SLURM 模式下走 has_schedulable_node()；local
+    # 模式无此概念跳过。失败时 has_schedulable_node 自身 fail-open，不会引入新故障。
+    if not is_local_mode and scheduler.slurm_manager is not None:
+        if not scheduler.slurm_manager.has_schedulable_node():
+            raise HTTPException(
+                status_code = 503,
+                detail = (
+                    "No schedulable node available (all nodes are drain/down/maint/reboot). "
+                    "请等节点恢复 IDLE 后重试。"
+                ),
+            )
 
     db_job = models.Job(
         **job_dict,
