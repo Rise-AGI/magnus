@@ -307,7 +307,7 @@ export default function JobDetailsPage() {
           {/* Status Card */}
           <div className="flex flex-col md:flex-row md:items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-4 md:px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
             <div className="flex items-center gap-4">
-              <JobStatusBadge status={job.status} size="md" />
+              <JobStatusBadge status={job.status} isReleasing={job.is_releasing} size="md" />
               <div className="flex flex-col">
                 <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.status")}</span>
                 <span className={`text-base font-bold tracking-wide
@@ -357,8 +357,11 @@ export default function JobDetailsPage() {
                   <Send className="w-5 h-5" />
                 </button>
               )}
-              {/* Terminate Button */}
-              {(user?.id === job.user?.id || user?.is_admin) && ["Pending", "Preparing", "Running", "Paused"].includes(job.status) && (
+              {/* Terminate Button：inflight release (is_releasing) 时隐藏，避免用户对
+                  自己已 cancel、SLURM 仍在 CG 收尾的 job 重复点 cancel 而困惑。 */}
+              {(user?.id === job.user?.id || user?.is_admin)
+                && ["Pending", "Preparing", "Running", "Paused"].includes(job.status)
+                && !job.is_releasing && (
                 <button
                   onClick={() => onClickTerminate(job)}
                   className="ml-2 p-2 bg-red-950/30 hover:bg-red-900/50 text-red-400 hover:text-red-300 rounded-lg transition-colors border border-red-900/30"

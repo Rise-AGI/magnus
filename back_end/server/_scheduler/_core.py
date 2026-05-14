@@ -100,7 +100,19 @@ class MagnusScheduler(
 
         self._clean_up_working_table(job.id)
         job.status = JobStatus.TERMINATED
-        job.slurm_job_id = None
+        if is_local_mode:
+            # Docker 模式没有 SLURM 那种 CG 收尾窗口，stop_container +
+            # remove_container 已同步完成，slurm_job_id (实际存的是
+            # container_name) 立即清空，跟 _sync_reality_docker 的清理路径一致。
+            job.slurm_job_id = None
+        # else (SLURM): slurm_job_id 不在这里清空。scancel 后 SLURM job 进入
+        # CG (COMPLETING) 阶段跑 epilog（含 GPU reset 等），可能持续数十秒。
+        # 期间 cluster endpoint 看 squeue 还能见到这个 slurm_job_id，若 magnus
+        # 端立即清空，cluster 的 magnus_job_map 找不到映射，会把该 inflight job
+        # 错显示成 external "(slurm)" 任务，让用户怀疑是绕过 magnus 的越权提交。
+        # 改由 _sync_reality_slurm 在 SLURM 真正报
+        # COMPLETED/FAILED/CANCELLED/TIMEOUT 后清空，跟 RUNNING → 终态的清理
+        # 路径一致。
         job.start_time = None
         db.commit()
 

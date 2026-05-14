@@ -131,10 +131,15 @@ def get_cluster_stats(
         slurm_id = task["id"]
 
         if slurm_id in magnus_job_map:
-            # Case A: Magnus 任务
+            # Case A: Magnus 任务。直接用 DB 真实 status，不强制改写为 RUNNING：
+            # slurm_job_id 持有 ⇔ SLURM 端仍占资源 (见 models/_job.py docstring)，
+            # 而 SLURM 端占资源 ≠ "用户视角下还在跑"——TERMINATED / PAUSED 状态
+            # 的 job 在 SLURM CG (COMPLETING) 阶段也持有 slurm_job_id，强制改成
+            # RUNNING 会让用户看到"我刚 cancel 的 job 仍在 RUNNING 30-60s"，比
+            # 老 bug "显示成 external" 体感更怪。让真实 status 透传，前端可以
+            # 据此呈现 "Terminated (releasing)" 等复合语义。
             job_orm = magnus_job_map[slurm_id]
             job_resp = JobResponse.model_validate(job_orm)
-            job_resp.status = JobStatus.RUNNING
             all_running_jobs.append(job_resp)
 
         else:

@@ -4,11 +4,16 @@ import { useLanguage } from "@/context/language-context";
 
 interface JobStatusBadgeProps {
   status: string;
+  // 直接消费后端 JobResponse.is_releasing computed field：scancel 已发但 SLURM
+  // 还在 CG (COMPLETING) 收尾的 inflight 子态。后端语义详见 back_end
+  // schemas/_job.py JobResponse.is_releasing。前端不要在这里重新推断（避免
+  // 多 surface 漏接同步）。
+  isReleasing?: boolean;
   size?: "sm" | "md";
   animate?: boolean;
 }
 
-export function JobStatusBadge({ status, size = "sm", animate = true }: JobStatusBadgeProps) {
+export function JobStatusBadge({ status, isReleasing = false, size = "sm", animate = true }: JobStatusBadgeProps) {
   const { t } = useLanguage();
 
   const config = {
@@ -25,21 +30,32 @@ export function JobStatusBadge({ status, size = "sm", animate = true }: JobStatu
   const Icon = config.icon;
   // status 是运行时动态值，无法满足 TranslationKey 字面量类型
   const displayText = t(`jobStatus.${status.toLowerCase()}` as any) || status;
+  const releasingText = t("jobStatus.releasing");
 
   if (size === "md") {
-    const shouldAnimate = animate && (status === 'Running' || status === 'Preparing');
-    return <Icon className={`w-5 h-5 ${config.color} ${shouldAnimate ? 'animate-pulse' : ''}`} />;
+    const shouldAnimate = animate && (status === 'Running' || status === 'Preparing' || isReleasing);
+    return (
+      <div className="flex items-center gap-2">
+        <Icon className={`w-5 h-5 ${config.color} ${shouldAnimate ? 'animate-pulse' : ''}`} />
+        {isReleasing && (
+          <span className={`text-xs font-medium ${config.color} opacity-70`}>· {releasingText}</span>
+        )}
+      </div>
+    );
   }
 
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border shadow-sm ${config.bg} ${config.color} ${config.border}`}>
-      {(status === 'Running' || status === 'Preparing') && animate && (
+      {(status === 'Running' || status === 'Preparing' || isReleasing) && animate && (
         <span className="relative flex h-1.5 w-1.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-current"></span>
           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-current"></span>
         </span>
       )}
       {displayText}
+      {isReleasing && (
+        <span className="ml-1 opacity-70">· {releasingText}</span>
+      )}
     </span>
   );
 }

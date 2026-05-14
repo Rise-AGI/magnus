@@ -207,7 +207,7 @@ export default function ServiceDetailsPage() {
         onClick={() => router.push(buildFromHref(`/jobs/${service.current_job!.id}`))}
         className="cursor-pointer hover:opacity-80 transition-opacity"
       >
-        <JobStatusBadge status={currentJobStatus!} size="md" />
+        <JobStatusBadge status={currentJobStatus!} isReleasing={service.current_job?.is_releasing} size="md" />
       </div>
     );
   } else {

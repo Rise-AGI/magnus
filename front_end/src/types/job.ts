@@ -25,4 +25,8 @@ export interface Job {
   system_entry_command: string;
   result?: string;
   action?: string;
+  // True ⇔ scancel 已发但 SLURM CG 还在持有资源（详见后端 schemas/_job.py
+  // JobResponse.is_releasing computed field）。前端拿来直接做 UX 决策，避免
+  // 重复实现 `status × slurm_job_id` 组合推断。
+  is_releasing?: boolean;
 }

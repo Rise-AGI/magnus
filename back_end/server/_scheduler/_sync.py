@@ -34,8 +34,21 @@ class _SyncMixin(_SyncMixinBase):
 
             # Phase 2 — 写快照（短 session）
             with SessionLocal() as db:
-                running_jobs = db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
-                magnus_usage = sum(job.gpu_count for job in running_jobs)
+                # magnus_usage 包含 RUNNING 与 inflight release (TERMINATED/PAUSED
+                # 且 slurm_job_id 非空)：后者 SLURM 仍在 CG 持有 GPU，从历史趋势
+                # 视角属 magnus 而非 external，否则 epilog 期间会出现 30-60s 的
+                # "magnus 用量假凹"，且让 slurm_used_gpus - magnus_used_gpus 误
+                # 暗示 external 占用激增。跟 cluster endpoint used_gpus 派生口径
+                # 对齐（详见 routers/cluster.py 与 JobResponse.is_releasing）。
+                holding_jobs = db.query(Job).filter(
+                    Job.slurm_job_id.isnot(None),
+                    Job.status.in_([
+                        JobStatus.RUNNING,
+                        JobStatus.TERMINATED,
+                        JobStatus.PAUSED,
+                    ]),
+                ).all()
+                magnus_usage = sum(job.gpu_count for job in holding_jobs)
 
                 snapshot = ClusterSnapshot(
                     total_gpus = slurm_stats["total_gpus"],
@@ -210,6 +223,19 @@ class _SyncMixin(_SyncMixinBase):
                 (job.id, job.slurm_job_id)
                 for job in db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
             ]
+            # ``TERMINATED`` / ``PAUSED`` 且 slurm_job_id 仍在的 job 处于 inflight
+            # release 阶段：terminate_job / _kill_and_pause 已经发了 scancel 但
+            # SLURM 还在 CG (COMPLETING) 跑 epilog。这里 poll 直到 SLURM 报终态
+            # 才清 slurm_job_id，让 cluster endpoint 在 CG 期间仍能匹配 magnus
+            # 关联（不显示成 external），并让 PAUSED 走到 Phase 2.5 resubmit 时
+            # 旧 SLURM 资源已确实释放。
+            inflight_release_info = [
+                (job.id, job.slurm_job_id, job.status)
+                for job in db.query(Job).filter(
+                    Job.status.in_([JobStatus.TERMINATED, JobStatus.PAUSED]),
+                    Job.slurm_job_id.isnot(None),
+                ).all()
+            ]
 
         # Phase 2 — SLURM 状态检查（无 session）
         slurm_statuses = {}
@@ -217,6 +243,9 @@ class _SyncMixin(_SyncMixinBase):
             if slurm_job_id:
                 assert self.slurm_manager is not None
                 slurm_statuses[job_id] = self.slurm_manager.check_job_status(slurm_job_id)
+        for job_id, slurm_job_id, _ in inflight_release_info:
+            assert self.slurm_manager is not None
+            slurm_statuses[job_id] = self.slurm_manager.check_job_status(slurm_job_id)
 
         # Phase 3 — 批量更新（短 session）
         with SessionLocal() as db:
@@ -291,5 +320,26 @@ class _SyncMixin(_SyncMixinBase):
                             self._clean_up_working_table(job.id)
                 except Exception as error:
                     logger.error(f"Failed to sync RUNNING job {job_id}: {error}")
+
+            for job_id, slurm_job_id, original_status in inflight_release_info:
+                try:
+                    job = db.query(Job).filter(Job.id == job_id).first()
+                    if job is None:
+                        continue
+                    # 中途 status 已被改写（如 PAUSED → PREPARING by Phase 2.5）
+                    # 或 slurm_job_id 已被覆盖（如 _submit_to_slurm 写新 id），
+                    # 跳过——本批 inflight 快照的前提条件不再成立。
+                    if job.status != original_status or job.slurm_job_id != slurm_job_id:
+                        continue
+
+                    real_status = slurm_statuses.get(job_id)
+                    if real_status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"):
+                        # SLURM 已真正释放资源，可以清 slurm_job_id；status 保持
+                        # 不变（TERMINATED 是终态、PAUSED 等待 Phase 2.5 resubmit）。
+                        job.slurm_job_id = None
+                    # 其他情况（CG 仍在跑，check_job_status 把 CG 映射到 RUNNING）
+                    # 保留 slurm_job_id 等下个 tick 再检查。
+                except Exception as error:
+                    logger.error(f"Failed to sync inflight-release job {job_id}: {error}")
 
             db.commit()

@@ -468,6 +468,7 @@ const translations = {
   "jobStatus.pending": { zh: "排队中", en: "Pending" },
   "jobStatus.preparing": { zh: "准备中", en: "Preparing" },
   "jobStatus.terminated": { zh: "已终止", en: "Terminated" },
+  "jobStatus.releasing": { zh: "释放中", en: "Releasing" },
 
   // ===== Job Detail - Header =====
   "jobDetail.status": { zh: "状态", en: "Status" },

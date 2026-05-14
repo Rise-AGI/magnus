@@ -2,7 +2,7 @@
 """Job submission / response schemas."""
 from datetime import datetime
 from typing import Any, List, Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, computed_field, field_validator
 
 from ..models import JobType, JobStatus
 from ._user import UserInfo
@@ -54,6 +54,19 @@ class JobResponse(JobSubmission):
         if v == JobStatus.QUEUED or v == "Queued":
             return JobStatus.PENDING
         return v
+
+    @computed_field
+    @property
+    def is_releasing(self) -> bool:
+        """``True`` ⇔ scancel 已发但 SLURM 还在 CG (COMPLETING) 阶段持有资源
+        （SLURM 模式 inflight 子态，详见 ``models/_job.py`` JobStatus docstring）。
+
+        在后端这里集中派生避免前端 / SDK 各处重复 ``status × slurm_job_id`` 推断
+        而漏掉某个 surface（review 里已经踩过 4 处遗漏）。前端直接读这个字段做
+        UX 决策（badge 显示 "Releasing"、隐藏重复终结按钮等）。Docker (local)
+        模式下 terminate_job 立即清 slurm_job_id，所以这里恒为 ``False``。
+        """
+        return self.slurm_job_id is not None and self.status in (JobStatus.TERMINATED, JobStatus.PAUSED)
 
 
 class PagedJobResponse(BaseModel):

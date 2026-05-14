@@ -74,7 +74,7 @@ export function ServiceTable({
                   {!svc.is_active ? (
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-500 border border-zinc-700">{t("services.inactive")}</span>
                   ) : isJobAlive ? (
-                    <div className="scale-90"><JobStatusBadge status={svc.current_job!.status} /></div>
+                    <div className="scale-90"><JobStatusBadge status={svc.current_job!.status} isReleasing={svc.current_job!.is_releasing} /></div>
                   ) : (
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20">{t("services.idle")}</span>
                   )}
@@ -151,7 +151,7 @@ export function ServiceTable({
                   // Active Job Running
                   statusNode = (
                     <div className="scale-90">
-                      <JobStatusBadge status={currentStatus} />
+                      <JobStatusBadge status={currentStatus} isReleasing={svc.current_job?.is_releasing} />
                     </div>
                   );
                 } else {

@@ -80,6 +80,9 @@ export default function ClusterPage() {
       // scheduler 还没把 DB 推到 RUNNING 时，同一 job 会以 SLURM=Running、DB=Pending/Preparing
       // 的形态同时出现在两个 panel。两次 fetch 同一前端轮询里完成，时间窗口几乎重合，
       // 用 cluster.running 的 slurm_job_id 集合反向覆盖 my-active 状态即可消除矛盾。
+      // 注意：inflight release (is_releasing) 的 job 不能反向覆盖——它的 slurm_id 在
+      // squeue 里只是 SLURM CG 收尾未释放，magnus DB 已经标 TERMINATED/PAUSED 是真相，
+      // 强制改 Running 会让用户看到自己刚 cancel 的 job 又"复活"。
       const slurmRunningIds = new Set<string>(
         ((clusterData?.running_jobs ?? []) as Job[])
           .map(job => job.slurm_job_id)
@@ -91,6 +94,7 @@ export default function ClusterPage() {
           job.slurm_job_id
           && slurmRunningIds.has(job.slurm_job_id)
           && job.status !== "Running"
+          && !job.is_releasing
             ? { ...job, status: "Running" }
             : job
         );

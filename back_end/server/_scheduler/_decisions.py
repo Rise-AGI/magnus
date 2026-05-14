@@ -96,8 +96,16 @@ class _DecisionsMixin(_DecisionsMixinBase):
                         failed_job.result = f"Resource preparation crashed: {exc}"
                         db.commit()
 
-            # Phase 2.5: 抢占恢复 — PAUSED 任务重新准备资源（镜像/仓库在抢占时已被清理）
-            paused_jobs = db.query(Job).filter(Job.status == JobStatus.PAUSED).all()
+            # Phase 2.5: 抢占恢复 — PAUSED 任务重新准备资源（镜像/仓库在抢占时已被清理）。
+            # `slurm_job_id IS NULL` 过滤把 SLURM 仍在 CG (COMPLETING) 阶段释放
+            # 旧 step 的 paused job 排除掉——那种 job slurm_id 还在，资源未真正
+            # 释放，立即 resubmit 会让旧+新两个 SLURM step 同时占资源 + 让 cluster
+            # endpoint 在新 slurm_id 写入后丢失旧 slurm_id 的 magnus 关联。等
+            # _sync_reality_slurm 在 SLURM 真正释放后清空 slurm_job_id 才进这里。
+            paused_jobs = db.query(Job).filter(
+                Job.status == JobStatus.PAUSED,
+                Job.slurm_job_id.is_(None),
+            ).all()
             for job in paused_jobs:
                 job.status = JobStatus.PREPARING
                 logger.info(f"Job {job.id} re-entering preparation after preemption")
@@ -231,6 +239,13 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
         self._clean_up_working_table(job.id)
         job.status = JobStatus.PAUSED
-        job.slurm_job_id = None
+        # slurm_job_id 不在这里清空：scancel 后 SLURM job 进入 CG (COMPLETING)
+        # 阶段跑 epilog（含 GPU reset 等），可能持续数十秒。期间 cluster endpoint
+        # 看 squeue 还能见到这个 slurm_job_id，若 magnus 端立即清空，cluster 的
+        # magnus_job_map 找不到映射，会把该 inflight job 错显示成 external "(slurm)"
+        # 任务。同时若 _make_decisions Phase 2.5 立即 resubmit，旧 SLURM step
+        # 仍在 hold 资源，新 step 无法调度且新 slurm_id 写入后旧 slurm_id 永久
+        # 丢失 magnus 关联。改由 _sync_reality_slurm 在 SLURM 真正报终态后清空，
+        # Phase 2.5 用 `slurm_job_id IS None` 过滤等真正释放再 resubmit。
         job.start_time = None
         db.commit()
