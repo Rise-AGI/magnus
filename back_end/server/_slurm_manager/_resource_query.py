@@ -10,19 +10,32 @@ from typing import Dict, List, Tuple
 from . import logger
 
 
+def _unwrap_slurm_int(value) -> int:
+    """SLURM 24+ JSON 把 int 字段包成 ``{"set": bool, "infinite": bool, "number": N}``，
+    21.x 还是直接 int。统一解包成 int 兼容两种 schema；解析失败或缺失返回 0。
+    """
+    if isinstance(value, dict):
+        return value.get("number") or 0
+    if isinstance(value, int):
+        return value
+    return 0
+
+
 @dataclass(frozen=True)
 class NodeSnapshot:
-    """一次 ``scontrol show node`` 解析得到的全部静态/动态资源数字。
+    """一次 ``scontrol show node`` 解析得到的容量数字。
 
-    Cluster stats endpoint 用这个快照让 GPU 总量、CPU、内存来自同一时刻的
-    SLURM 视图，避免分别查询带来的 race（free + used ≠ total）。
+    只暴露静态容量 (total_gpus / cpu_total / mem_total_mb)。alloc 维度必须从
+    ``get_all_running_tasks`` 的 job-level squeue 数字派生 (见 cluster.py /
+    _decisions.py)，而非 scontrol 的 CPUAlloc / AllocMem 字段——后者在
+    SLURM job 进入 COMPLETING (CG) 状态时立即清零，但 squeue 视角下 job
+    仍持有 cpu / mem (跟 GPU 行为一致)。把 alloc 三维度统一从 squeue 派生
+    可消除 SLURM 自身两套数据源在 CG 期间的内部错位。
     """
 
     total_gpus: int
     cpu_total: int
-    cpu_alloc: int
     mem_total_mb: int
-    mem_alloc_mb: int
 
 
 class _ResourceQueryMixin:
@@ -99,11 +112,11 @@ class _ResourceQueryMixin:
             return 0, 0
 
     def get_node_snapshot(self) -> NodeSnapshot:
-        """单次 ``scontrol show node`` 同时拉 GPU 容量 / CPU / 内存。
+        """单次 ``scontrol show node`` 拉容量数字 (GPU / CPU / 内存 total)。
 
-        Cluster stats endpoint 用这个快照让所有派生数字（free, used, total,
-        cpu_*, mem_*）在同一时刻的 SLURM 视图下保持自洽：``total = free + used``、
-        ``used == sum(running_jobs[*].gpu_count)``，无 race 窗口。
+        只承担 capacity 维度。alloc 维度（free / used）由调用方拿
+        ``get_all_running_tasks`` 派生 sum，全部走 squeue 的 job-level 数字以
+        跟 GPU 行为对齐——详见 ``NodeSnapshot`` 类 docstring。
         """
         try:
             result = subprocess.run(
@@ -120,10 +133,11 @@ class _ResourceQueryMixin:
 
             total_gpus = 0
             cpu_total = 0
-            cpu_alloc = 0
             mem_total = 0
-            mem_alloc = 0
 
+            # 故意只取容量 (CPUTot / RealMemory)；CPUAlloc / AllocMem 在 CG 期间
+            # 不可信，alloc 维度全部从 get_all_running_tasks 派生。详见 NodeSnapshot
+            # docstring。
             for line in result.stdout.split('\n'):
                 line = line.strip()
                 if line.startswith("Gres=") and "gpu" in line:
@@ -137,31 +151,23 @@ class _ResourceQueryMixin:
                     for part in line.split():
                         if part.startswith("CPUTot="):
                             cpu_total += int(part.split("=")[1])
-                        elif part.startswith("CPUAlloc="):
-                            cpu_alloc += int(part.split("=")[1])
                 elif line.startswith("RealMemory="):
                     # 同行布局：RealMemory=515000 AllocMem=102400 ...
                     for part in line.split():
                         if part.startswith("RealMemory="):
                             mem_total += int(part.split("=")[1])
-                        elif part.startswith("AllocMem="):
-                            mem_alloc += int(part.split("=")[1])
 
             return NodeSnapshot(
                 total_gpus = total_gpus,
                 cpu_total = cpu_total,
-                cpu_alloc = cpu_alloc,
                 mem_total_mb = mem_total,
-                mem_alloc_mb = mem_alloc,
             )
         except Exception as error:
             logger.error(f"Error querying node snapshot: {error}")
             return NodeSnapshot(
                 total_gpus = 0,
                 cpu_total = 0,
-                cpu_alloc = 0,
                 mem_total_mb = 0,
-                mem_alloc_mb = 0,
             )
 
     def get_cluster_free_gpus(self) -> int:
@@ -255,14 +261,10 @@ class _ResourceQueryMixin:
                     user = job.get("user_name")
                     name = job.get("name")
 
-                    raw_start_time = job.get("start_time")
-                    start_ts = None
-                    if isinstance(raw_start_time, dict):
-                        # 新版 SLURM 用结构体：{"number": 1234567890, ...}
-                        start_ts = raw_start_time.get("number")
-                    elif isinstance(raw_start_time, int):
-                        # 旧版 SLURM 直接给 epoch int
-                        start_ts = raw_start_time
+                    # SLURM 21.x JSON 给 int，24+ 给 {"set","infinite","number"}；
+                    # _unwrap_slurm_int 兼容两种 schema。下面 cpu / mem / node_count
+                    # 同款处理。
+                    start_ts = _unwrap_slurm_int(job.get("start_time"))
                     if start_ts:
                         start_time_str = datetime.fromtimestamp(start_ts).isoformat()
                     else:
@@ -304,6 +306,16 @@ class _ResourceQueryMixin:
                             except ValueError:
                                 pass
 
+                    # CPU / Mem 占用走 squeue (job-level)，理由见 NodeSnapshot
+                    # docstring：CG 期间这两个字段仍报 alloc，跟 GPU 行为对齐。
+                    # ``cpus`` 是 job 已分配的逻辑 CPU 总数 (跨节点之和，hyperthread
+                    # 已 round-up)；``memory_per_node`` 是单节点 mem (MB)，乘以
+                    # ``node_count`` 得 job 总 mem。
+                    cpu_count = _unwrap_slurm_int(job.get("cpus"))
+                    mem_per_node = _unwrap_slurm_int(job.get("memory_per_node"))
+                    node_count = _unwrap_slurm_int(job.get("node_count")) or 1
+                    memory_mb = mem_per_node * node_count
+
                     tasks.append({
                         "id": job_id,
                         "user": user,
@@ -311,6 +323,8 @@ class _ResourceQueryMixin:
                         "start_time": start_time_str,
                         "gpu_count": gpu_count,
                         "gpu_type": gpu_type,
+                        "cpu_count": cpu_count,
+                        "memory_mb": memory_mb,
                     })
 
                 except Exception as error:

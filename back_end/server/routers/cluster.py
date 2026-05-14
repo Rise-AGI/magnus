@@ -183,10 +183,15 @@ def get_cluster_stats(
     sorted_all_running = magnus_group + external_group
 
     # 资源数字全部来自单次 scontrol 快照 + 单次 squeue --json（即 all_slurm_tasks）。
-    # used 直接从 squeue 派生的 running 列表派生，total 取 SLURM 报告的 capacity；
-    # 两者来源同时刻，保证 total = free + used 且 used == sum(running.gpu_count)。
+    # 三个 alloc 维度（gpu / cpu / mem）都从 squeue 的 job-level 数字派生，total
+    # 取 SLURM 报告的 capacity；两者来源同时刻，保证 total = free + used 且
+    # used == sum(running.<dim>)。alloc 不走 scontrol 的 CPUAlloc / AllocMem 是
+    # 因为后者在 CG 期间立即清零，跟 squeue 视角下 job 仍占 cpu / mem 矛盾，
+    # 详见 _slurm_manager._resource_query.NodeSnapshot docstring。
     node_snap = slurm_manager.get_node_snapshot()
     used_gpus = sum(job.gpu_count for job in sorted_all_running)
+    used_cpus = sum(task.get("cpu_count", 0) for task in all_slurm_tasks)
+    used_mem_mb = sum(task.get("memory_mb", 0) for task in all_slurm_tasks)
     display_total = max(node_snap.total_gpus, used_gpus)
     free_gpus = max(0, display_total - used_gpus)
 
@@ -235,9 +240,9 @@ def get_cluster_stats(
             "free": free_gpus,
             "used": used_gpus,
             "cpu_total": node_snap.cpu_total,
-            "cpu_free": max(0, node_snap.cpu_total - node_snap.cpu_alloc),
+            "cpu_free": max(0, node_snap.cpu_total - used_cpus),
             "mem_total_mb": node_snap.mem_total_mb,
-            "mem_free_mb": max(0, node_snap.mem_total_mb - node_snap.mem_alloc_mb),
+            "mem_free_mb": max(0, node_snap.mem_total_mb - used_mem_mb),
         },
         "running_jobs": paginated_running,
         "total_running": total_running,

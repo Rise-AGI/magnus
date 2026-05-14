@@ -147,14 +147,20 @@ class _DecisionsMixin(_DecisionsMixinBase):
         """从 SLURM 一次性派生 ``(total, free)`` 资源向量。
 
         维度顺序固定为 ``(gpu, cpu_cores, memory_mb)``，与
-        ``_job_to_resource_vector`` 对齐。一次 scontrol（NodeSnapshot 提供
-        cpu/mem/gpu 容量 + cpu/mem 占用）+ 一次 squeue（running tasks 派生
-        GPU 占用），让 free 与 total 来自同一时刻 SLURM 视图，无 race。
+        ``_job_to_resource_vector`` 对齐。一次 scontrol (NodeSnapshot) 给三个
+        容量维度，一次 squeue (running tasks) 派生三个 alloc 维度——gpu / cpu /
+        mem 全部走 job-level squeue 数字 sum，让 free 与 total 来自同一时刻
+        SLURM 视图，无 race。alloc 不走 scontrol 的 CPUAlloc / AllocMem 是因为
+        后者在 CG 状态会瞬时清零，跟 squeue 视角下 GPU 仍占用矛盾；统一从
+        squeue 派生即可消除该内部不一致，避免 scheduler 在 epilog 期间误判
+        free 充足而 over-schedule。详见 NodeSnapshot docstring。
         """
         assert self.slurm_manager is not None
         node_snap = self.slurm_manager.get_node_snapshot()
         running_tasks = self.slurm_manager.get_all_running_tasks()
         alloc_gpus = sum(task["gpu_count"] for task in running_tasks)
+        alloc_cpus = sum(task["cpu_count"] for task in running_tasks)
+        alloc_mem_mb = sum(task["memory_mb"] for task in running_tasks)
 
         cluster_total = ResourceVector(
             components = (
@@ -166,8 +172,8 @@ class _DecisionsMixin(_DecisionsMixinBase):
         cluster_free = ResourceVector(
             components = (
                 max(0, node_snap.total_gpus - alloc_gpus),
-                max(0, node_snap.cpu_total - node_snap.cpu_alloc),
-                max(0, node_snap.mem_total_mb - node_snap.mem_alloc_mb),
+                max(0, node_snap.cpu_total - alloc_cpus),
+                max(0, node_snap.mem_total_mb - alloc_mem_mb),
             ),
         )
         return cluster_total, cluster_free
