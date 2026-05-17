@@ -91,7 +91,7 @@ const translations = {
   // ===== Cluster =====
   "cluster.welcome": { zh: "欢迎回来，{name}。这是集群概览。", en: "Welcome back, {name}. Here is your cluster overview." },
   "cluster.newJob": { zh: "新建任务", en: "New Job" },
-  "cluster.myActiveJobs": { zh: "我和下属的活跃任务", en: "My & Team Active Jobs" },
+  "cluster.myActiveJobs": { zh: "我负责的活跃任务", en: "Active Jobs I Oversee" },
   "cluster.noActiveJobs": { zh: "暂无活跃任务。", en: "No active jobs." },
   "cluster.availableGpus": { zh: "可用 GPU", en: "Available GPUs" },
   "cluster.availableCpuMem": { zh: "CPU / 内存", en: "CPUs / Memory" },
@@ -384,6 +384,53 @@ const translations = {
   "action.copied": { zh: "已复制！", en: "Copied!" },
   "action.copyConfig": { zh: "复制配置", en: "Copy Config" },
   "action.pasteConfig": { zh: "粘贴配置", en: "Paste Config" },
+
+  // ===== Clipboard Permission Modal =====
+  "clipboard.permissionTitle": {
+    zh: "需要开启浏览器权限",
+    en: "Browser Permission Required",
+  },
+  "clipboard.permissionSubtitle": {
+    zh: "HTTP 环境下的剪贴板安全限制",
+    en: "Clipboard security restriction under HTTP",
+  },
+  "clipboard.permissionIntro": {
+    zh: "为了在内网 HTTP 环境下实现 ",
+    en: "To enable ",
+  },
+  "clipboard.permissionIntroHighlight": {
+    zh: "“一键粘贴”",
+    en: "one-click paste",
+  },
+  "clipboard.permissionIntroTail": {
+    zh: "，请按照以下步骤将 Magnus 添加到浏览器白名单：",
+    en: " under intranet HTTP, please follow these steps to add Magnus to the browser allowlist:",
+  },
+  "clipboard.flagAddress": {
+    zh: "Flag 地址",
+    en: "Flag Address",
+  },
+  "clipboard.flagAddressNote": {
+    zh: "（浏览器禁止直接跳转）",
+    en: "(browsers block direct navigation)",
+  },
+  "clipboard.flagAddressHint": {
+    zh: "请复制上方地址，粘贴到浏览器地址栏并回车。",
+    en: "Copy the address above, paste it into the browser address bar, and press Enter.",
+  },
+  "clipboard.originUrl": {
+    zh: "源 URL",
+    en: "Origin URL",
+  },
+  "clipboard.originUrlHintPrefix": {
+    zh: "将此地址填入高亮的文本框中，选择 ",
+    en: "Fill this address into the highlighted text box, choose ",
+  },
+  "clipboard.originUrlHintSuffix": {
+    zh: " 并重启浏览器。",
+    en: ", then restart the browser.",
+  },
+
   "fileSecret.upload": { zh: "上传文件", en: "Upload File" },
   "fileSecret.uploadFolder": { zh: "上传文件夹", en: "Upload Folder" },
   "fileSecret.uploading": { zh: "上传中...", en: "Uploading..." },
@@ -419,7 +466,7 @@ const translations = {
   "files.downloadTitle": { zh: "下载文件", en: "Download File" },
   "files.downloadDescription": { zh: "输入已有的 magnus-secret，浏览器会向后端请求并触发本地下载。", en: "Enter an existing magnus-secret and the browser will request it from the backend and trigger a local download." },
   "files.downloadFlow": { zh: "下载流程", en: "Download Flow" },
-  "files.downloadHint": { zh: "这里接受完整的 magnus-secret，也接受去掉前缀后的 token。页面会自动帮你补全。", en: "This field accepts either the full magnus-secret or just the bare token. The page will normalize it automatically." },
+  "files.downloadHint": { zh: "这里接受完整的 magnus-secret，也接受去掉前缀后的 token。页面会自动帮您补全。", en: "This field accepts either the full magnus-secret or just the bare token. The page will normalize it automatically." },
   "files.secretLabel": { zh: "File Secret", en: "File Secret" },
   "files.secretRequired": { zh: "请输入有效的 FileSecret", en: "Enter a valid FileSecret" },
   "files.downloadButton": { zh: "下载文件", en: "Download File" },

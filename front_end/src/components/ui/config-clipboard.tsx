@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Copy, ClipboardPaste, Check, XCircle, ShieldAlert, X } from "lucide-react";
 import { CopyableText } from "./copyable-text";
+import { useLanguage } from "@/context/language-context";
 import yaml from "js-yaml";
 
 interface ConfigClipboardProps {
@@ -13,6 +14,7 @@ interface ConfigClipboardProps {
 }
 
 export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigClipboardProps) {
+  const { t } = useLanguage();
   const [status, setStatus] = useState<"idle" | "copied" | "pasted" | "error" | "config_needed">("idle");
   const [mounted, setMounted] = useState(false);
 
@@ -91,11 +93,11 @@ export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigCl
 
   return (
     <div className="relative flex items-center gap-1">
-      <button onClick={handleCopy} className={btnClass} title="Copy Config">
+      <button onClick={handleCopy} className={btnClass} title={t("action.copyConfig")}>
         {status === "copied" ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
       </button>
 
-      <button onClick={handlePaste} className={btnClass} title="Paste Config">
+      <button onClick={handlePaste} className={btnClass} title={t("action.pasteConfig")}>
         {status === "pasted" ? (
           <Check className="w-4 h-4 text-blue-500" />
         ) : status === "error" ? (
@@ -123,8 +125,8 @@ export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigCl
                         <ShieldAlert className="w-6 h-6 text-amber-500" />
                     </div>
                     <div>
-                        <h3 className="text-base font-bold text-zinc-100">需要开启浏览器权限</h3>
-                        <p className="text-xs text-zinc-400 mt-0.5">HTTP 环境下的剪贴板安全限制</p>
+                        <h3 className="text-base font-bold text-zinc-100">{t("clipboard.permissionTitle")}</h3>
+                        <p className="text-xs text-zinc-400 mt-0.5">{t("clipboard.permissionSubtitle")}</p>
                     </div>
                 </div>
                 <button onClick={() => setStatus("idle")} className="text-zinc-500 hover:text-zinc-300 transition-colors">
@@ -135,7 +137,9 @@ export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigCl
             {/* Body */}
             <div className="p-5 space-y-4">
                <p className="text-sm text-zinc-300 leading-relaxed">
-                  为了在内网 HTTP 环境下实现 <span className="text-amber-400 font-medium">“一键粘贴”</span>，请按照以下步骤将 Magnus 添加到浏览器白名单：
+                  {t("clipboard.permissionIntro")}
+                  <span className="text-amber-400 font-medium">{t("clipboard.permissionIntroHighlight")}</span>
+                  {t("clipboard.permissionIntroTail")}
                </p>
 
                <div className="bg-black/40 rounded-lg border border-zinc-800/50 p-4 space-y-5">
@@ -144,17 +148,17 @@ export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigCl
                     <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2">
                             <span className="flex items-center justify-center w-5 h-5 rounded-full bg-zinc-800 text-[10px] font-bold text-zinc-400">1</span>
-                            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Flag Address</span>
+                            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("clipboard.flagAddress")}</span>
                         </div>
-                        <span className="text-[10px] text-zinc-600">(浏览器禁止直接跳转)</span>
+                        <span className="text-[10px] text-zinc-600">{t("clipboard.flagAddressNote")}</span>
                     </div>
-                    <CopyableText 
-                        text="chrome://flags/#unsafely-treat-insecure-origin-as-secure" 
-                        className="text-blue-400 text-xs font-mono bg-blue-500/10 px-2 py-2 rounded-md w-full break-all border border-blue-500/20" 
-                        variant="text" 
+                    <CopyableText
+                        text="chrome://flags/#unsafely-treat-insecure-origin-as-secure"
+                        className="text-blue-400 text-xs font-mono bg-blue-500/10 px-2 py-2 rounded-md w-full break-all border border-blue-500/20"
+                        variant="text"
                     />
                     <p className="text-[10px] text-zinc-500 mt-1.5 ml-7">
-                        请复制上方地址，粘贴到浏览器地址栏并回车。
+                        {t("clipboard.flagAddressHint")}
                     </p>
                   </div>
                   
@@ -162,14 +166,16 @@ export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigCl
                   <div>
                     <div className="flex items-center gap-2 mb-1.5">
                         <span className="flex items-center justify-center w-5 h-5 rounded-full bg-zinc-800 text-[10px] font-bold text-zinc-400">2</span>
-                        <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Origin URL</span>
+                        <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t("clipboard.originUrl")}</span>
                     </div>
-                    <CopyableText 
-                        text={typeof window !== 'undefined' ? window.location.origin : ""} 
-                        className="text-green-400 text-xs font-mono bg-green-500/10 px-2 py-2 rounded-md w-full border border-green-500/20" 
+                    <CopyableText
+                        text={typeof window !== 'undefined' ? window.location.origin : ""}
+                        className="text-green-400 text-xs font-mono bg-green-500/10 px-2 py-2 rounded-md w-full border border-green-500/20"
                     />
                     <p className="text-[10px] text-zinc-500 mt-1.5 ml-7">
-                        将此地址填入高亮的文本框中，选择 <span className="text-zinc-300 font-bold">Enabled</span> 并重启浏览器。
+                        {t("clipboard.originUrlHintPrefix")}
+                        <span className="text-zinc-300 font-bold">Enabled</span>
+                        {t("clipboard.originUrlHintSuffix")}
                     </p>
                   </div>
                </div>
@@ -177,11 +183,11 @@ export function ConfigClipboard({ kind, onGetPayload, onApplyPayload }: ConfigCl
 
             {/* Footer */}
             <div className="px-5 py-4 bg-zinc-950/50 border-t border-zinc-800/50 flex justify-end">
-              <button 
+              <button
                 onClick={() => setStatus("idle")}
                 className="px-4 py-2 bg-zinc-100 hover:bg-white text-zinc-900 text-sm font-semibold rounded-lg transition-colors shadow-lg shadow-zinc-900/20 active:scale-[0.98]"
               >
-                我知道了
+                {t("common.gotIt")}
               </button>
             </div>
           </div>
