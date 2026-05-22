@@ -66,8 +66,17 @@ export async function client(endpoint: string, { json, body, ...customConfig }: 
     // 5. 处理通用业务错误
     if (!response.ok) {
       // 尝试解析错误详情
-      const errorData = await response.json().catch(() => ({})); 
-      throw new Error(errorData.detail || `API Error: ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      // FastAPI 422 验证错误的 detail 是数组而非字符串，直接 throw new Error(detail) 会被强转成 "[object Object]"。
+      // 字符串原样用；其他形态 (数组 / 对象) 序列化，至少把内容透传出去而不是吞成 gibberish。
+      const detail = (errorData as { detail?: unknown })?.detail;
+      const message =
+        typeof detail === "string"
+          ? detail
+          : detail != null
+            ? JSON.stringify(detail)
+            : `API Error: ${response.statusText}`;
+      throw new Error(message);
     }
 
     // 返回解析后的 JSON（204 No Content 无 body）
