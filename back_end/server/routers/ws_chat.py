@@ -5,14 +5,13 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List
 
-import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .. import models
 from ..schemas import UserInfo, MessageResponse
 from ..database import SessionLocal
 from .._chat_manager import chat_manager
-from .._magnus_config import magnus_config
+from .._jwt_signer import jwt_signer
 
 logger = logging.getLogger(__name__)
 ws_router = APIRouter()
@@ -45,16 +44,11 @@ def _authenticate_by_app_secret(app_secret: str) -> models.User | None:
 
 
 def _authenticate_by_jwt(token: str) -> models.User | None:
-    try:
-        payload = jwt.decode(
-            token,
-            magnus_config["server"]["auth"]["jwt_signer"]["secret_key"],
-            algorithms=[magnus_config["server"]["auth"]["jwt_signer"]["algorithm"]],
-        )
-        user_id = payload.get("sub")
-        if not user_id:
-            return None
-    except jwt.PyJWTError:
+    payload = jwt_signer.decode_access_token(token)
+    if not payload:
+        return None
+    user_id = payload.get("sub")
+    if not user_id:
         return None
     with SessionLocal() as db:
         user = db.query(models.User).filter(models.User.id == user_id).first()

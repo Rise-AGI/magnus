@@ -1,7 +1,6 @@
 # back_end/server/routers/auth.py
 import secrets
 import logging
-import jwt
 import asyncio
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -145,17 +144,11 @@ def get_current_user(
 
     # 3. Check JWT (Web Session)
     if not user_id_found:
-        try:
-            payload = jwt.decode(
-                final_token,
-                magnus_config["server"]["auth"]["jwt_signer"]["secret_key"],
-                algorithms = [magnus_config["server"]["auth"]["jwt_signer"]["algorithm"]],
-            )
+        payload = jwt_signer.decode_access_token(final_token)
+        if payload:
             user_id = payload.get("sub")
             if user_id:
                 user_id_found = str(user_id)
-        except jwt.PyJWTError:
-            pass
 
     if not user_id_found:
         raise HTTPException(
