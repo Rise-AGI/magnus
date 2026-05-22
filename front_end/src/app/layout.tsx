@@ -1,12 +1,29 @@
 // front_end/src/app/layout.tsx
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/context/auth-context";
 import { LanguageProvider } from "@/context/language-context";
 import { CLUSTER_CONFIG } from "@/lib/config";
 
-const inter = Inter({ subsets: ["latin"] });
+// Inter Variable, latin subset。字体二进制提交在 src/app/fonts/，
+// 取自 fontsource 镜像（与 Google Fonts CDN 同 OFL 二进制），避免 build 时
+// 对 fonts.googleapis.com 的外网依赖。
+const inter = localFont({
+  src: [
+    {
+      path: "./fonts/Inter-Variable-Latin.woff2",
+      style: "normal",
+      weight: "100 900",
+    },
+    {
+      path: "./fonts/Inter-Variable-Latin-Italic.woff2",
+      style: "italic",
+      weight: "100 900",
+    },
+  ],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Magnus Platform",
