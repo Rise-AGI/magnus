@@ -51,10 +51,12 @@ def _download_once(
         if (not is_directory
             and content_length_str is not None
             and int(content_length_str) < _SMALL_FILE_THRESHOLD):
-            data = resp.read()
             target = Path(target_path).resolve() if target_path else Path.cwd() / filename
-            if overwrite and target.exists():
+            if target.exists():
+                if not overwrite:
+                    raise FileExistsError(f"Target path already exists: {target}")
                 shutil.rmtree(target) if target.is_dir() else target.unlink()
+            data = resp.read()
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             return target
@@ -82,7 +84,9 @@ def _download_once(
                 source = tmp_file
 
             target = Path(target_path).resolve() if target_path else Path.cwd() / source.name
-            if overwrite and target.exists():
+            if target.exists():
+                if not overwrite:
+                    raise FileExistsError(f"Target path already exists: {target}")
                 shutil.rmtree(target) if target.is_dir() else target.unlink()
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(source), str(target))
