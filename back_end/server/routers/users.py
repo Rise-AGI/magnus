@@ -20,7 +20,7 @@ from ..schemas import (
 )
 from .._magnus_config import is_admin_user
 from .._file_custody_manager import file_custody_manager
-from .auth import get_current_user, generate_trust_token, MAGNUS_TOKEN_LENGTH
+from .auth import get_current_user, generate_trust_token, evict_token_from_cache, MAGNUS_TOKEN_LENGTH
 
 
 logger = logging.getLogger(__name__)
@@ -514,10 +514,13 @@ def refresh_user_token(
     if target.id != current_user.id and not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
+    old_token = target.token
     new_token = generate_trust_token()
     target.token = new_token
     db.commit()
     db.refresh(target)
+
+    evict_token_from_cache(old_token)
 
     logger.info(f"User {current_user.id} refreshed token for user {user_id}")
 
@@ -549,8 +552,12 @@ def set_user_token(
             detail=f"Token must start with 'sk-' and be exactly {MAGNUS_TOKEN_LENGTH} characters.",
         )
 
+    old_token = target.token
     target.token = token
     db.commit()
+
+    if old_token != token:
+        evict_token_from_cache(old_token)
 
     logger.info(f"User {current_user.id} set custom token for user {user_id}")
 

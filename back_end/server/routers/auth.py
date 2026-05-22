@@ -44,6 +44,20 @@ def _add_to_cache(
     _auth_cache[token] = user.id
 
 
+def evict_token_from_cache(
+    token: Optional[str],
+)-> None:
+    """Drop a token from the in-process auth cache.
+
+    Call after rotating or replacing a user's trust token so the prior
+    token can't keep authenticating via cache for up to AUTH_CACHE_TTL.
+    No-op for falsy input so callers don't need a guard around fresh
+    users whose token attribute is None.
+    """
+    if token:
+        _auth_cache.pop(token, None)
+
+
 def generate_trust_token()-> str:
     return f"sk-{secrets.token_urlsafe(24)}"
 
@@ -274,11 +288,17 @@ def refresh_trust_token(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 )-> Dict[str, Any]:
+    # Snapshot the old token BEFORE overwriting so we can evict it from the
+    # in-process auth cache; otherwise a leaked token stays usable for up to
+    # AUTH_CACHE_TTL after the user rotated specifically to revoke it.
+    old_token = current_user.token
     new_token = generate_trust_token()
     current_user.token = new_token
 
     db.commit()
     db.refresh(current_user)
+
+    evict_token_from_cache(old_token)
 
     logger.info(f"User {current_user.id} ({current_user.name}) refreshed their trust token.")
 
@@ -304,9 +324,13 @@ def set_custom_token(
             detail = f"Token must start with 'sk-' and be exactly {MAGNUS_TOKEN_LENGTH} characters.",
         )
 
+    old_token = current_user.token
     current_user.token = token
     db.commit()
     db.refresh(current_user)
+
+    if old_token != token:
+        evict_token_from_cache(old_token)
 
     logger.info(f"User {current_user.id} ({current_user.name}) set a custom trust token.")
 
