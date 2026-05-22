@@ -70,7 +70,7 @@ export function GroupInviteDialog({
     >
       <div className="space-y-3">
         <p className="text-xs text-zinc-500">
-          {t("chat.inviteToGroupDesc").replace("{name}", targetUserName)}
+          {t("chat.inviteToGroupDesc", { name: targetUserName })}
         </p>
 
         {loading ? (

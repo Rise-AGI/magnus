@@ -1217,7 +1217,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
     if (params) {
       Object.entries(params).forEach(([paramKey, value]) => {
-        text = text.replace(`{${paramKey}}`, value);
+        // split/join 而非 replace：替换全部 occurrence，且不把 value 中的
+        // "$1" / "$&" 等当作 String.replace 的特殊替换 token
+        text = text.split(`{${paramKey}}`).join(value);
       });
     }
 
