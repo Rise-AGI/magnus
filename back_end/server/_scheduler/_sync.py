@@ -66,8 +66,11 @@ class _SyncMixin(_SyncMixinBase):
     def _dump_docker_logs(self, job_id: str, container_name: str, since: Optional[str] = None) -> Optional[str]:
         # 与 SLURM 模式的 sbatch --output 共用同一文件，让 jobs.py 读端点不必按模式分支。
         log_path = f"{magnus_workspace_path}/jobs/{job_id}/slurm/output.txt"
-        # Capture cursor BEFORE fetching logs to avoid missing lines emitted during the call
-        new_cursor = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Capture cursor BEFORE fetching logs to avoid missing lines emitted during the call.
+        # Microsecond precision (RFC 3339 with %f) drastically narrows the duplicate window
+        # vs second precision: docker logs --since is inclusive, so saving a floor-to-second
+        # cursor would re-fetch every line emitted within the same wall-clock second on each tick.
+        new_cursor = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         try:
             command = [
                 "docker",
