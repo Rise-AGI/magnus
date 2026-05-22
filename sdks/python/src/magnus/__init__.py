@@ -141,6 +141,12 @@ default_client = MagnusClient()
 
 def configure(token: Optional[str] = None, address: Optional[str] = None) -> None:
     global default_client
+    # Release the prior client's sync httpx pool before replacing the global;
+    # otherwise repeated configure() calls in the same process orphan a chain of
+    # httpx.Client instances with open sockets. close() is a no-op when the lazy
+    # http client was never instantiated, so the typical configure-once-at-startup
+    # path pays nothing.
+    default_client.close()
     default_client = MagnusClient(token=token, address=address)
 
 
