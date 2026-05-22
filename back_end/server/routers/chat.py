@@ -90,8 +90,6 @@ def create_conversation(
     current_user: models.User = Depends(get_current_user),
 ) -> ConversationResponse:
     if body.type == models.ConversationType.P2P:
-        if len(body.member_ids) == 0:
-            raise HTTPException(status_code=400, detail="P2P conversation requires exactly 1 other member")
         if len(body.member_ids) != 1:
             raise HTTPException(status_code=400, detail="P2P conversation requires exactly 1 other member")
         other_id = body.member_ids[0]

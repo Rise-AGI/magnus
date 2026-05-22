@@ -215,8 +215,6 @@ async def _check_http_readiness(port: int)-> bool:
             response = await client.get(url)
             if response.status_code >= 500: return False
         return True
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadTimeout):
-        return False
     except Exception:
         return False
 

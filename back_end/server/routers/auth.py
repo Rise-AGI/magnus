@@ -3,7 +3,6 @@ import secrets
 import logging
 import asyncio
 from typing import Optional, Dict, Any
-from dataclasses import dataclass
 
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, status, Request
