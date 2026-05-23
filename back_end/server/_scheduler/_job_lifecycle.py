@@ -13,6 +13,17 @@ else:
     _JobLifecycleMixinBase = object
 
 
+# Entries under a job's working table that the persistence protocol keeps for
+# post-completion reads (see routers/jobs.py + routers/metrics.py):
+#   slurm/          — SLURM stdout/stderr (slurm/output.txt)
+#   metrics/        — Magnus Metrics Protocol v1 JSONL files
+#   .magnus_result  — MAGNUS_RESULT, task result content
+#   .magnus_action  — MAGNUS_ACTION, client action instruction
+# Everything else (repository, wrapper.py, transient markers, ephemeral overlay,
+# and anything the user wrote into the workspace bind mount) is removed on cleanup.
+_WORKING_TABLE_KEEP = frozenset({"slurm", "metrics", ".magnus_result", ".magnus_action"})
+
+
 class _JobLifecycleMixin(_JobLifecycleMixinBase):
     """Job 收尾相关：success/result 标记、OOM 检测、working table 清理。"""
 
@@ -56,23 +67,20 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
         job_working_table = f"{magnus_workspace_path}/jobs/{job_id}"
         job_ephemeral_table = f"{magnus_ephemeral_workspace_path}/jobs/{job_id}"
         try:
-            delete_file(os.path.join(job_working_table, "repository"))
-            delete_file(os.path.join(job_working_table, "wrapper.py"))
-            delete_file(os.path.join(job_working_table, ".magnus_success"))
-            delete_file(os.path.join(job_working_table, ".magnus_oom"))
-            delete_file(os.path.join(job_working_table, ".magnus_user_script.sh"))
-            # ephemeral overlay + apptainer tmp/cache 落在 ephemeral table。
+            # Keep-whitelist: remove everything under the working table except the
+            # protocol artifacts. This also reclaims anything the user wrote into the
+            # workspace bind mount (e.g. checkpoints / outputs dumped straight into
+            # $MAGNUS_HOME/workspace instead of going through file_custody), which the
+            # old fixed delete-list silently let accumulate forever.
+            if os.path.isdir(job_working_table):
+                for entry in os.listdir(job_working_table):
+                    if entry not in _WORKING_TABLE_KEEP:
+                        delete_file(os.path.join(job_working_table, entry))
+            # When ephemeral_root is split onto a separate disk, the overlay +
+            # apptainer tmp/cache live outside the working table; drop that dir
+            # wholesale (it holds only transient artifacts). When it coincides with
+            # the working table, the keep-whitelist sweep above already removed them.
             if job_ephemeral_table != job_working_table:
-                # 独立 ephemeral_root：该目录只存临时产物，整体删除即可。
                 delete_file(job_ephemeral_table)
-            else:
-                # 缺省：ephemeral 与持久产物同目录，逐项删（保留 metrics/ slurm/）。
-                # apptainer overlay create 落盘命名随版本而异（ephemeral_overlay.img
-                # 或自动追加 .ext3 后缀），双删兜住两种避免漏掉孤儿 sparse 文件。
-                delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
-                delete_file(os.path.join(job_working_table, "ephemeral_overlay.img.ext3"))
-                delete_file(os.path.join(job_working_table, ".magnus_tmp"))
-                delete_file(os.path.join(job_working_table, ".magnus_cache"))
-            # metrics/ 不清理，与 slurm/output.txt 同策略，供 job 结束后回看
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")
