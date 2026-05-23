@@ -222,7 +222,14 @@ async def upload_file(
         raise HTTPException(status_code=413, detail=f"File too large (limit: {_raw})")
 
     file_id = secrets.token_hex(8)
-    ext = filename.split(".")[-1].lower() if "." in filename else ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    # Only keep the extension when it's short pure-ASCII alphanumeric, otherwise
+    # drop it: a hostile upload filename like "x.png/../etc" would otherwise put
+    # a slash into saved_filename and (via Pathlib join semantics) let the open()
+    # below land outside files_dir. Length cap is generous vs real extensions
+    # (txt / json / sqlite are all <= 6 chars) while staying clearly bounded.
+    if not re.fullmatch(r"[a-z0-9]{1,16}", ext):
+        ext = ""
     saved_filename = f"{file_id}.{ext}" if ext else file_id
 
     files_dir = get_session_files_dir(session_id)

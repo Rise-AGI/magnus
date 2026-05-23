@@ -25,6 +25,23 @@ from ._word_list import _PRIMES, _WORDS
 _COPY_CHUNK_SIZE = 64 * 1024
 
 
+def _sanitize_filename(name: str) -> str:
+    """Strip path components from a user-supplied upload filename.
+
+    ``store_file`` later joins ``file_dir / filename``; without this, a
+    hostile filename like ``"../etc/passwd"`` would let the on-disk write
+    escape the per-entry directory (and with enough leading ``..`` would
+    escape the storage root entirely). ``os.path.basename`` handles the
+    common path-separator cases; the remaining ``""`` / ``"."`` / ``".."``
+    / NUL cases would still make the join refer to something other than a
+    fresh leaf file, so collapse them to a known-safe fallback.
+    """
+    base = os.path.basename(name)
+    if not base or base in (".", "..") or "\0" in base:
+        return "upload"
+    return base
+
+
 class FileCustodyManager:
     """文件托管管理器（进程内单例）。
 
@@ -127,6 +144,10 @@ class FileCustodyManager:
         max_downloads: Optional[int] = None,
         permanent: bool = False,
     ) -> str:
+        # Sanitize at the entry point so all callers are protected centrally
+        # rather than each one needing to remember `os.path.basename`.
+        filename = _sanitize_filename(filename)
+
         # permanent 条目由服务端内部代码控制（如头像），不受 max_ttl 限制
         if not permanent:
             if expire_minutes is None:
