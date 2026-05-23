@@ -209,3 +209,18 @@ async def ws_chat(websocket: WebSocket) -> None:
         logger.error(f"WebSocket error for user={user_id}: {e}")
     finally:
         chat_manager.disconnect(user_id, websocket)
+        # Once the user has no remaining WebSocket connections, garbage-collect
+        # their rate-limit bucket so the process-lifetime dict doesn't accrete
+        # one stale entry per unique user that ever sent a message. Keep the
+        # bucket if it still has recent timestamps in the 1-minute window:
+        # that way reconnecting can't reset a triggered rate limit before the
+        # window naturally expires.
+        if not chat_manager.is_connected(user_id):
+            bucket = _rate_buckets.get(user_id)
+            if bucket is not None:
+                window = datetime.now(timezone.utc) - timedelta(minutes=1)
+                live = [t for t in bucket if t > window]
+                if live:
+                    _rate_buckets[user_id] = live
+                else:
+                    _rate_buckets.pop(user_id, None)
