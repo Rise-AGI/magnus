@@ -23,6 +23,7 @@ function AuthCallbackContent() {
   const code = searchParams.get("code");
   const oauthError = searchParams.get("error");
   const oauthErrorDesc = searchParams.get("error_description");
+  const oauthState = searchParams.get("state");
   const { t } = useLanguage();
 
   // 防止 React StrictMode 在开发环境下导致 useEffect 执行两次
@@ -37,8 +38,20 @@ function AuthCallbackContent() {
     }
 
     if (!code || hasFetched.current) return;
-    
+
     hasFetched.current = true;
+
+    // OAuth CSRF check: the `state` Feishu echoes back must match the nonce
+    // loginWithFeishu() put into sessionStorage. Consume the stored value so
+    // an abandoned-then-resurrected callback URL can't replay it. Key is the
+    // literal "magnus_oauth_state" string also written in auth-context.tsx —
+    // keep them in sync.
+    const storedState = sessionStorage.getItem("magnus_oauth_state");
+    sessionStorage.removeItem("magnus_oauth_state");
+    if (!oauthState || !storedState || oauthState !== storedState) {
+      setError(t("auth.oauthDenied"));
+      return;
+    }
 
     const doLogin = async () => {
       try {
@@ -72,7 +85,7 @@ function AuthCallbackContent() {
     };
 
     doLogin();
-  }, [code, router, oauthError, oauthErrorDesc, t]);
+  }, [code, router, oauthError, oauthErrorDesc, oauthState, t]);
 
   if (error) {
     return (

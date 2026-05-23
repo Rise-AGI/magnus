@@ -109,7 +109,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithFeishu = () => {
     const REDIRECT_URI = `${window.location.origin}/auth/callback`;
-    const FEISHU_AUTH_URL = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=RANDOM_STATE`;
+    // OAuth CSRF defense: 128-bit random nonce stored in sessionStorage,
+    // verified in /auth/callback against the `state` param Feishu echoes back.
+    // sessionStorage scopes the nonce to this tab so a different tab on the
+    // same browser can't satisfy a forged callback. The storage key is
+    // duplicated literally in callback/page.tsx — keep them in sync.
+    const stateBytes = new Uint8Array(16);
+    window.crypto.getRandomValues(stateBytes);
+    const state = Array.from(stateBytes, b => b.toString(16).padStart(2, "0")).join("");
+    sessionStorage.setItem("magnus_oauth_state", state);
+    const FEISHU_AUTH_URL = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=${encodeURIComponent(state)}`;
 
     window.location.href = FEISHU_AUTH_URL;
   };
