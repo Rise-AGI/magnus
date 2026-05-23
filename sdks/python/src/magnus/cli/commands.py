@@ -16,7 +16,6 @@ from rich.status import Status
 from rich.markup import escape as rich_escape
 from datetime import datetime
 from importlib.metadata import version
-from ruamel.yaml import YAML
 
 __version__ = version("magnus-sdk")
 
@@ -91,8 +90,20 @@ def _job_view_link_msg(job_id: str)-> str:
 
 OutputFormat = Literal["table", "yaml", "json"]
 
-_yaml_dumper = YAML()
-_yaml_dumper.default_flow_style = False
+_yaml_dumper = None
+
+
+def _get_yaml_dumper():
+    """Lazily build the ruamel.yaml dumper. Only `--format yaml` output needs
+    it, so importing this CLI module must not hard-depend on ruamel.yaml —
+    otherwise a broken/missing ruamel install in the user's env takes down every
+    command (receive/submit/login/...), not just yaml output."""
+    global _yaml_dumper
+    if _yaml_dumper is None:
+        from ruamel.yaml import YAML
+        _yaml_dumper = YAML()
+        _yaml_dumper.default_flow_style = False
+    return _yaml_dumper
 
 
 def _auto_format() -> OutputFormat:
@@ -107,7 +118,7 @@ def _output_data(
     """统一输出数据"""
     if fmt == "yaml":
         stream = io.StringIO()
-        _yaml_dumper.dump(data, stream)
+        _get_yaml_dumper().dump(data, stream)
         # markup=False/highlight=False: 数据 dump 是机读文本，
         # 不能让 Rich 把字段里的 "[str, ...]" 当成 style tag 吞掉
         console.print(stream.getvalue(), end="", markup=False, highlight=False)
@@ -2472,7 +2483,7 @@ def _write_points_json(points: List[Dict[str, Any]], output: Path) -> None:
 def _write_points_yaml(points: List[Dict[str, Any]], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with open(output, "w", encoding="utf-8") as f:
-        _yaml_dumper.dump({"points": points}, f)
+        _get_yaml_dumper().dump({"points": points}, f)
 
 
 def _do_job_metric_streams(job_ref: str, fmt: OutputFormat) -> None:
