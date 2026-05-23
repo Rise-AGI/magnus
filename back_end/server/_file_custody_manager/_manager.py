@@ -10,6 +10,8 @@ import threading
 from pathlib import Path
 from typing import Any, Optional, Dict, Tuple, BinaryIO
 
+from library import is_disk_full_oserror
+
 from .._magnus_config import magnus_config
 from .._size_utils import _parse_size_string
 from . import logger
@@ -195,10 +197,14 @@ class FileCustodyManager:
                     self._current_size -= written
                     placeholder.file_size = 0
                     raise CustodyStorageFullError()
-        except Exception:
+        except Exception as error:
             with self._lock:
                 self._entries.pop(entry_id, None)
             shutil.rmtree(file_dir, ignore_errors=True)
+            # 真实磁盘满（ENOSPC/EDQUOT）和配额满对调用方是同一回事："存不下了"。
+            # 翻译成域错误，让 API 回 503 清晰提示，而不是裸 OSError 冒成 500。
+            if isinstance(error, OSError) and is_disk_full_oserror(error):
+                raise CustodyStorageFullError() from error
             raise
 
         # 写入成功，更新过期时间使 entry 生效

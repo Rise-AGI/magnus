@@ -546,7 +546,10 @@ if [ -n "$APPTAINER_CONTAIN" ]; then
     if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]; then
         if ! apptainer overlay create --sparse --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}} 2>/dev/null; then
             echo "[Magnus] WARNING: --sparse not supported (apptainer < 1.3?), falling back to dense overlay" >&2
-            apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}
+            if ! apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}; then
+                echo "[Magnus] ERROR: failed to create ephemeral overlay at {{overlay_path}}; the ephemeral disk is likely full -- free up space on its volume" >&2
+                exit 1
+            fi
         fi
         APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
     else

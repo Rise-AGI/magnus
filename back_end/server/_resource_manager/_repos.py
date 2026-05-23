@@ -9,8 +9,10 @@ import functools
 import subprocess
 from typing import Optional, Tuple
 
+from library import is_disk_full_stderr, disk_full_message
+
 from .._magnus_config import magnus_config, is_local_mode
-from . import logger
+from . import logger, magnus_repo_cache_path
 from ._config import (
     _git_env,
     DEFAULT_BRANCH_CACHE_TTL_SECONDS,
@@ -162,6 +164,14 @@ class _ReposMixin:
                 return True
 
             error_msg = stderr.decode().strip()
+            # 磁盘满不会在 backoff 期间自愈——和 image pull 同理，直接 fail-fast，
+            # 不烧 retry/backoff 预算。
+            if is_disk_full_stderr(error_msg):
+                logger.error(
+                    f"git fetch aborted (disk full): {repo_url} — "
+                    f"{disk_full_message(magnus_repo_cache_path)}"
+                )
+                return False
             logger.warning(
                 f"git fetch failed (rc={proc.returncode}), "
                 f"attempt {attempt + 1}/{GIT_FETCH_MAX_RETRIES}: {repo_url} — {error_msg}"
@@ -242,6 +252,8 @@ class _ReposMixin:
                     logger.error(f"Clone failed ({repo_url}): {clone_error}")
                     if os.path.exists(cache_path):
                         shutil.rmtree(cache_path, ignore_errors=True)
+                    if is_disk_full_stderr(clone_error):
+                        return False, disk_full_message(magnus_repo_cache_path), None
                     return False, f"git clone failed: {clone_error}", None
 
                 elapsed = time.time() - start_time
@@ -306,6 +318,11 @@ class _ReposMixin:
                 # 会在下次调度时把残留副本误判为"已就绪"，跑在不完整代码上
                 shutil.rmtree(target_dir, ignore_errors=True)
                 logger.error(f"Failed to copy repo cache: {error}")
+                # copytree 把 per-file 错误聚合成 shutil.Error，磁盘满信息在 str(error) 里。
+                # target_dir 刚被 rmtree，查它自身的剩余空间会失败返 0；查其父目录
+                # （同一卷、仍存在）才能报出真实可用字节，且填满的正是目标卷。
+                if is_disk_full_stderr(str(error)):
+                    return False, disk_full_message(os.path.dirname(target_dir)), None
                 return False, f"copy cache failed: {error}", None
 
         # Phase 3: 解析 commit_sha 语义并 checkout（无需 fetch——cache 上一步已刷新，

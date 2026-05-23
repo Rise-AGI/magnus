@@ -4,6 +4,8 @@ import os
 import shutil
 from typing import List, Tuple
 
+from library import disk_free_bytes
+
 from .._magnus_config import is_local_mode
 from . import logger, magnus_container_cache_path, magnus_repo_cache_path, magnus_apptainer_cache_path
 from ._helpers import _get_dir_size
@@ -41,8 +43,13 @@ class _CacheMixin:
                 continue
         return repos
 
-    def _evict_lru_images(self):
+    def _evict_lru_images(self, target_free_bytes: int = 0):
         """LRU 清理：按访问时间淘汰旧镜像。
+
+        淘汰直到镜像缓存回到 size 配额以内；当 target_free_bytes > 0 时，额外淘汰
+        直到 cache 卷的真实剩余空间不低于该目标——这样磁盘被缓存以外的数据填满时，
+        pull 也能靠淘汰旧镜像腾出空间，而不是只在缓存自身超配额时才淘汰。
+
         注：此方法在 self.image_locks[image] 内调用，不会与同一 URI 的拉取并发；
         不同 URI 的并发淘汰理论上存在 TOCTOU，但 ensure_image 入口处的 os.utime
         会刷新 atime，使正在使用的镜像不会被误淘汰，无需额外加锁。"""
@@ -53,7 +60,14 @@ class _CacheMixin:
         images.sort(key=lambda x: x[2])
         total_size = sum(img[1] for img in images)
 
-        while images and total_size > CONTAINER_CACHE_SIZE:
+        def _needs_eviction() -> bool:
+            if total_size > CONTAINER_CACHE_SIZE:
+                return True
+            if target_free_bytes > 0 and disk_free_bytes(magnus_container_cache_path) < target_free_bytes:
+                return True
+            return False
+
+        while images and _needs_eviction():
             path, size, _ = images.pop(0)
             try:
                 os.remove(path)

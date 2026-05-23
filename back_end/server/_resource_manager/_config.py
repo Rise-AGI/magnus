@@ -46,6 +46,13 @@ def _rewrite_image_for_mirror(image: str) -> str:
 CONTAINER_CACHE_SIZE = _parse_size_string(magnus_config['execution']['resource_cache']['container_cache_size'])
 REPO_CACHE_SIZE = _parse_size_string(magnus_config['execution']['resource_cache']['repo_cache_size'])
 
+# Free-space floor for an image pull. Below it a pull cannot plausibly succeed,
+# so we fail fast with a clear message instead of attempting and burning the
+# retry/backoff budget. Conservative (2 GiB) so a small-image pull is never
+# falsely rejected when space is merely tight -- eviction tries to restore this
+# headroom first (see _evict_lru_images).
+MIN_FREE_BYTES_FOR_PULL = _parse_size_string("2G")
+
 
 # git subprocess 使用的干净环境：禁用交互式认证，剔除 IDE 注入的 credential helper
 _git_env = os.environ.copy()

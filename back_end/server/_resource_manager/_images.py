@@ -8,9 +8,11 @@ import asyncio
 import tempfile
 from typing import Optional, Tuple
 
+from library import disk_free_bytes, is_disk_full_stderr, disk_full_message
+
 from .._magnus_config import is_local_mode
-from . import logger, magnus_apptainer_cache_path
-from ._config import _rewrite_image_for_mirror
+from . import logger, magnus_apptainer_cache_path, magnus_container_cache_path
+from ._config import _rewrite_image_for_mirror, MIN_FREE_BYTES_FOR_PULL
 
 
 class _ImagesMixin:
@@ -97,7 +99,13 @@ class _ImagesMixin:
                     pass
                 return True, None
 
-            self._evict_lru_images()
+            # 先按真实剩余空间淘汰旧镜像腾地；若腾完仍低于下限，pull 必败，直接
+            # fail-fast 给清晰提示，不浪费 retry/backoff。
+            self._evict_lru_images(target_free_bytes=MIN_FREE_BYTES_FOR_PULL)
+            if disk_free_bytes(magnus_container_cache_path) < MIN_FREE_BYTES_FOR_PULL:
+                message = disk_full_message(magnus_container_cache_path)
+                logger.error(f"Refusing to pull image {image}: {message}")
+                return False, message
 
             # 始终写入临时文件，成功后原子 rename
             # 这样断电/OOM 只会留下 .tmp，重启时统一清理，正式 .sif 不会被污染
@@ -155,6 +163,13 @@ class _ImagesMixin:
 
                     error_msg = stderr.decode().strip()
                     error_lower = error_msg.lower()
+
+                    # 磁盘满不是瞬态错误——磁盘不会在 backoff 期间自己变空，重试纯属
+                    # 浪费时间。直接 fail-fast 并给出可操作的剩余空间提示。
+                    if is_disk_full_stderr(error_msg):
+                        message = disk_full_message(magnus_container_cache_path)
+                        logger.error(f"Failed to pull image {image} (disk full): {error_msg} | {message}")
+                        return False, message
 
                     if any(p in error_lower for p in non_transient_patterns):
                         logger.error(f"Failed to pull image {image} (non-transient): {error_msg}")
