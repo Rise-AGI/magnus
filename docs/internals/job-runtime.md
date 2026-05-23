@@ -77,7 +77,7 @@ When apptainer returns 0, write the `.magnus_success` marker. The finally block 
 
 ### Host side
 
-All paths are based on `{magnus_root}/workspace/jobs/{job_id}/` (abbreviated below as `{work}/`):
+All paths are based on `{magnus_root}/workspace/jobs/{job_id}/` (abbreviated below as `{work}/`). The three ephemeral artifacts (overlay image + apptainer tmp/cache) instead live under `{magnus_ephemeral_root}/workspace/jobs/{job_id}/` (abbreviated `{ephemeral}/`); `ephemeral_root` defaults to `root`, so `{ephemeral}/` == `{work}/` unless a site sets `server.ephemeral_root` to put the high-frequency random-write overlay on a faster disk:
 
 | Path | Lifecycle | Writer | Reader | Description |
 |------|----------|--------|--------|------|
@@ -89,9 +89,9 @@ All paths are based on `{magnus_root}/workspace/jobs/{job_id}/` (abbreviated bel
 | `{work}/.magnus_oom` | epilogue (on non-zero ret) → sync_reality / cleanup | wrapper.py (cgroup memory.events probe) | scheduler | OOM marker; its existence means the kernel OOM-killed something inside the job's cgroup. Scheduler rewrites `job.result` to a memory-limit message instead of the generic FAILED string. Docker mode uses `docker inspect .State.OOMKilled` instead of this file. |
 | `{work}/.magnus_result` | user writes inside container → API reads | user code | routers/jobs.py | task result content |
 | `{work}/.magnus_action` | user writes inside container → API reads | user code | routers/jobs.py + SDK | client action instruction |
-| `{work}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | writable layer, deleted after job ends |
-| `{work}/.magnus_tmp/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
-| `{work}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
+| `{ephemeral}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | writable layer, deleted after job ends |
+| `{ephemeral}/.magnus_tmp/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
+| `{ephemeral}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
 | `{work}/metrics/` | submit → permanent | wrapper sidecar + user code | routers/metrics.py | Magnus Metrics Protocol v1 JSONL metrics files |
 
 **cleanup** refers to `_clean_up_working_table()`, called when the job ends (SUCCESS/FAILED/TERMINATED/PAUSED). `slurm/output.txt` is not cleaned.

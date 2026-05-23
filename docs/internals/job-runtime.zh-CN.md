@@ -77,7 +77,7 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 
 ### 宿主机侧
 
-所有路径基于 `{magnus_root}/workspace/jobs/{job_id}/`（下文简称 `{work}/`）：
+所有路径基于 `{magnus_root}/workspace/jobs/{job_id}/`（下文简称 `{work}/`）。三个临时产物（overlay image + apptainer tmp/cache）则落在 `{magnus_ephemeral_root}/workspace/jobs/{job_id}/`（简称 `{ephemeral}/`）；`ephemeral_root` 缺省等于 `root`，所以除非站点配置 `server.ephemeral_root`（把高频随机写的 overlay 放到更快的盘），否则 `{ephemeral}/` == `{work}/`：
 
 | 路径 | 生命周期 | 写入方 | 读取方 | 说明 |
 |------|----------|--------|--------|------|
@@ -89,9 +89,9 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 | `{work}/.magnus_oom` | epilogue（仅在 ret≠0 时写）→ sync_reality / cleanup | wrapper.py（探测 cgroup memory.events） | scheduler | OOM 标记，存在即表示 job 所在 cgroup 内发生过内核 OOM-kill；调度器据此把 `job.result` 改写为内存超限提示，覆盖通用 FAILED 字符串。Docker 模式改用 `docker inspect .State.OOMKilled` 取代此文件。 |
 | `{work}/.magnus_result` | 容器内用户写入 → API 读取 | 用户代码 | routers/jobs.py | 任务结果内容 |
 | `{work}/.magnus_action` | 容器内用户写入 → API 读取 | 用户代码 | routers/jobs.py + SDK | 客户端动作指令 |
-| `{work}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | 可写层，job 结束后删除 |
-| `{work}/.magnus_tmp/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
-| `{work}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
+| `{ephemeral}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | 可写层，job 结束后删除 |
+| `{ephemeral}/.magnus_tmp/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
+| `{ephemeral}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
 | `{work}/metrics/` | submit → 永久 | wrapper sidecar + 用户代码 | routers/metrics.py | Magnus Metrics Protocol v1 JSONL 指标文件 |
 
 **cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。`slurm/output.txt` 不被清理。

@@ -67,6 +67,11 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(server, "front_end_port", int)
     _check_key(server, "back_end_port", int)
     _check_key(server, "root", str)
+    # ephemeral_root 可选：缺省回落到 root（向后兼容，单盘站点无需配置）。
+    # 显式配置可把高频随机写的 ephemeral overlay + apptainer tmp/cache 落到更快的盘，
+    # 与持久数据（database / file_custody / container_cache，仍在 root）解耦。
+    server.setdefault("ephemeral_root", server["root"])
+    _check_key(server, "ephemeral_root", str)
     _check_key(server, "cors_origins", list)
     _check_key(server, "database", dict)
     _check_key(server, "auth", dict)
@@ -75,7 +80,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(server, "file_custody", dict)
 
     expected_server_keys = {
-        "address", "front_end_port", "back_end_port", "root",
+        "address", "front_end_port", "back_end_port", "root", "ephemeral_root",
         "database", "auth", "scheduler", "service_proxy", "file_custody",
         "cors_origins",
     }
@@ -252,6 +257,10 @@ def _load_magnus_config()-> Dict[str, Any]:
             data["server"]["front_end_port"] += 2
             data["server"]["back_end_port"] += 2
             data["server"]["root"] += "-develop"
+            # ephemeral_root 显式配置时同样隔离 develop/prod；缺省时它会在
+            # 校验阶段回落到（已加后缀的）root，无需在此处理。
+            if "ephemeral_root" in data["server"]:
+                data["server"]["ephemeral_root"] += "-develop"
 
         # 快速失败：启动时验证配置完整性
         _prepare_and_validate_magnus_config(data)

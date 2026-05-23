@@ -9,6 +9,11 @@ server:
   # during development, back_end_port += 2
   # redirect_uri = f"{address}:{front_end_port}/auth/callback"
   root: /path/to/magnus-data
+  # optional: put the per-job ephemeral overlay + apptainer tmp/cache on a
+  # faster disk, decoupled from the persistent data under `root`. defaults to
+  # `root` when omitted (single-disk sites need not set it). on dev runs the
+  # `-develop` suffix is appended just like `root`.
+  # ephemeral_root: /fast-ssd/magnus-ephemeral
   cors_origins:
     - http://your-server-ip:3011       # production frontend
     - http://localhost:3013            # dev frontend (port+2)

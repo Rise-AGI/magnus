@@ -11,6 +11,7 @@ wrapper.py 在每个 SLURM job 启动时由 sbatch 调起，负责：
 """
 def _build_wrapper_content(
     job_working_table: str,
+    job_ephemeral_table: str,
     repo_dir: str,
     sif_path: str,
     system_entry_command: str,
@@ -426,6 +427,10 @@ def main():
     # ignore，由 proctrack 广播 cgroup 全员瞬间清场；详见
     # docs/internals/job-runtime.md "Signaling and Termination"。
     work_dir = {repr(job_working_table)}
+    # ephemeral_dir：ephemeral overlay + apptainer tmp/cache 的落脚处。
+    # 缺省等于 work_dir；server.ephemeral_root 配成独立快盘时落到那侧。
+    ephemeral_dir = {repr(job_ephemeral_table)}
+    os.makedirs(ephemeral_dir, exist_ok=True)
     _signaled = [False]
     def _on_sigterm(_signum, _frame):
         _signaled[0] = True
@@ -443,8 +448,8 @@ def main():
     magnus_address = {repr(magnus_address)}
     job_id = {repr(job_id)}
     ephemeral_storage = {repr(ephemeral_storage)}
-    apptainer_tmp_dir = os.path.join(work_dir, ".magnus_tmp")
-    apptainer_cache_dir = os.path.join(work_dir, ".magnus_cache")
+    apptainer_tmp_dir = os.path.join(ephemeral_dir, ".magnus_tmp")
+    apptainer_cache_dir = os.path.join(ephemeral_dir, ".magnus_cache")
 
     user_cmd_str = {repr(entry_command)}
     if "sudo" in user_cmd_str:
@@ -481,7 +486,7 @@ def main():
     os.chmod(user_script_path, 0o755)
 
     # Phase 2: Execute with container
-    overlay_path = os.path.join(work_dir, "ephemeral_overlay.img")
+    overlay_path = os.path.join(ephemeral_dir, "ephemeral_overlay.img")
     try:
         os.makedirs(apptainer_tmp_dir, exist_ok=True)
         os.makedirs(apptainer_cache_dir, exist_ok=True)

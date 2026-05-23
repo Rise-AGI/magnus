@@ -21,10 +21,15 @@ logger = logging.getLogger(__name__)
 
 # 模块级路径常量 + import-time 副作用：必须在子模块 import 之前完成。
 magnus_root = magnus_config['server']['root']
+# ephemeral_root 缺省等于 root（_magnus_config 已 setdefault）。配成独立快盘时，
+# 只有 ephemeral overlay + apptainer tmp/cache 落到这里，持久数据仍在 root。
+magnus_ephemeral_root = magnus_config['server']['ephemeral_root']
 magnus_workspace_path = f"{magnus_root}/workspace"
+magnus_ephemeral_workspace_path = f"{magnus_ephemeral_root}/workspace"
 magnus_container_cache_path = f"{magnus_root}/container_cache"
 magnus_uv_cache_path = f"{magnus_root}/uv_cache"
 guarantee_file_exist(magnus_workspace_path, is_directory=True)
+guarantee_file_exist(magnus_ephemeral_workspace_path, is_directory=True)
 guarantee_file_exist(magnus_container_cache_path, is_directory=True)
 guarantee_file_exist(magnus_uv_cache_path, is_directory=True)
 

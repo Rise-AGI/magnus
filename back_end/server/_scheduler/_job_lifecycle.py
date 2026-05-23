@@ -4,7 +4,7 @@ import traceback
 from typing import TYPE_CHECKING, Optional
 from pywheels.file_tools import delete_file
 from ..models import Job, JobStatus
-from . import logger, magnus_workspace_path
+from . import logger, magnus_workspace_path, magnus_ephemeral_workspace_path
 
 if TYPE_CHECKING:
     from ._typing import _SchedulerProtocol
@@ -54,19 +54,25 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
 
     def _clean_up_working_table(self, job_id: str) -> None:
         job_working_table = f"{magnus_workspace_path}/jobs/{job_id}"
+        job_ephemeral_table = f"{magnus_ephemeral_workspace_path}/jobs/{job_id}"
         try:
             delete_file(os.path.join(job_working_table, "repository"))
             delete_file(os.path.join(job_working_table, "wrapper.py"))
             delete_file(os.path.join(job_working_table, ".magnus_success"))
             delete_file(os.path.join(job_working_table, ".magnus_oom"))
             delete_file(os.path.join(job_working_table, ".magnus_user_script.sh"))
-            # apptainer overlay create 在不同 apptainer 版本下落盘文件名不同：
-            # 部分版本写 ephemeral_overlay.img，部分版本自动追加 .ext3 后缀。
-            # 双删兜住两种情况，避免漏掉孤儿 sparse 文件。
-            delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
-            delete_file(os.path.join(job_working_table, "ephemeral_overlay.img.ext3"))
-            delete_file(os.path.join(job_working_table, ".magnus_tmp"))
-            delete_file(os.path.join(job_working_table, ".magnus_cache"))
+            # ephemeral overlay + apptainer tmp/cache 落在 ephemeral table。
+            if job_ephemeral_table != job_working_table:
+                # 独立 ephemeral_root：该目录只存临时产物，整体删除即可。
+                delete_file(job_ephemeral_table)
+            else:
+                # 缺省：ephemeral 与持久产物同目录，逐项删（保留 metrics/ slurm/）。
+                # apptainer overlay create 落盘命名随版本而异（ephemeral_overlay.img
+                # 或自动追加 .ext3 后缀），双删兜住两种避免漏掉孤儿 sparse 文件。
+                delete_file(os.path.join(job_working_table, "ephemeral_overlay.img"))
+                delete_file(os.path.join(job_working_table, "ephemeral_overlay.img.ext3"))
+                delete_file(os.path.join(job_working_table, ".magnus_tmp"))
+                delete_file(os.path.join(job_working_table, ".magnus_cache"))
             # metrics/ 不清理，与 slurm/output.txt 同策略，供 job 结束后回看
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")
