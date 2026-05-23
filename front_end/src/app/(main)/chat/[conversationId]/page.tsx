@@ -210,8 +210,20 @@ export default function ConversationPage() {
     return () => {
       mountedRef.current = false;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      wsRef.current?.close();
+      const ws = wsRef.current;
       wsRef.current = null;
+      if (ws) {
+        // Detach handlers BEFORE close(): close() fires onclose asynchronously,
+        // and by the time it runs the effect body has re-run and reset
+        // mountedRef.current back to true, so the old onclose would happily
+        // schedule a reconnect that races the new ws into wsRef and leaves
+        // two live sockets per dep change.
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+      }
     };
   }, [connectWs]);
 
