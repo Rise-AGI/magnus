@@ -416,8 +416,18 @@ def delete_user(
         old_token = avatar_url.rsplit("/", 1)[-1]
         file_custody_manager.delete_entry(old_token)
 
+    # Snapshot the trust token before delete so we can evict it from the in-
+    # process auth cache. get_current_user fails closed for deleted users on
+    # the next DB lookup, so this isn't a security gap — but a stale cache
+    # entry keeps mapping a now-deleted user_id for up to AUTH_CACHE_TTL,
+    # wasting one DB query per auth attempt during that window and leaving
+    # the dict slightly grown for no reason.
+    deleted_token = target.token
+
     db.delete(target)
     db.commit()
+
+    evict_token_from_cache(deleted_token)
 
     logger.info(f"User {current_user.id} ({current_user.name}) deleted agent {user_id}")
 
