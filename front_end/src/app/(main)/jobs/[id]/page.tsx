@@ -46,6 +46,63 @@ const LogContent = React.memo(function LogContent({ logs }: { logs: string }) {
   );
 });
 
+// Artifacts (MAGNUS_RESULT / MAGNUS_ACTION) render verbatim into a
+// whitespace-pre-wrap + break-all <pre>. break-all forces the layout engine to
+// weigh a break opportunity at every single character, so a multi-hundred-KB
+// blob turns each layout / scroll repaint into a visible stall. Cap how much we
+// render inline; the limit is deliberately generous — roughly 20x any realistic
+// result/action and well under the server's 1 MB marker cap — so ordinary
+// artifacts render exactly as before and only a pathological blob is deferred.
+const ARTIFACT_INLINE_CHAR_LIMIT = 200_000;
+
+function formatArtifactSize(charCount: number): string {
+  const units = ["B", "KB", "MB"];
+  const exponent = Math.min(Math.floor(Math.log(charCount) / Math.log(1024)), units.length - 1);
+  const value = charCount / 1024 ** exponent;
+  return `${value >= 10 || exponent === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[exponent]}`;
+}
+
+// Below the limit this renders the exact same <pre> the artifacts tab used
+// before (pixel-identical). Above it, only the head is rendered until the user
+// explicitly opts into the full blob via "show full". Memoized so the 3s job
+// poll — which hands back a fresh job object every tick — doesn't re-reconcile
+// a huge <pre> on every render.
+const ArtifactContent = React.memo(function ArtifactContent({ text }: { text: string }) {
+  const { t } = useLanguage();
+  const [expanded, setExpanded] = useState(false);
+
+  // A still-running job can rewrite its result/action; whenever the underlying
+  // text changes, fall back to the truncated view so we never silently keep a
+  // stale full render on screen.
+  useEffect(() => {
+    setExpanded(false);
+  }, [text]);
+
+  const tooLarge = text.length > ARTIFACT_INLINE_CHAR_LIMIT;
+  const shown = tooLarge && !expanded ? text.slice(0, ARTIFACT_INLINE_CHAR_LIMIT) : text;
+
+  return (
+    <>
+      <pre className="text-sm text-zinc-300 bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-all font-mono">
+        {shown}
+      </pre>
+      {tooLarge && !expanded && (
+        <div className="mt-2 flex items-center justify-between gap-3 px-4 py-2.5 bg-zinc-900/40 border border-zinc-800 rounded-lg">
+          <span className="text-xs text-zinc-500">
+            {t("jobDetail.artifactTruncated", { size: formatArtifactSize(text.length) })}
+          </span>
+          <button
+            onClick={() => setExpanded(true)}
+            className="shrink-0 px-2.5 py-1 text-xs rounded-md border border-zinc-700/50 bg-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-700 transition-colors"
+          >
+            {t("jobDetail.showFull")}
+          </button>
+        </div>
+      )}
+    </>
+  );
+});
+
 export default function JobDetailsPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
@@ -681,9 +738,7 @@ export default function JobDetailsPage() {
                 <div>
                   <h4 className="text-sm font-semibold text-zinc-400 mb-2">{t("jobDetail.result")}</h4>
                   {job.result ? (
-                    <pre className="text-sm text-zinc-300 bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-all font-mono">
-                      {job.result}
-                    </pre>
+                    <ArtifactContent text={job.result} />
                   ) : (
                     <p className="text-sm text-zinc-600 italic">
                       {['Pending', 'Preparing', 'Running'].includes(job.status)
@@ -696,9 +751,7 @@ export default function JobDetailsPage() {
                 <div>
                   <h4 className="text-sm font-semibold text-zinc-400 mb-2">{t("jobDetail.action")}</h4>
                   {job.action ? (
-                    <pre className="text-sm text-zinc-300 bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-all font-mono">
-                      {job.action}
-                    </pre>
+                    <ArtifactContent text={job.action} />
                   ) : (
                     <p className="text-sm text-zinc-600 italic">
                       {['Pending', 'Preparing', 'Running'].includes(job.status)

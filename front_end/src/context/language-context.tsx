@@ -555,6 +555,8 @@ const translations = {
   "jobDetail.action": { zh: "动作", en: "Action" },
   "jobDetail.noResult": { zh: "任务未写入结果。", en: "This job did not write a result." },
   "jobDetail.noAction": { zh: "任务未写入动作。", en: "This job did not write an action." },
+  "jobDetail.artifactTruncated": { zh: "内容过大（{size}），已截断显示", en: "Output too large ({size}), truncated" },
+  "jobDetail.showFull": { zh: "显示完整", en: "Show full" },
   "jobDetail.downloadOutput": { zh: "下载输出", en: "Download Output" },
   "jobDetail.downloadingOutput": { zh: "下载中...", en: "Downloading..." },
   "jobDetail.browserDownloadHint": { zh: "Web 端只对白名单形式的 magnus receive 动作提供浏览器下载。target 在这里会被当作建议下载名，而不是本地绝对路径。", en: "The Web client only supports browser download for allowlisted magnus receive actions. target is treated as a suggested download name here, not a local absolute path." },
