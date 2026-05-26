@@ -1,8 +1,8 @@
 // front_end/src/app/(main)/services/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { Search, Plus, Activity, ArrowUpDown } from "lucide-react";
 import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
@@ -11,6 +11,7 @@ import { User } from "@/types/auth";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { usePolling } from "@/hooks/use-polling";
+import { useUrlPagination } from "@/hooks/use-url-pagination";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { ServiceTable } from "@/components/services/service-table";
@@ -20,8 +21,8 @@ import { getUserInitials } from "@/lib/user-display";
 
 export default function ServicesPage() {
   const { t } = useLanguage();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const { page, pageSize, setPage, setPageSize, setParams } = useUrlPagination();
 
   // 排序选项配置
   const SORT_OPTIONS = [
@@ -36,13 +37,12 @@ export default function ServicesPage() {
   // Filters & Sorting
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
-  const [selectedUserId, setSelectedUserId] = useState(searchParams.get("owner_id") ?? "");
+  // owner_id lives in the URL so owner links and back-navigation round-trip it.
+  const selectedUserId = searchParams.get("owner_id") ?? "";
   // [Magnus Update] 新增筛选和排序状态
   const [activeOnly, setActiveOnly] = useState(false);
   const [sortBy, setSortBy] = useState<string>("activity");
 
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
   const [totalItems, setTotalItems] = useState(0);
 
   // Drawer State
@@ -58,7 +58,7 @@ export default function ServicesPage() {
     service: Service;
   } | null>(null);
 
-  const skip = (currentPage - 1) * pageSize;
+  const skip = (page - 1) * pageSize;
 
   // 1. Fetch Services
   const fetchServices = useCallback(async (isBackground = false) => {
@@ -111,27 +111,17 @@ export default function ServicesPage() {
     ];
   }, [allUsers, t]);
 
-  // Reset page when filters change
+  // Reset to the first page when search / activeOnly / sortBy change — but not
+  // on mount, which would wipe a page restored from the URL on back-navigation.
+  // owner_id changes reset the page atomically in the filter onChange below.
+  const isFirstFilter = useRef(true);
   useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedQuery, selectedUserId, activeOnly, sortBy]);
-
-  // owner_id 双向同步：state → URL（SearchableSelect）；URL → state（外部链接落地或
-  // 自页 PersonHoverCard chip 跳同 route）。idempotent。
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (selectedUserId) params.set("owner_id", selectedUserId);
-    else params.delete("owner_id");
-    const next = params.toString();
-    router.replace(next ? `?${next}` : "?", { scroll: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUserId]);
-
-  useEffect(() => {
-    const fromUrl = searchParams.get("owner_id") ?? "";
-    if (fromUrl !== selectedUserId) setSelectedUserId(fromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+    if (isFirstFilter.current) {
+      isFirstFilter.current = false;
+      return;
+    }
+    setParams({ page: null });
+  }, [debouncedQuery, activeOnly, sortBy, setParams]);
 
   useEffect(() => { fetchServices(); }, [fetchServices]);
   usePolling(() => fetchServices(true), POLL_INTERVAL);
@@ -291,7 +281,7 @@ export default function ServicesPage() {
         <div className="w-full sm:w-48">
           <SearchableSelect
             value={selectedUserId}
-            onChange={setSelectedUserId}
+            onChange={(uid) => setParams({ owner_id: uid || null, page: null })}
             options={userFilterOptions}
             placeholder={t("services.filterByOwner")}
             className="mb-0 border-none bg-transparent"
@@ -342,15 +332,12 @@ export default function ServicesPage() {
         {services.length > 0 && (
           <div className="px-6 py-2 border-zinc-900/30">
             <PaginationControls
-              currentPage={currentPage}
+              currentPage={page}
               totalPages={Math.ceil(totalItems / pageSize)}
               pageSize={pageSize}
               totalItems={totalItems}
-              onPageChange={setCurrentPage}
-              onPageSizeChange={(newSize) => {
-                setPageSize(newSize);
-                setCurrentPage(1);
-              }}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
             />
           </div>
         )}

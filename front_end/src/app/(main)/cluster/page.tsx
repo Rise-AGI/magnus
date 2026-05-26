@@ -14,6 +14,7 @@ import { useJobOperations } from "@/hooks/use-job-operations";
 import { usePolling } from "@/hooks/use-polling";
 import { JobTable } from "@/components/jobs/job-table";
 import { PaginationControls } from "@/components/ui/pagination-controls";
+import { useUrlPagination } from "@/hooks/use-url-pagination";
 
 interface ClusterResources {
   node: string;
@@ -44,15 +45,14 @@ export default function ClusterPage() {
   const [totalMyJobs, setTotalMyJobs] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // My Active Jobs pagination
-  const [myPage, setMyPage] = useState(1);
-  const [mySize, setMySize] = useState(5);
-
-  // Cluster running/pending pagination
-  const [runningPage, setRunningPage] = useState(1);
-  const [runningSize, setRunningSize] = useState(5);
-  const [pendingPage, setPendingPage] = useState(1);
-  const [pendingSize, setPendingSize] = useState(5);
+  // Each panel keeps its page in the URL under its own prefix so the three
+  // paginations survive a route round-trip independently without colliding.
+  const { page: myPage, pageSize: mySize, setPage: setMyPage, setPageSize: setMySize } =
+    useUrlPagination({ prefix: "my", defaultPageSize: 5 });
+  const { page: runningPage, pageSize: runningSize, setPage: setRunningPage, setPageSize: setRunningSize } =
+    useUrlPagination({ prefix: "running", defaultPageSize: 5 });
+  const { page: pendingPage, pageSize: pendingSize, setPage: setPendingPage, setPageSize: setPendingSize } =
+    useUrlPagination({ prefix: "pending", defaultPageSize: 5 });
 
   const fetchData = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
@@ -262,7 +262,7 @@ export default function ClusterPage() {
                   pageSize={mySize}
                   totalItems={totalMyJobs}
                   onPageChange={setMyPage}
-                  onPageSizeChange={(s) => { setMySize(s); setMyPage(1); }}
+                  onPageSizeChange={setMySize}
                   pageSizeOptions={[5, 10, 20]}
                 />
               </div>
@@ -293,7 +293,7 @@ export default function ClusterPage() {
                   pageSize={runningSize}
                   totalItems={cluster?.total_running || 0}
                   onPageChange={setRunningPage}
-                  onPageSizeChange={(s) => { setRunningSize(s); setRunningPage(1); }}
+                  onPageSizeChange={setRunningSize}
                   pageSizeOptions={[5, 10, 20]}
                 />
               </div>
@@ -324,7 +324,7 @@ export default function ClusterPage() {
                   pageSize={pendingSize}
                   totalItems={cluster?.total_pending || 0}
                   onPageChange={setPendingPage}
-                  onPageSizeChange={(s) => { setPendingSize(s); setPendingPage(1); }}
+                  onPageSizeChange={setPendingSize}
                   pageSizeOptions={[5, 10, 20]}
                 />
               </div>

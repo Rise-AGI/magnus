@@ -1,8 +1,8 @@
 // front_end/src/app/(main)/blueprints/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { Search, Plus } from "lucide-react";
 import { client } from "@/lib/api";
 import { PaginationControls } from "@/components/ui/pagination-controls";
@@ -14,6 +14,7 @@ import { getUserInitials } from "@/lib/user-display";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { usePolling } from "@/hooks/use-polling";
+import { useUrlPagination } from "@/hooks/use-url-pagination";
 
 import { User } from "@/types/auth";
 import { Blueprint } from "@/types/blueprint";
@@ -24,17 +25,15 @@ import { BlueprintRunner } from "@/components/blueprints/blueprint-runner";
 
 export default function BlueprintsPage() {
   const { t } = useLanguage();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const { page, pageSize, setPage, setPageSize, setParams } = useUrlPagination();
   const [blueprints, setBlueprints] = useState<Blueprint[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState(searchParams.get("owner_id") ?? "");
-  
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const selectedUserId = searchParams.get("owner_id") ?? "";
+
   const [totalItems, setTotalItems] = useState(0);
 
   const [selectedBlueprint, setSelectedBlueprint] = useState<Blueprint | null>(null);
@@ -67,29 +66,22 @@ export default function BlueprintsPage() {
       ...allUsers.map(u => ({ label: u.name, value: u.id, meta: u.email || "", icon: u.avatar_url || undefined, initials: getUserInitials(u.name) }))
   ], [allUsers, t]);
 
-  useEffect(() => { setCurrentPage(1); }, [debouncedQuery, selectedUserId]);
-
-  // owner_id 双向同步：state → URL（SearchableSelect）；URL → state（外部链接落地或
-  // 自页 PersonHoverCard chip 跳同 route）。idempotent。
+  // Reset to the first page when the search query changes — but not on mount,
+  // which would wipe a page restored from the URL on back-navigation. owner_id
+  // changes reset the page atomically in the filter onChange below.
+  const isFirstQuery = useRef(true);
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (selectedUserId) params.set("owner_id", selectedUserId);
-    else params.delete("owner_id");
-    const next = params.toString();
-    router.replace(next ? `?${next}` : "?", { scroll: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUserId]);
-
-  useEffect(() => {
-    const fromUrl = searchParams.get("owner_id") ?? "";
-    if (fromUrl !== selectedUserId) setSelectedUserId(fromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+    if (isFirstQuery.current) {
+      isFirstQuery.current = false;
+      return;
+    }
+    setParams({ page: null });
+  }, [debouncedQuery, setParams]);
 
   const fetchBlueprints = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const skip = (currentPage - 1) * pageSize;
+      const skip = (page - 1) * pageSize;
       const params = new URLSearchParams({ skip: skip.toString(), limit: pageSize.toString() });
       if (debouncedQuery.trim()) params.append("search", debouncedQuery.trim());
       if (selectedUserId) params.append("creator_id", selectedUserId);
@@ -103,7 +95,7 @@ export default function BlueprintsPage() {
       })));
       setTotalItems(res.total);
     } catch (e) { console.error(e); } finally { if (!isBackground) setLoading(false); }
-  }, [currentPage, pageSize, debouncedQuery, selectedUserId, allUsers]);
+  }, [page, pageSize, debouncedQuery, selectedUserId, allUsers]);
 
   useEffect(() => { fetchBlueprints(); }, [fetchBlueprints]);
   usePolling(() => fetchBlueprints(true), POLL_INTERVAL);
@@ -163,7 +155,7 @@ export default function BlueprintsPage() {
         </div>
         <div className="h-6 w-px bg-zinc-800 hidden sm:block"></div>
         <div className="w-full sm:w-56">
-          <SearchableSelect value={selectedUserId} onChange={setSelectedUserId} options={userFilterOptions} placeholder={t("blueprints.filterByUser")} className="mb-0 border-none bg-transparent" />
+          <SearchableSelect value={selectedUserId} onChange={(uid) => setParams({ owner_id: uid || null, page: null })} options={userFilterOptions} placeholder={t("blueprints.filterByUser")} className="mb-0 border-none bg-transparent" />
         </div>
       </div>
 
@@ -172,7 +164,7 @@ export default function BlueprintsPage() {
       />
       {blueprints.length > 0 && (
         <div className="mt-4 px-6">
-          <PaginationControls currentPage={currentPage} totalPages={Math.ceil(totalItems / pageSize)} pageSize={pageSize} totalItems={totalItems} onPageChange={setCurrentPage} onPageSizeChange={(s) => { setPageSize(s); setCurrentPage(1); }} />
+          <PaginationControls currentPage={page} totalPages={Math.ceil(totalItems / pageSize)} pageSize={pageSize} totalItems={totalItems} onPageChange={setPage} onPageSizeChange={setPageSize} />
         </div>
       )}
 

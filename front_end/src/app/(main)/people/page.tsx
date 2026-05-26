@@ -1,7 +1,7 @@
 // front_end/src/app/(main)/people/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Search, Plus } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { client } from "@/lib/api";
@@ -13,6 +13,7 @@ import { RecruitDrawer } from "@/components/people/recruit-drawer";
 import { GroupInviteDialog } from "@/components/chat/group-invite-dialog";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
+import { useUrlPagination } from "@/hooks/use-url-pagination";
 import { UserDetail } from "@/types/auth";
 
 
@@ -20,14 +21,12 @@ export default function PeoplePage() {
   const { t } = useLanguage();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { page, pageSize, setPage, setPageSize, setParams } = useUrlPagination();
   const [users, setUsers] = useState<UserDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalItems, setTotalItems] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
-
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
 
   // UI state
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
@@ -41,7 +40,7 @@ export default function PeoplePage() {
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await client(`/api/users/roster?page=${currentPage}&page_size=${pageSize}&search=${encodeURIComponent(debouncedQuery)}`);
+      const res = await client(`/api/users/roster?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(debouncedQuery)}`);
       setUsers(res.items);
       setTotalItems(res.total);
     } catch (e) {
@@ -49,10 +48,19 @@ export default function PeoplePage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize, debouncedQuery]);
+  }, [page, pageSize, debouncedQuery]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
-  useEffect(() => { setCurrentPage(1); }, [debouncedQuery]);
+  // Reset to the first page when the search changes — but not on mount, which
+  // would wipe a page restored from the URL on back-navigation.
+  const isFirstQuery = useRef(true);
+  useEffect(() => {
+    if (isFirstQuery.current) {
+      isFirstQuery.current = false;
+      return;
+    }
+    setParams({ page: null });
+  }, [debouncedQuery, setParams]);
 
   // Keep selectedUser in sync with latest fetched data
   useEffect(() => {
@@ -83,11 +91,9 @@ export default function PeoplePage() {
       })
       .catch((e) => console.error("Failed to focus user", e))
       .finally(() => {
-        // 清理 URL：drawer 一旦打开就不再需要 query，避免刷新重复触发
-        const params = new URLSearchParams(searchParams.toString());
-        params.delete("focus");
-        const next = params.toString();
-        router.replace(next ? `?${next}` : "?", { scroll: false });
+        // 清理 URL：drawer 一旦打开就不再需要 query，避免刷新重复触发。
+        // 走 setParams 而非裸 router.replace，合并实时 URL，保住可能并存的 page 参数。
+        setParams({ focus: null });
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,12 +170,12 @@ export default function PeoplePage() {
       {totalItems > 0 && (
         <div className="mt-4 px-6">
           <PaginationControls
-            currentPage={currentPage}
+            currentPage={page}
             totalPages={totalPages}
             pageSize={pageSize}
             totalItems={totalItems}
-            onPageChange={setCurrentPage}
-            onPageSizeChange={(s) => { setPageSize(s); setCurrentPage(1); }}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
           />
         </div>
       )}

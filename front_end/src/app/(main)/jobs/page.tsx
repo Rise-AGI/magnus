@@ -1,8 +1,8 @@
 // front_end/src/app/(main)/jobs/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { Plus, Search } from "lucide-react";
 import { client } from "@/lib/api";
 import { POLL_INTERVAL } from "@/lib/config";
@@ -11,6 +11,7 @@ import { User } from "@/types/auth";
 import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { usePolling } from "@/hooks/use-polling";
+import { useUrlPagination } from "@/hooks/use-url-pagination";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { JobDrawer } from "@/components/jobs/job-drawer";
@@ -21,8 +22,8 @@ import { getUserInitials } from "@/lib/user-display";
 
 export default function JobsPage() {
   const { t } = useLanguage();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const { page, pageSize, setPage, setPageSize, setParams } = useUrlPagination();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -30,14 +31,13 @@ export default function JobsPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebounce(searchQuery);
-  // owner_id 从 URL 初始化，使 PersonHoverCard "看其作品"链接生效
-  const [selectedUserId, setSelectedUserId] = useState(searchParams.get("owner_id") ?? "");
-  
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // owner_id lives in the URL so PersonHoverCard "see their work" links and
+  // back-navigation both round-trip the filter.
+  const selectedUserId = searchParams.get("owner_id") ?? "";
+
   const [totalItems, setTotalItems] = useState(0);
 
-  const skip = (currentPage - 1) * pageSize;
+  const skip = (page - 1) * pageSize;
   const fetchJobs = useCallback(async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
@@ -104,26 +104,17 @@ export default function JobsPage() {
     ];
   }, [allUsers, t]);
 
+  // Reset to the first page when the search query changes — but not on mount,
+  // which would wipe a page restored from the URL on back-navigation. owner_id
+  // changes reset the page atomically in the filter onChange below.
+  const isFirstQuery = useRef(true);
   useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedQuery, selectedUserId]);
-
-  // owner_id 双向同步：state → URL（用户改 SearchableSelect）；URL → state（外部
-  // 链接落地或自页 PersonHoverCard chip 跳同 route）。两个方向都会写同一个值，幂等不死循环。
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (selectedUserId) params.set("owner_id", selectedUserId);
-    else params.delete("owner_id");
-    const next = params.toString();
-    router.replace(next ? `?${next}` : "?", { scroll: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUserId]);
-
-  useEffect(() => {
-    const fromUrl = searchParams.get("owner_id") ?? "";
-    if (fromUrl !== selectedUserId) setSelectedUserId(fromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+    if (isFirstQuery.current) {
+      isFirstQuery.current = false;
+      return;
+    }
+    setParams({ page: null });
+  }, [debouncedQuery, setParams]);
 
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
   usePolling(() => fetchJobs(true), POLL_INTERVAL);
@@ -167,7 +158,7 @@ export default function JobsPage() {
         <div className="w-full sm:w-56">
           <SearchableSelect
              value={selectedUserId}
-             onChange={setSelectedUserId}
+             onChange={(uid) => setParams({ owner_id: uid || null, page: null })}
              options={userFilterOptions}
              placeholder={t("jobs.filterByUser")}
              className="mb-0 border-none bg-transparent"
@@ -189,16 +180,13 @@ export default function JobsPage() {
         {/* Pagination */}
         {jobs.length > 0 && (
           <div className="px-6 py-2 border-zinc-900/30">
-            <PaginationControls 
-              currentPage={currentPage}
+            <PaginationControls
+              currentPage={page}
               totalPages={Math.ceil(totalItems / pageSize)}
               pageSize={pageSize}
               totalItems={totalItems}
-              onPageChange={setCurrentPage}
-              onPageSizeChange={(newSize) => {
-                 setPageSize(newSize);
-                 setCurrentPage(1);
-              }}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
             />
           </div>
         )}
