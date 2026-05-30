@@ -58,7 +58,7 @@ async def upload_file(
             max_downloads,
         )
     except CustodyLimitError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=429, detail=str(e))
     except CustodyStorageFullError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except FileTooLargeError as e:
