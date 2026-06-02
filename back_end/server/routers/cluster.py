@@ -156,6 +156,18 @@ def get_cluster_stats(
             except ValueError:
                 start_dt = datetime.now()
 
+            # external job 的 cpu / mem 已由 get_all_running_tasks 从 squeue 采到，
+            # 一并填入让 cluster 页面与 magnus 原生 job 的资源展示对齐：前端按
+            # cpu_count / memory_demand 渲染，三者皆缺时才回落到 "仅 CPU"。
+            external_cpu_count = task.get("cpu_count") or None
+            external_memory_mb = task.get("memory_mb") or 0
+            if external_memory_mb <= 0:
+                external_memory_demand = None
+            elif external_memory_mb % 1024 == 0:
+                external_memory_demand = f"{external_memory_mb // 1024}G"
+            else:
+                external_memory_demand = f"{external_memory_mb}M"
+
             mock_job = JobResponse(
                 task_name = task["name"],
                 description = "External slurm task",
@@ -167,6 +179,8 @@ def get_cluster_stats(
                 container_image = "N/A",
                 gpu_type = task["gpu_type"].lower().replace(" ", ""),
                 gpu_count = task["gpu_count"],
+                cpu_count = external_cpu_count,
+                memory_demand = external_memory_demand,
                 job_type = JobType.EXTERNAL,
                 id = f"{slurm_id} (slurm)",
                 user_id = mock_user.id,
