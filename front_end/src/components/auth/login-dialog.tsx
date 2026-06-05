@@ -76,45 +76,71 @@ export function LoginDialog() {
           )}
         </div>
 
-        <div className="bg-zinc-900/50 px-6 py-4 border-t border-zinc-800/50 flex flex-col gap-3">
+        <div className="bg-zinc-900/50 px-6 py-4 border-t border-zinc-800/50">
           {showTokenInput ? (
-            <>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
               <button
                 onClick={handleTokenLogin}
                 disabled={isLoggingIn || tokenValue.length !== MAGNUS_TOKEN_LENGTH}
-                className="w-full px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="order-1 sm:order-2 w-full sm:w-auto px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoggingIn && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t("auth.tokenLoginButton")}
               </button>
               <button
                 onClick={() => { setShowTokenInput(false); setTokenValue(""); setTokenError(null); }}
-                className="w-full px-4 py-2 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                className="order-2 sm:order-1 w-full sm:w-auto px-4 py-2 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
               >
                 {t("common.cancel")}
               </button>
-            </>
+            </div>
           ) : (
             <>
-              <button
-                onClick={loginWithFeishu}
-                className="w-full px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
-              >
-                <LogIn className="w-4 h-4" />
-                {t("auth.signInWithFeishu")}
-              </button>
-              <button
-                onClick={() => setShowTokenInput(true)}
-                className="w-full px-4 py-2 rounded-lg text-sm font-medium text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700 transition-colors flex items-center justify-center gap-2"
-              >
-                {t("auth.tokenLogin")}
-              </button>
-              <button
-                onClick={closeDialog}
-                className="w-full px-4 py-2 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-              >
-                {t("common.cancel")}
-              </button>
+              {/* Mobile: full-width vertical stack */}
+              <div className="flex flex-col gap-3 sm:hidden">
+                <button
+                  onClick={loginWithFeishu}
+                  className="w-full px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  {t("auth.signInWithFeishu")}
+                </button>
+                <button
+                  onClick={() => setShowTokenInput(true)}
+                  className="w-full px-4 py-2 rounded-lg text-sm font-medium text-zinc-200 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  {t("auth.tokenLogin")}
+                </button>
+                <button
+                  onClick={closeDialog}
+                  className="w-full px-4 py-2 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                >
+                  {t("common.cancel")}
+                </button>
+              </div>
+
+              {/* Desktop: token-login link on the left, cancel + Feishu on the right */}
+              <div className="hidden sm:flex sm:items-center sm:gap-3">
+                <button
+                  onClick={() => setShowTokenInput(true)}
+                  className="flex-1 min-w-0 truncate text-left text-xs text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                >
+                  {t("auth.tokenLogin")}
+                </button>
+                <button
+                  onClick={closeDialog}
+                  className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  onClick={loginWithFeishu}
+                  className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  {t("auth.signInWithFeishu")}
+                </button>
+              </div>
             </>
           )}
         </div>
