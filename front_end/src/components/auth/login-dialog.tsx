@@ -42,7 +42,7 @@ export function LoginDialog() {
   if (!showLoginDialog) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 min-h-screen">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div
         className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
         onClick={closeDialog}
@@ -76,18 +76,18 @@ export function LoginDialog() {
           )}
         </div>
 
-        <div className="bg-zinc-900/50 px-6 py-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800/50">
+        <div className="bg-zinc-900/50 px-6 py-4 border-t border-zinc-800/50 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
           <button
             onClick={() => setShowTokenInput(!showTokenInput)}
-            className="shrink-0 whitespace-nowrap text-xs text-transparent hover:text-zinc-500 transition-colors cursor-pointer"
+            className="order-last sm:order-none sm:flex-1 min-w-0 truncate text-left text-xs text-transparent hover:text-zinc-500 transition-colors cursor-pointer"
           >
             {showTokenInput ? t("common.cancel") : t("auth.tokenLogin")}
           </button>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 sm:shrink-0">
             <button
               onClick={closeDialog}
-              className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+              className="w-full sm:w-auto shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
             >
               {t("common.cancel")}
             </button>
@@ -95,7 +95,7 @@ export function LoginDialog() {
               <button
                 onClick={handleTokenLogin}
                 disabled={isLoggingIn || tokenValue.length !== MAGNUS_TOKEN_LENGTH}
-                className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full sm:w-auto shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoggingIn && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t("auth.tokenLoginButton")}
@@ -103,7 +103,7 @@ export function LoginDialog() {
             ) : (
               <button
                 onClick={loginWithFeishu}
-                className="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2"
+                className="w-full sm:w-auto shrink-0 whitespace-nowrap px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 border border-blue-500/50 shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2"
               >
                 <LogIn className="w-4 h-4" />
                 {t("auth.signInWithFeishu")}
