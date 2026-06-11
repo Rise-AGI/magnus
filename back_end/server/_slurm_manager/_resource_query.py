@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 
 from .._magnus_config import magnus_config
+from .._size_utils import _parse_size_string
 from . import logger
 
 
@@ -45,6 +46,27 @@ def _unwrap_slurm_int(value) -> int:
         return value.get("number") or 0
     if isinstance(value, int):
         return value
+    return 0
+
+
+def _parse_tres_mem_mb(tres_str: str) -> int:
+    """从 squeue ``tres_alloc_str``（形如 ``cpu=8,mem=32G,node=1,billing=8``）取
+    已分配内存并换算成 MB；找不到 ``mem=`` 或解析失败返回 0。
+
+    内存占用刻意取**已分配** TRES 而非请求值 ``memory_per_node``：后者在用户用
+    ``--mem=0``（要走整机内存）时是哨兵 0，会让该 job 的内存在 cluster 视图和
+    scheduler 的 free-mem 派生里凭空消失——外部 job 只显示 CPU、free-mem 被高估、
+    scheduler 误判内存充足而过量提交（落到 SLURM 后卡 Resources）。
+    ``tres_alloc_str`` 的 ``mem=`` 是 SLURM 解析后的实际预留量，``--mem=0`` 下
+    给出整机真实数字。
+    """
+    for token in tres_str.split(","):
+        token = token.strip()
+        if token.startswith("mem="):
+            try:
+                return _parse_size_string(token[len("mem="):]) // (1024 ** 2)
+            except (ValueError, IndexError):
+                return 0
     return 0
 
 
@@ -388,12 +410,19 @@ class _ResourceQueryMixin:
                     # CPU / Mem 占用走 squeue (job-level)，理由见 NodeSnapshot
                     # docstring：CG 期间这两个字段仍报 alloc，跟 GPU 行为对齐。
                     # ``cpus`` 是 job 已分配的逻辑 CPU 总数 (跨节点之和，hyperthread
-                    # 已 round-up)；``memory_per_node`` 是单节点 mem (MB)，乘以
-                    # ``node_count`` 得 job 总 mem。
+                    # 已 round-up)。
                     cpu_count = _unwrap_slurm_int(job.get("cpus"))
-                    mem_per_node = _unwrap_slurm_int(job.get("memory_per_node"))
-                    node_count = _unwrap_slurm_int(job.get("node_count")) or 1
-                    memory_mb = mem_per_node * node_count
+
+                    # 内存取已分配 TRES (tres_alloc_str 的 mem=)，而非请求值
+                    # memory_per_node——后者在 --mem=0 (要走整机内存) 时为哨兵 0，
+                    # 会让内存凭空消失、cluster/scheduler 的 free-mem 被高估，详见
+                    # _parse_tres_mem_mb docstring。tres_alloc_str 缺失或无 mem=
+                    # 时（旧版 SLURM）fallback 回 memory_per_node * node_count。
+                    memory_mb = _parse_tres_mem_mb(job.get("tres_alloc_str") or "")
+                    if memory_mb <= 0:
+                        mem_per_node = _unwrap_slurm_int(job.get("memory_per_node"))
+                        node_count = _unwrap_slurm_int(job.get("node_count")) or 1
+                        memory_mb = mem_per_node * node_count
 
                     tasks.append({
                         "id": job_id,
