@@ -130,6 +130,8 @@ class _SubmitMixin(_SubmitMixinBase):
         default_ephemeral_storage = magnus_config["cluster"]["default_ephemeral_storage"]
         ephemeral_storage = job.ephemeral_storage if job.ephemeral_storage else default_ephemeral_storage
 
+        container_runtime = magnus_config["execution"]["container_runtime"]
+
         wrapper_content = _build_wrapper_content(
             job_working_table = job_working_table,
             job_ephemeral_table = job_ephemeral_table,
@@ -143,6 +145,7 @@ class _SubmitMixin(_SubmitMixinBase):
             allow_root = allow_root,
             entry_command = job.entry_command,
             effective_runner = effective_runner,
+            container_runtime = container_runtime,
         )
 
         wrapper_path = f"{job_working_table}/wrapper.py"

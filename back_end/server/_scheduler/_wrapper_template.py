@@ -22,8 +22,23 @@ def _build_wrapper_content(
     allow_root: bool,
     entry_command: str,
     effective_runner: str,
+    container_runtime: str,
 ) -> str:
     success_marker_path = f"{job_working_table}/.magnus_success"
+
+    # 容器运行时方言：apptainer 与 singularity(CE) 的 CLI（exec / overlay create /
+    # --nv / --contain[all] / --overlay / --writable-tmpfs / --env / --fakeroot /
+    # --pwd / --no-mount）大体兼容，但 magnus 注入的环境变量前缀不同 —— apptainer
+    # 读 APPTAINER_* / APPTAINERENV_*，singularity(CE) 只读 SINGULARITY_* /
+    # SINGULARITYENV_*（apptainer 兼容读 SINGULARITY_*，反之不成立）。按
+    # container_runtime 推导出二进制名与这两个前缀；container_runtime='apptainer'
+    # 时全部回到历史字面量，生成的 wrapper 字节级一致。注意：未 export 的纯局部
+    # shell 变量（APPTAINER_CONTAIN / APPTAINER_FLAGS / APPTAINER_CMD /
+    # _setuid_apptainer）保持原名，它们不进环境、不被任何 runtime 读，singularity
+    # 下只是普通局部变量。
+    runtime_binary = container_runtime
+    runtime_var_prefix = container_runtime.upper()
+    runtime_env_prefix = f"{runtime_var_prefix}ENV"
 
     return f'''import os
 import signal
@@ -492,27 +507,27 @@ def main():
         os.makedirs(apptainer_cache_dir, exist_ok=True)
 
         shell_cmd = f"""set -e
-export APPTAINERENV_MAGNUS_TOKEN={{user_token}}
-export APPTAINERENV_MAGNUS_ADDRESS={{magnus_address}}
-export APPTAINERENV_MAGNUS_JOB_ID={{job_id}}
-export APPTAINERENV_PYTHONUNBUFFERED=1
+export {runtime_env_prefix}_MAGNUS_TOKEN={{user_token}}
+export {runtime_env_prefix}_MAGNUS_ADDRESS={{magnus_address}}
+export {runtime_env_prefix}_MAGNUS_JOB_ID={{job_id}}
+export {runtime_env_prefix}_PYTHONUNBUFFERED=1
 if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
-    export APPTAINERENV_CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES"
+    export {runtime_env_prefix}_CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES"
 fi
 
 {{system_entry_command}}
 
 export MAGNUS_HOME=${{{{MAGNUS_HOME:-/magnus}}}}
-export APPTAINERENV_MAGNUS_HOME=$MAGNUS_HOME
-export APPTAINERENV_MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
-export APPTAINERENV_MAGNUS_ACTION=$MAGNUS_HOME/workspace/.magnus_action
-export APPTAINERENV_MAGNUS_METRICS_DIR=$MAGNUS_HOME/workspace/metrics
-export APPTAINERENV_MAGNUS_METRICS_PROTO=metrics.v1
-export APPTAINER_TMPDIR={{apptainer_tmp_dir}}
-export APPTAINER_CACHEDIR={{apptainer_cache_dir}}
+export {runtime_env_prefix}_MAGNUS_HOME=$MAGNUS_HOME
+export {runtime_env_prefix}_MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
+export {runtime_env_prefix}_MAGNUS_ACTION=$MAGNUS_HOME/workspace/.magnus_action
+export {runtime_env_prefix}_MAGNUS_METRICS_DIR=$MAGNUS_HOME/workspace/metrics
+export {runtime_env_prefix}_MAGNUS_METRICS_PROTO=metrics.v1
+export {runtime_var_prefix}_TMPDIR={{apptainer_tmp_dir}}
+export {runtime_var_prefix}_CACHEDIR={{apptainer_cache_dir}}
 # 追加 workspace bind mount: host {{work_dir}} → 容器 $MAGNUS_HOME/workspace
 # SDK 的 get_tmp_base() 依赖此 bind mount 判断运行环境（MAGNUS_HOME 存在 + workspace 目录存在 → 用 $MAGNUS_HOME/.tmp/ 中转文件，位于容器可写层而非 host 磁盘）
-export APPTAINER_BIND="${{{{APPTAINER_BIND:+${{{{APPTAINER_BIND}}}},}}}}{{work_dir}}:$MAGNUS_HOME/workspace"
+export {runtime_var_prefix}_BIND="${{{{{runtime_var_prefix}_BIND:+${{{{{runtime_var_prefix}_BIND}}}},}}}}{{work_dir}}:$MAGNUS_HOME/workspace"
 
 MAGNUS_HOST_GATEWAY="${{{{MAGNUS_HOST_GATEWAY:-10.0.2.2}}}}"
 for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy; do
@@ -521,12 +536,12 @@ for _var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO
         if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
             _val=$(echo "$_val" | sed "s/127\\\\.0\\\\.0\\\\.1/$MAGNUS_HOST_GATEWAY/g; s/localhost/$MAGNUS_HOST_GATEWAY/g")
         fi
-        export "APPTAINERENV_$_var=$_val"
+        export "{runtime_env_prefix}_$_var=$_val"
     fi
 done
 
 # Detect setuid apptainer: check binary setuid bit (zero I/O, instant)
-if [ -u "$(command -v apptainer)" ]; then
+if [ -u "$(command -v {runtime_binary})" ]; then
     _setuid_apptainer=1
 else
     _setuid_apptainer=
@@ -549,9 +564,9 @@ if [ -n "$APPTAINER_CONTAIN" ]; then
         # existing image. The overlay is strictly per-run scratch, so any leftover is
         # garbage -- drop it before creating so a re-run isn't blocked by it.
         rm -f {{overlay_path}} {{overlay_path}}.ext3
-        if ! apptainer overlay create --sparse --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}} 2>/dev/null; then
+        if ! {runtime_binary} overlay create --sparse --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}} 2>/dev/null; then
             echo "[Magnus] WARNING: --sparse not supported (apptainer < 1.3?), falling back to dense overlay" >&2
-            if ! apptainer overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}; then
+            if ! {runtime_binary} overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}; then
                 echo "[Magnus] ERROR: failed to create ephemeral overlay at {{overlay_path}}; the ephemeral disk may be full -- check free space on its volume" >&2
                 exit 1
             fi
@@ -576,7 +591,7 @@ if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
 fi
 
-APPTAINER_CMD="apptainer exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
+APPTAINER_CMD="{runtime_binary} exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     ROOTLESSKIT_FLAGS="--net=slirp4netns --port-driver=builtin --publish $MAGNUS_PORT_MAP"
