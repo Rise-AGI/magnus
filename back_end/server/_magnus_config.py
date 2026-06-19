@@ -50,7 +50,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     # 顶层键
     _check_key(config, "server", dict)
     _check_key(config, "execution", dict)
-    _warn_extra_keys(config, {"client", "server", "execution", "cluster"}, "config")
+    _warn_extra_keys(config, {"client", "server", "execution", "cluster", "transport"}, "config")
 
     # execution 配置 (先验证，决定后续验证路径)
     execution = config["execution"]
@@ -60,6 +60,29 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         raise ValueError(f"❌ execution.backend 必须是 'slurm' 或 'local'，当前值: '{backend}'")
 
     is_local = backend == "local"
+
+    # transport：magnus 执行 SLURM CLI（及后续跨界文件搬运）的位置。
+    # local = 本机 subprocess（magnus 与 SLURM controller 同机，liu/zhu/gu 现状）；
+    # ssh = 经已建立的 SSH ControlMaster socket 驱动远程站点（wm2 场景：在唯一可达的
+    # liu 上骑 socket 跑命令）。default local 保持现状，现有站点无需配置即字节级等价。
+    config.setdefault("transport", {"mode": "local"})
+    transport = config["transport"]
+    _check_key(transport, "mode", str)
+    transport_mode = transport["mode"]
+    if transport_mode not in ("local", "ssh"):
+        raise ValueError(f"❌ transport.mode 必须是 'local' 或 'ssh'，当前值: '{transport_mode}'")
+    if transport_mode == "ssh":
+        _check_key(transport, "ssh", dict)
+        ssh = transport["ssh"]
+        _check_key(ssh, "control_path", str)
+        _check_key(ssh, "host", str)
+        _check_key(ssh, "user", str)
+        # remote_root：远程站点上 magnus 搬运 job 工作区 / wrapper / 产物的根目录
+        # （wm2 落 Lustre 共享盘）。跨界 workspace I/O 链路（后续 commit）消费，缺省 None。
+        ssh.setdefault("remote_root", None)
+        _check_key(ssh, "remote_root", str, nullable=True)
+        _warn_extra_keys(ssh, {"control_path", "host", "user", "remote_root"}, "transport.ssh")
+    _warn_extra_keys(transport, {"mode", "ssh"}, "transport")
 
     # server 配置
     server = config["server"]
@@ -182,11 +205,33 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
             raise ValueError(f"❌ execution.backend='local' 要求 container_runtime='docker'，当前值: '{execution['container_runtime']}'")
     else:
         _check_key(execution, "container_runtime", str)
-        if execution["container_runtime"] != "apptainer":
-            raise NotImplementedError(f"❌ execution.container_runtime '{execution['container_runtime']}' 尚未实现，HPC 模式仅支持 'apptainer'")
+        if execution["container_runtime"] not in ("apptainer", "singularity"):
+            raise NotImplementedError(f"❌ execution.container_runtime '{execution['container_runtime']}' 尚未实现，HPC 模式支持 'apptainer' 或 'singularity'")
         _check_key(execution, "allow_root", bool)
         _check_key(execution, "resource_cache", dict)
-        expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache"}
+        # slurm 子配置：SLURM 提交方言。全部带保持现状的 default —— partition/qos/
+        # account 为 None 即不下发对应 flag；mem_mode='explicit' 即沿用 --mem；
+        # module_loads 为空即不注入 module load 前置。独占集群站点（liu/zhu/gu）无需
+        # 配置即字节级等价；wm2 这类租户场景显式覆盖（如 mem_mode='per_cpu' 折核数、
+        # module_loads=['singularity/3.11.3']）。
+        execution.setdefault("slurm", {})
+        slurm_cfg = execution["slurm"]
+        slurm_cfg.setdefault("partition", None)
+        slurm_cfg.setdefault("qos", None)
+        slurm_cfg.setdefault("account", None)
+        slurm_cfg.setdefault("mem_mode", "explicit")
+        slurm_cfg.setdefault("mem_per_cpu_mb", 4000)
+        slurm_cfg.setdefault("module_loads", [])
+        _check_key(slurm_cfg, "partition", str, nullable=True)
+        _check_key(slurm_cfg, "qos", str, nullable=True)
+        _check_key(slurm_cfg, "account", str, nullable=True)
+        _check_key(slurm_cfg, "mem_mode", str)
+        if slurm_cfg["mem_mode"] not in ("explicit", "per_cpu"):
+            raise ValueError(f"❌ execution.slurm.mem_mode 必须是 'explicit' 或 'per_cpu'，当前值: '{slurm_cfg['mem_mode']}'")
+        _check_key(slurm_cfg, "mem_per_cpu_mb", int)
+        _check_key(slurm_cfg, "module_loads", list)
+        _warn_extra_keys(slurm_cfg, {"partition", "qos", "account", "mem_mode", "mem_per_cpu_mb", "module_loads"}, "execution.slurm")
+        expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache", "slurm"}
 
     _warn_extra_keys(execution, expected_exec_keys, "execution")
 
@@ -231,8 +276,20 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
             "name", "gpus", "max_cpu_count", "max_memory_demand",
             "default_cpu_count", "default_memory_demand", "default_runner",
             "default_container_image", "default_ephemeral_storage", "default_system_entry_command",
-            "registry_mirror",
+            "registry_mirror", "scheduling",
         }, "cluster")
+
+    # cluster.scheduling：调度策略模式。authoritative = magnus 独占集群、自己算全
+    # 集群 free + EASY backfill + 抢占（liu/zhu/gu 现状）；tenant = magnus 是共享
+    # 集群的租户、只按 QOS 配额 eager 提交、把排队/backfill 交给外部 SLURM 自身
+    # fairshare 调度（wm2）。default authoritative 保持现状。local 与 HPC 两模式通用。
+    cluster = config["cluster"]
+    cluster.setdefault("scheduling", {"mode": "authoritative"})
+    scheduling = cluster["scheduling"]
+    _check_key(scheduling, "mode", str)
+    if scheduling["mode"] not in ("authoritative", "tenant"):
+        raise ValueError(f"❌ cluster.scheduling.mode 必须是 'authoritative' 或 'tenant'，当前值: '{scheduling['mode']}'")
+    _warn_extra_keys(scheduling, {"mode"}, "cluster.scheduling")
 
 
 def _load_magnus_config()-> Dict[str, Any]:
