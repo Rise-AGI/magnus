@@ -1,5 +1,7 @@
 # back_end/server/_scheduler/_decisions.py
-"""调度决策：EASY backfill 模式 — 队头优先级保留，后续不延迟队头者旁路启动。"""
+"""调度决策：按 cluster.scheduling.mode 切换 —— authoritative 跑 EASY backfill
+（队头优先级保留，后续不延迟队头者旁路启动），tenant 按优先级序 eager 提交、把排队
+交给外部 SLURM 的 fairshare。"""
 import asyncio
 from typing import TYPE_CHECKING, Tuple
 
@@ -12,7 +14,7 @@ from library.fundamental.scheduling import (
 )
 from ..database import SessionLocal
 from ..models import Job, JobStatus, JobType
-from .._magnus_config import is_local_mode
+from .._magnus_config import is_local_mode, magnus_config
 from .._size_utils import _parse_size_string
 from . import logger
 
@@ -49,7 +51,15 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
     async def _make_decisions(self):
         """
-        调度决策 — EASY backfill 模式
+        调度决策
+
+        提交策略由 cluster.scheduling.mode 选择（默认 authoritative）：
+        - authoritative：magnus 独占集群，自己算全集群 free + EASY backfill + A 抢 B，
+          SLURM 只接收已验证过资源的提交（liu/zhu/gu，下方详述）。
+        - tenant：magnus 是共享集群的租户、只有 QOS 配额，按优先级序 eager 提交所有
+          pending，把排队/backfill 交给外部 SLURM 的 fairshare（wm2）。
+
+        以下 backfill / 抢占描述针对 authoritative 模式。
 
         状态流转：Preparing → Pending → Queued → Running
         - Preparing: 系统正在准备资源（镜像、仓库）
@@ -127,13 +137,34 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
             head_job = schedulable_jobs[0]
 
-            # 队头是 A 类时先尝试抢占 B 类，让 backfill 拿到可能更大的 free
-            if not is_local_mode and head_job.job_type in [JobType.A1, JobType.A2]:
+            scheduling_mode = magnus_config["cluster"]["scheduling"]["mode"]
+
+            # 抢占只在 authoritative（magnus 独占集群）下成立：队头是 A 类时先抢占
+            # B 类释放 GPU，让 backfill 拿到可能更大的 free。tenant 模式我们是共享
+            # 集群的租户、无权也不该抢占（连自己的 job 也交给外部 SLURM 调度）；
+            # local 模式无 SLURM。
+            if (
+                not is_local_mode
+                and scheduling_mode == "authoritative"
+                and head_job.job_type in [JobType.A1, JobType.A2]
+            ):
                 self._handle_preemption_for_job(db, head_job)
 
             if is_local_mode:
                 # local 模式只跑队头，docker run 自身非阻塞，多容器自然并行
                 self._submit_to_docker(db, head_job)
+            elif scheduling_mode == "tenant":
+                # tenant 模式：magnus 只有 QOS 配额、不掌握集群。不算全集群 free、
+                # 不 backfill、不抢占 —— 那些只对 magnus 独占集群成立；作为租户，
+                # 全集群 squeue 给的是全站所有租户的占用，算 free 既不准也不该用，
+                # magnus 侧 backfill/抢占更是僭越。改为按 magnus 优先级序 eager 提交
+                # 所有 pending job，交给外部 SLURM 自己的 fairshare + backfill 排队。
+                # SLURM 兜底分两种：运行类配额（MaxJobs / GrpTRES）超额时 sbatch 收下
+                # 并挂 PENDING 等待；但 QOS 提交条数上限（MaxSubmitJobs，wm2 为 5000）
+                # 超额时 sbatch 直接拒绝，该 job 经 _submit_to_slurm 的异常分支标 FAILED
+                # （正常用量远不及该上限，不为此加重试）。
+                for job in schedulable_jobs:
+                    self._submit_to_slurm(db, job)
             else:
                 cluster_total, cluster_free = self._compute_cluster_resources()
                 candidates = [
