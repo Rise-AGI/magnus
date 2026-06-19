@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple
 from .._magnus_config import magnus_config
 from .._size_utils import _parse_size_string
 from . import logger
+from ._transport import _Transport
 
 
 def _resolve_default_gpu_model() -> str:
@@ -89,6 +90,8 @@ class NodeSnapshot:
 
 class _ResourceQueryMixin:
 
+    _transport: _Transport
+
     def _get_capacity_and_usage(self) -> Tuple[int, int]:
         """[Internal] 复用逻辑：获取 (总容量, 当前总占用)。"""
         try:
@@ -99,10 +102,8 @@ class _ResourceQueryMixin:
                 "node",
                 "--future",
             ]
-            capacity_result = subprocess.run(
+            capacity_result = self._transport.run(
                 capacity_command,
-                capture_output = True,
-                text = True,
                 check = True,
             )
 
@@ -127,10 +128,8 @@ class _ResourceQueryMixin:
                 "--noheader",
                 "--format=%D %b",
             ]
-            usage_result = subprocess.run(
+            usage_result = self._transport.run(
                 usage_command,
-                capture_output = True,
-                text = True,
                 check = True,
             )
 
@@ -168,15 +167,13 @@ class _ResourceQueryMixin:
         跟 GPU 行为对齐——详见 ``NodeSnapshot`` 类 docstring。
         """
         try:
-            result = subprocess.run(
+            result = self._transport.run(
                 [
                     "scontrol",
                     "show",
                     "node",
                     "--future",
                 ],
-                capture_output = True,
-                text = True,
                 check = True,
             )
 
@@ -230,15 +227,13 @@ class _ResourceQueryMixin:
         失败时 fail-open 返回 True：让 SLURM 自己 PENDING 兜底，不引入新故障路径。
         """
         try:
-            result = subprocess.run(
+            result = self._transport.run(
                 [
                     "scontrol",
                     "show",
                     "node",
                     "--oneliner",
                 ],
-                capture_output = True,
-                text = True,
                 check = True,
             )
         except (OSError, subprocess.SubprocessError) as error:
@@ -295,10 +290,8 @@ class _ResourceQueryMixin:
         ]
 
         try:
-            result = subprocess.run(
+            result = self._transport.run(
                 command,
-                capture_output = True,
-                text = True,
             )
             state = result.stdout.strip()
 
@@ -342,10 +335,8 @@ class _ResourceQueryMixin:
         ]
 
         try:
-            result = subprocess.run(
+            result = self._transport.run(
                 command,
-                capture_output = True,
-                text = True,
                 check = True,
             )
             data = json.loads(result.stdout)

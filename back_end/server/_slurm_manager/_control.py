@@ -1,13 +1,15 @@
 # back_end/server/_slurm_manager/_control.py
 """SLURM 任务提交与终止：sbatch / scancel 包装。"""
 import os
-import subprocess
 from typing import Dict, Optional
 
 from . import logger
+from ._transport import _Transport
 
 
 class _ControlMixin:
+
+    _transport: _Transport
 
     def submit_job_simple(
         self,
@@ -76,11 +78,9 @@ class _ControlMixin:
         gpu_info = f"{gpu_type}:{gpus}" if (gpu_type and gpus > 0) else f"{gpus}"
         logger.info(f"🚀 Submitting '{job_name}' to SLURM queue (GPUs: {gpu_info})...")
 
-        result = subprocess.run(
+        result = self._transport.run(
             command,
             input = script_content,
-            capture_output = True,
-            text = True,
             check = True,
             env = env,
         )
@@ -112,11 +112,9 @@ class _ControlMixin:
 
         # Step 1: SIGKILL --full 全员立刻清场
         try:
-            result = subprocess.run(
+            result = self._transport.run(
                 ["scancel", "--signal=KILL", "--full", slurm_job_id],
                 check = False,
-                capture_output = True,
-                text = True,
                 env = env,
             )
             if result.returncode != 0:
@@ -129,11 +127,9 @@ class _ControlMixin:
 
         # Step 2: 裸 scancel 让 SLURM 把 job state 转为 CANCELLED
         try:
-            result = subprocess.run(
+            result = self._transport.run(
                 ["scancel", slurm_job_id],
                 check = False,
-                capture_output = True,
-                text = True,
                 env = env,
             )
             if result.returncode != 0:
@@ -179,11 +175,9 @@ class _ControlMixin:
         env["MAGNUS_TOKEN"] = token
 
         try:
-            result = subprocess.run(
+            result = self._transport.run(
                 command,
                 check = False,
-                capture_output = True,
-                text = True,
                 env = env,
             )
             if result.returncode != 0:
