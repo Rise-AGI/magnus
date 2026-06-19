@@ -1,8 +1,11 @@
 # back_end/server/_slurm_manager/_control.py
 """SLURM 任务提交与终止：sbatch / scancel 包装。"""
+import math
 import os
 from typing import Dict, Optional
 
+from .._magnus_config import magnus_config
+from .._size_utils import _parse_size_string
 from . import logger
 from ._transport import _Transport
 
@@ -44,13 +47,34 @@ class _ControlMixin:
         个 token，复合结构后半段会被静默吞掉。当前唯一调用点 `_scheduler/_submit.py`
         传 `python3 {wrapper_path}`，满足约束。
         """
-        script_content = f"#!/bin/bash\ntrap '' TERM\n\nexec {entry_command}"
+        slurm_config = magnus_config["execution"]["slurm"]
+
+        # module_loads：在 batch script 里、exec wrapper 之前注入 `module load` 行，
+        # 让租户站点（如 wm2）先把容器运行时（singularity）等放上 PATH。module_loads
+        # 为空时这段为空串，script_content 与历史字节级一致。`exec` 让 module load 后的
+        # 环境（PATH 等）经 POSIX exec 继承给 wrapper.py。
+        module_loads = slurm_config["module_loads"]
+        module_lines = "".join(
+            f"module load {module_name}\n"
+            for module_name in module_loads
+        )
+        script_content = f"#!/bin/bash\ntrap '' TERM\n{module_lines}\nexec {entry_command}"
 
         command = [
             "sbatch",
             "--parsable",
             f"--job-name={job_name}",
         ]
+
+        # partition / qos / account：租户站点（如 wm2）的 SLURM 强制要求这三项；自有
+        # 站点配为 None，不下发对应 flag，sbatch 行为与历史一致。
+        for flag_name, flag_value in (
+            ("partition", slurm_config["partition"]),
+            ("qos", slurm_config["qos"]),
+            ("account", slurm_config["account"]),
+        ):
+            if flag_value is not None:
+                command.append(f"--{flag_name}={flag_value}")
 
         log_file = output_path if output_path else "magnus_%j.log"
         command.append(f"--output={log_file}")
@@ -64,10 +88,23 @@ class _ControlMixin:
             else:
                 command.append(f"--gres=gpu:{gpus}")
 
-        if memory_demand is not None:
-            command.append(f"--mem={memory_demand}")
-        if cpu_count is not None and cpu_count > 0:
-            command.append(f"--cpus-per-task={cpu_count}")
+        # 内存模式：
+        # - explicit（自有站点现状）：直接下发 --mem，与历史一致。
+        # - per_cpu（wm2 等禁用 --mem 的站点）：不发 --mem，把内存需求按
+        #   内存 = 核数 × mem_per_cpu_mb 折算成核数，与显式 cpu_count 取较大值，
+        #   一并作 --cpus-per-task 下发（核数足够即隐式满足内存需求）。
+        effective_cpu_count = cpu_count if (cpu_count is not None and cpu_count > 0) else 0
+        if slurm_config["mem_mode"] == "per_cpu":
+            if memory_demand is not None:
+                mem_per_cpu_mb = slurm_config["mem_per_cpu_mb"]
+                memory_demand_mb = _parse_size_string(memory_demand) // (1024 ** 2)
+                cores_for_memory = math.ceil(memory_demand_mb / mem_per_cpu_mb)
+                effective_cpu_count = max(effective_cpu_count, cores_for_memory)
+        else:
+            if memory_demand is not None:
+                command.append(f"--mem={memory_demand}")
+        if effective_cpu_count > 0:
+            command.append(f"--cpus-per-task={effective_cpu_count}")
 
         env: Dict[str, str] = os.environ.copy()
         if runner is not None:
