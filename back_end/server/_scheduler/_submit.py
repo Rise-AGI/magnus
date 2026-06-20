@@ -192,9 +192,19 @@ class _SubmitMixin(_SubmitMixinBase):
             self._stage_in_resources(job_id, local_sif_path, local_repo_dir)
         except Exception as error:
             logger.error(f"Failed to stage Job {job.id} to remote site: {error}")
+            self._cleanup_remote_job(job_id)
             job.status = JobStatus.FAILED
             job.result = f"Failed to stage job to remote execution site: {error}"
             db.commit()
+            return False
+
+        # 暂存（远端站点 scp SIF/repo 可达数秒）期间 job 可能被 terminate：sbatch 前重读
+        # 状态，已非 PENDING 就放弃并清理远端 —— 否则会把已 terminate 的 job 交给 SLURM
+        # 跑成孤儿，且随后写 QUEUED 覆盖掉 TERMINATED。
+        db.refresh(job)
+        if job.status != JobStatus.PENDING:
+            logger.info(f"Job {job.id} no longer PENDING ({job.status}) after staging; aborting submit")
+            self._cleanup_remote_job(job_id)
             return False
 
         # 执行端 wrapper 路径：本机执行下逐字等于本机 wrapper_path，sbatch 参数字节级不变。
@@ -223,6 +233,7 @@ class _SubmitMixin(_SubmitMixinBase):
 
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}")
+            self._cleanup_remote_job(job_id)
             job.status = JobStatus.FAILED
             job.result = f"Job submission to scheduler failed: {error}"
             db.commit()

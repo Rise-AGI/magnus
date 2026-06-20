@@ -3,7 +3,7 @@
 （队头优先级保留，后续不延迟队头者旁路启动），tenant 按优先级序 eager 提交、把排队
 交给外部 SLURM 的 fairshare。"""
 import asyncio
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -163,7 +163,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
             if is_local_mode:
                 # local 模式只跑队头，docker run 自身非阻塞，多容器自然并行
-                self._submit_to_docker(db, head_job)
+                submit_ids = [head_job.id]
             elif scheduling_mode == "tenant":
                 # tenant 模式：magnus 只有 QOS 配额、不掌握集群。不算全集群 free、
                 # 不 backfill、不抢占 —— 那些只对 magnus 独占集群成立；作为租户，
@@ -174,8 +174,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 # 并挂 PENDING 等待；但 QOS 提交条数上限（MaxSubmitJobs，上限通常为数千）
                 # 超额时 sbatch 直接拒绝，该 job 经 _submit_to_slurm 的异常分支标 FAILED
                 # （正常用量远不及该上限，不为此加重试）。
-                for job in schedulable_jobs:
-                    self._submit_to_slurm(db, job)
+                submit_ids = [job.id for job in schedulable_jobs]
             else:
                 cluster_total, cluster_free = self._compute_cluster_resources()
                 candidates = [
@@ -190,7 +189,29 @@ class _DecisionsMixin(_DecisionsMixinBase):
                     cluster_total = cluster_total,
                     cluster_free = cluster_free,
                 )
-                for job in selected:
+                submit_ids = [job.id for job in selected]
+
+            # 提交含远端 scp staging（SIF/repo 推共享盘）+ sbatch —— 远端站点是秒级阻塞
+            # subprocess，必须丢 worker thread，否则卡死事件循环上的所有 API/WS。本机/
+            # Docker 也走这条，统一且无害。提交器自带 session，不碰这里的 db。
+            if submit_ids:
+                await asyncio.to_thread(self._submit_jobs, submit_ids)
+
+    def _submit_jobs(self, job_ids: List[str]) -> None:
+        """在 worker thread 里提交一批 job（由 _make_decisions 经 asyncio.to_thread 调用）。
+
+        提交链路含阻塞调用 —— 远端站点下要 scp 把 SIF/repo 推到共享盘、再 sbatch over
+        socket，单个可达数秒；必须离开事件循环，否则卡死所有 API/WS。本方法**自有
+        session**（绝不碰调度循环的 db），逐个按 id 重新载入再按后端提交，没有跨线程
+        共享 ORM 对象。"""
+        with SessionLocal() as db:
+            for job_id in job_ids:
+                job = db.query(Job).filter(Job.id == job_id).first()
+                if job is None:
+                    continue
+                if is_local_mode:
+                    self._submit_to_docker(db, job)
+                else:
                     self._submit_to_slurm(db, job)
 
     def _compute_cluster_resources(self) -> Tuple[ResourceVector, ResourceVector]:
