@@ -263,6 +263,12 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         if slurm_cfg["mem_mode"] not in ("explicit", "per_cpu"):
             raise ValueError(f"❌ execution.slurm.mem_mode 必须是 'explicit' 或 'per_cpu'，当前值: '{slurm_cfg['mem_mode']}'")
         _check_key(slurm_cfg, "mem_per_cpu_mb", int)
+        # per_cpu 模式按 ceil(内存MB / mem_per_cpu_mb) 折核数，<=0 会除零/负核：fail-fast。
+        if slurm_cfg["mem_mode"] == "per_cpu" and slurm_cfg["mem_per_cpu_mb"] <= 0:
+            raise ValueError(
+                f"❌ execution.slurm.mem_mode='per_cpu' 要求 mem_per_cpu_mb > 0，"
+                f"当前值: {slurm_cfg['mem_per_cpu_mb']}"
+            )
         _check_key(slurm_cfg, "module_loads", list)
         _warn_extra_keys(slurm_cfg, {"partition", "qos", "account", "mem_mode", "mem_per_cpu_mb", "module_loads"}, "execution.slurm")
         expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache", "slurm"}
@@ -323,6 +329,16 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(scheduling, "mode", str)
     if scheduling["mode"] not in ("authoritative", "tenant"):
         raise ValueError(f"❌ cluster.scheduling.mode 必须是 'authoritative' 或 'tenant'，当前值: '{scheduling['mode']}'")
+    # tenant 模式下 cluster 视图与提交都 scope 到本租户获授的分区（见 routers/cluster.py
+    # 与 _scheduler/_decisions.py）。SLURM 后端下 partition 是 tenant 语义的前提，缺它会
+    # 静默退化成"把整个共享集群当我们的"——明确 fail-fast，逼站点配 execution.slurm.partition。
+    # local 后端无 SLURM、tenant 只影响调度分流、不涉分区，故不强制。
+    if scheduling["mode"] == "tenant" and config["execution"]["backend"] != "local":
+        if not config.get("execution", {}).get("slurm", {}).get("partition"):
+            raise ValueError(
+                "❌ cluster.scheduling.mode='tenant' 要求 execution.slurm.partition —— "
+                "租户视图与提交需 scope 到分区，否则会把整个共享集群误显示成本租户"
+            )
     _warn_extra_keys(scheduling, {"mode"}, "cluster.scheduling")
 
 
@@ -352,6 +368,14 @@ def _load_magnus_config()-> Dict[str, Any]:
             # 校验阶段回落到（已加后缀的）root，无需在此处理。
             if "ephemeral_root" in data["server"]:
                 data["server"]["ephemeral_root"] += "-develop"
+            # 远端站点（transport=ssh）的 remote_root 同样要隔离 dev/prod —— 它在共享盘
+            # （如 Lustre）上，dev/prod 两实例若共用同一 remote_root，job 工作区与
+            # container_cache 会在同一路径互相踩。prod（--deliver）不进此分支，保持原值。
+            _transport = data.get("transport") or {}
+            if _transport.get("mode") == "ssh":
+                _ssh = _transport.get("ssh") or {}
+                if _ssh.get("remote_root"):
+                    _ssh["remote_root"] += "-develop"
 
         # 快速失败：启动时验证配置完整性
         _prepare_and_validate_magnus_config(data)

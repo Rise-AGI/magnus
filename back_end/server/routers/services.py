@@ -46,6 +46,16 @@ _service_spawn_locks = defaultdict(asyncio.Lock)
 _service_semaphores: Dict[str, asyncio.Semaphore] = {}
 _service_semaphores_lock = threading.Lock()
 
+# 远端站点（transport=ssh）不支持 services：proxy 连的是 Magnus 宿主机的
+# 127.0.0.1:{port}，而远端 job 跑在计算节点上、无网络路径回到 Magnus，服务永远拉不起。
+# 明确 fail-fast（501）而非让用户撞 127.0.0.1 的神秘超时；待将来有反向 service 网关再放开。
+_SERVICES_SUPPORTED = magnus_config["transport"]["mode"] != "ssh"
+_REMOTE_SERVICES_DETAIL = (
+    "Services are unavailable on this site: it drives a remote cluster over SSH, and "
+    "remote compute nodes have no network path back to Magnus, so a service can never "
+    "be reached. Run services on a co-located (local-transport) site."
+)
+
 # === [New] Double Bulkhead Configuration ===
 # 1. Outer Bulkhead: Global Concurrency Limit for Proxy
 #    Protects the Web Server (CPU/RAM/File Descriptors)
@@ -248,7 +258,9 @@ def create_service(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 )-> models.Service:
-    # ... (Same as original code) ...
+    if not _SERVICES_SUPPORTED:
+        raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
+
     existing = db.query(Service).filter(Service.id == service_data.id).first()
 
     if not existing:
@@ -444,7 +456,9 @@ async def proxy_service_request(
     request: Request,
     # REMOVED: db: Session = Depends(database.get_db)->Fixes Connection Holding
 )-> StreamingResponse:
-    
+    if not _SERVICES_SUPPORTED:
+        raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
+
     # === 1. Start SLA Timer ===
     start_time = datetime.now(timezone.utc)
     total_budget: Optional[float] = None 
