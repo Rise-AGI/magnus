@@ -88,7 +88,29 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
                 "❌ transport.mode='ssh' 要求 transport.ssh.remote_root"
                 "（远程站点 job 工作区根目录），当前为 None"
             )
-        _warn_extra_keys(ssh, {"control_path", "host", "user", "remote_root"}, "transport.ssh")
+        # resource_staging：SIF 镜像 / git 仓库怎么落到远端站点。
+        # - relay：控制机（已在镜像反代白名单内）本地拉取后经 transport 推到远端，
+        #   远端站点不需要能直连镜像反代。
+        # - remote：远端站点自己拉（需先把站点出网 IP 加进镜像反代白名单）—— 接线
+        #   待白名单落地，当前 gate 住。
+        ssh.setdefault("resource_staging", "relay")
+        _check_key(ssh, "resource_staging", str)
+        if ssh["resource_staging"] not in ("relay", "remote"):
+            raise ValueError(
+                "❌ transport.ssh.resource_staging 必须是 'relay' 或 'remote'，"
+                f"当前值: '{ssh['resource_staging']}'"
+            )
+        if ssh["resource_staging"] == "remote":
+            raise ValueError(
+                "❌ transport.ssh.resource_staging='remote'（远端站点自拉镜像/仓库）"
+                "尚未接线，需先把站点出网 IP 加入镜像反代白名单；当前请用 'relay'"
+                "（控制机拉取后推送到远端）"
+            )
+        _warn_extra_keys(
+            ssh,
+            {"control_path", "host", "user", "remote_root", "resource_staging"},
+            "transport.ssh",
+        )
     _warn_extra_keys(transport, {"mode", "ssh"}, "transport")
 
     # server 配置

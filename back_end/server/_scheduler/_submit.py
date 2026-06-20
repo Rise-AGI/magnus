@@ -109,9 +109,10 @@ class _SubmitMixin(_SubmitMixinBase):
             effective_runner = job.runner if job.runner is not None else user_magnus
 
             # 本机路径：wrapper 在本机生成、本机 init 工作区骨架、回读 marker/产物的
-            # 落点。
+            # 落点；local_repo_dir 是 Preparing 阶段本地 clone 的落点（relay 模式下推往远端）。
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             job_ephemeral_table = f"{magnus_ephemeral_workspace_path}/jobs/{job.id}"
+            local_repo_dir = f"{job_working_table}/repository"
             # 执行端路径：job 真正运行处。本机执行下逐字等于上面的本机路径（下方
             # wrapper 内容与 sbatch 参数字节级不变）；远端执行（transport=ssh）下指向
             # remote_root 下的工作区，由 _stage_in_job 在远端建好并推送 wrapper。
@@ -184,6 +185,7 @@ class _SubmitMixin(_SubmitMixinBase):
         # 本机执行下 no-op。失败按提交失败处理，不把无 wrapper 的 job 交给 sbatch。
         try:
             self._stage_in_job(job_id, wrapper_path)
+            self._stage_in_resources(job_id, local_sif_path, local_repo_dir)
         except Exception as error:
             logger.error(f"Failed to stage Job {job.id} to remote site: {error}")
             job.status = JobStatus.FAILED

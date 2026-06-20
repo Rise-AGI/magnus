@@ -76,6 +76,12 @@ server:
 #     host: login.your-hpc.example.edu
 #     user: "your-cluster-account"
 #     remote_root: /lustre/home/your-cluster-account/magnus-data  # REQUIRED when mode=ssh: remote job working-tree root
+#     resource_staging: relay              # relay | remote (default relay). How the SIF image and git
+#                                          # repo reach the remote site. relay: the magnus host (already
+#                                          # on the registry/git proxy allowlist) pulls them locally and
+#                                          # pushes them over; the remote site needs no outbound proxy
+#                                          # access. remote: the remote site pulls them itself (requires
+#                                          # its egress IP on the proxy allowlist) -- not yet wired.
 
 execution:
   backend: slurm                         # slurm | local
