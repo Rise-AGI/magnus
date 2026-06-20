@@ -95,9 +95,9 @@ execution:
   # clusters that mandate partition/qos/account, disable `--mem`, or require
   # `module load` before the runtime is on PATH.
   # slurm:
-  #   partition: C064M0256G              # null = don't pass --partition
+  #   partition: your-partition          # null = don't pass --partition
   #   qos: normal                        # null = don't pass --qos
-  #   account: hpc2506188159             # null = don't pass --account
+  #   account: your-account              # null = don't pass --account
   #   mem_mode: per_cpu                  # explicit (pass --mem) | per_cpu (derive cores, omit --mem)
   #   mem_per_cpu_mb: 4000               # only used when mem_mode == per_cpu
   #   module_loads:                      # `module load` lines prepended in the job script
@@ -110,8 +110,17 @@ cluster:
   # resources and runs its own EASY backfill + preemption. `tenant` = magnus is
   # one tenant on a shared cluster, eagerly submits up to its QOS quota and lets
   # the foreign SLURM's own fairshare/backfill do the scheduling.
+  # scheduling.quota: tenant-only. The cluster page shows this tenant's own quota
+  # (per-user QOS limits) as the resource totals instead of the whole shared
+  # cluster's node capacity. Omit the whole quota block to fall back to node
+  # capacity; an omitted single field defaults to 0 (that dimension then shows
+  # total = used rather than falling back).
   # scheduling:
   #   mode: tenant                       # authoritative | tenant
+  #   quota:                             # tenant only; null = fall back to node capacity
+  #     gpu: 8                           # GPU count granted to this tenant
+  #     cpu: 256                         # CPU cores granted to this tenant
+  #     mem: 1T                          # memory granted to this tenant (size string; omit -> that dimension shows total = used)
   name: Your Cluster Name
   gpus:
     -

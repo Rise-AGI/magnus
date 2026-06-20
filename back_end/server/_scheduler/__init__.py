@@ -34,11 +34,11 @@ guarantee_file_exist(magnus_ephemeral_workspace_path, is_directory=True)
 guarantee_file_exist(magnus_container_cache_path, is_directory=True)
 guarantee_file_exist(magnus_uv_cache_path, is_directory=True)
 
-# 远端执行（transport=ssh）下，job 的工作区物理上落在远程站点（wm2 Lustre），由
+# 远端执行（transport=ssh）下，job 的工作区物理上落在远程站点（远端共享盘，如 Lustre），由
 # remote_root 寻址；wrapper / repo / SIF 推过去，marker / SLURM stdout / metrics 拉
 # 回来（搬运逻辑见 _staging.py）。默认的本机 transport 下，下面的远端路径**逐字**
 # 收敛回本地 workspace 路径，于是 _submit / _sync / _job_lifecycle 的所有消费点字节
-# 级不变，本机站点（liu/zhu/gu 本地、Docker local）零参与搬运。
+# 级不变，本机站点（独占集群本地、Docker local）零参与搬运。
 # 远端路径仅作字符串烘进 wrapper / 传给 sbatch / 作搬运端点，故这里**不**对其
 # guarantee_file_exist（那是远端目录，由 _staging 经 transport 远程 mkdir 建）。
 _transport_config = magnus_config["transport"]

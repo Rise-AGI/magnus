@@ -1,12 +1,12 @@
 # back_end/server/_scheduler/_staging.py
 """跨界 workspace I/O：transport=ssh 时把 job 工作区在本机与远程站点间搬运。
 
-magnus 在本机（如 liu），SLURM 在异机（如 wm2），两边无共享盘 —— job 的工作区
+magnus 在本机，SLURM 在异机（远端站点），两边无共享盘 —— job 的工作区
 （wrapper.py / repo / SIF / overlay）必须落远端 remote_root，而 wrapper 写出的
 marker（.magnus_success / .magnus_result / .magnus_action / .magnus_oom）、SLURM
 stdout、metrics 要回读到本机给 scheduler / 前端端点。本 mixin 收口这条搬运链路。
 
-本机 transport（liu/zhu/gu 本地、Docker local）下 is_remote=False，下面每个方法都
+本机 transport（独占集群本地、Docker local）下 is_remote=False，下面每个方法都
 立即返回 no-op，且 _scheduler/__init__ 里的远端路径已逐字收敛回本地路径，于是整条
 执行链对本机站点字节级不变、零搬运参与。
 

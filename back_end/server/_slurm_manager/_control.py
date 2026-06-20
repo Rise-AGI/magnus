@@ -50,7 +50,7 @@ class _ControlMixin:
         slurm_config = magnus_config["execution"]["slurm"]
 
         # module_loads：在 batch script 里、exec wrapper 之前注入 `module load` 行，
-        # 让租户站点（如 wm2）先把容器运行时（singularity）等放上 PATH。module_loads
+        # 让租户站点先把容器运行时（singularity）等放上 PATH。module_loads
         # 为空时这段为空串，script_content 与历史字节级一致。`exec` 让 module load 后的
         # 环境（PATH 等）经 POSIX exec 继承给 wrapper.py。
         module_loads = slurm_config["module_loads"]
@@ -66,7 +66,7 @@ class _ControlMixin:
             f"--job-name={job_name}",
         ]
 
-        # partition / qos / account：租户站点（如 wm2）的 SLURM 强制要求这三项；自有
+        # partition / qos / account：租户站点的 SLURM 强制要求这三项；自有
         # 站点配为 None，不下发对应 flag，sbatch 行为与历史一致。
         for flag_name, flag_value in (
             ("partition", slurm_config["partition"]),
@@ -90,7 +90,7 @@ class _ControlMixin:
 
         # 内存模式：
         # - explicit（自有站点现状）：直接下发 --mem，与历史一致。
-        # - per_cpu（wm2 等禁用 --mem 的站点）：不发 --mem，把内存需求按
+        # - per_cpu（禁用 --mem 的站点）：不发 --mem，把内存需求按
         #   内存 = 核数 × mem_per_cpu_mb 折算成核数，与显式 cpu_count 取较大值，
         #   一并作 --cpus-per-task 下发（核数足够即隐式满足内存需求）。
         effective_cpu_count = cpu_count if (cpu_count is not None and cpu_count > 0) else 0

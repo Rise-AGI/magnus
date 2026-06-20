@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Optional, List
 # =====================================================
 UserName = Annotated[str, {
     "label": "User Name",
-    "placeholder": "enter your username on liustation2 here",
+    "placeholder": "enter your cluster username here",
     "allow_empty": False,
 }]
 

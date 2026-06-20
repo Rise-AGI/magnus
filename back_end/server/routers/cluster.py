@@ -12,6 +12,7 @@ from ..models import JobStatus, JobType
 from ..schemas import ClusterStatsResponse, JobResponse, PagedJobResponse, UserInfo
 from .auth import get_current_user
 from .._magnus_config import magnus_config, is_local_mode
+from .._size_utils import _parse_size_string
 from .._slurm_manager import SlurmManager
 
 
@@ -111,7 +112,10 @@ def get_cluster_stats(
     # --- 1. 获取 Slurm 真实数据 ---
     # SlurmManager 涉及阻塞 Shell 命令，必须在线程池中运行 (def)
     slurm_manager = SlurmManager()
-    all_slurm_tasks = slurm_manager.get_all_running_tasks()
+    # tenant 站点（magnus 是共享集群的租户）只看自己账号跑的任务 + 自己的配额，不把整
+    # 集群全租户当"我们的集群"显示；authoritative（独占集群）看全量。
+    is_tenant = magnus_config["cluster"]["scheduling"]["mode"] == "tenant"
+    all_slurm_tasks = slurm_manager.get_all_running_tasks(scope_to_me=is_tenant)
 
     running_slurm_ids = [task["id"] for task in all_slurm_tasks]
 
@@ -201,17 +205,30 @@ def get_cluster_stats(
 
     sorted_all_running = magnus_group + external_group
 
-    # 资源数字全部来自单次 scontrol 快照 + 单次 squeue --json（即 all_slurm_tasks）。
-    # 三个 alloc 维度（gpu / cpu / mem）都从 squeue 的 job-level 数字派生，total
-    # 取 SLURM 报告的 capacity；两者来源同时刻，保证 total = free + used 且
-    # used == sum(running.<dim>)。alloc 不走 scontrol 的 CPUAlloc / AllocMem 是
-    # 因为后者在 CG 期间立即清零，跟 squeue 视角下 job 仍占 cpu / mem 矛盾，
-    # 详见 _slurm_manager._resource_query.NodeSnapshot docstring。
-    node_snap = slurm_manager.get_node_snapshot()
+    # 三个 alloc 维度（gpu / cpu / mem）都从 squeue 的 job-level 数字派生（all_slurm_tasks），
+    # alloc 不走 scontrol 的 CPUAlloc / AllocMem——后者在 CG 期间立即清零，跟 squeue 视角
+    # 下 job 仍占 cpu / mem 矛盾，详见 _slurm_manager._resource_query.NodeSnapshot docstring。
     used_gpus = sum(job.gpu_count for job in sorted_all_running)
     used_cpus = sum(task.get("cpu_count", 0) for task in all_slurm_tasks)
     used_mem_mb = sum(task.get("memory_mb", 0) for task in all_slurm_tasks)
-    display_total = max(node_snap.total_gpus, used_gpus)
+
+    # 总量（total）来源：tenant 站点取本租户配额（cluster.scheduling.quota），authoritative
+    # 取真实节点容量（单次 scontrol 快照，与 used 同时刻、保证 total = free + used）。tenant
+    # 但没配 quota 时回落节点容量（会显示整个共享集群、对租户不准但不致命）。
+    tenant_quota = magnus_config["cluster"]["scheduling"]["quota"] if is_tenant else None
+    if tenant_quota is not None:
+        quota_mem_mb = (
+            _parse_size_string(tenant_quota["mem"]) // (1024 ** 2)
+            if tenant_quota["mem"] else 0
+        )
+        display_total = max(tenant_quota["gpu"], used_gpus)
+        cpu_total = max(tenant_quota["cpu"], used_cpus)
+        mem_total_mb = max(quota_mem_mb, used_mem_mb)
+    else:
+        node_snap = slurm_manager.get_node_snapshot()
+        display_total = max(node_snap.total_gpus, used_gpus)
+        cpu_total = node_snap.cpu_total
+        mem_total_mb = node_snap.mem_total_mb
     free_gpus = max(0, display_total - used_gpus)
 
     # --- 5. Running 列表分页切片 ---
@@ -258,10 +275,10 @@ def get_cluster_stats(
             "total": display_total,
             "free": free_gpus,
             "used": used_gpus,
-            "cpu_total": node_snap.cpu_total,
-            "cpu_free": max(0, node_snap.cpu_total - used_cpus),
-            "mem_total_mb": node_snap.mem_total_mb,
-            "mem_free_mb": max(0, node_snap.mem_total_mb - used_mem_mb),
+            "cpu_total": cpu_total,
+            "cpu_free": max(0, cpu_total - used_cpus),
+            "mem_total_mb": mem_total_mb,
+            "mem_free_mb": max(0, mem_total_mb - used_mem_mb),
         },
         "running_jobs": paginated_running,
         "total_running": total_running,

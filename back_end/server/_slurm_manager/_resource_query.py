@@ -18,7 +18,7 @@ def _resolve_default_gpu_model() -> str:
     个 GPU 的 ``value`` 字段（如 "rtx5090" / "a100"）；缺失或异常 fallback
     "unknown"。
 
-    历史教训：之前硬编码 "rtx5090"（只 work 在 liustation），换 zhustation
+    历史教训：之前硬编码 "rtx5090"（只 work 在某一站点），换到另一站点
     (a100) 后 cluster endpoint 把无法识别 gpu_type 的 SLURM job 显示成 rtx5090
     误导用户。读站点 config 让 fallback 跟着站点走。
 
@@ -315,13 +315,19 @@ class _ResourceQueryMixin:
             logger.error(f"Failed to check job status {slurm_job_id}: {error}")
             return "UNKNOWN"
 
-    def get_all_running_tasks(self) -> List[Dict]:
+    def get_all_running_tasks(self, scope_to_me: bool = False) -> List[Dict]:
         """获取所有正在运行 / 收尾中的 SLURM 任务详情。
 
         包含 RUNNING 与 COMPLETING：CG 阶段 SLURM 物理上仍占 GPU 不释放，且本类
         ``check_job_status`` 也把 CG 映射到 RUNNING；这里跟它对齐，避免 cluster
         endpoint 跟 sync_reality 对同一个 job 给出 "已释放 vs 仍在跑" 的不一致快照。
         epilog 较长（如做单卡 reset 兜底）时 CG 会停留数十秒，否则瞬时不可见。
+
+        ``scope_to_me=True`` 时只查当前 SLURM 用户的任务（squeue ``--me``）：tenant
+        站点（magnus 是共享集群的租户）只关心自己这个账号跑了什么，整集群全租户的任务
+        既不是"我们的"、也会把 cluster 视图淹没。``--me`` 取的是跑 squeue 的用户 —— 经
+        ssh transport 即远端站点上 magnus 的那个账号，刚好对。authoritative 站点（独占
+        集群）传 False 看全量。
 
         关键坑点：SLURM job-completion caching 让 ``squeue --json`` 可能返回内存中
         残留的已结束任务（即便用了 ``--states`` 过滤）。代码层面必须再显式检查
@@ -333,6 +339,8 @@ class _ResourceQueryMixin:
             "--states=RUNNING,COMPLETING",
             "--json",
         ]
+        if scope_to_me:
+            command.append("--me")
 
         try:
             result = self._transport.run(

@@ -55,9 +55,9 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
         提交策略由 cluster.scheduling.mode 选择（默认 authoritative）：
         - authoritative：magnus 独占集群，自己算全集群 free + EASY backfill + A 抢 B，
-          SLURM 只接收已验证过资源的提交（liu/zhu/gu，下方详述）。
+          SLURM 只接收已验证过资源的提交（独占集群，下方详述）。
         - tenant：magnus 是共享集群的租户、只有 QOS 配额，按优先级序 eager 提交所有
-          pending，把排队/backfill 交给外部 SLURM 的 fairshare（wm2）。
+          pending，把排队/backfill 交给外部 SLURM 的 fairshare（共享集群租户）。
 
         以下 backfill / 抢占描述针对 authoritative 模式。
 
@@ -160,7 +160,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 # magnus 侧 backfill/抢占更是僭越。改为按 magnus 优先级序 eager 提交
                 # 所有 pending job，交给外部 SLURM 自己的 fairshare + backfill 排队。
                 # SLURM 兜底分两种：运行类配额（MaxJobs / GrpTRES）超额时 sbatch 收下
-                # 并挂 PENDING 等待；但 QOS 提交条数上限（MaxSubmitJobs，wm2 为 5000）
+                # 并挂 PENDING 等待；但 QOS 提交条数上限（MaxSubmitJobs，上限通常为数千）
                 # 超额时 sbatch 直接拒绝，该 job 经 _submit_to_slurm 的异常分支标 FAILED
                 # （正常用量远不及该上限，不为此加重试）。
                 for job in schedulable_jobs:

@@ -15,7 +15,7 @@ class SlurmManager(_ResourceQueryMixin, _ControlMixin):
         transport: Optional[_Transport] = None,
     ) -> None:
         # 显式传入的 transport 优先（测试 / 特殊调用）；否则按站点 transport 配置
-        # 构造 —— local 站点回落本机 subprocess，wm2 这类租户站点骑 SSH socket。
+        # 构造 —— local 站点回落本机 subprocess，共享集群租户站点骑 SSH socket。
         self._transport = (
             transport
             if transport is not None

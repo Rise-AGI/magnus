@@ -62,9 +62,9 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     is_local = backend == "local"
 
     # transport：magnus 执行 SLURM CLI（及后续跨界文件搬运）的位置。
-    # local = 本机 subprocess（magnus 与 SLURM controller 同机，liu/zhu/gu 现状）；
-    # ssh = 经已建立的 SSH ControlMaster socket 驱动远程站点（wm2 场景：在唯一可达的
-    # liu 上骑 socket 跑命令）。default local 保持现状，现有站点无需配置即字节级等价。
+    # local = 本机 subprocess（magnus 与 SLURM controller 同机，自有/独占集群现状）；
+    # ssh = 经已建立的 SSH ControlMaster socket 驱动远程站点（共享集群租户场景：在唯一可达的
+    # 控制机上骑 socket 跑命令）。default local 保持现状，现有站点无需配置即字节级等价。
     config.setdefault("transport", {"mode": "local"})
     transport = config["transport"]
     _check_key(transport, "mode", str)
@@ -78,7 +78,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _check_key(ssh, "host", str)
         _check_key(ssh, "user", str)
         # remote_root：远程站点上 magnus 搬运 job 工作区 / wrapper / 产物的根目录
-        # （wm2 落 Lustre 共享盘）。transport=ssh 意味着 SLURM 在异机、与 magnus 无
+        # （典型落远端共享盘，如 Lustre）。transport=ssh 意味着 SLURM 在异机、与 magnus 无
         # 共享盘，job 工作区必须落远端，故 remote_root 必填 —— 启动即 fail-fast，
         # 不留到首个 job 提交时才炸。
         ssh.setdefault("remote_root", None)
@@ -240,8 +240,8 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _check_key(execution, "resource_cache", dict)
         # slurm 子配置：SLURM 提交方言。全部带保持现状的 default —— partition/qos/
         # account 为 None 即不下发对应 flag；mem_mode='explicit' 即沿用 --mem；
-        # module_loads 为空即不注入 module load 前置。独占集群站点（liu/zhu/gu）无需
-        # 配置即字节级等价；wm2 这类租户场景显式覆盖（如 mem_mode='per_cpu' 折核数、
+        # module_loads 为空即不注入 module load 前置。独占集群站点无需
+        # 配置即字节级等价；共享集群租户场景显式覆盖（如 mem_mode='per_cpu' 折核数、
         # module_loads=['singularity/3.11.3']）。
         execution.setdefault("slurm", {})
         slurm_cfg = execution["slurm"]
@@ -309,16 +309,31 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         }, "cluster")
 
     # cluster.scheduling：调度策略模式。authoritative = magnus 独占集群、自己算全
-    # 集群 free + EASY backfill + 抢占（liu/zhu/gu 现状）；tenant = magnus 是共享
+    # 集群 free + EASY backfill + 抢占（独占集群现状）；tenant = magnus 是共享
     # 集群的租户、只按 QOS 配额 eager 提交、把排队/backfill 交给外部 SLURM 自身
-    # fairshare 调度（wm2）。default authoritative 保持现状。local 与 HPC 两模式通用。
+    # fairshare 调度（共享集群租户）。default authoritative 保持现状。local 与 HPC 两模式通用。
     cluster = config["cluster"]
     cluster.setdefault("scheduling", {"mode": "authoritative"})
     scheduling = cluster["scheduling"]
     _check_key(scheduling, "mode", str)
     if scheduling["mode"] not in ("authoritative", "tenant"):
         raise ValueError(f"❌ cluster.scheduling.mode 必须是 'authoritative' 或 'tenant'，当前值: '{scheduling['mode']}'")
-    _warn_extra_keys(scheduling, {"mode"}, "cluster.scheduling")
+    # scheduling.quota：tenant 模式下 cluster 视图展示的资源总量 —— 本租户在共享集群上
+    # 的配额（典型是 per-user QOS 限额：gpu / cpu + 内存）。authoritative 模式不用
+    # （视图取真实节点容量）。缺省 None：tenant 模式无此配置时回落到节点快照（会把整个
+    # 共享集群的容量显示成"我们的"，对租户不准但不致命）。
+    scheduling.setdefault("quota", None)
+    quota = scheduling["quota"]
+    if quota is not None:
+        _check_key(scheduling, "quota", dict)
+        quota.setdefault("gpu", 0)
+        quota.setdefault("cpu", 0)
+        quota.setdefault("mem", None)
+        _check_key(quota, "gpu", int)
+        _check_key(quota, "cpu", int)
+        _check_key(quota, "mem", str, nullable=True)
+        _warn_extra_keys(quota, {"gpu", "cpu", "mem"}, "cluster.scheduling.quota")
+    _warn_extra_keys(scheduling, {"mode", "quota"}, "cluster.scheduling")
 
 
 def _load_magnus_config()-> Dict[str, Any]:

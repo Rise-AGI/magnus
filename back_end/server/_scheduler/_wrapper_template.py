@@ -361,7 +361,7 @@ def _signal_user_processes(sig):
     完全靠 kernel procfs 既有字段 runtime 识别。systemd `KillMode=cgroup` /
     Kubernetes 优雅终止走同一思路。
 
-    Apptainer 不同模式（liu rootless / zhu setuid）实测 NSpid 字段行为一致。
+    Apptainer 不同模式（rootless / setuid 两种模式）实测 NSpid 字段行为一致。
     单 PID kill 失败 / status 读失败任一步 fail-open continue，handler 不抛
     回 main；Phase 3 marker 决策仍能凭 _signaled[0] 触发。
     """
