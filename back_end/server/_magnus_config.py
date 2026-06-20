@@ -189,7 +189,12 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     scheduler_cfg = server["scheduler"]
     _check_key(scheduler_cfg, "heartbeat_interval", int)
     _check_key(scheduler_cfg, "snapshot_interval", int)
-    _warn_extra_keys(scheduler_cfg, {"heartbeat_interval", "snapshot_interval"}, "server.scheduler")
+    # cluster 页面只读 SLURM 视图（squeue + scontrol）的 TTL 缓存秒数。0 = 不缓存、
+    # 每次现查（默认，保持现状）。骑 ssh transport 的远端站点把它设成几秒可显著降低
+    # 高频 poll / 多查看者下的远端查询开销，代价是 cluster 页面至多陈旧这么多秒。
+    scheduler_cfg.setdefault("cluster_stats_cache_ttl", 0)
+    _check_key(scheduler_cfg, "cluster_stats_cache_ttl", int)
+    _warn_extra_keys(scheduler_cfg, {"heartbeat_interval", "snapshot_interval", "cluster_stats_cache_ttl"}, "server.scheduler")
 
     # service_proxy 配置
     service_proxy = server["service_proxy"]

@@ -45,6 +45,11 @@ server:
   scheduler:
     heartbeat_interval: 2
     snapshot_interval: 300
+    cluster_stats_cache_ttl: 0   # seconds to cache the cluster page's read-only SLURM
+                                 # view (squeue + scontrol). 0 = always query live.
+                                 # Set to a few seconds on remote (transport: ssh)
+                                 # sites to cut per-poll socket round-trips; the page
+                                 # then trails reality by at most this many seconds.
   service_proxy:
     max_concurrency: 1024
   file_custody:

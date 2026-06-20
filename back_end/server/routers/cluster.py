@@ -1,5 +1,6 @@
 # back_end/server/routers/cluster.py
-from typing import List
+import time
+from typing import Callable, List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
@@ -20,6 +21,31 @@ _gpu_model = magnus_config["cluster"]["gpus"][0]["label"] if magnus_config["clus
 
 
 router = APIRouter()
+
+
+# cluster 页面每次 poll 都要现查 SLURM（squeue + scontrol）。本机执行下是本地 subprocess、
+# 很快；骑 ssh transport 的远端站点下每次都走 socket 拉一遍（大集群可达 ~MB 级 squeue JSON
+# + 数百节点 scontrol），高频 poll 叠加多查看者会明显拖慢。server.scheduler.cluster_stats_cache_ttl
+# > 0 时把这些只读远端查询的结果按 TTL 缓存复用；默认 0 = 不缓存、每次现查（独占站点保持
+# 现状、字节级不变）。调度器自身的 SLURM 查询不走这里 —— 它要实时数据做决策，缓存只服务
+# cluster 页面这条只读链路。
+_slurm_view_cache: dict = {}
+
+
+def _cached_slurm_view(cache_key, ttl_seconds: int, producer: Callable):
+    """TTL 缓存 cluster 页面的远端 SLURM 查询。ttl_seconds <= 0 时直接 producer()（不缓存）。
+
+    缓存的对象（task 列表 / NodeSnapshot）下游只读不改、跨请求共享安全；线程池并发下
+    偶发重复查询无害（不加锁，best-effort）。"""
+    if ttl_seconds <= 0:
+        return producer()
+    now = time.monotonic()
+    cached = _slurm_view_cache.get(cache_key)
+    if cached is not None and now - cached[0] < ttl_seconds:
+        return cached[1]
+    value = producer()
+    _slurm_view_cache[cache_key] = (now, value)
+    return value
 
 
 def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int, pending_skip: int, pending_limit: int):
@@ -116,7 +142,12 @@ def get_cluster_stats(
     # 同分区竞争态，而不把整个共享集群当成"我们的"。独占集群（authoritative）partition
     # 为 None，看全量、容量取整集群节点快照。
     tenant_partition = magnus_config["execution"]["slurm"]["partition"] if is_tenant else None
-    all_slurm_tasks = slurm_manager.get_all_running_tasks(partition=tenant_partition)
+    cluster_stats_cache_ttl = magnus_config["server"]["scheduler"]["cluster_stats_cache_ttl"]
+    all_slurm_tasks = _cached_slurm_view(
+        ("running_tasks", tenant_partition),
+        cluster_stats_cache_ttl,
+        lambda: slurm_manager.get_all_running_tasks(partition=tenant_partition),
+    )
 
     running_slurm_ids = [task["id"] for task in all_slurm_tasks]
 
@@ -218,9 +249,17 @@ def get_cluster_stats(
     # job-level，CG 收尾期可能短暂超过快照容量（见 NodeSnapshot docstring）；cpu / mem
     # 直接用快照容量（分区 / 整集群的容量恒 >= 其自身 job 的 used 之和）。
     if tenant_partition:
-        snapshot = slurm_manager.get_partition_snapshot(tenant_partition)
+        snapshot = _cached_slurm_view(
+            ("partition_snapshot", tenant_partition),
+            cluster_stats_cache_ttl,
+            lambda: slurm_manager.get_partition_snapshot(tenant_partition),
+        )
     else:
-        snapshot = slurm_manager.get_node_snapshot()
+        snapshot = _cached_slurm_view(
+            ("node_snapshot", None),
+            cluster_stats_cache_ttl,
+            lambda: slurm_manager.get_node_snapshot(),
+        )
     display_total = max(snapshot.total_gpus, used_gpus)
     cpu_total = snapshot.cpu_total
     mem_total_mb = snapshot.mem_total_mb
