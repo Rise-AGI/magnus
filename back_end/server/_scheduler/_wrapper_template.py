@@ -23,6 +23,7 @@ def _build_wrapper_content(
     entry_command: str,
     effective_runner: str,
     container_runtime: str,
+    enable_custody_drop: bool = False,
 ) -> str:
     success_marker_path = f"{job_working_table}/.magnus_success"
 
@@ -39,6 +40,27 @@ def _build_wrapper_content(
     runtime_binary = container_runtime
     runtime_var_prefix = container_runtime.upper()
     runtime_env_prefix = f"{runtime_var_prefix}ENV"
+
+    # 容器内 user-script 前导追加的两段 shell。
+    # (1) 平台 sdk 注入（SLURM 执行通用，owned 本机 + 远端租户）：若 .magnus_sdk 已随工作区进容器，把它顶到
+    #     PYTHONPATH/PATH 最前，覆盖镜像里 baked 的 sdk —— python `import magnus` 走
+    #     PYTHONPATH、bash `magnus` 走 PATH 下的 shim，两链路都改道平台 sdk。命中才 echo
+    #     一行；缺失（未提供 → 回退用镜像 baked sdk）静默。PYTHONPATH/PATH 都是前置追加，
+    #     不清空容器原值。
+    # (2) custody drop-dir（仅远端无网执行设）：让 SDK custody_file 写盘交给 staging 回传，
+    #     不走 HTTP。owned/本机执行不设，custody 仍走 HTTP，行为不变。
+    sdk_inject_shell = (
+        'if [ -d "$MAGNUS_HOME/workspace/.magnus_sdk/magnus" ]; then\n'
+        '    export PYTHONPATH="$MAGNUS_HOME/workspace/.magnus_sdk:${PYTHONPATH:-}"\n'
+        '    export PATH="$MAGNUS_HOME/workspace/.magnus_sdk/bin:$PATH"\n'
+        '    echo "[magnus] platform sdk active (overriding image-baked sdk)"\n'
+        'fi\n'
+    )
+    custody_drop_shell = (
+        'export MAGNUS_CUSTODY_DROP_DIR=$MAGNUS_HOME/workspace/.magnus_custody_drop\n'
+        if enable_custody_drop
+        else ''
+    )
 
     return f'''import os
 import signal
@@ -492,10 +514,14 @@ def main():
     # 回拖垮整条进程链。SIG_IGN 通过 POSIX exec 继承到 user 进程，user 代码
     # 用 signal.signal(SIGTERM, …) 装 handler 自然覆盖回去触发。
     user_script_path = os.path.join(work_dir, ".magnus_user_script.sh")
+    _magnus_sdk_inject = {repr(sdk_inject_shell)}
+    _magnus_custody_drop = {repr(custody_drop_shell)}
     with open(user_script_path, "w") as f:
         f.write("set -e\\n")
         f.write("trap '' TERM\\n")
         f.write("export HOME=$MAGNUS_HOME\\n")
+        f.write(_magnus_sdk_inject)
+        f.write(_magnus_custody_drop)
         f.write(user_cmd_str)
         f.write("\\n")
     os.chmod(user_script_path, 0o755)

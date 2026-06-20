@@ -3,6 +3,8 @@ import os
 import ast
 import time
 import json
+import uuid
+import shutil
 import asyncio
 import logging
 import tempfile as _tempfile
@@ -21,7 +23,7 @@ from .config import (
     _get_current_site, normalize_address,
 )
 from .actions import execute_action
-from .file_transfer import is_file_secret, get_tmp_base
+from .file_transfer import is_file_secret, get_tmp_base, ENV_CUSTODY_DROP_DIR, FILE_SECRET_PREFIX
 
 logger = logging.getLogger("magnus")
 
@@ -334,6 +336,10 @@ class MagnusClient:
         if not p.exists():
             raise MagnusError(f"Path does not exist: {path}")
 
+        drop_dir = os.environ.get(ENV_CUSTODY_DROP_DIR)
+        if drop_dir:
+            return self._drop_file(p, drop_dir, expire_minutes, max_downloads)
+
         data: Dict[str, str] = {"expire_minutes": str(expire_minutes)}
         if max_downloads is not None:
             data["max_downloads"] = str(max_downloads)
@@ -353,6 +359,53 @@ class MagnusClient:
 
         self._handle_error(resp)
         return resp.json()["file_secret"]
+
+    def _drop_file(
+        self,
+        p: Path,
+        drop_dir: str,
+        expire_minutes: int,
+        max_downloads: Optional[int],
+    ) -> str:
+        """Custody delivery for no-network remote execution: write the file plus a
+        manifest into drop_dir instead of POSTing it. The magnus host pulls this
+        directory back over the transport and registers each entry in custody
+        under its token, so the returned FileSecret resolves once the job's
+        outputs are staged back. One directory per entry:
+
+            <drop_dir>/<token>/meta.json   {token, filename, is_directory,
+                                            expire_minutes, max_downloads}
+            <drop_dir>/<token>/<filename>  the file (a .tar.gz for directories)
+
+        Directories are tar.gz'd exactly as the HTTP path does, so the host-side
+        registration and the eventual download behave identically. The token is
+        `relay-<uuid>` so it never collides with the server's own
+        `<prime>-<word>-<word>-<word>` tokens.
+        """
+        token = f"relay-{uuid.uuid4().hex}"
+        entry_dir = Path(drop_dir) / token
+        entry_dir.mkdir(parents=True, exist_ok=True)
+
+        is_dir = p.is_dir()
+        if is_dir:
+            filename = f"{p.name}.tar.gz"
+            with _tarfile.open(str(entry_dir / filename), "w:gz", format=_tarfile.PAX_FORMAT, dereference=True) as tar:
+                tar.add(str(p), arcname=p.name)
+        else:
+            filename = p.name
+            shutil.copy2(str(p), str(entry_dir / filename))
+
+        meta = {
+            "token": token,
+            "filename": filename,
+            "is_directory": is_dir,
+            "expire_minutes": expire_minutes,
+            "max_downloads": max_downloads,
+        }
+        with open(entry_dir / "meta.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f)
+
+        return f"{FILE_SECRET_PREFIX}{token}"
 
     # === Blueprint Methods ===
 

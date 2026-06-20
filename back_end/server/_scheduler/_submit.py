@@ -121,6 +121,9 @@ class _SubmitMixin(_SubmitMixinBase):
             remote_repo_dir = f"{remote_job_working_table}/repository"
 
             self._init_job_working_dir(job_working_table)
+            # 平台 SDK 落进工作区（容器跑平台 SDK 而非镜像 baked 版）。SLURM 执行通用：
+            # owned 本机经 workspace bind 进容器，远端租户由 _stage_in_job 推过去。
+            self._provision_platform_sdk(job_working_table)
             # ephemeral_root == root 时与 job_working_table 同路径（幂等）；
             # 配成独立快盘时在那侧建好 ephemeral overlay / apptainer tmp 的落脚目录。
             guarantee_file_exist(job_ephemeral_table, is_directory=True)
@@ -168,6 +171,7 @@ class _SubmitMixin(_SubmitMixinBase):
             entry_command = job.entry_command,
             effective_runner = effective_runner,
             container_runtime = container_runtime,
+            enable_custody_drop = self._is_remote_execution(),
         )
 
         wrapper_path = f"{job_working_table}/wrapper.py"

@@ -1,6 +1,7 @@
 # back_end/server/_file_custody_manager/_manager.py
 """FileCustodyManager 主类。详细线程安全说明见类 docstring。"""
 import os
+import re
 import json
 import time
 import shutil
@@ -25,6 +26,13 @@ from ._word_list import _PRIMES, _WORDS
 
 
 _COPY_CHUNK_SIZE = 64 * 1024
+
+# Shape of the SDK's offline-generated relay token (`relay-<uuid4 hex>`). An explicit
+# token reaches store_file from a job's drop-dir meta.json — untrusted input on
+# no-network relay sites — and is used verbatim as the on-disk entry dir, so it must be
+# validated against this exact shape to keep it a single leaf under the storage root
+# (no path traversal). filename is sanitized separately by _sanitize_filename.
+_RELAY_TOKEN_RE = re.compile(r"^relay-[0-9a-f]{32}\Z")
 
 
 def _sanitize_filename(name: str) -> str:
@@ -145,10 +153,18 @@ class FileCustodyManager:
         is_directory: bool = False,
         max_downloads: Optional[int] = None,
         permanent: bool = False,
+        explicit_token: Optional[str] = None,
     ) -> str:
         # Sanitize at the entry point so all callers are protected centrally
         # rather than each one needing to remember `os.path.basename`.
         filename = _sanitize_filename(filename)
+
+        # explicit_token is untrusted on relay sites (it comes from a job-written
+        # meta.json) and is used verbatim as the on-disk entry directory. Reject any
+        # token that isn't the SDK's exact relay shape so it can't traverse out of the
+        # storage root. None (the HTTP path) skips this and uses _generate_token.
+        if explicit_token is not None and not _RELAY_TOKEN_RE.match(explicit_token):
+            raise ValueError(f"invalid explicit custody token: {explicit_token!r}")
 
         # permanent 条目由服务端内部代码控制（如头像），不受 max_ttl 限制
         if not permanent:
@@ -158,11 +174,17 @@ class FileCustodyManager:
 
         # 先占位再写文件，避免并发请求绕过 _max_processes 限制
         with self._lock:
+            # explicit_token：远端无网执行时 SDK 离线生成的 relay token，由 host 侧
+            # staging 把暂存产物按它注册进 custody。重复注册（同一 drop 被多次拉回）
+            # 幂等返回，不重写、不重复计数。explicit_token=None 时走原 _generate_token
+            # 路径，HTTP 上传行为完全不变。
+            if explicit_token is not None and explicit_token in self._entries:
+                return explicit_token
             if len(self._entries) >= self._max_processes:
                 raise CustodyLimitError(self._max_processes)
             if self._current_size >= self._max_size:
                 raise CustodyStorageFullError()
-            entry_id = self._generate_token()
+            entry_id = explicit_token if explicit_token is not None else self._generate_token()
             placeholder = CustodyEntry(
                 entry_id = entry_id,
                 file_dir = self._storage_root / entry_id,

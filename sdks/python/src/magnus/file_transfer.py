@@ -4,6 +4,15 @@ from typing import Optional
 
 FILE_SECRET_PREFIX = "magnus-secret:"
 
+# Set by the magnus job wrapper on no-network remote-execution sites: when
+# present, custody uploads are written into this directory instead of POSTed
+# over HTTP. The magnus host pulls the directory back over the transport and
+# registers each entry in custody under its token, so the returned FileSecret
+# still resolves once the job's outputs are staged back. See Client._drop_file
+# for the on-disk layout. Unset (the local / owned-cluster default) keeps the
+# direct HTTP upload path unchanged.
+ENV_CUSTODY_DROP_DIR = "MAGNUS_CUSTODY_DROP_DIR"
+
 
 def is_file_secret(value: str) -> bool:
     return value.startswith(FILE_SECRET_PREFIX)
