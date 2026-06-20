@@ -3,6 +3,7 @@ import httpx
 import logging
 import asyncio
 import socket
+import threading
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 from collections import defaultdict
@@ -38,8 +39,12 @@ router = APIRouter()
 # Prevent concurrent creation conflicts for the same service
 _service_spawn_locks = defaultdict(asyncio.Lock)
 
-# Flow control semaphores (Per-Service)
+# Flow control semaphores (Per-Service). 被并发改：proxy（async，event loop）惰性
+# get-or-create，create_service / delete_service（sync 端点，FastAPI 线程池）del。
+# 用一把锁串起所有访问，杜绝 del 撞 proxy 的 check-then-act 引发的 KeyError / 重复建。
+# 锁只包 dict 操作 + Semaphore() 构造（均同步、无 await），绝不跨 await 持有。
 _service_semaphores: Dict[str, asyncio.Semaphore] = {}
+_service_semaphores_lock = threading.Lock()
 
 # === [New] Double Bulkhead Configuration ===
 # 1. Outer Bulkhead: Global Concurrency Limit for Proxy
@@ -266,8 +271,9 @@ def create_service(
         will_be_active = data.get("is_active", was_active)
 
         if service_data.max_concurrency != existing.max_concurrency:
-            if existing.id in _service_semaphores:
-                del _service_semaphores[existing.id]
+            with _service_semaphores_lock:
+                removed_sem = _service_semaphores.pop(existing.id, None)
+            if removed_sem is not None:
                 logger.info(f"Concurrency limit changed for {existing.id}, semaphore reset.")
 
         for k, v in data.items():
@@ -314,8 +320,8 @@ def delete_service(
     db.delete(svc)
     db.commit()
 
-    if service_id in _service_semaphores:
-        del _service_semaphores[service_id]
+    with _service_semaphores_lock:
+        _service_semaphores.pop(service_id, None)
 
 
 @router.post("/services/{service_id}/transfer", response_model=ServiceResponse)
@@ -482,10 +488,13 @@ async def proxy_service_request(
 
     try:
         # === 4. Service Bulkhead (Per-Service Limit) ===
-        if service_snap.id not in _service_semaphores:
-            _service_semaphores[service_snap.id] = asyncio.Semaphore(service_snap.max_concurrency)
-        
-        service_sem = _service_semaphores[service_snap.id]
+        # 锁内 get-or-create（与线程池侧的 del 原子互斥），拿到 semaphore 引用后在锁外
+        # acquire/release —— 绝不跨 await 持有同步锁。
+        with _service_semaphores_lock:
+            service_sem = _service_semaphores.get(service_snap.id)
+            if service_sem is None:
+                service_sem = asyncio.Semaphore(service_snap.max_concurrency)
+                _service_semaphores[service_snap.id] = service_sem
 
         try:
             await asyncio.wait_for(service_sem.acquire(), timeout=get_remaining_time())

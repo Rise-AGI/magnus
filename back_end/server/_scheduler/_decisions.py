@@ -84,18 +84,29 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 JobType.B2: 1,
             }
 
-            # Phase 1: 启动 Preparing 任务的资源准备
+            # Phase 1: 启动 Preparing 任务的资源准备。check-then-set 在锁内做，与
+            # terminate_job（线程池）的 pop 原子互斥；create_task 是同步的（仅在 loop
+            # 上排程），锁内调用无阻塞风险。
             preparing_jobs = db.query(Job).filter(Job.status == JobStatus.PREPARING).all()
             for job in preparing_jobs:
-                if job.id not in self.preparing_jobs:
-                    task = asyncio.create_task(self._prepare_job_resources(job.id))
-                    self.preparing_jobs[job.id] = task
-                    logger.info(f"Job {job.id} started resource preparation")
+                with self._preparing_jobs_lock:
+                    if job.id in self.preparing_jobs:
+                        continue
+                    self.preparing_jobs[job.id] = asyncio.create_task(self._prepare_job_resources(job.id))
+                logger.info(f"Job {job.id} started resource preparation")
 
-            # Phase 2: 清理已完成的 preparing tasks
-            done_jobs = [jid for jid, task in self.preparing_jobs.items() if task.done()]
-            for jid in done_jobs:
-                task = self.preparing_jobs.pop(jid)
+            # Phase 2: 清理已完成的 preparing tasks。锁内 snapshot + 摘出已完成 task，
+            # 锁外再处理其结果 —— task.exception() / db.commit 不能在锁内（会把锁占给慢
+            # I/O，阻塞 terminate_job 的线程池访问）。terminate_job 取消的 task 已被它自己
+            # 摘出，这里见不到；对仍在此的 cancelled task 跳过（task.exception() 会抛
+            # CancelledError）。pop 用默认值兜底，防与 terminate_job 的竞态。
+            with self._preparing_jobs_lock:
+                done_tasks = [(jid, task) for jid, task in self.preparing_jobs.items() if task.done()]
+                for jid, _ in done_tasks:
+                    self.preparing_jobs.pop(jid, None)
+            for jid, task in done_tasks:
+                if task.cancelled():
+                    continue
                 exc = task.exception()
                 if exc is not None:
                     logger.error(f"Job {jid} preparation crashed: {exc}")

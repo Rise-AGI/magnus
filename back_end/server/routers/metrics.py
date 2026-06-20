@@ -313,7 +313,9 @@ async def render_metric_chart(
         png = await asyncio.to_thread(_no_data_png, name)
         return Response(content=png, media_type="image/png")
 
-    all_points = _read_all_points(metrics_dir)
+    # 在这个 async 端点里，_read_all_points 会 glob + 逐行 json.loads 整个 metrics 目录，
+    # 长跑 job 可达数十 MB —— 必须丢线程池，否则阻塞事件循环（本函数其余重活已都 to_thread）。
+    all_points = await asyncio.to_thread(_read_all_points, metrics_dir)
     unit: Optional[str] = None
     by_labels: Dict[Tuple, List[Dict[str, Any]]] = {}
     for p in all_points:

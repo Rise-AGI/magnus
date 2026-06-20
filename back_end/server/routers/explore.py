@@ -478,15 +478,21 @@ async def transcribe_audio(
         raise HTTPException(status_code=501, detail="Explorer is not configured. Add server.explorer to your config.")
 
     audio_bytes = await file.read()
-    # 统一转为 mp3：单声道 64kbps，体积小且中转站能正确解析时长
-    mp3_bytes = _convert_audio_to_mp3(audio_bytes)
+    # 统一转为 mp3：单声道 64kbps，体积小且中转站能正确解析时长。
+    # ffmpeg(subprocess，最多 15s)与下面同步的 STT 网络调用都是阻塞的，必须丢线程池，
+    # 否则会把整个事件循环卡住数秒到十几秒，拖垮所有并发请求（含 cluster 轮询）。
+    mp3_bytes = await asyncio.to_thread(_convert_audio_to_mp3, audio_bytes)
     prompt = context[:900] if context else ""
 
+    # 在 loop 上绑定方法（此处 llm_client 已过 None 守卫），阻塞的 create 调用丢线程池。
+    _stt_create = llm_client.audio.transcriptions.create
     try:
-        transcription = llm_client.audio.transcriptions.create(
-            model=str(explorer_config["stt_model_name"]),
-            file=("audio.mp3", mp3_bytes),
-            prompt=prompt,
+        transcription = await asyncio.to_thread(
+            lambda: _stt_create(
+                model=str(explorer_config["stt_model_name"]),
+                file=("audio.mp3", mp3_bytes),
+                prompt=prompt,
+            )
         )
         return {"text": transcription.text}
     except Exception as e:
@@ -539,7 +545,11 @@ async def chat(
     db.close()  # 提前释放连接，不等 VLM 处理和 streaming 结束
 
     # ---- VLM 处理（无 session）----
-    processed_content = process_images_in_content(data.content, context_messages)
+    # process_images_in_content 对每张图同步调 VLM（网络阻塞），这里在事件循环上，
+    # 必须丢线程池，否则带图消息会把整个事件循环卡住若干次网络往返。
+    processed_content = await asyncio.to_thread(
+        process_images_in_content, data.content, context_messages
+    )
 
     messages = context_messages.copy()
     messages.append({"role": "user", "content": processed_content})

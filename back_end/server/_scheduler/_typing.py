@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -37,6 +38,8 @@ class _SchedulerProtocol:
     enabled: bool
     last_snapshot_time: datetime
     preparing_jobs: Dict[str, asyncio.Task[Any]]
+    _preparing_jobs_lock: "threading.Lock"
+    _loop: Optional[asyncio.AbstractEventLoop]
     _image_pull_tasks: Dict[str, asyncio.Task[Any]]
     _docker_log_cursors: Dict[str, Optional[str]]
 

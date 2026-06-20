@@ -1,5 +1,6 @@
 # back_end/server/_scheduler/_core.py
 import asyncio
+import threading
 from datetime import datetime, timezone
 from typing import Dict, Optional
 from sqlalchemy.orm import Session
@@ -52,12 +53,23 @@ class MagnusScheduler(
             self.docker_manager = None
         self.last_snapshot_time = datetime.min.replace(tzinfo=timezone.utc)
         self.preparing_jobs: Dict[str, asyncio.Task] = {}  # job_id -> Task
+        # preparing_jobs 被两类执行体并发动：调度循环（event loop，建/清 task）与
+        # terminate_job（sync 端点，跑在 FastAPI 线程池）。用一把锁串起所有 dict 访问，
+        # 杜绝 del 撞 pop / 迭代期被改的 KeyError/RuntimeError。_loop 在 tick 里捕获，
+        # 供线程池侧把 asyncio.Task.cancel() 经 call_soon_threadsafe 调度回 loop 线程
+        # （Task.cancel 跨线程调不安全）。
+        self._preparing_jobs_lock = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._image_pull_tasks: Dict[str, asyncio.Task] = {}  # image_uri -> shared pull Task
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
 
     async def tick(self):
         if not self.enabled:
             return
+        # tick 跑在调度 event loop 上：捕获它，供 terminate_job（线程池）跨线程调度
+        # task.cancel()。idempotent。
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
         try:
             # subprocess 调用（docker logs / slurm queries）放线程池，避免阻塞 event loop
             await asyncio.to_thread(self._sync_reality)
@@ -72,10 +84,14 @@ class MagnusScheduler(
             logger.warning("Scheduler disabled, skipping termination logic.")
             return
 
-        # 取消 Preparing 状态的异步任务
-        if job.id in self.preparing_jobs:
-            self.preparing_jobs[job.id].cancel()
-            del self.preparing_jobs[job.id]
+        # 取消 Preparing 状态的异步任务。本函数跑在 FastAPI 线程池：先在锁内把 task 摘出
+        # （与调度循环的建/清原子互斥），再经 call_soon_threadsafe 把 cancel 调度回 loop
+        # 线程执行 —— asyncio.Task.cancel() 跨线程直调不安全。摘出后调度循环 Phase 2 不会
+        # 再见到它，无 double-pop。
+        with self._preparing_jobs_lock:
+            preparing_task = self.preparing_jobs.pop(job.id, None)
+        if preparing_task is not None and self._loop is not None:
+            self._loop.call_soon_threadsafe(preparing_task.cancel)
 
         if job.slurm_job_id:
             if is_local_mode:
