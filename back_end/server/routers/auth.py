@@ -2,6 +2,7 @@
 import secrets
 import logging
 import asyncio
+import threading
 from typing import Optional, Dict, Any
 
 from cachetools import TTLCache
@@ -27,19 +28,25 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/feishu/login", auto_err
 AUTH_CACHE_TTL = 60
 AUTH_CACHE_MAX_SIZE = 1000
 _auth_cache: TTLCache[str, str] = TTLCache(maxsize=AUTH_CACHE_MAX_SIZE, ttl=AUTH_CACHE_TTL)
+# cachetools.TTLCache 非线程安全（get/set/pop 都会跑改内部过期链表的 expire pass）。
+# get_current_user 是 sync def 依赖，每个鉴权请求都在 FastAPI 线程池里并发访问它，
+# 故所有访问都串到这把锁上，杜绝过期记账期的并发 KeyError / 结构损坏。临界区极短。
+_auth_cache_lock = threading.Lock()
 
 
 def _get_from_cache(
     token: str
 )-> Optional[str]:
-    return _auth_cache.get(token)
+    with _auth_cache_lock:
+        return _auth_cache.get(token)
 
 
 def _add_to_cache(
     token: str,
     user: models.User,
 )-> None:
-    _auth_cache[token] = user.id
+    with _auth_cache_lock:
+        _auth_cache[token] = user.id
 
 
 def evict_token_from_cache(
@@ -53,7 +60,8 @@ def evict_token_from_cache(
     users whose token attribute is None.
     """
     if token:
-        _auth_cache.pop(token, None)
+        with _auth_cache_lock:
+            _auth_cache.pop(token, None)
 
 
 def generate_trust_token()-> str:

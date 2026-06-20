@@ -66,6 +66,13 @@ _REMOTE_MARKERS = (
 )
 
 
+def _is_safe_leaf(name: str) -> bool:
+    """name 是否为安全的单层路径名。远端无网计算节点（信任边界外）经 `ls` 列出的
+    文件 / 目录名，在 host 侧拼进 fetch 落点前必须过这关 —— 否则 `../x` 之类会把
+    文件写到目标目录之外（与 custody filename 的 basename 防护同类）。"""
+    return bool(name) and name not in (".", "..") and os.path.basename(name) == name
+
+
 class _StagingMixin(_StagingMixinBase):
     """远端执行下的工作区搬运。本机执行下全程 no-op。"""
 
@@ -209,7 +216,9 @@ class _StagingMixin(_StagingMixinBase):
         if listing.returncode == 0:
             # 按行切（ls -1 一行一名），不按空白切 —— metrics 文件名可能含空格。
             for name in listing.stdout.splitlines():
-                if not name:
+                # metrics 文件名来自远端无网计算节点（信任边界）：拼 host 侧落点前必须
+                # 确认是安全单层名，否则 `../x` 之类会把文件写到 metrics 目录外。
+                if not _is_safe_leaf(name):
                     continue
                 try:
                     transport.fetch(
@@ -264,7 +273,10 @@ class _StagingMixin(_StagingMixinBase):
             return
         for token in listing.stdout.splitlines():
             token = token.strip()
-            if not token:
+            # token 是远端 drop 目录里的子目录名（job 端造，信任边界外）：拼 host 侧
+            # 落点前过安全单层名校验，与 metrics 拉取同防。真正按 token 注册进 custody
+            # 时 store_file 还会用 _RELAY_TOKEN_RE 严格校验形状。
+            if not _is_safe_leaf(token):
                 continue
             try:
                 # 逐 token 拉整个条目目录(meta.json + 文件/.tar.gz),scp -r。
