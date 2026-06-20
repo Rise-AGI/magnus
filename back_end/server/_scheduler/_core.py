@@ -13,6 +13,7 @@ from ._submit import _SubmitMixin
 from ._decisions import _DecisionsMixin
 from ._resources import _ResourcesMixin
 from ._job_lifecycle import _JobLifecycleMixin
+from ._staging import _StagingMixin
 
 
 class MagnusScheduler(
@@ -21,6 +22,7 @@ class MagnusScheduler(
     _DecisionsMixin,
     _ResourcesMixin,
     _JobLifecycleMixin,
+    _StagingMixin,
 ):
     """Job 调度器主类。
 
@@ -30,6 +32,7 @@ class MagnusScheduler(
     - _DecisionsMixin: EASY backfill + 抢占
     - _ResourcesMixin: 镜像拉取 + 仓库 clone (Preparing → Pending)
     - _JobLifecycleMixin: success/OOM marker、working table 清理
+    - _StagingMixin: 远端执行（transport=ssh）下 job 工作区的跨界搬运（本机执行 no-op）
     """
 
     def __init__(self):

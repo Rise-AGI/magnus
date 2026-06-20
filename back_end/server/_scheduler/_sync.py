@@ -240,12 +240,20 @@ class _SyncMixin(_SyncMixinBase):
                 ).all()
             ]
 
-        # Phase 2 — SLURM 状态检查（无 session）
+        # Phase 2 — SLURM 状态检查 + 远端产物回读（无 session）
         slurm_statuses = {}
         for job_id, slurm_job_id in queued_info + running_info:
             if slurm_job_id:
                 assert self.slurm_manager is not None
-                slurm_statuses[job_id] = self.slurm_manager.check_job_status(slurm_job_id)
+                status = self.slurm_manager.check_job_status(slurm_job_id)
+                slurm_statuses[job_id] = status
+                # 远端执行：终态把 marker + 日志 + metrics 拉齐，供 Phase 3 的
+                # finalize / OOM 判定本机读取；运行中拉日志 / metrics 做 live 镜像。
+                # 本机执行下两者均 no-op（远端路径已收敛回本地，无需搬运）。
+                if status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"):
+                    self._stage_out_final(job_id)
+                elif status == "RUNNING":
+                    self._stage_out_logs(job_id)
         for job_id, slurm_job_id, _ in inflight_release_info:
             assert self.slurm_manager is not None
             slurm_statuses[job_id] = self.slurm_manager.check_job_status(slurm_job_id)

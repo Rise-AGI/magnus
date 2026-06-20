@@ -78,9 +78,16 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _check_key(ssh, "host", str)
         _check_key(ssh, "user", str)
         # remote_root：远程站点上 magnus 搬运 job 工作区 / wrapper / 产物的根目录
-        # （wm2 落 Lustre 共享盘）。跨界 workspace I/O 链路（后续 commit）消费，缺省 None。
+        # （wm2 落 Lustre 共享盘）。transport=ssh 意味着 SLURM 在异机、与 magnus 无
+        # 共享盘，job 工作区必须落远端，故 remote_root 必填 —— 启动即 fail-fast，
+        # 不留到首个 job 提交时才炸。
         ssh.setdefault("remote_root", None)
         _check_key(ssh, "remote_root", str, nullable=True)
+        if ssh["remote_root"] is None:
+            raise ValueError(
+                "❌ transport.mode='ssh' 要求 transport.ssh.remote_root"
+                "（远程站点 job 工作区根目录），当前为 None"
+            )
         _warn_extra_keys(ssh, {"control_path", "host", "user", "remote_root"}, "transport.ssh")
     _warn_extra_keys(transport, {"mode", "ssh"}, "transport")
 

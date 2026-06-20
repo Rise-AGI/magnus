@@ -82,5 +82,9 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
             # the working table, the keep-whitelist sweep above already removed them.
             if job_ephemeral_table != job_working_table:
                 delete_file(job_ephemeral_table)
+            # 远端执行：删掉远端 job 工作区（持久产物已在终态 _stage_out_final 拉回本机，
+            # 上面的 keep-whitelist 在本机侧保留）。本机执行下 no-op；远端不存在时 rm -rf
+            # 亦无害（覆盖 terminate / preparing 失败等尚未在远端建目录的清理路径）。
+            self._cleanup_remote_job(job_id)
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")

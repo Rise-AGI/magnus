@@ -21,3 +21,9 @@ class SlurmManager(_ResourceQueryMixin, _ControlMixin):
             if transport is not None
             else build_transport(magnus_config["transport"])
         )
+
+    @property
+    def transport(self) -> _Transport:
+        """执行后端（本机 subprocess 或骑 SSH socket 的远端）。scheduler 的跨界
+        staging 经此拿到 push/fetch/is_remote，无需触碰私有字段。"""
+        return self._transport

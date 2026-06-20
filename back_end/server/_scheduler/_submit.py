@@ -9,7 +9,14 @@ from pywheels.file_tools import guarantee_file_exist
 from ..models import Job, JobStatus
 from .._magnus_config import magnus_config
 from .._resource_manager import resource_manager
-from . import logger, magnus_workspace_path, magnus_ephemeral_workspace_path
+from . import (
+    logger,
+    magnus_workspace_path,
+    magnus_ephemeral_workspace_path,
+    magnus_remote_workspace_path,
+    magnus_remote_ephemeral_workspace_path,
+    magnus_remote_container_cache_path,
+)
 from ._wrapper_template import _build_wrapper_content
 
 if TYPE_CHECKING:
@@ -101,9 +108,16 @@ class _SubmitMixin(_SubmitMixinBase):
             user_magnus = magnus_config["cluster"]["default_runner"]
             effective_runner = job.runner if job.runner is not None else user_magnus
 
+            # 本机路径：wrapper 在本机生成、本机 init 工作区骨架、回读 marker/产物的
+            # 落点。
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             job_ephemeral_table = f"{magnus_ephemeral_workspace_path}/jobs/{job.id}"
-            repo_dir = f"{job_working_table}/repository"
+            # 执行端路径：job 真正运行处。本机执行下逐字等于上面的本机路径（下方
+            # wrapper 内容与 sbatch 参数字节级不变）；远端执行（transport=ssh）下指向
+            # remote_root 下的工作区，由 _stage_in_job 在远端建好并推送 wrapper。
+            remote_job_working_table = f"{magnus_remote_workspace_path}/jobs/{job.id}"
+            remote_job_ephemeral_table = f"{magnus_remote_ephemeral_workspace_path}/jobs/{job.id}"
+            remote_repo_dir = f"{remote_job_working_table}/repository"
 
             self._init_job_working_dir(job_working_table)
             # ephemeral_root == root 时与 job_working_table 同路径（幂等）；
@@ -122,7 +136,14 @@ class _SubmitMixin(_SubmitMixinBase):
             db.commit()
             return False
 
-        sif_path = resource_manager.get_sif_path(job.container_image)
+        local_sif_path = resource_manager.get_sif_path(job.container_image)
+        # 执行端 SIF 路径：本机执行下逐字等于本机路径；远端执行下指向 remote_root 下
+        # 的 container_cache（同名 SIF，文件本身如何落远端是来源相关的另一回事）。
+        remote_sif_path = (
+            f"{magnus_remote_container_cache_path}/{os.path.basename(local_sif_path)}"
+            if self._is_remote_execution()
+            else local_sif_path
+        )
         default_system_entry_command = magnus_config["cluster"]["default_system_entry_command"]
         base_system_entry_command = job.system_entry_command if job.system_entry_command else default_system_entry_command
         system_entry_command = base_system_entry_command.strip()
@@ -133,10 +154,10 @@ class _SubmitMixin(_SubmitMixinBase):
         container_runtime = magnus_config["execution"]["container_runtime"]
 
         wrapper_content = _build_wrapper_content(
-            job_working_table = job_working_table,
-            job_ephemeral_table = job_ephemeral_table,
-            repo_dir = repo_dir,
-            sif_path = sif_path,
+            job_working_table = remote_job_working_table,
+            job_ephemeral_table = remote_job_ephemeral_table,
+            repo_dir = remote_repo_dir,
+            sif_path = remote_sif_path,
             system_entry_command = system_entry_command,
             user_token = user_token,
             magnus_address = magnus_address,
@@ -159,14 +180,27 @@ class _SubmitMixin(_SubmitMixinBase):
             db.commit()
             return False
 
+        # 远端执行（transport=ssh）：在远端建好工作区骨架并把本机生成的 wrapper 推过去；
+        # 本机执行下 no-op。失败按提交失败处理，不把无 wrapper 的 job 交给 sbatch。
+        try:
+            self._stage_in_job(job_id, wrapper_path)
+        except Exception as error:
+            logger.error(f"Failed to stage Job {job.id} to remote site: {error}")
+            job.status = JobStatus.FAILED
+            job.result = f"Failed to stage job to remote execution site: {error}"
+            db.commit()
+            return False
+
+        # 执行端 wrapper 路径：本机执行下逐字等于本机 wrapper_path，sbatch 参数字节级不变。
+        remote_wrapper_path = f"{remote_job_working_table}/wrapper.py"
         try:
             assert self.slurm_manager is not None
             slurm_id = self.slurm_manager.submit_job_simple(
-                entry_command = f"python3 {wrapper_path}",
+                entry_command = f"python3 {remote_wrapper_path}",
                 gpus = job.gpu_count,
                 job_name = job.task_name,
                 gpu_type = job.gpu_type,
-                output_path = f"{job_working_table}/slurm/output.txt",
+                output_path = f"{remote_job_working_table}/slurm/output.txt",
                 overwrite_output = False,
                 runner = effective_runner,
                 cpu_count = job.cpu_count,

@@ -61,18 +61,21 @@ server:
     stt_model_name: whisper-1
     api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# transport: where magnus runs the SLURM CLI (and, later, cross-boundary file
-# staging). Omit entirely (default `mode: local`) when magnus shares a host with
-# the SLURM controller — this is the case for self-owned clusters. Set `mode: ssh`
+# transport: where magnus runs the SLURM CLI and stages each job's working tree.
+# Omit entirely (default `mode: local`) when magnus shares a host with the SLURM
+# controller — this is the case for self-owned clusters, and every remote path
+# below collapses onto the local workspace so nothing is moved. Set `mode: ssh`
 # to drive a remote multi-tenant cluster over a pre-established SSH ControlMaster
-# socket (the human bootstraps the socket once with 2FA, magnus rides it).
+# socket (the human bootstraps the socket once with 2FA, magnus rides it): the job
+# working tree (wrapper.py + dirs) is pushed to remote_root before sbatch and the
+# wrapper-written markers / SLURM stdout / metrics are pulled back from there.
 # transport:
 #   mode: ssh                            # local | ssh
 #   ssh:
-#     control_path: ~/.ssh/cm-wm2.sock   # the ControlMaster socket to ride
-#     host: wm2-login.pku.edu.cn
-#     user: "2200011363"
-#     remote_root: /lustre/home/2200011363/magnus-data  # shared FS root for staging
+#     control_path: /home/magnus/.ssh/cm-remote.sock  # absolute path (no ~): passed verbatim to ssh
+#     host: login.your-hpc.example.edu
+#     user: "your-cluster-account"
+#     remote_root: /lustre/home/your-cluster-account/magnus-data  # REQUIRED when mode=ssh: remote job working-tree root
 
 execution:
   backend: slurm                         # slurm | local
