@@ -1,5 +1,6 @@
 # back_end/server/routers/cluster.py
 import time
+import threading
 from typing import Callable, List
 from datetime import datetime
 
@@ -25,27 +26,55 @@ router = APIRouter()
 
 # cluster 页面每次 poll 都要现查 SLURM（squeue + scontrol）。本机执行下是本地 subprocess、
 # 很快；骑 ssh transport 的远端站点下每次都走 socket 拉一遍（大集群可达 ~MB 级 squeue JSON
-# + 数百节点 scontrol），高频 poll 叠加多查看者会明显拖慢。server.scheduler.cluster_stats_cache_ttl
+# + 数百节点 scontrol），单次就要约 1 秒、并发下更慢。server.scheduler.cluster_stats_cache_ttl
 # > 0 时把这些只读远端查询的结果按 TTL 缓存复用；默认 0 = 不缓存、每次现查（独占站点保持
 # 现状、字节级不变）。调度器自身的 SLURM 查询不走这里 —— 它要实时数据做决策，缓存只服务
 # cluster 页面这条只读链路。
+#
+# 缓存采用 **single-flight + serve-stale**，这对远端站点是硬要求：cluster 页面高频 poll，
+# 若多个请求同时 miss 就会一起打同一个 SSH socket、互相拖慢，且查询耗时一旦超过 TTL / poll
+# 间隔，请求就会越堆越多形成雪崩（cache stampede）。所以任一时刻**至多一个远端刷新在飞**
+# （_refresh_lock），其余请求**立即返回上一份陈旧值、绝不堆叠打 socket**；冷启动（还没有任何
+# 缓存值）时才在锁上短暂等待那唯一的首刷。陈旧度上限约 TTL + 一次查询耗时，对集群总览可接受。
 _slurm_view_cache: dict = {}
+_slurm_view_cache_lock = threading.Lock()    # 保护 _slurm_view_cache 的快操作
+_slurm_view_refresh_lock = threading.Lock()  # single-flight：同一时刻只允许一个远端刷新
 
 
 def _cached_slurm_view(cache_key, ttl_seconds: int, producer: Callable):
-    """TTL 缓存 cluster 页面的远端 SLURM 查询。ttl_seconds <= 0 时直接 producer()（不缓存）。
+    """TTL 缓存 cluster 页面的远端 SLURM 查询，single-flight + serve-stale。
+    ttl_seconds <= 0 时直接 producer()（不缓存，独占站点默认）。
 
-    缓存的对象（task 列表 / NodeSnapshot）下游只读不改、跨请求共享安全；线程池并发下
-    偶发重复查询无害（不加锁，best-effort）。"""
+    缓存的对象（task 列表 / NodeSnapshot）下游只读不改、跨请求共享安全。"""
     if ttl_seconds <= 0:
         return producer()
-    now = time.monotonic()
-    cached = _slurm_view_cache.get(cache_key)
-    if cached is not None and now - cached[0] < ttl_seconds:
+
+    with _slurm_view_cache_lock:
+        cached = _slurm_view_cache.get(cache_key)
+    if cached is not None and time.monotonic() - cached[0] < ttl_seconds:
         return cached[1]
-    value = producer()
-    _slurm_view_cache[cache_key] = (now, value)
-    return value
+
+    if cached is not None:
+        # 有陈旧值：抢到刷新锁就由我刷新，抢不到（已有刷新在飞）就立即返回陈旧值，
+        # 绝不堆叠打 socket —— 这是防雪崩的关键。
+        if not _slurm_view_refresh_lock.acquire(blocking=False):
+            return cached[1]
+    else:
+        # 冷启动无任何值：在锁上等那唯一的首刷，等到后下面 re-check 直接拿到结果。
+        _slurm_view_refresh_lock.acquire()
+
+    try:
+        # 拿到刷新锁后 re-check：别的线程可能刚刷新过，避免重复远端查询。
+        with _slurm_view_cache_lock:
+            cached = _slurm_view_cache.get(cache_key)
+        if cached is not None and time.monotonic() - cached[0] < ttl_seconds:
+            return cached[1]
+        value = producer()
+        with _slurm_view_cache_lock:
+            _slurm_view_cache[cache_key] = (time.monotonic(), value)
+        return value
+    finally:
+        _slurm_view_refresh_lock.release()
 
 
 def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int, pending_skip: int, pending_limit: int):
