@@ -318,22 +318,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(scheduling, "mode", str)
     if scheduling["mode"] not in ("authoritative", "tenant"):
         raise ValueError(f"❌ cluster.scheduling.mode 必须是 'authoritative' 或 'tenant'，当前值: '{scheduling['mode']}'")
-    # scheduling.quota：tenant 模式下 cluster 视图展示的资源总量 —— 本租户在共享集群上
-    # 的配额（典型是 per-user QOS 限额：gpu / cpu + 内存）。authoritative 模式不用
-    # （视图取真实节点容量）。缺省 None：tenant 模式无此配置时回落到节点快照（会把整个
-    # 共享集群的容量显示成"我们的"，对租户不准但不致命）。
-    scheduling.setdefault("quota", None)
-    quota = scheduling["quota"]
-    if quota is not None:
-        _check_key(scheduling, "quota", dict)
-        quota.setdefault("gpu", 0)
-        quota.setdefault("cpu", 0)
-        quota.setdefault("mem", None)
-        _check_key(quota, "gpu", int)
-        _check_key(quota, "cpu", int)
-        _check_key(quota, "mem", str, nullable=True)
-        _warn_extra_keys(quota, {"gpu", "cpu", "mem"}, "cluster.scheduling.quota")
-    _warn_extra_keys(scheduling, {"mode", "quota"}, "cluster.scheduling")
+    _warn_extra_keys(scheduling, {"mode"}, "cluster.scheduling")
 
 
 def _load_magnus_config()-> Dict[str, Any]:

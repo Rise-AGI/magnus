@@ -5,7 +5,7 @@ import subprocess
 import traceback
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .._magnus_config import magnus_config
 from .._size_utils import _parse_size_string
@@ -216,6 +216,80 @@ class _ResourceQueryMixin:
                 mem_total_mb = 0,
             )
 
+    def get_partition_snapshot(self, partition: str) -> NodeSnapshot:
+        """单次 ``scontrol show node --oneliner`` 拉**指定分区**节点的容量数字
+        (GPU / CPU / 内存 total)。
+
+        共享集群租户模式的 cluster 视图用：那里资源总量该是本租户所在分区的实际容量
+        （租户在此分区里和别人竞争），而不是整集群所有分区之和。和 ``get_node_snapshot``
+        一样只承担 capacity 维度，alloc（free / used）由调用方拿 ``get_all_running_tasks``
+        派生 sum（详见 ``NodeSnapshot`` docstring）。
+
+        用 ``--oneliner`` 让每个节点占一行，便于按 ``Partitions=`` 字段过滤；一个节点
+        可同属多个分区，只要其分区列表含目标分区就计入容量。
+        """
+        try:
+            result = self._transport.run(
+                [
+                    "scontrol",
+                    "show",
+                    "node",
+                    "--oneliner",
+                ],
+                check = True,
+            )
+
+            total_gpus = 0
+            cpu_total = 0
+            mem_total = 0
+
+            for line in result.stdout.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+
+                # --oneliner 一行一节点，字段是空格分隔的 key=value。逐 token 拆成字典，
+                # 只取关心的单 token 值（CPUTot / RealMemory / Gres / Partitions）——含空格
+                # 的值（如 Reason="..."）会被拆散，但不影响这几个字段的取值。
+                fields: Dict[str, str] = {}
+                for token in line.split():
+                    if "=" in token:
+                        key, value = token.split("=", 1)
+                        fields[key] = value
+
+                node_partitions = fields.get("Partitions", "").split(",")
+                if partition not in node_partitions:
+                    continue
+
+                try:
+                    cpu_total += int(fields.get("CPUTot", "0"))
+                except ValueError:
+                    pass
+                try:
+                    mem_total += int(fields.get("RealMemory", "0"))
+                except ValueError:
+                    pass
+
+                gres = fields.get("Gres", "")
+                if "gpu" in gres:
+                    try:
+                        total_gpus += int(gres.split('(')[0].split(':')[-1])
+                    except (ValueError, IndexError):
+                        pass
+
+            return NodeSnapshot(
+                total_gpus = total_gpus,
+                cpu_total = cpu_total,
+                mem_total_mb = mem_total,
+            )
+        except Exception as error:
+            logger.error(f"Error querying partition snapshot for '{partition}': {error}")
+            return NodeSnapshot(
+                total_gpus = 0,
+                cpu_total = 0,
+                mem_total_mb = 0,
+            )
+
     def has_schedulable_node(self) -> bool:
         """集群里是否至少有一个节点处于可调度状态。
 
@@ -315,7 +389,7 @@ class _ResourceQueryMixin:
             logger.error(f"Failed to check job status {slurm_job_id}: {error}")
             return "UNKNOWN"
 
-    def get_all_running_tasks(self, scope_to_me: bool = False) -> List[Dict]:
+    def get_all_running_tasks(self, partition: Optional[str] = None) -> List[Dict]:
         """获取所有正在运行 / 收尾中的 SLURM 任务详情。
 
         包含 RUNNING 与 COMPLETING：CG 阶段 SLURM 物理上仍占 GPU 不释放，且本类
@@ -323,11 +397,10 @@ class _ResourceQueryMixin:
         endpoint 跟 sync_reality 对同一个 job 给出 "已释放 vs 仍在跑" 的不一致快照。
         epilog 较长（如做单卡 reset 兜底）时 CG 会停留数十秒，否则瞬时不可见。
 
-        ``scope_to_me=True`` 时只查当前 SLURM 用户的任务（squeue ``--me``）：tenant
-        站点（magnus 是共享集群的租户）只关心自己这个账号跑了什么，整集群全租户的任务
-        既不是"我们的"、也会把 cluster 视图淹没。``--me`` 取的是跑 squeue 的用户 —— 经
-        ssh transport 即远端站点上 magnus 的那个账号，刚好对。authoritative 站点（独占
-        集群）传 False 看全量。
+        ``partition`` 非空时只查该分区的任务（squeue ``--partition=<name>``）：共享集群
+        租户模式下 magnus 只在自己获授的分区里和别人竞争资源，整集群全分区的任务既不是
+        这个视图该呈现的、也会把列表淹没；限定到本分区既给出真实的同分区竞争态、又不越界。
+        独占集群（authoritative）传 None 看全量。
 
         关键坑点：SLURM job-completion caching 让 ``squeue --json`` 可能返回内存中
         残留的已结束任务（即便用了 ``--states`` 过滤）。代码层面必须再显式检查
@@ -339,8 +412,8 @@ class _ResourceQueryMixin:
             "--states=RUNNING,COMPLETING",
             "--json",
         ]
-        if scope_to_me:
-            command.append("--me")
+        if partition:
+            command.append(f"--partition={partition}")
 
         try:
             result = self._transport.run(

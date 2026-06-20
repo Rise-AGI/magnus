@@ -12,7 +12,6 @@ from ..models import JobStatus, JobType
 from ..schemas import ClusterStatsResponse, JobResponse, PagedJobResponse, UserInfo
 from .auth import get_current_user
 from .._magnus_config import magnus_config, is_local_mode
-from .._size_utils import _parse_size_string
 from .._slurm_manager import SlurmManager
 
 
@@ -112,10 +111,12 @@ def get_cluster_stats(
     # --- 1. 获取 Slurm 真实数据 ---
     # SlurmManager 涉及阻塞 Shell 命令，必须在线程池中运行 (def)
     slurm_manager = SlurmManager()
-    # tenant 站点（magnus 是共享集群的租户）只看自己账号跑的任务 + 自己的配额，不把整
-    # 集群全租户当"我们的集群"显示；authoritative（独占集群）看全量。
     is_tenant = magnus_config["cluster"]["scheduling"]["mode"] == "tenant"
-    all_slurm_tasks = slurm_manager.get_all_running_tasks(scope_to_me=is_tenant)
+    # 租户模式 scope 到本租户获授的分区：运行任务 + 资源容量都只看这个分区，呈现真实的
+    # 同分区竞争态，而不把整个共享集群当成"我们的"。独占集群（authoritative）partition
+    # 为 None，看全量、容量取整集群节点快照。
+    tenant_partition = magnus_config["execution"]["slurm"]["partition"] if is_tenant else None
+    all_slurm_tasks = slurm_manager.get_all_running_tasks(partition=tenant_partition)
 
     running_slurm_ids = [task["id"] for task in all_slurm_tasks]
 
@@ -212,23 +213,17 @@ def get_cluster_stats(
     used_cpus = sum(task.get("cpu_count", 0) for task in all_slurm_tasks)
     used_mem_mb = sum(task.get("memory_mb", 0) for task in all_slurm_tasks)
 
-    # 总量（total）来源：tenant 站点取本租户配额（cluster.scheduling.quota），authoritative
-    # 取真实节点容量（单次 scontrol 快照，与 used 同时刻、保证 total = free + used）。tenant
-    # 但没配 quota 时回落节点容量（会显示整个共享集群、对租户不准但不致命）。
-    tenant_quota = magnus_config["cluster"]["scheduling"]["quota"] if is_tenant else None
-    if tenant_quota is not None:
-        quota_mem_mb = (
-            _parse_size_string(tenant_quota["mem"]) // (1024 ** 2)
-            if tenant_quota["mem"] else 0
-        )
-        display_total = max(tenant_quota["gpu"], used_gpus)
-        cpu_total = max(tenant_quota["cpu"], used_cpus)
-        mem_total_mb = max(quota_mem_mb, used_mem_mb)
+    # 总量（total）来源：分区限定时取本分区节点容量，否则整集群节点容量（单次 scontrol
+    # 快照，与 used 同时刻）。GPU 与 used 取大，保证 total >= used —— used 走 squeue
+    # job-level，CG 收尾期可能短暂超过快照容量（见 NodeSnapshot docstring）；cpu / mem
+    # 直接用快照容量（分区 / 整集群的容量恒 >= 其自身 job 的 used 之和）。
+    if tenant_partition:
+        snapshot = slurm_manager.get_partition_snapshot(tenant_partition)
     else:
-        node_snap = slurm_manager.get_node_snapshot()
-        display_total = max(node_snap.total_gpus, used_gpus)
-        cpu_total = node_snap.cpu_total
-        mem_total_mb = node_snap.mem_total_mb
+        snapshot = slurm_manager.get_node_snapshot()
+    display_total = max(snapshot.total_gpus, used_gpus)
+    cpu_total = snapshot.cpu_total
+    mem_total_mb = snapshot.mem_total_mb
     free_gpus = max(0, display_total - used_gpus)
 
     # --- 5. Running 列表分页切片 ---
