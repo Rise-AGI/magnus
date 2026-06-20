@@ -87,6 +87,21 @@ server:
 #                                          # pushes them over; the remote site needs no outbound proxy
 #                                          # access. remote: the remote site pulls them itself (requires
 #                                          # its egress IP on the proxy allowlist) -- not yet wired.
+#     auto_connect:                        # OPTIONAL. Omit -> the ControlMaster socket must be built by
+#                                          # hand and a dead socket fast-fails. Set it to (re)build the
+#                                          # socket unattended when it dies (ControlPersist expiry / host
+#                                          # reboot), answering a "password + TOTP code" keyboard-interactive
+#                                          # login with the account holder's own credentials. Works for any
+#                                          # password + RFC 6238 TOTP SSH host. Each secret is given EITHER
+#                                          # inline OR as a path to a chmod-600 file (exactly one of each):
+#                                          #   password: "..."          OR  password_file: /path/to/pw      (mode 600)
+#                                          #   totp_secret: "BASE32..."  OR  totp_secret_file: /path/to/seed (mode 600)
+#                                          # totp_secret is the base32 seed from the otpauth:// QR you scanned.
+#       totp_secret_file: /home/magnus/.config/magnus/cluster-totp.seed
+#       password_file: /home/magnus/.config/magnus/cluster-login.pw
+#       control_persist: 8h                # optional, master lifetime after the last use (default 8h)
+#       # password_prompt / totp_prompt    # optional regexes if the host's prompt wording differs from the
+#       #                                  # built-in defaults (verification code / OTP / 验证码 ... vs password / 口令)
 
 execution:
   backend: slurm                         # slurm | local

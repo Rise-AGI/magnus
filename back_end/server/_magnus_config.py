@@ -39,6 +39,24 @@ def _warn_extra_keys(config: dict, expected_keys: Set[str], path: str)-> None:
         logger.warning(f"⚠️ 配置中存在未识别的键: '{path}.{key}'，可能是拼写错误或已废弃")
 
 
+def _check_one_secret_source(config: dict, inline_key: str, file_key: str, path: str)-> None:
+    """密钥必须恰好以"内联值"或"文件路径"之一提供（互斥）。给出文件路径时要求文件已
+    存在 —— fail-fast，免得留到首个 socket 重建时才炸。"""
+    has_inline = config.get(inline_key) is not None
+    has_file = config.get(file_key) is not None
+    if has_inline == has_file:
+        raise ValueError(
+            f"❌ {path} 要求 '{inline_key}'（内联值）与 '{file_key}'"
+            "（chmod 600 密钥文件路径）恰好提供一个"
+        )
+    if has_file:
+        _check_key(config, file_key, str)
+        if not Path(config[file_key]).is_file():
+            raise ValueError(f"❌ {path}.{file_key} 指向的密钥文件不存在: {config[file_key]}")
+    else:
+        _check_key(config, inline_key, str)
+
+
 def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     """
     验证 magnus_config 的完整性和类型正确性。
@@ -106,9 +124,42 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
                 "尚未接线，需先把站点出网 IP 加入镜像反代白名单；当前请用 'relay'"
                 "（控制机拉取后推送到远端）"
             )
+        # auto_connect（可选）：配了就让 transport 在每次跨界操作前确保 ControlMaster
+        # socket 活着、失效（ControlPersist 过期 / 控制机重启）时用账号持有人自己的登录
+        # 密码 + TOTP 种子（标准 RFC 6238）无人值守重建 —— 把人肉一次的 2FA 登录自动化。
+        # 缺省 None：保持现状（socket 需人肉建、失效即快失败）。通用能力，任何"密码 +
+        # TOTP"两段 keyboard-interactive 认证的 SSH 主机皆可用。
+        ssh.setdefault("auto_connect", None)
+        if ssh["auto_connect"] is not None:
+            _check_key(ssh, "auto_connect", dict)
+            auto_connect = ssh["auto_connect"]
+            # 密钥（登录密码、TOTP 种子）各自内联值或 chmod 600 文件路径二选一。
+            _check_one_secret_source(
+                auto_connect, "password", "password_file", "transport.ssh.auto_connect",
+            )
+            _check_one_secret_source(
+                auto_connect, "totp_secret", "totp_secret_file", "transport.ssh.auto_connect",
+            )
+            # control_persist：重建时 master 的存活时长；prompt 正则：站点提示词措辞与
+            # 默认不符时覆盖（None 即用内置默认，见 _ssh_auto_connect）。
+            auto_connect.setdefault("control_persist", "8h")
+            auto_connect.setdefault("password_prompt", None)
+            auto_connect.setdefault("totp_prompt", None)
+            _check_key(auto_connect, "control_persist", str)
+            _check_key(auto_connect, "password_prompt", str, nullable=True)
+            _check_key(auto_connect, "totp_prompt", str, nullable=True)
+            _warn_extra_keys(
+                auto_connect,
+                {
+                    "password", "password_file",
+                    "totp_secret", "totp_secret_file",
+                    "control_persist", "password_prompt", "totp_prompt",
+                },
+                "transport.ssh.auto_connect",
+            )
         _warn_extra_keys(
             ssh,
-            {"control_path", "host", "user", "remote_root", "resource_staging"},
+            {"control_path", "host", "user", "remote_root", "resource_staging", "auto_connect"},
             "transport.ssh",
         )
     _warn_extra_keys(transport, {"mode", "ssh"}, "transport")
@@ -339,6 +390,17 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
                 "❌ cluster.scheduling.mode='tenant' 要求 execution.slurm.partition —— "
                 "租户视图与提交需 scope 到分区，否则会把整个共享集群误显示成本租户"
             )
+    # 远端 transport（ssh）只能配 tenant：驱动的是异机共享集群，magnus 是租户、不掌握
+    # 全集群，authoritative 的"全集群算 free + backfill + 抢占"语义不成立。功能层面外，这
+    # 也消掉了 authoritative 决策（_make_decisions 的 _compute_cluster_resources / 抢占）
+    # 在事件循环上跑的远端查询 —— 它不像 _sync_reality / _submit_jobs / _record_snapshot
+    # 那样被 to_thread 卸到线程池，ssh 下会把阻塞的 socket 查询/重建留在 loop 上。fail-fast
+    # 杜绝这个组合。
+    if config["transport"]["mode"] == "ssh" and scheduling["mode"] == "authoritative":
+        raise ValueError(
+            "❌ transport.mode='ssh' 不能与 cluster.scheduling.mode='authoritative' 同用 —— "
+            "远端共享集群下 magnus 是租户，请用 scheduling.mode='tenant'"
+        )
     _warn_extra_keys(scheduling, {"mode"}, "cluster.scheduling")
 
 

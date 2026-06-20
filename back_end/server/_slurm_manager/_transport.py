@@ -17,6 +17,8 @@ import shlex
 import subprocess
 from typing import Dict, List, Optional
 
+from ._ssh_auto_connect import ensure_control_master
+
 
 class _Transport:
     """SLURM CLI 命令 + 跨界文件搬运的执行后端。
@@ -111,10 +113,25 @@ class _SshControlMasterTransport(_Transport):
         control_path: str,
         host: str,
         user: str,
+        auto_connect: Optional[Dict] = None,
     ) -> None:
         self._control_path = control_path
         self._host = host
         self._user = user
+        # auto_connect 为 None（缺省）时本类语义与历史完全一致：只骑既有 socket，
+        # BatchMode=yes 在 socket 失效时快失败、不自建。配了 auto_connect 才在每次操作前
+        # 确保 socket 活着、失效时用密码 + TOTP 无人值守重建。
+        self._auto_connect = auto_connect
+
+    def _ensure_socket(self) -> None:
+        """配了 auto_connect 时，操作前确保 master socket 活着（失效则单飞重建）。"""
+        if self._auto_connect is not None:
+            ensure_control_master(
+                self._control_path,
+                self._host,
+                self._user,
+                self._auto_connect,
+            )
 
     def run(
         self,
@@ -124,6 +141,7 @@ class _SshControlMasterTransport(_Transport):
         check: bool = False,
         env: Optional[Dict[str, str]] = None,
     ) -> subprocess.CompletedProcess:
+        self._ensure_socket()
         remote_tokens: List[str] = []
         if env is not None:
             injected = [
@@ -190,6 +208,7 @@ class _SshControlMasterTransport(_Transport):
     def _scp(self, source: str, destination: str) -> None:
         """骑 ControlMaster socket 跑一次 scp。-r 兼容文件与目录树；socket 已建好，
         BatchMode=yes 让 socket 失效时快失败而非挂起等密码（与 run() 一致）。"""
+        self._ensure_socket()
         scp_command = [
             "scp",
             "-r",
@@ -226,5 +245,6 @@ def build_transport(transport_config: Dict) -> _Transport:
             control_path = ssh["control_path"],
             host = ssh["host"],
             user = ssh["user"],
+            auto_connect = ssh.get("auto_connect"),
         )
     return _LocalTransport()

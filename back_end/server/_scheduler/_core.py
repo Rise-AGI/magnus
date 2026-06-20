@@ -74,7 +74,10 @@ class MagnusScheduler(
             # subprocess 调用（docker logs / slurm queries）放线程池，避免阻塞 event loop
             await asyncio.to_thread(self._sync_reality)
             await self._make_decisions()
-            self._record_snapshot()
+            # _record_snapshot 也会跑 slurm 查询（远端 transport 下是骑 socket 的 squeue/
+            # scontrol，秒级，且 auto_connect 时可能触发 socket 重建）——同样丢线程池，
+            # 否则会周期性阻塞 event loop。tick 串行执行，线程内独占无并发。
+            await asyncio.to_thread(self._record_snapshot)
         except Exception as error:
             logger.error(f"Scheduler tick failed: {error}", exc_info=True)
 

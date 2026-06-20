@@ -110,7 +110,9 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 exc = task.exception()
                 if exc is not None:
                     logger.error(f"Job {jid} preparation crashed: {exc}")
-                    self._clean_up_working_table(jid)
+                    # _clean_up_working_table 在远端执行下含 ssh `rm -rf`（+ 可能触发 socket
+                    # 重建），这里跑在事件循环上，丢线程池避免阻塞 loop。
+                    await asyncio.to_thread(self._clean_up_working_table, jid)
                     failed_job = db.query(Job).filter(Job.id == jid).first()
                     if failed_job and failed_job.status == JobStatus.PREPARING:
                         failed_job.status = JobStatus.FAILED

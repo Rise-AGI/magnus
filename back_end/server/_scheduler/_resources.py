@@ -155,7 +155,9 @@ class _ResourcesMixin(_ResourcesMixinBase):
         with SessionLocal() as db:
             job = db.query(Job).filter(Job.id == job_id).first()
             if not job or job.status != JobStatus.PREPARING:
-                self._clean_up_working_table(job_id)
+                # _clean_up_working_table 在远端执行下含 ssh `rm -rf`（+ 可能触发 socket
+                # 重建），_prepare_job_resources 跑在事件循环上，丢线程池避免阻塞 loop。
+                await asyncio.to_thread(self._clean_up_working_table, job_id)
                 return
 
             if not image_ok:
