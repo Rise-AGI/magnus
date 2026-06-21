@@ -283,12 +283,25 @@ rootlesskit \
 ```bash
 sbatch --parsable \
   --job-name={task_name} \
+  [--partition={partition}] \            # execution.slurm.partition, omitted when null
+  [--qos={qos}] \                        # execution.slurm.qos, omitted when null
+  [--account={account}] \                # execution.slurm.account, omitted when null
   --output={work}/slurm/output.txt \
-  --gres=gpu:{gpu_type}:{gpu_count} \
-  --mem={memory_demand} \
-  --cpus-per-task={cpu_count} \
-  # Script content: python3 {work}/wrapper.py
+  [--open-mode=append] \                 # unless output is overwritten
+  --gres=gpu:{gpu_type}:{gpu_count} \    # only when gpu_count > 0
+  --mem={memory_demand} \                # explicit mem_mode only (see below)
+  --cpus-per-task={effective_cpu_count} \
+  [--time={time_limit}] \                # per-job walltime in minutes, omitted when null
+  # Script content: {module load ...}; exec python3 {work}/wrapper.py
 ```
+
+`partition` / `qos` / `account` are emitted only when set under `execution.slurm`; self-owned sites leave them null and the flags are absent (byte-identical to the historical command). Tenant clusters that mandate them set them here. Any `execution.slurm.module_loads` entries are prepended to the batch script as `module load ...` lines before the runtime is on `PATH`.
+
+**Memory mode** (`execution.slurm.mem_mode`):
+- `explicit` (default, self-owned sites): `--mem={memory_demand}` is passed verbatim — the request equals the allocation.
+- `per_cpu` (clusters that disable `--mem`): no `--mem` is passed. SLURM allocates memory implicitly as `effective_cpu_count × mem_per_cpu_mb` via `DefMemPerCPU`, and `memory_demand` is folded into the core count: `effective_cpu_count = max(cpu_count, ceil(memory_demand_mb / mem_per_cpu_mb))`, so requesting more memory raises the core count. On these sites the submission path **normalizes** the stored `cpu_count` / `memory_demand` to this effective allocation (`normalize_per_cpu_resources`, after default-fill and before limit validation), so the DB, UI, and SDK report what the job actually receives instead of the raw request. The fold is shared with the sbatch builder (`effective_cpu_count_per_cpu`) and is idempotent.
+
+`time_limit` (minutes) maps to `--time`; when null no `--time` is emitted and the job runs under the partition's default walltime. Declaring a short walltime makes a job more eligible for backfill on shared clusters.
 
 The environment variables `MAGNUS_RUNNER` and `MAGNUS_TOKEN` are passed via sbatch's process environment.
 
@@ -392,6 +405,10 @@ server:
 cluster:
   default_cpu_count: 4
   default_memory_demand: 1600M
+  max_cpu_count: 128                       # upper bound enforced at submission (HTTP 400 over)
+  max_memory_demand: 256G                  # upper bound enforced at submission
+  default_time_limit: null                 # default --time (minutes); null = no --time emitted
+  max_time_limit: null                     # walltime cap (minutes); null = uncapped
   default_runner: zycai
   default_container_image: docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
   default_ephemeral_storage: 10G
@@ -405,6 +422,17 @@ cluster:
     unset -f nvidia-smi
     unset VIRTUAL_ENV SSL_CERT_FILE
     export UV_CACHE_DIR=/home/magnus/magnus-data-develop/uv_cache/$USER
+
+execution:
+  backend: slurm                           # slurm | local
+  container_runtime: apptainer             # apptainer | singularity (HPC); docker (local)
+  slurm:                                   # SLURM submission dialect; every field defaults to current behavior
+    partition: null                        # null = don't pass --partition
+    qos: null                              # null = don't pass --qos
+    account: null                          # null = don't pass --account
+    mem_mode: explicit                     # explicit (pass --mem) | per_cpu (derive cores, omit --mem)
+    mem_per_cpu_mb: 4000                   # only used when mem_mode == per_cpu
+    module_loads: []                       # `module load` lines prepended in the job script
 ```
 
 ### Source file index

@@ -187,7 +187,8 @@ print(job_id)
 | `description` | str \| None | No | None | Task description (Markdown) |
 | `container_image` | str \| None | No | None | Container image (None = cluster default) |
 | `cpu_count` | int \| None | No | None | CPU count (None = cluster default) |
-| `memory_demand` | str \| None | No | None | Memory demand (None = cluster default) |
+| `memory_demand` | str \| None | No | None | Memory demand (None = cluster default; ignored as an independent knob on `per_cpu` clusters, where it folds into the core count) |
+| `time_limit` | int \| None | No | None | Max walltime in minutes (SLURM `--time`; None = partition default) |
 | `runner` | str \| None | No | None | Runner (None = cluster default) |
 
 **Returns**: Job ID (str)

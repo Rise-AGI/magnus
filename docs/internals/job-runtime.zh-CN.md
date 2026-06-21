@@ -283,12 +283,25 @@ rootlesskit \
 ```bash
 sbatch --parsable \
   --job-name={task_name} \
+  [--partition={partition}] \            # execution.slurm.partition，为 null 时不下发
+  [--qos={qos}] \                        # execution.slurm.qos，为 null 时不下发
+  [--account={account}] \                # execution.slurm.account，为 null 时不下发
   --output={work}/slurm/output.txt \
-  --gres=gpu:{gpu_type}:{gpu_count} \
-  --mem={memory_demand} \
-  --cpus-per-task={cpu_count} \
-  # 脚本内容: python3 {work}/wrapper.py
+  [--open-mode=append] \                 # 非覆盖输出时
+  --gres=gpu:{gpu_type}:{gpu_count} \    # 仅 gpu_count > 0 时
+  --mem={memory_demand} \                # 仅 explicit 内存模式（见下）
+  --cpus-per-task={effective_cpu_count} \
+  [--time={time_limit}] \                # 单 job 墙钟（分钟），为 null 时不下发
+  # 脚本内容: {module load ...}; exec python3 {work}/wrapper.py
 ```
+
+`partition` / `qos` / `account` 仅在 `execution.slurm` 配了才下发；自有站点留 null、不带这些 flag（与历史命令字节级一致），共享集群租户场景在此显式设置。`execution.slurm.module_loads` 的每一项会作为 `module load ...` 前置进 batch 脚本，在运行时上 `PATH` 之前执行。
+
+**内存模式**（`execution.slurm.mem_mode`）：
+- `explicit`（默认，自有站点）：原样下发 `--mem={memory_demand}`，请求即分配。
+- `per_cpu`（禁用 `--mem` 的集群）：不发 `--mem`。SLURM 按 `DefMemPerCPU` 隐式分配内存 = `有效核数 × mem_per_cpu_mb`，`memory_demand` 折算进核数：`effective_cpu_count = max(cpu_count, ceil(memory_demand_mb / mem_per_cpu_mb))`，所以请求更多内存会顶高核数。这类站点的提交链路会把存储的 `cpu_count` / `memory_demand` **归一化**为真实有效分配（`normalize_per_cpu_resources`，在填默认值之后、上限校验之前），使 DB、UI、SDK 显示 job 真实拿到的资源而非原始请求。该折算与 sbatch 构建共用同一 helper（`effective_cpu_count_per_cpu`），且幂等。
+
+`time_limit`（分钟）映射到 `--time`；为 null 时不下发，沿用分区默认墙钟。声明短墙钟的 job 在共享集群更易被 backfill 插队。
 
 环境变量 `MAGNUS_RUNNER` 和 `MAGNUS_TOKEN` 通过 sbatch 的进程环境传递。
 
@@ -392,6 +405,10 @@ server:
 cluster:
   default_cpu_count: 4
   default_memory_demand: 1600M
+  max_cpu_count: 128                       # 提交时强制的上限（超出转 HTTP 400）
+  max_memory_demand: 256G                  # 提交时强制的上限
+  default_time_limit: null                 # 默认 --time（分钟）；null = 不下发 --time
+  max_time_limit: null                     # 墙钟上限（分钟）；null = 不限
   default_runner: zycai
   default_container_image: docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
   default_ephemeral_storage: 10G
@@ -405,6 +422,17 @@ cluster:
     unset -f nvidia-smi
     unset VIRTUAL_ENV SSL_CERT_FILE
     export UV_CACHE_DIR=/home/magnus/magnus-data-develop/uv_cache/$USER
+
+execution:
+  backend: slurm                           # slurm | local
+  container_runtime: apptainer             # apptainer | singularity（HPC）；docker（local）
+  slurm:                                   # SLURM 提交方言；每项都带保持现状的默认
+    partition: null                        # null = 不下发 --partition
+    qos: null                              # null = 不下发 --qos
+    account: null                          # null = 不下发 --account
+    mem_mode: explicit                     # explicit（下发 --mem）| per_cpu（折核数、不发 --mem）
+    mem_per_cpu_mb: 4000                   # 仅 mem_mode == per_cpu 时使用
+    module_loads: []                       # batch 脚本里前置的 `module load` 行
 ```
 
 ### 源文件索引

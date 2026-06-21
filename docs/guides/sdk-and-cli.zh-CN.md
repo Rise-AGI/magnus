@@ -187,7 +187,8 @@ print(job_id)
 | `description` | str \| None | 否 | None | 任务描述（Markdown） |
 | `container_image` | str \| None | 否 | None | 容器镜像（None = 集群默认） |
 | `cpu_count` | int \| None | 否 | None | CPU 数量（None = 集群默认） |
-| `memory_demand` | str \| None | 否 | None | 内存需求（None = 集群默认） |
+| `memory_demand` | str \| None | 否 | None | 内存需求（None = 集群默认；在 `per_cpu` 集群上不是独立旋钮，会折算进核数） |
+| `time_limit` | int \| None | 否 | None | 最大墙钟（分钟，SLURM `--time`；None = 分区默认） |
 | `runner` | str \| None | 否 | None | 运行人（None = 集群默认） |
 
 **返回值**：Job ID (str)
