@@ -22,7 +22,7 @@ from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse, TransferRequest
 from .._service_manager import service_manager
 from .._id_registry import assert_id_available
-from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, validate_cluster_limits
+from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, normalize_per_cpu_resources, validate_cluster_limits
 from .._scheduler import scheduler
 from .auth import get_current_user
 from .users import _get_all_subordinate_ids
@@ -270,6 +270,8 @@ def create_service(
 
     # 所有 Optional 字段填入集群默认值
     apply_cluster_defaults(data)
+    # per_cpu 站点把 cpu_count / memory_demand 归一化为真实分配值（与 jobs.py 对齐）
+    normalize_per_cpu_resources(data)
     # 与 jobs.py 对齐：超额请求转 HTTP 400，避免通过 service revive 绕过 Job 资源上限
     try:
         validate_cluster_limits(data)

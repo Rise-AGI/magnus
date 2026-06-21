@@ -150,6 +150,7 @@ const translations = {
   "jobForm.cpuCoresHint": { zh: "设为 0 使用默认值 ({value})。", en: "Set to 0 for default ({value})." },
   "jobForm.memory": { zh: "内存", en: "Memory" },
   "jobForm.memoryDefault": { zh: "默认：{value}", en: "Default: {value}" },
+  "jobForm.memoryPerCpuHint": { zh: "由 CPU 自动分配（每核 {value}）", en: "Auto-allocated per CPU ({value} each)" },
   "jobForm.timeLimit": { zh: "最大运行时长 (分钟)", en: "Max Runtime (min)" },
   "jobForm.timeLimitHint": { zh: "留空 = 分区默认墙钟", en: "Empty = station default" },
   "jobForm.ephemeralStorage": { zh: "临时存储", en: "Ephemeral Storage" },

@@ -1,11 +1,10 @@
 # back_end/server/_slurm_manager/_control.py
 """SLURM 任务提交与终止：sbatch / scancel 包装。"""
-import math
 import os
 from typing import Dict, Optional
 
 from .._magnus_config import magnus_config
-from .._size_utils import _parse_size_string
+from .._size_utils import effective_cpu_count_per_cpu
 from . import logger
 from ._transport import _Transport
 
@@ -91,17 +90,19 @@ class _ControlMixin:
 
         # 内存模式：
         # - explicit（自有站点现状）：直接下发 --mem，与历史一致。
-        # - per_cpu（禁用 --mem 的站点）：不发 --mem，把内存需求按
-        #   内存 = 核数 × mem_per_cpu_mb 折算成核数，与显式 cpu_count 取较大值，
-        #   一并作 --cpus-per-task 下发（核数足够即隐式满足内存需求）。
-        effective_cpu_count = cpu_count if (cpu_count is not None and cpu_count > 0) else 0
+        # - per_cpu（禁用 --mem 的站点）：不发 --mem，把内存需求折算成核数（与显式
+        #   cpu_count 取较大值，见 effective_cpu_count_per_cpu），一并作 --cpus-per-task
+        #   下发，核数足够即隐式满足内存需求。提交链路上游已对 per_cpu 站点归一化过
+        #   cpu_count / memory_demand（normalize_per_cpu_resources），此处对归一化结果
+        #   再折算是幂等的；对未经归一化的调用方（防御性）仍给出正确核数。
         if slurm_config["mem_mode"] == "per_cpu":
-            if memory_demand is not None:
-                mem_per_cpu_mb = slurm_config["mem_per_cpu_mb"]
-                memory_demand_mb = _parse_size_string(memory_demand) // (1024 ** 2)
-                cores_for_memory = math.ceil(memory_demand_mb / mem_per_cpu_mb)
-                effective_cpu_count = max(effective_cpu_count, cores_for_memory)
+            effective_cpu_count = effective_cpu_count_per_cpu(
+                cpu_count = cpu_count,
+                memory_demand = memory_demand,
+                mem_per_cpu_mb = slurm_config["mem_per_cpu_mb"],
+            )
         else:
+            effective_cpu_count = cpu_count if (cpu_count is not None and cpu_count > 0) else 0
             if memory_demand is not None:
                 command.append(f"--mem={memory_demand}")
         if effective_cpu_count > 0:

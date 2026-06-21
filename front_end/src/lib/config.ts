@@ -46,6 +46,10 @@ export interface ClusterConfig {
   default_container_image: string;
   default_ephemeral_storage: string;
   default_system_entry_command: string;
+  // 内存模式（由 next.config.mjs 从 execution.slurm 注入）：'per_cpu' 站点禁用 --mem，
+  // 内存按「核数 × mem_per_cpu_mb」由站点自动分配，不是独立可调字段。
+  mem_mode: string;
+  mem_per_cpu_mb: number;
 }
 
 const clusterConfigJson = requireEnv(
@@ -74,6 +78,9 @@ export const DEFAULT_RUNNER = CLUSTER_CONFIG.default_runner;
 export const DEFAULT_CONTAINER_IMAGE = CLUSTER_CONFIG.default_container_image;
 export const DEFAULT_EPHEMERAL_STORAGE = CLUSTER_CONFIG.default_ephemeral_storage;
 export const DEFAULT_SYSTEM_ENTRY_COMMAND = CLUSTER_CONFIG.default_system_entry_command;
+export const MEM_PER_CPU_MB = CLUSTER_CONFIG.mem_per_cpu_mb;
+// per_cpu 站点内存随 CPU 自动分配，前端据此把内存输入框改为只读派生展示。
+export const IS_PER_CPU_MEMORY = CLUSTER_CONFIG.mem_mode === "per_cpu";
 export function getGpuLimit(gpuType: string): number {
   if (gpuType === 'cpu') return 0;
   const gpu = PHYSICAL_GPUS.find(g => g.value === gpuType);

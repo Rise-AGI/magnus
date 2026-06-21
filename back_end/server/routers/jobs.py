@@ -22,7 +22,7 @@ from .. import database
 from .. import models
 from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
-from .._magnus_config import magnus_config, is_admin_user, is_local_mode, apply_cluster_defaults, validate_cluster_limits
+from .._magnus_config import magnus_config, is_admin_user, is_local_mode, apply_cluster_defaults, normalize_per_cpu_resources, validate_cluster_limits
 from .._scheduler import scheduler
 from .auth import get_current_user
 from library import escape_like
@@ -46,6 +46,7 @@ def create_job(
     负责：填充集群默认值、校验资源上限、节点可用性 precheck、创建 ORM 对象、写入数据库。
     """
     apply_cluster_defaults(job_dict)
+    normalize_per_cpu_resources(job_dict)
     validate_cluster_limits(job_dict)
 
     # 节点可用性 precheck：杜绝节点全部 drain/down/reboot 期间用户提交"看似成功

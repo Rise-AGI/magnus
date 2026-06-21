@@ -18,6 +18,8 @@ import {
   DEFAULT_RUNNER,
   DEFAULT_CONTAINER_IMAGE,
   DEFAULT_SYSTEM_ENTRY_COMMAND,
+  IS_PER_CPU_MEMORY,
+  MEM_PER_CPU_MB,
 } from "@/lib/config";
 
 const GPU_TYPES = [
@@ -324,7 +326,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       gpu_type: gpuType,
       job_type: jobType,
       cpu_count: cpuCount ? cpuCount : null,
-      memory_demand: memoryDemand.trim() ? memoryDemand.trim() : null,
+      // per_cpu 站点内存随 CPU 自动分配，不下发 memory_demand（后端按核数归一化）。
+      memory_demand: IS_PER_CPU_MEMORY ? null : (memoryDemand.trim() ? memoryDemand.trim() : null),
       time_limit: timeLimit ? timeLimit : null,
       ephemeral_storage: ephemeralStorage.trim() ? ephemeralStorage.trim() : null,
       runner: runner.trim() ? runner.trim() : null,
@@ -492,13 +495,27 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
             <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
               {t("jobForm.memory")}
             </label>
-            <input
-              type="text"
-              className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
-              value={memoryDemand}
-              placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
-              onChange={e => setMemoryDemand(e.target.value)}
-            />
+            {IS_PER_CPU_MEMORY ? (
+              // per_cpu 站点禁用 --mem，内存按「核数 × 每核内存」由站点自动分配，
+              // 不可独立调整：展示随 CPU 实时变化的派生值 + 每核内存提示，提交时
+              // 不下发 memory_demand（后端归一化为真实分配值）。
+              <>
+                <div className="w-full bg-zinc-900/60 border border-zinc-800 px-3 py-2.5 rounded-lg text-zinc-400 text-sm select-none">
+                  {(cpuCount || DEFAULT_CPU_COUNT) * MEM_PER_CPU_MB}M
+                </div>
+                <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">
+                  {t("jobForm.memoryPerCpuHint", { value: `${MEM_PER_CPU_MB}M` })}
+                </p>
+              </>
+            ) : (
+              <input
+                type="text"
+                className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+                value={memoryDemand}
+                placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
+                onChange={e => setMemoryDemand(e.target.value)}
+              />
+            )}
           </div>
         </div>
 
