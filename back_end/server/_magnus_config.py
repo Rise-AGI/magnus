@@ -341,8 +341,10 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         cluster.setdefault("gpus", [])
         cluster.setdefault("max_cpu_count", 128)
         cluster.setdefault("max_memory_demand", "256G")
+        cluster.setdefault("max_time_limit", None)
         cluster.setdefault("default_cpu_count", 4)
         cluster.setdefault("default_memory_demand", "4G")
+        cluster.setdefault("default_time_limit", None)
         cluster.setdefault("default_runner", getpass.getuser())
         cluster.setdefault("default_container_image", "docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime")
         cluster.setdefault("default_ephemeral_storage", "10G")
@@ -361,11 +363,16 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _check_key(cluster, "default_container_image", str)
         _check_key(cluster, "default_ephemeral_storage", str)
         _check_key(cluster, "default_system_entry_command", str)
+        # time_limit 上限/默认（分钟）可选,缺省 None = 不限/不下发 --time(保持现状)。
+        cluster.setdefault("max_time_limit", None)
+        cluster.setdefault("default_time_limit", None)
+        _check_key(cluster, "max_time_limit", int, nullable=True)
+        _check_key(cluster, "default_time_limit", int, nullable=True)
         cluster.setdefault("registry_mirror", None)
         _check_key(cluster, "registry_mirror", str, nullable=True)
         _warn_extra_keys(cluster, {
-            "name", "gpus", "max_cpu_count", "max_memory_demand",
-            "default_cpu_count", "default_memory_demand", "default_runner",
+            "name", "gpus", "max_cpu_count", "max_memory_demand", "max_time_limit",
+            "default_cpu_count", "default_memory_demand", "default_time_limit", "default_runner",
             "default_container_image", "default_ephemeral_storage", "default_system_entry_command",
             "registry_mirror", "scheduling",
         }, "cluster")
@@ -468,6 +475,7 @@ def is_admin_user(user) -> bool:
 _CLUSTER_DEFAULT_FIELDS = [
     ("cpu_count", "default_cpu_count"),
     ("memory_demand", "default_memory_demand"),
+    ("time_limit", "default_time_limit"),
     ("ephemeral_storage", "default_ephemeral_storage"),
     ("runner", "default_runner"),
     ("container_image", "default_container_image"),
@@ -476,10 +484,17 @@ _CLUSTER_DEFAULT_FIELDS = [
 
 
 def apply_cluster_defaults(data: Dict[str, Any])-> Dict[str, Any]:
-    """填充 Job/Service 提交字典中未指定的资源字段为集群默认值。In-place + return self。"""
+    """填充 Job/Service 提交字典中未指定的资源字段为集群默认值。In-place + return self。
+
+    只补提交字典里已经带的字段,不凭空注入新键:Service 提交（ServiceCreate）不含
+    time_limit（常驻服务给墙钟会被超时误杀）,其 data 随后整体 splat 进 Service(**data),
+    若注入了 Service 无此列的键会构造失败。
+    """
     cluster = magnus_config["cluster"]
     for field, default_key in _CLUSTER_DEFAULT_FIELDS:
-        if data.get(field) is None or (field == "cpu_count" and data[field] == 0):
+        if field not in data:
+            continue
+        if data[field] is None or (field == "cpu_count" and data[field] == 0):
             data[field] = cluster[default_key]
     return data
 
@@ -503,6 +518,13 @@ def validate_cluster_limits(data: Dict[str, Any])-> None:
     max_mem = _parse_size_string(max_mem_str)
     if requested_mem > max_mem:
         raise ValueError(f"memory_demand={data['memory_demand']} exceeds cluster limit ({max_mem_str})")
+
+    # time_limit 仅在站点配了 max_time_limit 且本次提交带了 time_limit 时校验;两者任一为
+    # None 都不限(保持现状)。
+    max_time = cluster["max_time_limit"]
+    requested_time = data.get("time_limit")
+    if max_time is not None and requested_time is not None and requested_time > max_time:
+        raise ValueError(f"time_limit={requested_time} exceeds cluster limit ({max_time} min)")
 
     raw_gpu_type = data.get("gpu_type") or "cpu"
     gpu_type = raw_gpu_type.strip().lower()

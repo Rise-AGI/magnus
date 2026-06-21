@@ -683,6 +683,7 @@ class MagnusClient:
         container_image: Optional[str],
         cpu_count: Optional[int],
         memory_demand: Optional[str],
+        time_limit: Optional[int],
         ephemeral_storage: Optional[str],
         runner: Optional[str],
         system_entry_command: Optional[str],
@@ -703,6 +704,7 @@ class MagnusClient:
             ("container_image", container_image),
             ("cpu_count", cpu_count),
             ("memory_demand", memory_demand),
+            ("time_limit", time_limit),
             ("ephemeral_storage", ephemeral_storage),
             ("runner", runner),
             ("system_entry_command", system_entry_command),
@@ -726,6 +728,7 @@ class MagnusClient:
         container_image: Optional[str] = None,
         cpu_count: Optional[int] = None,
         memory_demand: Optional[str] = None,
+        time_limit: Optional[int] = None,
         ephemeral_storage: Optional[str] = None,
         runner: Optional[str] = None,
         system_entry_command: Optional[str] = None,
@@ -734,7 +737,7 @@ class MagnusClient:
         payload = self._build_job_payload(
             task_name, entry_command, repo_name, branch, commit_sha,
             gpu_type, gpu_count, namespace, job_type, description,
-            container_image, cpu_count, memory_demand, ephemeral_storage,
+            container_image, cpu_count, memory_demand, time_limit, ephemeral_storage,
             runner, system_entry_command,
         )
         try:
@@ -761,6 +764,7 @@ class MagnusClient:
         container_image: Optional[str] = None,
         cpu_count: Optional[int] = None,
         memory_demand: Optional[str] = None,
+        time_limit: Optional[int] = None,
         ephemeral_storage: Optional[str] = None,
         runner: Optional[str] = None,
         system_entry_command: Optional[str] = None,
@@ -770,7 +774,7 @@ class MagnusClient:
             self.submit_job,
             task_name, entry_command, repo_name, branch, commit_sha,
             gpu_type, gpu_count, namespace, job_type, description,
-            container_image, cpu_count, memory_demand, ephemeral_storage,
+            container_image, cpu_count, memory_demand, time_limit, ephemeral_storage,
             runner, system_entry_command, timeout,
         )
 
@@ -789,6 +793,7 @@ class MagnusClient:
         container_image: Optional[str] = None,
         cpu_count: Optional[int] = None,
         memory_demand: Optional[str] = None,
+        time_limit: Optional[int] = None,
         ephemeral_storage: Optional[str] = None,
         runner: Optional[str] = None,
         system_entry_command: Optional[str] = None,
@@ -803,7 +808,7 @@ class MagnusClient:
             gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace,
             job_type=job_type, description=description,
             container_image=container_image, cpu_count=cpu_count,
-            memory_demand=memory_demand, ephemeral_storage=ephemeral_storage,
+            memory_demand=memory_demand, time_limit=time_limit, ephemeral_storage=ephemeral_storage,
             runner=runner, system_entry_command=system_entry_command,
         )
         return self._poll_job_completion(job_id, timeout, poll_interval, execute_action)
@@ -823,6 +828,7 @@ class MagnusClient:
         container_image: Optional[str] = None,
         cpu_count: Optional[int] = None,
         memory_demand: Optional[str] = None,
+        time_limit: Optional[int] = None,
         ephemeral_storage: Optional[str] = None,
         runner: Optional[str] = None,
         system_entry_command: Optional[str] = None,
@@ -837,7 +843,7 @@ class MagnusClient:
             gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace,
             job_type=job_type, description=description,
             container_image=container_image, cpu_count=cpu_count,
-            memory_demand=memory_demand, ephemeral_storage=ephemeral_storage,
+            memory_demand=memory_demand, time_limit=time_limit, ephemeral_storage=ephemeral_storage,
             runner=runner, system_entry_command=system_entry_command,
         )
         return await self._poll_job_completion_async(job_id, timeout, poll_interval, execute_action)

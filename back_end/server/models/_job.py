@@ -64,6 +64,10 @@ class Job(Base):
     gpu_type: Mapped[str] = mapped_column(String)
     cpu_count: Mapped[int | None] = mapped_column(Integer, default=None)
     memory_demand: Mapped[str | None] = mapped_column(String, default=None)
+    # 期望最大墙钟（分钟）。None = 不下发 --time，由站点 SLURM 分区默认墙钟决定（保持现状）。
+    # 设了它，短任务声明短墙钟即可被共享集群的 backfill 优先插队（否则按分区默认墙钟算、
+    # 几乎无法 backfill）。Docker/local 模式由调度器按此超时 kill（与 SLURM --time 对偶）。
+    time_limit: Mapped[int | None] = mapped_column(Integer, default=None)
     ephemeral_storage: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PREPARING)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.A2)

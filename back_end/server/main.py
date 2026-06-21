@@ -149,6 +149,14 @@ def run_migrations()-> None:
             conn.commit()
         logger.info("✅ Migration completed.")
 
+    job_columns = [col["name"] for col in inspector.get_columns("jobs")]
+    if "time_limit" not in job_columns:
+        logger.info("🔧 Adding time_limit column to jobs table...")
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE jobs ADD COLUMN time_limit INTEGER"))
+            conn.commit()
+        logger.info("✅ Migration completed.")
+
 
 run_migrations()
 

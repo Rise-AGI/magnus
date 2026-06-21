@@ -26,6 +26,7 @@ class _ControlMixin:
         overwrite_output: bool = True,
         cpu_count: Optional[int] = None,
         memory_demand: Optional[str] = None,
+        time_limit: Optional[int] = None,
     ) -> str:
         """简单提交：不做 sleep + 状态检查，让 SLURM 自己排队和调度。
 
@@ -105,6 +106,12 @@ class _ControlMixin:
                 command.append(f"--mem={memory_demand}")
         if effective_cpu_count > 0:
             command.append(f"--cpus-per-task={effective_cpu_count}")
+
+        # time_limit（分钟）→ --time。SLURM 把裸整数当分钟解析。None 时不下发,
+        # 沿用分区默认墙钟（自有站点现状字节级不变）。声明短墙钟的任务在共享集群更易
+        # 被 backfill 插队。
+        if time_limit is not None:
+            command.append(f"--time={time_limit}")
 
         env: Dict[str, str] = os.environ.copy()
         if runner is not None:

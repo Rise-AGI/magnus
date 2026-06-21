@@ -221,6 +221,7 @@ class _SubmitMixin(_SubmitMixinBase):
                 runner = effective_runner,
                 cpu_count = job.cpu_count,
                 memory_demand = job.memory_demand,
+                time_limit = job.time_limit,
                 token = job.user.token if job.user.token is not None else "",
             )
 

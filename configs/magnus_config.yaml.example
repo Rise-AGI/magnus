@@ -145,6 +145,13 @@ cluster:
       limit: 4
   max_cpu_count: 128
   max_memory_demand: 256G
+  # max_time_limit / default_time_limit (minutes) are OPTIONAL. Omit (or null) =
+  # no walltime cap and no --time emitted, so each job runs under the partition's
+  # default walltime (current behavior). A per-job time_limit lets short jobs
+  # declare a short walltime so a shared cluster's backfill can slot them in
+  # sooner; default_time_limit imposes one on jobs that omit it.
+  # max_time_limit: 1440
+  # default_time_limit: null
   default_cpu_count: 4
   default_memory_demand: 1600M
   default_runner: username

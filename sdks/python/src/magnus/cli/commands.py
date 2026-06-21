@@ -923,6 +923,7 @@ _JOB_PARAM_KEYS: Dict[str, type] = {
     "container_image": str,
     "cpu_count": int,
     "memory_demand": str,
+    "time_limit": int,
     "ephemeral_storage": str,
     "runner": str,
     "system_entry_command": str,
@@ -1134,6 +1135,7 @@ Optional parameters:
   --gpu-count INT           Number of GPUs
   --cpu-count INT           Number of CPUs
   --memory-demand TEXT      Memory limit (e.g. 16G)
+  --time-limit INT          Max wall-clock minutes (SLURM --time; omit = partition default)
   --ephemeral-storage TEXT  Disk limit (e.g. 10G)
   --container-image TEXT    Container image URI (default: cluster config;
                               e.g. docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime)

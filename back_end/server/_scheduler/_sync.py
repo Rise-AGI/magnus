@@ -106,6 +106,17 @@ class _SyncMixin(_SyncMixinBase):
         else:
             self._sync_reality_slurm()
 
+    def _docker_job_timed_out(self, job: Job) -> bool:
+        """job 是否已超出其 time_limit（分钟）。time_limit 或 start_time 为 None 则不限。
+        start_time 从 SQLite 读出可能是 naive（按 UTC 存的），统一补成 aware 再比较。"""
+        if job.time_limit is None or job.start_time is None:
+            return False
+        start = job.start_time
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        elapsed_minutes = (datetime.now(timezone.utc) - start).total_seconds() / 60
+        return elapsed_minutes > job.time_limit
+
     def _sync_reality_docker(self):
         """同步 Docker 容器状态到数据库（三阶段模式，与 _sync_reality_slurm 对称）"""
         assert self.docker_manager is not None
@@ -205,6 +216,16 @@ class _SyncMixin(_SyncMixinBase):
                             else:
                                 job.result = f"Container {real_status} during execution"
                             job.slurm_job_id = None
+                            self.docker_manager.remove_container(container_name)
+                            self._clean_up_working_table(job.id)
+                            self._docker_log_cursors.pop(job_id, None)
+                        elif real_status == "RUNNING" and self._docker_job_timed_out(job):
+                            # 对偶 SLURM 的 --time：容器仍在跑但超出 time_limit → kill + FAILED。
+                            logger.warning(f"Job {job.id} exceeded time_limit ({job.time_limit} min), terminating")
+                            job.status = JobStatus.FAILED
+                            job.result = f"Job exceeded its time limit ({job.time_limit} min)"
+                            job.slurm_job_id = None
+                            self.docker_manager.stop_container(container_name)
                             self.docker_manager.remove_container(container_name)
                             self._clean_up_working_table(job.id)
                             self._docker_log_cursors.pop(job_id, None)

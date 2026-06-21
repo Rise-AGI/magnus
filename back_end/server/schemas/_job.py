@@ -22,6 +22,7 @@ class JobSubmission(BaseModel):
     container_image: Optional[str] = None
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
+    time_limit: Optional[int] = None        # 期望最大墙钟（分钟）。None = 站点分区默认墙钟
     ephemeral_storage: Optional[str] = None
     runner: Optional[str] = None
     system_entry_command: Optional[str] = None

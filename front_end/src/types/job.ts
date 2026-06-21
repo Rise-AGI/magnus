@@ -19,6 +19,7 @@ export interface Job {
   slurm_job_id?: string;
   cpu_count?: number | null;
   memory_demand?: string | null;
+  time_limit?: number | null;
   ephemeral_storage?: string | null;
   runner?: string | null;
   container_image: string;

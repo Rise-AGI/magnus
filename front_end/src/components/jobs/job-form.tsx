@@ -48,6 +48,7 @@ export interface JobFormData {
   job_type: string;
   cpu_count?: number | null;
   memory_demand?: string | null;
+  time_limit?: number | null;
   ephemeral_storage?: string | null;
   runner?: string | null;
   container_image?: string | null;
@@ -93,6 +94,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   
   const [cpuCount, setCpuCount] = useState<number>(initialData?.cpu_count ?? 0);
   const [memoryDemand, setMemoryDemand] = useState<string>(initialData?.memory_demand || "");
+  const [timeLimit, setTimeLimit] = useState<number>(initialData?.time_limit ?? 0);
   const [ephemeralStorage, setEphemeralStorage] = useState<string>(initialData?.ephemeral_storage || "");
   const [runner, setRunner] = useState<string>(initialData?.runner || "");
   const [containerImage, setContainerImage] = useState<string>(initialData?.container_image || DEFAULT_CONTAINER_IMAGE);
@@ -120,6 +122,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         job_type: jobType,
         cpu_count: cpuCount,
         memory_demand: memoryDemand,
+        time_limit: timeLimit,
         ephemeral_storage: ephemeralStorage,
         runner: runner,
         container_image: containerImage,
@@ -158,6 +161,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       // Advanced
       if (payload.cpu_count !== undefined) setCpuCount(payload.cpu_count);
       if (payload.memory_demand !== undefined) setMemoryDemand(payload.memory_demand);
+      if (payload.time_limit !== undefined) setTimeLimit(payload.time_limit ?? 0);
       if (payload.ephemeral_storage !== undefined) setEphemeralStorage(payload.ephemeral_storage);
       if (payload.runner !== undefined) setRunner(payload.runner);
       if (payload.container_image !== undefined) setContainerImage(payload.container_image);
@@ -321,6 +325,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       job_type: jobType,
       cpu_count: cpuCount ? cpuCount : null,
       memory_demand: memoryDemand.trim() ? memoryDemand.trim() : null,
+      time_limit: timeLimit ? timeLimit : null,
       ephemeral_storage: ephemeralStorage.trim() ? ephemeralStorage.trim() : null,
       runner: runner.trim() ? runner.trim() : null,
       container_image: containerImage.trim() ? containerImage.trim() : null,
@@ -493,6 +498,21 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
               value={memoryDemand}
               placeholder={t("jobForm.memoryDefault", { value: DEFAULT_MEMORY })}
               onChange={e => setMemoryDemand(e.target.value)}
+            />
+          </div>
+
+          {/* Max Runtime (time limit, minutes) */}
+          <div>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+              {t("jobForm.timeLimit")}
+            </label>
+            <input
+              type="number"
+              min={0}
+              className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+              value={timeLimit || ""}
+              placeholder={t("jobForm.timeLimitHint")}
+              onChange={e => setTimeLimit(e.target.value ? parseInt(e.target.value, 10) : 0)}
             />
           </div>
         </div>
