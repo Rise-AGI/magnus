@@ -500,21 +500,6 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
               onChange={e => setMemoryDemand(e.target.value)}
             />
           </div>
-
-          {/* Max Runtime (time limit, minutes) */}
-          <div>
-            <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
-              {t("jobForm.timeLimit")}
-            </label>
-            <input
-              type="number"
-              min={0}
-              className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
-              value={timeLimit || ""}
-              placeholder={t("jobForm.timeLimitHint")}
-              onChange={e => setTimeLimit(e.target.value ? parseInt(e.target.value, 10) : 0)}
-            />
-          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4">
@@ -552,6 +537,20 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
 
           {showAdvanced && (
             <div className="mt-3 pl-1 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in slide-in-from-top-1 duration-200">
+
+              {/* Max Runtime (time limit, minutes) */}
+              <div className="sm:col-span-2">
+                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
+                  {t("jobForm.timeLimit")}
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700"
+                  value={timeLimit || ""}
+                  placeholder={t("jobForm.timeLimitHint")}
+                  onChange={e => setTimeLimit(parseInt(e.target.value, 10) || 0)}
+                />
+              </div>
 
               {/* Ephemeral Storage */}
               <div className="sm:col-span-2">

@@ -537,8 +537,6 @@ const translations = {
   "jobDetail.gpuCount": { zh: "GPU 数量", en: "GPU Count" },
   "jobDetail.cpuCores": { zh: "CPU 核心", en: "CPU Cores" },
   "jobDetail.memory": { zh: "内存", en: "Memory" },
-  "jobDetail.timeLimit": { zh: "最大运行时长", en: "Max Runtime" },
-  "jobDetail.timeLimitValue": { zh: "{value} 分钟", en: "{value} min" },
   "jobDetail.stationDefault": { zh: "（分区默认）", en: "(Station Default)" },
 
   // ===== Job Detail - Entry Command =====

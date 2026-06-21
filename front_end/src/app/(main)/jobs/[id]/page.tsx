@@ -549,12 +549,6 @@ export default function JobDetailsPage() {
                 </span>
               </div>
               <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.timeLimit")}</label>
-                <span className="text-sm text-white font-medium block">
-                  {job.time_limit ? t("jobDetail.timeLimitValue", { value: job.time_limit.toString() }) : <span className="text-zinc-500 text-xs">{t("jobDetail.stationDefault")}</span>}
-                </span>
-              </div>
-              <div>
                 <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.accelerator")}</label>
                 <span className="text-sm text-white font-medium block">
                   {job.gpu_type === "CPU" ? t("jobDetail.cpuOnly") : job.gpu_type}

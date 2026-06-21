@@ -223,11 +223,6 @@ export function JobTable({
                           RAM {job.memory_demand}
                         </span>
                       )}
-                      {job.time_limit != null && (
-                        <span className="text-zinc-300 text-xs font-medium">
-                          {t("jobDetail.timeLimitValue", { value: job.time_limit.toString() })}
-                        </span>
-                      )}
                       {job.gpu_count > 0 && job.gpu_type !== "cpu" && (
                         <span className="text-zinc-300 text-xs font-medium">
                           {job.gpu_type.replace(/_/g, " ")} × {job.gpu_count}
