@@ -13,6 +13,15 @@ FILE_SECRET_PREFIX = "magnus-secret:"
 # direct HTTP upload path unchanged.
 ENV_CUSTODY_DROP_DIR = "MAGNUS_CUSTODY_DROP_DIR"
 
+# Symmetric inbound counterpart of ENV_CUSTODY_DROP_DIR. Set by the same wrapper on
+# no-network remote-execution sites: before the job runs, the magnus host stages the
+# custody files referenced by the job's entry_command into this directory (one
+# <token>/ subdir each, same layout as the drop dir). When present, download_file
+# resolves a token from here (filesystem read) instead of POSTing over HTTP, so
+# `magnus receive` works on compute nodes that cannot reach the backend. Unset (the
+# local / owned-cluster default) keeps the direct HTTP download path unchanged.
+ENV_CUSTODY_DROPIN_DIR = "MAGNUS_CUSTODY_DROPIN_DIR"
+
 
 def is_file_secret(value: str) -> bool:
     return value.startswith(FILE_SECRET_PREFIX)

@@ -47,7 +47,8 @@ def _build_wrapper_content(
     #     PYTHONPATH、bash `magnus` 走 PATH 下的 shim，两链路都改道平台 sdk。命中才 echo
     #     一行；缺失（未提供 → 回退用镜像 baked sdk）静默。PYTHONPATH/PATH 都是前置追加，
     #     不清空容器原值。
-    # (2) custody drop-dir（仅远端无网执行设）：让 SDK custody_file 写盘交给 staging 回传，
+    # (2) custody drop-dir / drop-in（仅远端无网执行设）：让 SDK custody_file 写盘交给 staging
+    #     回传(上传)、并让 download_file/receive 从 host 预置的 drop-in 读盘(下载)，两个方向都
     #     不走 HTTP。owned/本机执行不设，custody 仍走 HTTP，行为不变。
     sdk_inject_shell = (
         'if [ -d "$MAGNUS_HOME/workspace/.magnus_sdk/magnus" ]; then\n'
@@ -58,6 +59,7 @@ def _build_wrapper_content(
     )
     custody_drop_shell = (
         'export MAGNUS_CUSTODY_DROP_DIR=$MAGNUS_HOME/workspace/.magnus_custody_drop\n'
+        'export MAGNUS_CUSTODY_DROPIN_DIR=$MAGNUS_HOME/workspace/.magnus_custody_dropin\n'
         if enable_custody_drop
         else ''
     )

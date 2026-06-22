@@ -1,4 +1,6 @@
 # sdks/python/src/magnus/http_download.py
+import os
+import json
 import time
 import shutil
 import logging
@@ -7,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from .file_transfer import normalize_secret, get_tmp_base
+from .file_transfer import normalize_secret, get_tmp_base, ENV_CUSTODY_DROPIN_DIR
 from .exceptions import _ServerError
 
 logger = logging.getLogger("magnus")
@@ -27,6 +29,77 @@ def _magnus_error(msg: str) -> Exception:
 def _get_download_url(token: str) -> str:
     from . import default_client
     return f"{default_client.api_base}/files/download/{token}"
+
+
+def _prepare_target(target: Path, overwrite: bool) -> None:
+    """Clear an existing target (honoring overwrite) and ensure its parent exists."""
+    if target.exists():
+        if not overwrite:
+            raise FileExistsError(f"Target path already exists: {target}")
+        shutil.rmtree(target) if target.is_dir() else target.unlink()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _read_staged_dropin(
+    token: str,
+    target_path: Optional[str],
+    overwrite: bool,
+) -> Optional[Path]:
+    """Resolve a custody token from the host-staged drop-in dir instead of HTTP.
+
+    On no-network remote-execution sites the magnus host stages the files a job's
+    entry_command references into ENV_CUSTODY_DROPIN_DIR before the job runs (see
+    _StagingMixin._stage_in_custody), mirroring the upload drop dir. Per entry:
+
+        <dropin>/<token>/meta.json   {token, filename, is_directory}
+        <dropin>/<token>/<filename>  the file (a .tar.gz for directories)
+
+    Returns the materialized target Path when the token is staged here, or None to
+    fall through to the HTTP path (env unset on local/owned sites, or token not staged).
+    """
+    dropin = os.environ.get(ENV_CUSTODY_DROPIN_DIR)
+    if not dropin:
+        return None
+    entry_dir = Path(dropin) / token
+    meta_path = entry_dir / "meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    # meta.filename was sanitized host-side at upload; basename again defensively
+    # before joining, since this materializes a file on the caller's disk.
+    filename = os.path.basename(str(meta.get("filename", "")))
+    if not filename or filename in (".", ".."):
+        return None
+    is_directory = bool(meta.get("is_directory", False))
+    src = entry_dir / filename
+    if not src.exists():
+        return None
+
+    if is_directory:
+        import tarfile
+        with tempfile.TemporaryDirectory(dir=get_tmp_base()) as tmp:
+            tmp_dir = Path(tmp)
+            with tarfile.open(src) as tar:
+                tar.extractall(tmp_dir, filter="data")
+            extracted = list(tmp_dir.iterdir())
+            if len(extracted) != 1:
+                raise _magnus_error(
+                    f"Expected 1 item from staged archive, got {len(extracted)}: {extracted}"
+                )
+            source = extracted[0]
+            target = Path(target_path).resolve() if target_path else Path.cwd() / source.name
+            _prepare_target(target, overwrite)
+            shutil.move(str(source), str(target))
+            return target
+
+    target = Path(target_path).resolve() if target_path else Path.cwd() / filename
+    _prepare_target(target, overwrite)
+    shutil.copy2(str(src), str(target))
+    return target
 
 
 def _download_once(
@@ -52,12 +125,8 @@ def _download_once(
             and content_length_str is not None
             and int(content_length_str) < _SMALL_FILE_THRESHOLD):
             target = Path(target_path).resolve() if target_path else Path.cwd() / filename
-            if target.exists():
-                if not overwrite:
-                    raise FileExistsError(f"Target path already exists: {target}")
-                shutil.rmtree(target) if target.is_dir() else target.unlink()
+            _prepare_target(target, overwrite)
             data = resp.read()
-            target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             return target
 
@@ -84,11 +153,7 @@ def _download_once(
                 source = tmp_file
 
             target = Path(target_path).resolve() if target_path else Path.cwd() / source.name
-            if target.exists():
-                if not overwrite:
-                    raise FileExistsError(f"Target path already exists: {target}")
-                shutil.rmtree(target) if target.is_dir() else target.unlink()
-            target.parent.mkdir(parents=True, exist_ok=True)
+            _prepare_target(target, overwrite)
             shutil.move(str(source), str(target))
             return target
 
@@ -100,6 +165,15 @@ def download_file(
     overwrite: bool = True,
 ) -> Path:
     token = normalize_secret(file_secret)
+
+    # No-network remote-execution sites: the host has pre-staged the file into the
+    # drop-in dir (see _StagingMixin._stage_in_custody). Resolve it from the filesystem
+    # instead of hitting the backend, which compute nodes there cannot reach. Falls
+    # through to HTTP when the dir is unset (local / owned sites) or the token isn't staged.
+    staged = _read_staged_dropin(token, target_path, overwrite)
+    if staged is not None:
+        return staged
+
     url = _get_download_url(token)
 
     for attempt in range(_MAX_RETRIES):

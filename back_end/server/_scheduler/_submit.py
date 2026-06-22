@@ -190,6 +190,10 @@ class _SubmitMixin(_SubmitMixinBase):
         try:
             self._stage_in_job(job_id, wrapper_path)
             self._stage_in_resources(job_id, local_sif_path, local_repo_dir)
+            # 无网计算节点：把 entry_command / system_entry_command 引用的 custody 文件预置
+            # 进远端 dropin，让 in-job `magnus receive` 读盘而非打 HTTP（download 侧的离线通道，
+            # 对称于上传侧的 drop + _stage_out_custody）。本机执行下 no-op。
+            self._stage_in_custody(job_id, job.entry_command, system_entry_command)
         except Exception as error:
             logger.error(f"Failed to stage Job {job.id} to remote site: {error}")
             self._cleanup_remote_job(job_id)
