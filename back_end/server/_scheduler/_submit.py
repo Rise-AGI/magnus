@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from pywheels.file_tools import guarantee_file_exist
 from ..models import Job, JobStatus
 from .._magnus_config import magnus_config
+from .._job_dir_access import grant_job_dir_runner_access
 from .._resource_manager import resource_manager
 from . import (
     logger,
@@ -127,6 +128,11 @@ class _SubmitMixin(_SubmitMixinBase):
             # ephemeral_root == root 时与 job_working_table 同路径（幂等）；
             # 配成独立快盘时在那侧建好 ephemeral overlay / apptainer tmp 的落脚目录。
             guarantee_file_exist(job_ephemeral_table, is_directory=True)
+            if job_ephemeral_table != job_working_table:
+                # 独立盘上的 ephemeral 目录由后端账户创建，而 job 可能以别的 OS 用户运行，
+                # 需能在此写 overlay / apptainer tmp、并让后端在 cleanup 时回收其内容。
+                # 同盘时二者是同一目录，该权限已随仓库准备阶段对 working table 的授权一并给到。
+                grant_job_dir_runner_access(job_ephemeral_table, effective_runner)
 
             allow_root = magnus_config["execution"]["allow_root"]
             user_token = job.user.token or ""

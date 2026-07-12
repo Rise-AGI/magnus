@@ -6,12 +6,12 @@ import time
 import shutil
 import asyncio
 import functools
-import subprocess
 from typing import Optional, Tuple
 
 from library import is_disk_full_stderr, disk_full_message
 
-from .._magnus_config import magnus_config, is_local_mode
+from .._magnus_config import is_local_mode
+from .._job_dir_access import grant_job_dir_runner_access
 from . import logger, magnus_repo_cache_path
 from ._config import (
     _git_env,
@@ -396,21 +396,7 @@ class _ReposMixin:
 
         # Phase 4: 设置 ACL（local 模式下跳过，Docker 容器内不需要 host ACL）
         if not is_local_mode:
-            default_runner = magnus_config["cluster"]["default_runner"]
-            try:
-                subprocess.run(
-                    [
-                        "setfacl", "-R",
-                        "-m", f"u:{runner}:rwx",
-                        "-d", "-m", f"u:{default_runner}:rwx",
-                        "-d", "-m", f"u:{runner}:rwx",
-                        job_working_dir,
-                    ],
-                    check = True,
-                    capture_output = True,
-                )
-            except (subprocess.CalledProcessError, FileNotFoundError) as error:
-                logger.warning(f"setfacl failed: {error}")
+            grant_job_dir_runner_access(job_working_dir, runner)
 
         elapsed = time.time() - start_time
         logger.info(f"Repo ready: {target_dir} ({elapsed:.1f}s)")

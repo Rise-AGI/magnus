@@ -94,6 +94,8 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 | `{ephemeral}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
 | `{work}/metrics/` | submit → 永久 | wrapper sidecar + 用户代码 | routers/metrics.py | Magnus Metrics Protocol v1 JSONL 指标文件 |
 
+当 `ephemeral_root` 拆到独立盘时，`{ephemeral}/` 由后端账户创建，而 job 可能以别的 OS 用户运行，因此提交阶段给该目录授予与 working table 在仓库准备阶段相同的 runner + 后端账户 ACL（共享 `setfacl` helper）——runner 需在此创建 overlay / apptainer tmp，后端需在 cleanup 时回收它们。
+
 **cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。它是 keep-whitelist：只保留 `slurm/`、`metrics/`、`.magnus_result`、`.magnus_action`，working table 下其余一切都删——包括用户写进 workspace bind mount 的任意文件（例如直接把 checkpoint / 输出堆进 `$MAGNUS_HOME/workspace` 而不走 `file_custody` / `.magnus_result`）。`ephemeral_root` 拆分时独立的 `{ephemeral}/` 目录整体删除。
 
 ## 信号与终止

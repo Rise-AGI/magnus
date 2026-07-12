@@ -94,6 +94,8 @@ All paths are based on `{magnus_root}/workspace/jobs/{job_id}/` (abbreviated bel
 | `{ephemeral}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
 | `{work}/metrics/` | submit → permanent | wrapper sidecar + user code | routers/metrics.py | Magnus Metrics Protocol v1 JSONL metrics files |
 
+When `ephemeral_root` is split onto a separate disk, `{ephemeral}/` is created by the backend account but the job may run as a different OS user, so submission grants that dir the same runner + backend-account ACL the working table receives during repo preparation (shared `setfacl` helper) — the runner needs to create the overlay / apptainer tmp there, and the backend needs to reclaim them at cleanup.
+
 **cleanup** refers to `_clean_up_working_table()`, called when the job ends (SUCCESS/FAILED/TERMINATED/PAUSED). It is a keep-whitelist: only `slurm/`, `metrics/`, `.magnus_result` and `.magnus_action` survive; everything else under the working table is removed — including anything the user wrote into the workspace bind mount (e.g. checkpoints or outputs dumped straight into `$MAGNUS_HOME/workspace` instead of going through `file_custody` / `.magnus_result`). The separate `{ephemeral}/` dir is dropped wholesale when `ephemeral_root` is split out.
 
 ## Signaling and Termination
