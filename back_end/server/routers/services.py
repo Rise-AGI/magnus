@@ -175,6 +175,15 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 service.entry_command,
             ])
 
+            # 与 jobs.py / create_service 建 job 的路径对齐：legacy service 行的 cpu_count /
+            # memory_demand 常为 null，直接抄给 job 会落到 SLURM 隐式分配（如 1 核）、且前端不
+            # 显示核数 / 内存。补成集群默认值，per_cpu 站点再归一化为真实分配值。
+            resolved_resources = apply_cluster_defaults({
+                "cpu_count": service.cpu_count,
+                "memory_demand": service.memory_demand,
+            })
+            normalize_per_cpu_resources(resolved_resources)
+
             new_job = models.Job(
                 task_name = service.job_task_name,
                 description = service.job_description,
@@ -185,8 +194,8 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 commit_sha = service.commit_sha,
                 gpu_count = service.gpu_count,
                 gpu_type = service.gpu_type,
-                cpu_count = service.cpu_count,
-                memory_demand = service.memory_demand,
+                cpu_count = resolved_resources["cpu_count"],
+                memory_demand = resolved_resources["memory_demand"],
                 ephemeral_storage = service.ephemeral_storage,
                 runner = service.runner,
                 entry_command = env_cmd,

@@ -624,6 +624,8 @@ response = magnus.call_service(
 - `TimeoutError`: 超时（服务端请求不会因此中断）
 - `MagnusError`: 服务不可用
 
+> 弹性服务由一个按需拉起的 job 承载，该 job 用 service 自身的资源配置创建；未指定的字段（如 `cpu_count`、`memory_demand`）回落到集群默认值，因此承载 job 请求并显示的默认值与普通 job 一致。
+
 #### list_services - 列出服务
 
 ```python

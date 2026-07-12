@@ -624,6 +624,8 @@ response = magnus.call_service(
 - `TimeoutError`: timed out (the server-side request is not interrupted as a result)
 - `MagnusError`: service unavailable
 
+> An elastic service is backed by an on-demand job spawned from the service's own resource configuration; fields left unspecified (e.g. `cpu_count`, `memory_demand`) fall back to the cluster defaults, so the backing job requests and reports the same defaults a normal job would.
+
 #### list_services - List Services
 
 ```python
