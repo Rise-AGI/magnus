@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from ..models import JobType
 from ._user import UserInfo
-from ._job import JobResponse
+from ._job import JobListItem
 
 
 class ServiceCreate(BaseModel):
@@ -40,7 +40,7 @@ class ServiceResponse(ServiceCreate):
     last_activity_time: datetime
     current_job_id: Optional[str] = None
     assigned_port: Optional[int] = None
-    current_job: Optional[JobResponse] = None
+    current_job: Optional[JobListItem] = None
     owner: Optional[UserInfo] = None
     updated_at: datetime
     can_manage: bool = False

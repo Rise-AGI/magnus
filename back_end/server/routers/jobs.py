@@ -160,7 +160,8 @@ def get_jobs(
 
     total = query.count()
 
-    jobs = query.order_by(models.Job.created_at.desc())\
+    jobs = query.options(*models.job_list_load_options())\
+            .order_by(models.Job.created_at.desc())\
             .offset(skip).limit(limit).all()
 
     return {"total": total, "items": jobs}

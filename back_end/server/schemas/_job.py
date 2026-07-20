@@ -33,19 +33,37 @@ class JobSubmission(BaseModel):
         return v.strip() if isinstance(v, str) else v
 
 
-class JobResponse(JobSubmission):
+class JobListItem(BaseModel):
+    """列表 / 看板 / 内嵌视图里的轻量 job 投影。
+
+    刻意不含 4 个重 Text 列（entry_command / system_entry_command / result /
+    action）—— 它们单行可达几十 MB（例如内联大 prompt 的批量 job），一页 100 行
+    就会序列化上 GB，并发轮询下拖垮整站。列表 UI 从不渲染这些列；需要它们的详情
+    视图走 GET /jobs/{id}（返回完整 ``JobResponse``）按需取。查询侧配合
+    ``models.job_list_load_options`` defer 掉这些列，做到既不读盘也不序列化。
+    """
     id: str
+    task_name: str
+    description: Optional[str] = None
     user_id: str
+    namespace: str
+    repo_name: str
+    branch: Optional[str] = None
+    commit_sha: Optional[str] = None
+    container_image: Optional[str] = None
+    gpu_count: int
+    gpu_type: str
+    cpu_count: Optional[int] = None
+    memory_demand: Optional[str] = None
+    time_limit: Optional[int] = None
+    ephemeral_storage: Optional[str] = None
+    runner: Optional[str] = None
+    job_type: JobType
     status: JobStatus
     slurm_job_id: Optional[str] = None
     start_time: Optional[datetime] = None
     created_at: datetime
     user: Optional[UserInfo] = None
-    cpu_count: Optional[int] = None
-    memory_demand: Optional[str] = None
-    runner: Optional[str] = None
-    result: Optional[str] = None
-    action: Optional[str] = None
     class Config: from_attributes = True
 
     @field_validator("status", mode="before")
@@ -70,6 +88,15 @@ class JobResponse(JobSubmission):
         return self.slurm_job_id is not None and self.status in (JobStatus.TERMINATED, JobStatus.PAUSED)
 
 
+class JobResponse(JobListItem):
+    """完整 job 视图（详情 / 提交返回）。在轻量投影之上补齐 4 个重 Text 列，
+    仅用于单条 job 的 endpoint（GET /jobs/{id}、提交返回），绝不进列表。"""
+    entry_command: str
+    system_entry_command: Optional[str] = None
+    result: Optional[str] = None
+    action: Optional[str] = None
+
+
 class PagedJobResponse(BaseModel):
     total: int
-    items: List[JobResponse]
+    items: List[JobListItem]

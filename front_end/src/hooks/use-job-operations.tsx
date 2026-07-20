@@ -40,28 +40,36 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
     setIsDrawerOpen(true);
   };
 
-  // 打开克隆窗口
-  const handleCloneJob = (job: Job) => {
+  // 打开克隆窗口。列表 / 看板给的是轻量投影（后端 JobListItem），不含 entry_command /
+  // system_entry_command（可能高达几十 MB）。点击克隆时按需拉一次完整 job 再回填表单，
+  // 保证克隆保真；正常 job 这一步近乎无感，只有内联超大命令的 job 才会真正搬运其体量。
+  const handleCloneJob = async (job: Job) => {
     setDrawerMode("clone");
     setSelectedJobId(job.id);
+    let full: Job = job;
+    try {
+      full = await client(`/api/jobs/${job.id}`);
+    } catch (e) {
+      console.error("Failed to load job detail for clone", e);
+    }
     setCloneData({
-      taskName: job.task_name, // 克隆时往往需要修改名字，这里保持原名或让用户自己改
-      description: job.description || "",
-      namespace: job.namespace,
-      repoName: job.repo_name,
-      branch: job.branch || "",
-      commit_sha: job.commit_sha || "",
-      entry_command: job.entry_command,
-      gpu_count: job.gpu_count,
-      gpu_type: job.gpu_type,
-      job_type: job.job_type,
-      cpu_count: job.cpu_count,
-      memory_demand: job.memory_demand,
-      time_limit: job.time_limit,
-      ephemeral_storage: job.ephemeral_storage,
-      runner: job.runner,
-      container_image: job.container_image,
-      system_entry_command: job.system_entry_command,
+      taskName: full.task_name, // 克隆时往往需要修改名字，这里保持原名或让用户自己改
+      description: full.description || "",
+      namespace: full.namespace,
+      repoName: full.repo_name,
+      branch: full.branch || "",
+      commit_sha: full.commit_sha || "",
+      entry_command: full.entry_command ?? "",
+      gpu_count: full.gpu_count,
+      gpu_type: full.gpu_type,
+      job_type: full.job_type,
+      cpu_count: full.cpu_count,
+      memory_demand: full.memory_demand,
+      time_limit: full.time_limit,
+      ephemeral_storage: full.ephemeral_storage,
+      runner: full.runner,
+      container_image: full.container_image,
+      system_entry_command: full.system_entry_command,
     });
     setFormKey((k) => k + 1);
     setIsDrawerOpen(true);

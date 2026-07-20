@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, case
 
 from .. import database
@@ -402,6 +402,7 @@ def list_services(
     human_first = case((models.User.user_type == "human", 0), else_=1)
     secondary = models.Service.updated_at.desc() if sort_by == "updated" else models.Service.last_activity_time.desc()
     items = query.join(models.User, models.Service.owner_id == models.User.id)\
+                 .options(joinedload(models.Service.current_job).options(*models.job_list_load_options()))\
                  .order_by(human_first, secondary)\
                  .offset(skip).limit(limit).all()
 
@@ -424,7 +425,9 @@ def get_service(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 )-> ServiceResponse:
-    service = db.query(models.Service).filter(models.Service.id == service_id).first()
+    service = db.query(models.Service)\
+        .options(joinedload(models.Service.current_job).options(*models.job_list_load_options()))\
+        .filter(models.Service.id == service_id).first()
 
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")

@@ -57,7 +57,7 @@ export function JobTable({
     return (
       <div className={cn("space-y-3", className)}>
         {jobs.map((job) => {
-          // inflight release (后端 JobResponse.is_releasing): scancel 已发但 SLURM
+          // inflight release (后端 JobListItem.is_releasing): scancel 已发但 SLURM
           // CG 还在收尾。这种状态下再次 terminate 在后端层 idempotent 但 UX 上
           // 误导用户以为 cancel 没生效，故 UI 隐藏终结按钮。
           const isActive = ["Pending", "Preparing", "Running", "Paused"].includes(job.status) && !job.is_releasing;
@@ -145,7 +145,7 @@ export function JobTable({
           </thead>
           <tbody className="divide-y divide-zinc-800/50">
             {jobs.map((job) => {
-              // inflight release (后端 JobResponse.is_releasing): scancel 已发但 SLURM
+              // inflight release (后端 JobListItem.is_releasing): scancel 已发但 SLURM
               // CG 还在收尾。这种状态下再次 terminate 在后端层 idempotent 但 UX 上
               // 误导用户以为 cancel 没生效，故 UI 隐藏终结按钮。
               const isActive = ["Pending", "Preparing", "Running", "Paused"].includes(job.status) && !job.is_releasing;

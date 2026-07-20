@@ -2,7 +2,7 @@
 import enum
 from datetime import datetime, timezone
 from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, defer, joinedload, mapped_column, relationship
 
 from ..database import Base
 from ._helpers import generate_hex_id
@@ -103,3 +103,27 @@ class ClusterSnapshot(Base):
     total_gpus: Mapped[int] = mapped_column(Integer)
     slurm_used_gpus: Mapped[int] = mapped_column(Integer)
     magnus_used_gpus: Mapped[int] = mapped_column(Integer)
+
+
+def job_list_load_options():
+    """Loader options shared by every query that returns jobs in a LIST / embedded
+    view. Defers the heavy Text columns so they are neither read from disk nor
+    serialized (single rows reach tens of MB and are never rendered in a list),
+    and eager-loads the owner to avoid an N+1 user lookup per row. The single-job
+    detail endpoint omits these options and returns the full row.
+
+    ``raiseload=True`` makes accessing a deferred column on a list-loaded row
+    raise instead of silently emitting a per-row lazy SELECT — that silent
+    per-row reload of these exact columns is what took the site down, so failing
+    loud turns any future regression into an immediate error rather than a slow
+    relapse. Code that needs the full text must load the row via the detail path.
+
+    Spread into a query: ``db.query(Job).options(*job_list_load_options())``.
+    """
+    return (
+        defer(Job.entry_command, raiseload=True),
+        defer(Job.system_entry_command, raiseload=True),
+        defer(Job.result, raiseload=True),
+        defer(Job.action, raiseload=True),
+        joinedload(Job.user),
+    )

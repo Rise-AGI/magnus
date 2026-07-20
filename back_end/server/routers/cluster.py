@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import database
 from .. import models
 from ..models import JobStatus, JobType
-from ..schemas import ClusterStatsResponse, JobResponse, PagedJobResponse, UserInfo
+from ..schemas import ClusterStatsResponse, JobListItem, PagedJobResponse, UserInfo
 from .auth import get_current_user
 from .._magnus_config import magnus_config, is_local_mode
 from .._slurm_manager import SlurmManager
@@ -81,14 +81,14 @@ def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int,
     """Local 模式的集群统计：只看 Magnus 数据库中的任务，资源取宿主机实际值"""
     import os
 
-    running_jobs_orm = db.query(models.Job).filter(
+    running_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.status.in_([JobStatus.RUNNING, JobStatus.QUEUED])
     ).order_by(models.Job.start_time.desc()).all()
 
-    pending_jobs_orm = db.query(models.Job).filter(
+    pending_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
     ).all()
-    preparing_jobs_orm = db.query(models.Job).filter(
+    preparing_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.status == JobStatus.PREPARING
     ).all()
 
@@ -96,12 +96,12 @@ def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int,
     preparing_jobs_orm.sort(key=lambda x: x.created_at.timestamp(), reverse=True)
     all_pending = pending_jobs_orm + preparing_jobs_orm
 
-    running_responses = [JobResponse.model_validate(j) for j in running_jobs_orm]
+    running_responses = [JobListItem.model_validate(j) for j in running_jobs_orm]
     total_running = len(running_responses)
     paginated_running = running_responses[running_skip:running_skip + running_limit]
 
     total_pending = len(all_pending)
-    paginated_pending = [JobResponse.model_validate(j) for j in all_pending[pending_skip:pending_skip + pending_limit]]
+    paginated_pending = [JobListItem.model_validate(j) for j in all_pending[pending_skip:pending_skip + pending_limit]]
 
     # 宿主机实际资源（local 模式不做细粒度资源追踪，显示 total = free）
     cpu_total = os.cpu_count() or 0
@@ -183,14 +183,14 @@ def get_cluster_stats(
     # --- 2. 数据库元数据匹配 ---
     magnus_jobs_orm = []
     if running_slurm_ids:
-        magnus_jobs_orm = db.query(models.Job).filter(
+        magnus_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
             models.Job.slurm_job_id.in_(running_slurm_ids)
         ).all()
 
     magnus_job_map = {job.slurm_job_id: job for job in magnus_jobs_orm}
 
     # --- 3. 构造最终列表 ---
-    all_running_jobs: List[JobResponse] = []
+    all_running_jobs: List[JobListItem] = []
 
     for task in all_slurm_tasks:
         slurm_id = task["id"]
@@ -204,7 +204,7 @@ def get_cluster_stats(
             # 老 bug "显示成 external" 体感更怪。让真实 status 透传，前端可以
             # 据此呈现 "Terminated (releasing)" 等复合语义。
             job_orm = magnus_job_map[slurm_id]
-            job_resp = JobResponse.model_validate(job_orm)
+            job_resp = JobListItem.model_validate(job_orm)
             all_running_jobs.append(job_resp)
 
         else:
@@ -233,14 +233,13 @@ def get_cluster_stats(
             else:
                 external_memory_demand = f"{external_memory_mb}M"
 
-            mock_job = JobResponse(
+            mock_job = JobListItem(
                 task_name = task["name"],
                 description = "External slurm task",
                 namespace = "External",
                 repo_name = "N/A",
                 branch = "N/A",
                 commit_sha = "N/A",
-                entry_command = "N/A",
                 container_image = "N/A",
                 gpu_type = task["gpu_type"].lower().replace(" ", ""),
                 gpu_count = task["gpu_count"],
@@ -309,11 +308,11 @@ def get_cluster_stats(
         or_(models.Job.slurm_job_id.is_(None), ~models.Job.slurm_job_id.in_(running_job_ids))
         if running_job_ids else None
     )
-    pending_jobs_orm = db.query(models.Job).filter(
+    pending_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
         *([not_running_in_slurm] if not_running_in_slurm is not None else []),
     ).all()
-    preparing_jobs_orm = db.query(models.Job).filter(
+    preparing_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.status == JobStatus.PREPARING,
         *([not_running_in_slurm] if not_running_in_slurm is not None else []),
     ).all()
@@ -329,7 +328,7 @@ def get_cluster_stats(
     total_pending = len(all_pending_jobs_orm)
     paginated_pending_orm = all_pending_jobs_orm[pending_skip : pending_skip + pending_limit]
 
-    paginated_pending = [JobResponse.model_validate(job) for job in paginated_pending_orm]
+    paginated_pending = [JobListItem.model_validate(job) for job in paginated_pending_orm]
 
     return {
         "resources": {
@@ -374,17 +373,17 @@ def get_my_active_jobs(
     user_ids = [current_user.id] + _collect_descendant_ids(current_user)
 
     # 获取 Running 任务
-    running_orm = db.query(models.Job).filter(
+    running_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.user_id.in_(user_ids),
         models.Job.status == JobStatus.RUNNING,
     ).order_by(models.Job.start_time.desc()).all()
 
     # 获取排队任务
-    queued_orm = db.query(models.Job).filter(
+    queued_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.user_id.in_(user_ids),
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
     ).all()
-    preparing_orm = db.query(models.Job).filter(
+    preparing_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.user_id.in_(user_ids),
         models.Job.status == JobStatus.PREPARING,
     ).all()
@@ -402,6 +401,6 @@ def get_my_active_jobs(
     paginated_orm = all_jobs_orm[skip : skip + limit]
 
     return {
-        "items": [JobResponse.model_validate(job) for job in paginated_orm],
+        "items": [JobListItem.model_validate(job) for job in paginated_orm],
         "total": total_count,
     }

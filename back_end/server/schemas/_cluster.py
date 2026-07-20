@@ -3,7 +3,7 @@
 from typing import List
 from pydantic import BaseModel
 
-from ._job import JobResponse
+from ._job import JobListItem
 
 
 class ClusterResources(BaseModel):
@@ -21,8 +21,8 @@ class ClusterResources(BaseModel):
 
 class ClusterStatsResponse(BaseModel):
     resources: ClusterResources
-    running_jobs: List[JobResponse]
+    running_jobs: List[JobListItem]
     total_running: int
-    pending_jobs: List[JobResponse]
+    pending_jobs: List[JobListItem]
     total_pending: int
     class Config: from_attributes = True

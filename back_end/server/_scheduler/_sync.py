@@ -39,7 +39,7 @@ class _SyncMixin(_SyncMixinBase):
                 # 视角属 magnus 而非 external，否则 epilog 期间会出现 30-60s 的
                 # "magnus 用量假凹"，且让 slurm_used_gpus - magnus_used_gpus 误
                 # 暗示 external 占用激增。跟 cluster endpoint used_gpus 派生口径
-                # 对齐（详见 routers/cluster.py 与 JobResponse.is_releasing）。
+                # 对齐（详见 routers/cluster.py 与 JobListItem.is_releasing）。
                 holding_jobs = db.query(Job).filter(
                     Job.slurm_job_id.isnot(None),
                     Job.status.in_([

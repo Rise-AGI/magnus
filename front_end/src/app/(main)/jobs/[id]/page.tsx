@@ -569,7 +569,7 @@ export default function JobDetailsPage() {
                 <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.entryCommand")}</h3>
               </div>
               <button
-                onClick={() => copyToClipboard(job.entry_command, setCopiedCommand)}
+                onClick={() => copyToClipboard(job.entry_command ?? "", setCopiedCommand)}
                 className="text-zinc-500 hover:text-zinc-200 transition-colors"
                 title={t("jobDetail.copyFullCommand")}
               >

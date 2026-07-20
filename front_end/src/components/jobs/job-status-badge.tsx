@@ -4,9 +4,9 @@ import { useLanguage } from "@/context/language-context";
 
 interface JobStatusBadgeProps {
   status: string;
-  // 直接消费后端 JobResponse.is_releasing computed field：scancel 已发但 SLURM
+  // 直接消费后端 JobListItem.is_releasing computed field：scancel 已发但 SLURM
   // 还在 CG (COMPLETING) 收尾的 inflight 子态。后端语义详见 back_end
-  // schemas/_job.py JobResponse.is_releasing。前端不要在这里重新推断（避免
+  // schemas/_job.py JobListItem.is_releasing。前端不要在这里重新推断（避免
   // 多 surface 漏接同步）。
   isReleasing?: boolean;
   size?: "sm" | "md";
