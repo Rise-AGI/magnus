@@ -157,6 +157,29 @@ def run_migrations()-> None:
             conn.commit()
         logger.info("✅ Migration completed.")
 
+    # 索引由 models 声明，create_all 只对新库生效、不会给已存在的 jobs 表补建。
+    # 站点上线前落库的老库需要在这里幂等补齐，否则热点读路径（列表分页 / cluster
+    # 视图 / 调度循环）会一直全表扫描。索引对应的查询语义见 models/_job.py。
+    job_indexes = {
+        "ix_jobs_created_at": "CREATE INDEX IF NOT EXISTS ix_jobs_created_at ON jobs (created_at)",
+        "ix_jobs_user_id_created_at": "CREATE INDEX IF NOT EXISTS ix_jobs_user_id_created_at ON jobs (user_id, created_at)",
+        "ix_jobs_status": "CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs (status)",
+        "ix_jobs_slurm_job_id": "CREATE INDEX IF NOT EXISTS ix_jobs_slurm_job_id ON jobs (slurm_job_id)",
+    }
+    existing_job_indexes = {idx["name"] for idx in inspector.get_indexes("jobs")}
+    missing_job_indexes = {
+        name: ddl
+        for name, ddl in job_indexes.items()
+        if name not in existing_job_indexes
+    }
+    if missing_job_indexes:
+        logger.info(f"🔧 Creating {len(missing_job_indexes)} missing index(es) on jobs table: {', '.join(missing_job_indexes)}...")
+        with engine.connect() as conn:
+            for ddl in missing_job_indexes.values():
+                conn.execute(text(ddl))
+            conn.commit()
+        logger.info("✅ Migration completed.")
+
 
 run_migrations()
 

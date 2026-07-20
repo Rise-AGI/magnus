@@ -1,7 +1,7 @@
 # back_end/server/models/_job.py
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
@@ -48,6 +48,16 @@ class JobStatus(str, enum.Enum):
 
 class Job(Base):
     __tablename__ = "jobs"
+    # jobs 是全站增长最快、被最多热点路径读取的表：/api/jobs 列表分页、cluster 视图、
+    # 调度心跳循环都反复查询它，而终态行会无限累积。给这些读路径的过滤 / 排序列建索引，
+    # 避免在整张表上做全表扫描 + 临时排序：
+    #   created_at / (user_id, created_at) —— 列表按创建时间倒序分页（可选按 owner 过滤）
+    #   status / slurm_job_id              —— 调度循环与 cluster 视图按活跃态 / SLURM id 反查
+    #                                         （活跃态在海量终态行里稀疏，索引直接命中而非扫全表）
+    # 单列索引就近声明在字段上（index=True）；跨列的复合索引在此声明。
+    __table_args__ = (
+        Index("ix_jobs_user_id_created_at", "user_id", "created_at"),
+    )
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_hex_id)
     task_name: Mapped[str] = mapped_column(String, index=True)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -69,7 +79,7 @@ class Job(Base):
     # 几乎无法 backfill）。Docker/local 模式由调度器按此超时 kill（与 SLURM --time 对偶）。
     time_limit: Mapped[int | None] = mapped_column(Integer, default=None)
     ephemeral_storage: Mapped[str | None] = mapped_column(String, nullable=True)
-    status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PREPARING)
+    status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PREPARING, index=True)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.A2)
     # SLURM 模式存 sbatch 返回的 SLURM job id；Docker (local) 模式复用此列存
     # container_name。语义为 "magnus 与外部资源的当前/last-known 关联"：在
@@ -78,9 +88,9 @@ class Job(Base):
     # 终态后才清空。新加 query 引用此列时（如 cluster endpoint 用 slurm_id 反
     # 查 magnus_job_map）必须考虑该字段在非 RUNNING 状态下也可能命中，否则
     # 会把仍在 SLURM CG 的 magnus job 误判为 external SLURM job。
-    slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     runner: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
