@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from ..schemas import (
     BlueprintResponse,
+    BlueprintListItem,
     BlueprintCreate,
     PagedBlueprintResponse,
     BlueprintParamSchema,
@@ -223,7 +224,7 @@ def list_blueprints(
 
     human_first = case((models.User.user_type == "human", 0), else_=1)
     items = query.join(models.User, models.Blueprint.user_id == models.User.id)\
-                 .options(joinedload(models.Blueprint.user))\
+                 .options(*models.blueprint_list_load_options())\
                  .order_by(human_first, models.Blueprint.updated_at.desc())\
                  .offset(skip).limit(limit).all()
 
@@ -231,7 +232,7 @@ def list_blueprints(
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     result = []
     for bp in items:
-        resp = BlueprintResponse.model_validate(bp)
+        resp = BlueprintListItem.model_validate(bp)
         resp.can_manage = compute_can_manage(
             db, current_user, bp.user_id, subordinate_ids=subordinate_ids,
         )

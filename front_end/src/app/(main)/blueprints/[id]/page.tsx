@@ -354,7 +354,7 @@ export default function BlueprintDetailsPage() {
                  <h3 className="text-sm font-semibold text-zinc-200">{t("blueprintDetail.implementationLogic")}</h3>
               </div>
               <button
-                onClick={() => copyToClipboard(blueprint.code, setCopiedCode)}
+                onClick={() => copyToClipboard(blueprint.code ?? "", setCopiedCode)}
                 className="text-zinc-500 hover:text-zinc-200 transition-colors"
                 title={t("blueprintDetail.copyCode")}
               >
@@ -366,7 +366,7 @@ export default function BlueprintDetailsPage() {
                 <BlueprintImplicitImports />
               </pre>
               <CodeEditor
-                value={blueprint.code}
+                value={blueprint.code ?? ""}
                 readOnly
                 language="python"
               />

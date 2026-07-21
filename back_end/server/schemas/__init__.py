@@ -41,6 +41,7 @@ from ._cluster import (
 )
 from ._blueprint import (
     BlueprintCreate,
+    BlueprintListItem,
     BlueprintResponse,
     PagedBlueprintResponse,
     BlueprintParamOption,
@@ -102,6 +103,7 @@ __all__ = [
     "LoginResponse",
     "ClusterStatsResponse",
     "BlueprintCreate",
+    "BlueprintListItem",
     "BlueprintResponse",
     "PagedBlueprintResponse",
     "BlueprintParamOption",

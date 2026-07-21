@@ -3,6 +3,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
+from sqlalchemy import func
 from ..database import SessionLocal
 from ..models import Job, JobStatus, ClusterSnapshot
 from .._magnus_config import magnus_config, is_local_mode
@@ -40,15 +41,17 @@ class _SyncMixin(_SyncMixinBase):
                 # "magnus 用量假凹"，且让 slurm_used_gpus - magnus_used_gpus 误
                 # 暗示 external 占用激增。跟 cluster endpoint used_gpus 派生口径
                 # 对齐（详见 routers/cluster.py 与 JobListItem.is_releasing）。
-                holding_jobs = db.query(Job).filter(
+                # Aggregate GPU usage DB-side: this runs every heartbeat and the jobs
+                # table can inline tens of MB per row, so materializing the rows just
+                # to sum a column would read those blobs off disk each tick.
+                magnus_usage = db.query(func.coalesce(func.sum(Job.gpu_count), 0)).filter(
                     Job.slurm_job_id.isnot(None),
                     Job.status.in_([
                         JobStatus.RUNNING,
                         JobStatus.TERMINATED,
                         JobStatus.PAUSED,
                     ]),
-                ).all()
-                magnus_usage = sum(job.gpu_count for job in holding_jobs)
+                ).scalar()
 
                 snapshot = ClusterSnapshot(
                     total_gpus = slurm_stats["total_gpus"],

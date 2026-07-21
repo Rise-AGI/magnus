@@ -5,7 +5,9 @@ export interface Blueprint {
   id: string;
   title: string;
   description: string;
-  code: string;
+  // 列表投影不含 code（可能几十 MB，后端 BlueprintListItem 省掉了它）；详情视图
+  // （GET /blueprints/{id}）才带全。故为 optional，消费方按需拉详情。
+  code?: string;
   user_id: string;
   user?: User;
   updated_at: string;

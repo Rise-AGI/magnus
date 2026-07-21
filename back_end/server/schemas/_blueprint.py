@@ -14,11 +14,12 @@ class BlueprintCreate(BaseModel):
     code: str
 
 
-class BlueprintResponse(BaseModel):
+class BlueprintListItem(BaseModel):
+    """列表视图的轻量投影：省掉可达几十 MB 的 code 列（列表从不渲染它，编辑 / 详情
+    走 GET /blueprints/{id} 按需取）。与 job 侧 JobListItem 同型，见其说明。"""
     id: str
     title: str
     description: str
-    code: str
     user_id: str
     updated_at: datetime
     user: Optional[UserInfo] = None
@@ -26,9 +27,15 @@ class BlueprintResponse(BaseModel):
     class Config: from_attributes = True
 
 
+class BlueprintResponse(BlueprintListItem):
+    """完整视图（详情 / 提交返回），在轻量投影之上补齐 code，只由单条 blueprint 的
+    endpoint 返回，绝不进列表。"""
+    code: str
+
+
 class PagedBlueprintResponse(BaseModel):
     total: int
-    items: List[BlueprintResponse]
+    items: List[BlueprintListItem]
 
 
 class BlueprintParamOption(BaseModel):

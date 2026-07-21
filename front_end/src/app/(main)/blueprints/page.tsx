@@ -102,8 +102,16 @@ export default function BlueprintsPage() {
 
   const handleOpenRun = (bp: Blueprint) => setSelectedBlueprint(bp);
   
-  const handleClone = (bp: Blueprint) => {
-      setEditorData({ id: bp.id, title: bp.title, description: bp.description, code: bp.code });
+  const handleClone = async (bp: Blueprint) => {
+      // 列表投影不含 code（后端 BlueprintListItem 省掉了可能几十 MB 的它），
+      // 点击克隆时按需拉完整蓝图再回填编辑器；正常蓝图近乎无感。
+      let full = bp;
+      try {
+        full = await client(`/api/blueprints/${bp.id}`);
+      } catch (e) {
+        console.error("Failed to load blueprint detail for clone", e);
+      }
+      setEditorData({ id: full.id, title: full.title, description: full.description, code: full.code ?? "" });
       setEditorMode('clone');
       setIsEditorOpen(true);
   };

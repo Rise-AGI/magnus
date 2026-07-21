@@ -402,7 +402,10 @@ def list_services(
     human_first = case((models.User.user_type == "human", 0), else_=1)
     secondary = models.Service.updated_at.desc() if sort_by == "updated" else models.Service.last_activity_time.desc()
     items = query.join(models.User, models.Service.owner_id == models.User.id)\
-                 .options(joinedload(models.Service.current_job).options(*models.job_list_load_options()))\
+                 .options(
+                     joinedload(models.Service.owner),
+                     joinedload(models.Service.current_job).options(*models.job_list_load_options()),
+                 )\
                  .order_by(human_first, secondary)\
                  .offset(skip).limit(limit).all()
 

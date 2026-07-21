@@ -18,7 +18,7 @@ from ..database import Base
 from ._helpers import generate_hex_id
 from ._user import User
 from ._job import Job, JobType, JobStatus, ClusterSnapshot, job_list_load_options
-from ._blueprint import Blueprint, BlueprintUserPreference
+from ._blueprint import Blueprint, BlueprintUserPreference, blueprint_list_load_options
 from ._service import Service
 from ._skill import Skill, SkillFile
 from ._image import CachedImage
@@ -42,6 +42,7 @@ __all__ = [
     "Blueprint",
     "Service",
     "BlueprintUserPreference",
+    "blueprint_list_load_options",
     "ExplorerSession",
     "ExplorerMessage",
     "Skill",
