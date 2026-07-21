@@ -72,19 +72,22 @@ export default function SkillsPage() {
       if (debouncedQuery.trim()) params.append("search", debouncedQuery.trim());
       if (selectedUserId) params.append("creator_id", selectedUserId);
       const res = await client(`/api/skills?${params.toString()}`);
-
-      setSkills(res.items.map((s: any) => ({
-          ...s,
-          created_at: s.created_at,
-          updated_at: s.updated_at,
-          user: s.user || allUsers.find(u => u.id === s.user_id)
-      })));
+      setSkills(res.items);
       setTotalItems(res.total);
     } catch (e) { console.error(e); } finally { if (!isBackground) setLoading(false); }
-  }, [page, pageSize, debouncedQuery, selectedUserId, allUsers]);
+  }, [page, pageSize, debouncedQuery, selectedUserId]);
 
   useEffect(() => { fetchSkills(); }, [fetchSkills]);
   usePolling(() => fetchSkills(true), POLL_INTERVAL);
+
+  // Fill each row's display user from the loaded users list only when the row
+  // itself lacks one, derived at render. Keeping allUsers out of fetchSkills'
+  // deps is what matters: otherwise the async users fetch recreates fetchSkills
+  // and retriggers a foreground reload, flashing the loading state a second time.
+  const displayedSkills = useMemo(
+    () => skills.map(s => ({ ...s, user: s.user || allUsers.find(u => u.id === s.user_id) })),
+    [skills, allUsers],
+  );
 
   const handleClone = async (skill: Skill) => {
       // 列表投影不含 files（后端 SkillListItem 省掉了文件内容），点击克隆时按需拉完整 skill 再回填。
@@ -157,9 +160,9 @@ export default function SkillsPage() {
       </div>
 
       <SkillTable
-        data={skills} loading={loading} onClone={handleClone} onDelete={setSkillToDelete} onRefresh={() => fetchSkills(true)}
+        data={displayedSkills} loading={loading} onClone={handleClone} onDelete={setSkillToDelete} onRefresh={() => fetchSkills(true)}
       />
-      {skills.length > 0 && (
+      {displayedSkills.length > 0 && (
         <div className="mt-4 px-6">
           <PaginationControls currentPage={page} totalPages={Math.ceil(totalItems / pageSize)} pageSize={pageSize} totalItems={totalItems} onPageChange={setPage} onPageSizeChange={setPageSize} />
         </div>

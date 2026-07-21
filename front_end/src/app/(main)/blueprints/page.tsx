@@ -86,19 +86,22 @@ export default function BlueprintsPage() {
       if (debouncedQuery.trim()) params.append("search", debouncedQuery.trim());
       if (selectedUserId) params.append("creator_id", selectedUserId);
       const res = await client(`/api/blueprints?${params.toString()}`);
-      
-      // Data Mapping: Backend (snake_case) -> Frontend Interface (camelCase)
-      setBlueprints(res.items.map((b: any) => ({
-          ...b,
-          updated_at: b.updated_at,
-          user: b.user || allUsers.find(u => u.id === b.user_id)
-      })));
+      setBlueprints(res.items);
       setTotalItems(res.total);
     } catch (e) { console.error(e); } finally { if (!isBackground) setLoading(false); }
-  }, [page, pageSize, debouncedQuery, selectedUserId, allUsers]);
+  }, [page, pageSize, debouncedQuery, selectedUserId]);
 
   useEffect(() => { fetchBlueprints(); }, [fetchBlueprints]);
   usePolling(() => fetchBlueprints(true), POLL_INTERVAL);
+
+  // Fill each row's display user from the loaded users list only when the row
+  // itself lacks one, derived at render. Keeping allUsers out of fetchBlueprints'
+  // deps is what matters: otherwise the async users fetch recreates fetchBlueprints
+  // and retriggers a foreground reload, flashing the loading state a second time.
+  const displayedBlueprints = useMemo(
+    () => blueprints.map(b => ({ ...b, user: b.user || allUsers.find(u => u.id === b.user_id) })),
+    [blueprints, allUsers],
+  );
 
   const handleOpenRun = (bp: Blueprint) => setSelectedBlueprint(bp);
   
@@ -168,9 +171,9 @@ export default function BlueprintsPage() {
       </div>
 
       <BlueprintTable
-        data={blueprints} loading={loading} onRun={handleOpenRun} onClone={handleClone} onDelete={setBlueprintToDelete} onRefresh={() => fetchBlueprints(true)}
+        data={displayedBlueprints} loading={loading} onRun={handleOpenRun} onClone={handleClone} onDelete={setBlueprintToDelete} onRefresh={() => fetchBlueprints(true)}
       />
-      {blueprints.length > 0 && (
+      {displayedBlueprints.length > 0 && (
         <div className="mt-4 px-6">
           <PaginationControls currentPage={page} totalPages={Math.ceil(totalItems / pageSize)} pageSize={pageSize} totalItems={totalItems} onPageChange={setPage} onPageSizeChange={setPageSize} />
         </div>
