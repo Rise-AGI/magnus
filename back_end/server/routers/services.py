@@ -26,6 +26,7 @@ from .._magnus_config import magnus_config, is_admin_user, apply_cluster_default
 from .._scheduler import scheduler
 from .auth import get_current_user
 from .users import _get_all_subordinate_ids
+from .jobs import enforce_field_size_limits
 from ._authz import (
     assert_can_manage_resource,
     assert_valid_transfer_target,
@@ -276,6 +277,7 @@ def create_service(
         assert_id_available(db, service_data.id)
 
     data = service_data.model_dump()
+    enforce_field_size_limits(data, "service")
 
     # 所有 Optional 字段填入集群默认值
     apply_cluster_defaults(data)

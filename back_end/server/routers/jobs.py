@@ -35,6 +35,41 @@ router = APIRouter()
 MAX_MARKER_PREVIEW_SIZE = 1024 * 1024
 
 
+# 提交内容里可写字符串字段的大小护栏，job / blueprint / service 共用。命令 / 代码类大字段
+# 体量天然可较大，给较大上限；其余字符串字段是会进列表序列化的元数据，给较紧上限避免撑大
+# 列表页。防止任何字段被塞进 MB 级 payload 撑爆 DB 与列表序列化。上限可配、向后兼容。
+# （job/blueprint 列表已用轻量投影 defer 掉大字段；service 列表暂未投影仍会带 entry_command，
+# 但 service 数量少、命令都很小，大档上限对其足够。）
+_LARGE_TEXT_FIELDS = frozenset({"entry_command", "system_entry_command", "code", "cached_params"})
+
+
+def enforce_field_size_limits(
+    data: Dict[str, Any],
+    context: str,
+)-> None:
+    """对一次提交（job / blueprint / service）的所有字符串字段做大小校验，超限抛 413。
+    命令 / 代码类大字段用 max_large_field_bytes，其余用 max_field_bytes（单位 UTF-8 字节）。
+    大输入应走 file custody（file_secret）按需 stage，而不是内联进字段。"""
+    server_cfg = magnus_config["server"]
+    field_cap = server_cfg["max_field_bytes"]
+    large_cap = server_cfg["max_large_field_bytes"]
+    for key, value in data.items():
+        if not isinstance(value, str):
+            continue
+        cap = large_cap if key in _LARGE_TEXT_FIELDS else field_cap
+        size = len(value.encode("utf-8"))
+        if size > cap:
+            raise HTTPException(
+                status_code = 413,
+                detail = (
+                    f"{context} field '{key}' is {size} bytes, over the {cap}-byte limit. "
+                    f"These fields are for lightweight metadata and launch commands, not data "
+                    f"payloads; upload large inputs via file custody (file_secret) and reference "
+                    f"them instead of inlining."
+                ),
+            )
+
+
 def create_job(
     job_dict: Dict[str, Any],
     user_id: str,
@@ -48,6 +83,7 @@ def create_job(
     apply_cluster_defaults(job_dict)
     normalize_per_cpu_resources(job_dict)
     validate_cluster_limits(job_dict)
+    enforce_field_size_limits(job_dict, "job")
 
     # 节点可用性 precheck：杜绝节点全部 drain/down/reboot 期间用户提交"看似成功
     # 但永远 PENDING"的 ghost job——前端反复点提交都返回 200、SDK 用户脚本累积一片

@@ -25,7 +25,7 @@ from .._blueprint_manager import blueprint_manager
 from .._id_registry import assert_id_available
 from .auth import get_current_user
 from .users import _get_all_subordinate_ids
-from .jobs import create_job
+from .jobs import create_job, enforce_field_size_limits
 from .._magnus_config import is_admin_user
 from ._authz import (
     assert_can_manage_resource,
@@ -102,6 +102,8 @@ def create_blueprint(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    enforce_field_size_limits(bp.model_dump(), "blueprint")
+
     # 1. 验证代码签名
     try:
         blueprint_manager.analyze_signature(bp.code)
@@ -323,6 +325,14 @@ def run_blueprint(
                     logger.warning(f"Failed to merge preferences: {e}")
 
 
+    # save_preference 会把 final_params 落库到 cached_params。在执行 / 建 job 之前先护栏，
+    # 否则超限只能等 create_job 已 commit job 之后才拒，留下"job 已起但调用方收到 413"的半成品。
+    if request.save_preference:
+        enforce_field_size_limits(
+            {"cached_params": serialize_json(final_params)},
+            "blueprint preference",
+        )
+
     # 2. 执行 Blueprint
     try:
         job_submission = blueprint_manager.execute(bp.code, final_params)
@@ -416,7 +426,8 @@ def save_blueprint_preference(
     ).first()
     
     serialized_params = serialize_json(pref_update.cached_params)
-    
+    enforce_field_size_limits({"cached_params": serialized_params}, "blueprint preference")
+
     if pref: # Update
         pref.blueprint_hash = current_hash
         pref.cached_params = serialized_params

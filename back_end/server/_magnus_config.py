@@ -176,6 +176,15 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     # 与持久数据（database / file_custody / container_cache，仍在 root）解耦。
     server.setdefault("ephemeral_root", server["root"])
     _check_key(server, "ephemeral_root", str)
+    # 提交内容（job / blueprint / service）的单字段大小护栏，防止任何字段被塞进 MB 级
+    # payload（如 base64 压缩包）撑爆 DB 与列表序列化。两档：命令 / 代码类大字段
+    # （entry_command / system_entry_command / code，只进详情不进列表）给较大上限；其余
+    # 字符串字段（会进列表序列化的元数据）给较紧上限。缺省向后兼容（老配置无需改动），
+    # 站点可按需调；超限在提交路径 fail-fast 为 413，大输入应走 file custody。
+    server.setdefault("max_field_bytes", 64 * 1024)
+    _check_key(server, "max_field_bytes", int)
+    server.setdefault("max_large_field_bytes", 1024 * 1024)
+    _check_key(server, "max_large_field_bytes", int)
     _check_key(server, "cors_origins", list)
     _check_key(server, "database", dict)
     _check_key(server, "auth", dict)
@@ -185,6 +194,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
 
     expected_server_keys = {
         "address", "front_end_port", "back_end_port", "root", "ephemeral_root",
+        "max_field_bytes", "max_large_field_bytes",
         "database", "auth", "scheduler", "service_proxy", "file_custody",
         "cors_origins",
     }

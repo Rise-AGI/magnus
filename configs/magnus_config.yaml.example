@@ -14,6 +14,14 @@ server:
   # `root` when omitted (single-disk sites need not set it). on dev runs the
   # `-develop` suffix is appended just like `root`.
   # ephemeral_root: /fast-ssd/magnus-ephemeral
+  # optional: per-field size guards on user-submitted content (job / blueprint /
+  # service). metadata fields that appear in list views (task_name, description,
+  # etc.) are capped at max_field_bytes; command / code fields (entry_command,
+  # system_entry_command, code, cached_params) at max_large_field_bytes.
+  # over-limit writes are rejected with 413 — route large inputs through file
+  # custody instead of inlining. defaults shown; omit to keep them.
+  # max_field_bytes: 65536
+  # max_large_field_bytes: 1048576
   cors_origins:
     - http://your-server-ip:3011       # production frontend
     - http://localhost:3013            # dev frontend (port+2)
