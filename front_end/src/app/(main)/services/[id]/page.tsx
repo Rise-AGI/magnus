@@ -520,7 +520,7 @@ export default function ServiceDetailsPage() {
                 <h3 className="text-sm font-semibold text-zinc-200">{t("serviceDetail.entryCommand")}</h3>
               </div>
               <button
-                onClick={() => copyToClipboard(service.entry_command, setCopiedCommand)}
+                onClick={() => copyToClipboard(service.entry_command ?? "", setCopiedCommand)}
                 className="text-zinc-500 hover:text-zinc-200 transition-colors"
                 title={t("serviceDetail.copyFullCommand")}
               >

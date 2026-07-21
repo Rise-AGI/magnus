@@ -12,14 +12,14 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, defer
 from sqlalchemy import or_, case
 
 from .. import database
 from ..database import SessionLocal
 from .. import models
 from ..models import JobStatus, Service
-from ..schemas import ServiceResponse, ServiceCreate, PagedServiceResponse, TransferRequest
+from ..schemas import ServiceResponse, ServiceListItem, ServiceCreate, PagedServiceResponse, TransferRequest
 from .._service_manager import service_manager
 from .._id_registry import assert_id_available
 from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, normalize_per_cpu_resources, validate_cluster_limits
@@ -405,6 +405,8 @@ def list_services(
     secondary = models.Service.updated_at.desc() if sort_by == "updated" else models.Service.last_activity_time.desc()
     items = query.join(models.User, models.Service.owner_id == models.User.id)\
                  .options(
+                     defer(models.Service.entry_command, raiseload=True),
+                     defer(models.Service.system_entry_command, raiseload=True),
                      joinedload(models.Service.owner),
                      joinedload(models.Service.current_job).options(*models.job_list_load_options()),
                  )\
@@ -415,7 +417,7 @@ def list_services(
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
     result = []
     for svc in items:
-        resp = ServiceResponse.model_validate(svc)
+        resp = ServiceListItem.model_validate(svc)
         resp.can_manage = compute_can_manage(
             db, current_user, svc.owner_id, subordinate_ids=subordinate_ids,
         )

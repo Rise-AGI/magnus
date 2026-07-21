@@ -61,20 +61,21 @@ export default function SkillDetailPage() {
           updated_at: data.updated_at,
       };
       setSkill(mappedData);
+      const files = mappedData.files ?? [];
       setEditorData({
         id: mappedData.id,
         title: mappedData.title,
         description: mappedData.description,
-        files: mappedData.files.filter(f => !f.is_binary).map(f => ({ path: f.path, content: f.content })),
+        files: files.filter(f => !f.is_binary).map(f => ({ path: f.path, content: f.content })),
       });
 
-      const skillMd = mappedData.files.find(f => f.path === "SKILL.md");
+      const skillMd = files.find(f => f.path === "SKILL.md");
       setActiveFile(prev => {
         if (prev) {
-          const updated = mappedData.files.find(f => f.path === prev.path);
-          return updated || skillMd || mappedData.files[0] || null;
+          const updated = files.find(f => f.path === prev.path);
+          return updated || skillMd || files[0] || null;
         }
-        return skillMd || mappedData.files[0] || null;
+        return skillMd || files[0] || null;
       });
 
       setNotFound(false);
@@ -152,13 +153,13 @@ export default function SkillDetailPage() {
       if (part === "..") resolved.pop();
       else if (part !== ".") resolved.push(part);
     }
-    const target = skill.files.find(f => f.path === resolved.join("/"));
+    const target = (skill.files ?? []).find(f => f.path === resolved.join("/"));
     if (target) setActiveFile(target);
   }, [skill, activeFile, router, buildFromHref]);
 
   const sortedFiles = useMemo(() => {
     if (!skill) return [];
-    return [...skill.files].sort((a, b) => {
+    return [...(skill.files ?? [])].sort((a, b) => {
       if (a.path === "SKILL.md") return -1;
       if (b.path === "SKILL.md") return 1;
       return a.path.localeCompare(b.path);
@@ -422,7 +423,7 @@ export default function SkillDetailPage() {
         isOpen={editorOpen}
         mode="clone"
         initialData={editorData}
-        initialResources={skill?.files.filter(f => f.is_binary).map(f => ({ path: f.path })) || []}
+        initialResources={skill?.files?.filter(f => f.is_binary).map(f => ({ path: f.path })) || []}
         onClose={() => { setEditorOpen(false); fetchSkill(true); }}
         onSave={handleEditorSave}
       />

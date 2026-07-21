@@ -22,7 +22,9 @@ export interface Service {
   repo_name: string;
   branch: string;
   commit_sha: string;
-  entry_command: string;
+  // 列表投影不含命令类字段（后端 ServiceListItem 省掉 entry_command / system_entry_command）；
+  // 详情视图（GET /services/{id}）才带全。故为 optional，消费方（clone）按需拉详情。
+  entry_command?: string;
   job_task_name: string;
   job_description: string;
   gpu_count: number;

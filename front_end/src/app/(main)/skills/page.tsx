@@ -86,12 +86,22 @@ export default function SkillsPage() {
   useEffect(() => { fetchSkills(); }, [fetchSkills]);
   usePolling(() => fetchSkills(true), POLL_INTERVAL);
 
-  const handleClone = (skill: Skill) => {
+  const handleClone = async (skill: Skill) => {
+      // 列表投影不含 files（后端 SkillListItem 省掉了文件内容），点击克隆时按需拉完整 skill 再回填。
+      // 拉详情失败就中止并报错（与别处保持一致），不用残缺的列表对象打开一个没有文件的克隆表单。
+      let full: Skill;
+      try {
+        full = await client(`/api/skills/${skill.id}`);
+      } catch (e) {
+        console.error("Failed to load skill detail for clone", e);
+        setErrorMessage(t("common.operationFailed"));
+        return;
+      }
       setEditorData({
-        id: skill.id,
-        title: skill.title,
-        description: skill.description,
-        files: skill.files.map(f => ({ path: f.path, content: f.content })),
+        id: full.id,
+        title: full.title,
+        description: full.description,
+        files: (full.files ?? []).map(f => ({ path: f.path, content: f.content })),
       });
       setEditorMode("clone");
       setIsEditorOpen(true);

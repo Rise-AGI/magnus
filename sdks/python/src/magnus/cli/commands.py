@@ -2893,12 +2893,16 @@ def skill_list_cmd(
 
         for sk in items:
             user = sk.get("user") or {}
-            files = sk.get("files") or []
+            # The list projection carries a lightweight file_count instead of the file
+            # contents; fall back to len(files) for older servers that still ship files.
+            file_count = sk.get("file_count")
+            if file_count is None:
+                file_count = len(sk.get("files") or [])
             table.add_row(
                 rich_escape(sk.get("id", "")[:25]),
                 rich_escape((sk.get("title") or "-")[:30]),
                 rich_escape((user.get("name") or "-")[:15]),
-                str(len(files)),
+                str(file_count),
                 _format_time(sk.get("updated_at")),
             )
 

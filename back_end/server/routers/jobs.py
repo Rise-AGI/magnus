@@ -35,11 +35,11 @@ router = APIRouter()
 MAX_MARKER_PREVIEW_SIZE = 1024 * 1024
 
 
-# 提交内容里可写字符串字段的大小护栏，job / blueprint / service 共用。命令 / 代码类大字段
-# 体量天然可较大，给较大上限；其余字符串字段是会进列表序列化的元数据，给较紧上限避免撑大
-# 列表页。防止任何字段被塞进 MB 级 payload 撑爆 DB 与列表序列化。上限可配、向后兼容。
-# （job/blueprint 列表已用轻量投影 defer 掉大字段；service 列表暂未投影仍会带 entry_command，
-# 但 service 数量少、命令都很小，大档上限对其足够。）
+# 提交内容里可写字符串字段的大小护栏，job / blueprint / service / skill 共用。命令 / 代码类
+# 大字段体量天然可较大，给较大上限；其余字符串字段是会进列表序列化的元数据，给较紧上限避免
+# 撑大列表页。防止任何字段被塞进 MB 级 payload 撑爆 DB 与列表序列化。上限可配、向后兼容。
+# （job / blueprint / skill / service 列表均已用轻量投影省掉大字段——列表不 ship 命令 / 代码 /
+#   文件内容，只有详情端点带全，故大档上限只影响详情 / 提交路径。）
 _LARGE_TEXT_FIELDS = frozenset({"entry_command", "system_entry_command", "code", "cached_params"})
 
 
@@ -47,7 +47,7 @@ def enforce_field_size_limits(
     data: Dict[str, Any],
     context: str,
 )-> None:
-    """对一次提交（job / blueprint / service）的所有字符串字段做大小校验，超限抛 413。
+    """对一次提交（job / blueprint / skill / service）的所有字符串字段做大小校验，超限抛 413。
     命令 / 代码类大字段用 max_large_field_bytes，其余用 max_field_bytes（单位 UTF-8 字节）。
     大输入应走 file custody（file_secret）按需 stage，而不是内联进字段。"""
     server_cfg = magnus_config["server"]

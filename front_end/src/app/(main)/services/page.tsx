@@ -132,8 +132,19 @@ export default function ServicesPage() {
     setIsDrawerOpen(true);
   };
 
-  const handleClone = (svc: Service) => {
-    setEditingService(svc);
+  const handleClone = async (svc: Service) => {
+    // 列表投影不含 entry_command / system_entry_command（后端 ServiceListItem 省掉了），
+    // 点击克隆时按需拉完整 service 再回填表单。拉详情失败就中止并报错（与 toggle 一致），
+    // 不用残缺的列表对象打开一个没有命令的克隆表单。
+    let full: Service;
+    try {
+      full = await client(`/api/services/${svc.id}`);
+    } catch (e) {
+      console.error("Failed to load service detail for clone", e);
+      setErrorMessage(t("common.operationFailed"));
+      return;
+    }
+    setEditingService(full);
     setIsDrawerOpen(true);
   };
 
@@ -164,19 +175,17 @@ export default function ServicesPage() {
           method: "DELETE",
         });
       } else if (pendingAction.type === "toggle") {
-        // Unified Upsert/Update via POST for toggling logic if needed, 
-        // OR patch if backend supports it. Assuming current backend logic:
-        // Ideally backend should have a specific endpoint for toggling or we update via POST.
-        // Based on previous context, we use the standard update endpoint or dedicated logic.
-        // Assuming we just update the `is_active` status.
-        // Note: Our latest backend code handles full object update on POST. 
-        // For atomic toggle, a lightweight PATCH is better, but strictly following the POST Upsert logic:
+        // Toggling is a full-object upsert to POST /services, which validates against
+        // ServiceCreate (entry_command required). The list projection (ServiceListItem)
+        // omits the command fields, so fetch the full service first; a failed fetch aborts
+        // via the catch below rather than POSTing an incomplete body.
+        const full = await client(`/api/services/${pendingAction.service.id}`);
         const updatedService = {
-            ...pendingAction.service,
-            is_active: !pendingAction.service.is_active
+            ...full,
+            is_active: !pendingAction.service.is_active,
         };
         await client("/api/services", {
-          method: "POST", 
+          method: "POST",
           json: updatedService,
         });
       }

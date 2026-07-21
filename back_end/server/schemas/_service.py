@@ -9,7 +9,13 @@ from ._user import UserInfo
 from ._job import JobListItem
 
 
-class ServiceCreate(BaseModel):
+class _ServiceContent(BaseModel):
+    # 命令类大字段：只进详情，不进列表轻量投影
+    entry_command: str
+    system_entry_command: Optional[str] = None
+
+
+class ServiceBase(BaseModel):
     id: str = Field(..., description="Slug ID for the service")
     name: str
     description: Optional[str] = None
@@ -23,7 +29,6 @@ class ServiceCreate(BaseModel):
     repo_name: str
     branch: str
     commit_sha: str
-    entry_command: str
     gpu_count: int = 0
     gpu_type: str
     job_type: JobType = JobType.A2
@@ -32,10 +37,15 @@ class ServiceCreate(BaseModel):
     ephemeral_storage: Optional[str] = None
     runner: Optional[str] = None
     container_image: Optional[str] = None
-    system_entry_command: Optional[str] = None
 
 
-class ServiceResponse(ServiceCreate):
+class ServiceCreate(ServiceBase, _ServiceContent):
+    pass
+
+
+class ServiceListItem(ServiceBase):
+    """列表视图的轻量投影：省掉命令类大字段（entry_command / system_entry_command）。
+    详情 GET /services/{id} 才带全。与 job / blueprint / skill 列表同型。"""
     owner_id: str
     last_activity_time: datetime
     current_job_id: Optional[str] = None
@@ -47,6 +57,11 @@ class ServiceResponse(ServiceCreate):
     class Config: from_attributes = True
 
 
+class ServiceResponse(ServiceListItem, _ServiceContent):
+    """完整视图（详情 / 创建返回），在轻量投影之上补齐命令类字段。"""
+    pass
+
+
 class PagedServiceResponse(BaseModel):
     total: int
-    items: List[ServiceResponse]
+    items: List[ServiceListItem]

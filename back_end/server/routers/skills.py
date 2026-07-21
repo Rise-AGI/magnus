@@ -13,8 +13,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload, subqueryload
-from sqlalchemy import or_, case
+from sqlalchemy.orm import Session, joinedload, raiseload
+from sqlalchemy import or_, case, func
 
 from .. import database
 from .. import models
@@ -22,6 +22,7 @@ from ..schemas import (
     SkillCreate,
     SkillFileCreate,
     SkillFileResponse,
+    SkillListItem,
     SkillResponse,
     PagedSkillResponse,
     TransferRequest,
@@ -29,6 +30,7 @@ from ..schemas import (
 from .._id_registry import assert_id_available
 from .auth import get_current_user
 from .users import _get_all_subordinate_ids
+from .jobs import enforce_field_size_limits
 from ._authz import (
     assert_can_manage_resource,
     assert_valid_transfer_target,
@@ -103,6 +105,7 @@ def _enrich_response(skill: models.Skill, can_manage: bool) -> SkillResponse:
     resp = SkillResponse.model_validate(skill)
     resp.can_manage = can_manage
     resp.files.extend(_discover_resource_files(skill.id))
+    resp.file_count = len(resp.files)
     return resp
 
 
@@ -115,6 +118,8 @@ def create_skill(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    enforce_field_size_limits({"id": skill.id, "title": skill.title, "description": skill.description}, "skill")
+
     has_skill_md = any(f.path == "SKILL.md" for f in skill.files)
     if not has_skill_md:
         raise HTTPException(status_code=400, detail="SKILL.md is required")
@@ -228,19 +233,31 @@ def list_skills(
 
     human_first = case((models.User.user_type == "human", 0), else_=1)
     items = query.join(models.User, models.Skill.user_id == models.User.id)\
-                 .options(joinedload(models.Skill.user), subqueryload(models.Skill.files))\
+                 .options(joinedload(models.Skill.user), raiseload(models.Skill.files))\
                  .order_by(human_first, models.Skill.updated_at.desc())\
                  .offset(skip).limit(limit).all()
 
     is_admin = is_admin_user(current_user)
     subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
+
+    # files 关系被 raiseload 挡掉了（列表不载文件内容），用一条 grouped COUNT 廉价补出每个 skill
+    # 的文件数——只数 DB 文件，语义与详情前的列表一致（详情才叠加文件系统 resource）。
+    skill_ids = [skill.id for skill in items]
+    file_counts = dict(
+        db.query(models.SkillFile.skill_id, func.count(models.SkillFile.id))
+          .filter(models.SkillFile.skill_id.in_(skill_ids))
+          .group_by(models.SkillFile.skill_id)
+          .all()
+    ) if skill_ids else {}
+
     result = []
     for skill in items:
         can_manage = compute_can_manage(
             db, current_user, skill.user_id, subordinate_ids=subordinate_ids,
         )
-        resp = SkillResponse.model_validate(skill)
+        resp = SkillListItem.model_validate(skill)
         resp.can_manage = can_manage
+        resp.file_count = file_counts.get(skill.id, 0)
         result.append(resp)
 
     return {"total": total, "items": result}

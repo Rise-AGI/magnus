@@ -9,7 +9,7 @@
 - _job.py:        JobSubmission, JobListItem, JobResponse, PagedJobResponse
 - _cluster.py:    ClusterResources, ClusterStatsResponse
 - _blueprint.py:  Blueprint*/PagedBlueprint*/BlueprintParam*/BlueprintPreference*
-- _service.py:    ServiceCreate, ServiceResponse, PagedServiceResponse
+- _service.py:    ServiceCreate, ServiceListItem, ServiceResponse, PagedServiceResponse
 - _explorer.py:   ExplorerSession*/ExplorerMessage*/PagedExplorerSessionResponse
 - _skill.py:      Skill*/PagedSkillResponse
 - _image.py:      CachedImageCreate, CachedImageResponse, PagedCachedImageResponse
@@ -51,6 +51,7 @@ from ._blueprint import (
 )
 from ._service import (
     ServiceCreate,
+    ServiceListItem,
     ServiceResponse,
     PagedServiceResponse,
 )
@@ -67,6 +68,7 @@ from ._skill import (
     SkillFileCreate,
     SkillFileResponse,
     SkillCreate,
+    SkillListItem,
     SkillResponse,
     PagedSkillResponse,
 )
@@ -109,6 +111,7 @@ __all__ = [
     "BlueprintParamOption",
     "BlueprintParamSchema",
     "ServiceCreate",
+    "ServiceListItem",
     "ServiceResponse",
     "PagedServiceResponse",
     "BlueprintPreferenceUpdate",
@@ -122,6 +125,7 @@ __all__ = [
     "SkillFileCreate",
     "SkillFileResponse",
     "SkillCreate",
+    "SkillListItem",
     "SkillResponse",
     "PagedSkillResponse",
     "CachedImageCreate",
