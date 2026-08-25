@@ -55,11 +55,28 @@ _FILE_SECRET_RE = re.compile(r"magnus-secret:([0-9A-Za-z_-]+)")
 # baked into the image. parents: [0]=_scheduler [1]=server [2]=back_end [3]=repo root.
 _PLATFORM_SDK_SRC = Path(__file__).resolve().parents[3] / "sdks" / "python" / "src" / "magnus"
 _PLATFORM_SDK_SUBDIR = ".magnus_sdk"
-# Shim so the bash `magnus` command also resolves to the platform SDK (the python
-# `import magnus` path is covered by PYTHONPATH, which the wrapper points at .magnus_sdk).
-# Prefer python3 but fall back to python for images that ship only the latter.
+# Shim so the bash `magnus` command also resolves to the platform SDK. The python
+# `import magnus` path is covered by PYTHONPATH (the wrapper points it at .magnus_sdk);
+# this shim covers the CLI. It must run under an interpreter that actually carries the
+# SDK's runtime deps (httpx, pydantic, typer, ...). The injected SDK is source only, so
+# those deps come from whichever interpreter runs it — and on uv-based images the ambient
+# python3 / python is a project venv synced from a lockfile that need not name them, while
+# the image bakes magnus-sdk (hence its deps) into a different interpreter, commonly the
+# base /usr/local/bin/python. A shim that hardcodes `python3` therefore lands on the
+# dep-less venv and dies on `import httpx`, even though the image did provide the deps.
+# So probe candidates in order and exec the first whose interpreter can import the SDK:
+# ambient first (a venv that does carry the deps still wins), then the usual base
+# locations (found even when a venv shadows them on PATH). The probe imports the very
+# module the shim runs, so it accepts an interpreter only if the CLI will actually run
+# there. If none qualifies (an image that bakes the SDK nowhere), fall back to python3 so
+# the failure is the original clear ImportError rather than a bare "command not found".
 _MAGNUS_CLI_SHIM = (
     "#!/bin/sh\n"
+    "for _py in python3 python /usr/local/bin/python3 /usr/local/bin/python /usr/bin/python3 /usr/bin/python; do\n"
+    "    if \"$_py\" -c 'import magnus.cli.main' >/dev/null 2>&1; then\n"
+    "        exec \"$_py\" -m magnus.cli.main \"$@\"\n"
+    "    fi\n"
+    "done\n"
     "if command -v python3 >/dev/null 2>&1; then exec python3 -m magnus.cli.main \"$@\"; fi\n"
     "exec python -m magnus.cli.main \"$@\"\n"
 )
