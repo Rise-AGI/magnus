@@ -81,6 +81,55 @@ _MAGNUS_CLI_SHIM = (
     "exec python -m magnus.cli.main \"$@\"\n"
 )
 
+# The platform SDK is injected as source only; its sole third-party runtime import is httpx
+# (client.py / http_download.py — the SDK never imports pydantic, and typer / rich are used
+# only by the CLI). The bash `magnus` shim above already routes the CLI to an interpreter that
+# carries those deps, but a user entry_command that imports magnus directly — e.g.
+# `python3 -c "import magnus; magnus.download_file(...)"` — runs under whatever python it chose
+# (on uv images the project venv, synced from a lockfile that need not carry httpx) and dies at
+# `import httpx`, even though PYTHONPATH resolves the magnus source. So vendor httpx and its
+# pure-Python runtime dependencies next to the source, on the same PYTHONPATH, so any
+# interpreter can import magnus without relying on the image's site-packages. Only these
+# pure-Python packages are vendored — they import cleanly across interpreters and Python
+# versions, unlike a compiled extension (there is none in this closure). socksio is optional
+# (httpx[socks]) and skipped when absent.
+_VENDORED_SDK_DEPS = (
+    # Sync closure (import magnus + download_file / custody_file): httpx and its sync stack.
+    "httpx", "httpcore", "h11", "certifi", "idna",
+    # Async closure (download_file_async / call_service_async): httpx's anyio backend, plus the
+    # deps anyio hard-imports at its module top — typing_extensions on every Python, and
+    # exceptiongroup on < 3.11 (a stdlib backport, so absent — and unneeded — on >= 3.11, where
+    # the best-effort copy simply skips it). socksio is httpx[socks], optional.
+    "anyio", "sniffio", "socksio", "typing_extensions", "exceptiongroup",
+)
+
+
+def _vendor_pure_python_deps(sdk_root: str) -> None:
+    """Copy httpx and its pure-Python runtime deps into sdk_root (alongside the magnus source,
+    both on the container's PYTHONPATH) so `import magnus` works under any interpreter, not just
+    one whose site-packages happen to carry them. Resolved from the backend interpreter, which
+    runs httpx itself and therefore has them. Best-effort per package: one that can't be located
+    or copied is skipped, degrading to the prior behavior rather than blocking job submission."""
+    import importlib.util
+    for dep in _VENDORED_SDK_DEPS:
+        try:
+            spec = importlib.util.find_spec(dep)
+            if spec is None:
+                continue
+            locations = list(spec.submodule_search_locations or [])
+            if locations:
+                shutil.copytree(
+                    locations[0],
+                    os.path.join(sdk_root, dep),
+                    ignore = shutil.ignore_patterns("__pycache__", "*.pyc"),
+                    dirs_exist_ok = True,
+                )
+            elif spec.origin and spec.origin.endswith(".py"):
+                shutil.copy2(spec.origin, os.path.join(sdk_root, os.path.basename(spec.origin)))
+        except Exception as error:
+            logger.warning(f"platform SDK: could not vendor dependency {dep}: {error}")
+
+
 if TYPE_CHECKING:
     from ._typing import _SchedulerProtocol
     _StagingMixinBase = _SchedulerProtocol
@@ -131,7 +180,8 @@ class _StagingMixin(_StagingMixinBase):
         两者都要。Docker/local 模式不经此（走 _submit_to_docker，沿用镜像 baked SDK；本地
         有网、custody 走 HTTP，没有"无网写回 / SDK 演进要重 build 镜像"的痛点）。
 
-        含一个 bin/magnus shim 给 bash `magnus` 链路。源缺失时静默跳过（容器回退 baked SDK）。"""
+        含一个 bin/magnus shim 给 bash `magnus` 链路，以及 vendored 的 httpx 全家桶让容器内任意
+        解释器都能 `import magnus`（见 _vendor_pure_python_deps）。源缺失时静默跳过（容器回退 baked SDK）。"""
         if not _PLATFORM_SDK_SRC.is_dir():
             return
         sdk_root = os.path.join(local_job_working_table, _PLATFORM_SDK_SUBDIR)
@@ -141,6 +191,7 @@ class _StagingMixin(_StagingMixinBase):
             os.path.join(sdk_root, "magnus"),
             ignore = shutil.ignore_patterns("__pycache__"),
         )
+        _vendor_pure_python_deps(sdk_root)
         bin_dir = os.path.join(sdk_root, "bin")
         os.makedirs(bin_dir, exist_ok=True)
         shim_path = os.path.join(bin_dir, "magnus")
