@@ -15,9 +15,14 @@ from rich.table import Table
 from rich.status import Status
 from rich.markup import escape as rich_escape
 from datetime import datetime
-from importlib.metadata import version
+from importlib.metadata import version, PackageNotFoundError
 
-__version__ = version("magnus-sdk")
+try:
+    __version__ = version("magnus-sdk")
+except PackageNotFoundError:
+    # Robust to the platform's source-only SDK injection (no installed distribution), same
+    # as magnus/__init__.py; keeps the CLI importable when run against the injected source.
+    __version__ = "0+source"
 
 from ..exceptions import MagnusError, ExecutionError
 from ..actions import execute_action as run_action

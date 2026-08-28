@@ -1,5 +1,5 @@
 # sdks/python/src/magnus/__init__.py
-from importlib.metadata import version as _pkg_version
+from importlib.metadata import version as _pkg_version, PackageNotFoundError as _PackageNotFoundError
 from typing import Optional, Dict, Any, Union, Literal, List
 from pathlib import Path
 from enum import Enum
@@ -48,7 +48,13 @@ class FileSecret(str):
             if not w.isalpha() or not w.islower() or not (4 <= len(w) <= 5):
                 raise ValueError(f"FileSecret word must be 4-5 lowercase letters, got '{w}'")
 
-__version__ = _pkg_version("magnus-sdk")
+try:
+    __version__ = _pkg_version("magnus-sdk")
+except _PackageNotFoundError:
+    # The platform injects this SDK as bare source on PYTHONPATH (no installed
+    # distribution / .dist-info), so the metadata lookup legitimately misses. Fall back to
+    # a non-authoritative marker instead of making `import magnus` fail in that mode.
+    __version__ = "0+source"
 
 __all__ = [
     "MagnusClient",
