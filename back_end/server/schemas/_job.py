@@ -22,6 +22,8 @@ class JobSubmission(BaseModel):
     container_image: Optional[str] = None
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
+    node_count: Optional[int] = None        # 申请节点数（SLURM 多节点）。None = 单节点（历史行为）
+    tasks_per_node: Optional[int] = None    # 每节点 MPI rank 数。None = 1
     time_limit: Optional[int] = None        # 期望最大墙钟（分钟）。None = 站点分区默认墙钟
     ephemeral_storage: Optional[str] = None
     runner: Optional[str] = None
@@ -55,6 +57,8 @@ class JobListItem(BaseModel):
     gpu_type: str
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
+    node_count: Optional[int] = None
+    tasks_per_node: Optional[int] = None
     time_limit: Optional[int] = None
     ephemeral_storage: Optional[str] = None
     runner: Optional[str] = None

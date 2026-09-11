@@ -12,6 +12,9 @@ import {
   PHYSICAL_GPUS,
   getGpuLimit,
   MAX_CPU_COUNT,
+  MAX_NODE_COUNT,
+  DEFAULT_NODE_COUNT,
+  DEFAULT_TASKS_PER_NODE,
   DEFAULT_MEMORY,
   DEFAULT_EPHEMERAL_STORAGE,
   DEFAULT_CPU_COUNT,
@@ -50,6 +53,8 @@ export interface JobFormData {
   job_type: string;
   cpu_count?: number | null;
   memory_demand?: string | null;
+  node_count?: number | null;
+  tasks_per_node?: number | null;
   time_limit?: number | null;
   ephemeral_storage?: string | null;
   runner?: string | null;
@@ -96,6 +101,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   
   const [cpuCount, setCpuCount] = useState<number>(initialData?.cpu_count ?? 0);
   const [memoryDemand, setMemoryDemand] = useState<string>(initialData?.memory_demand || "");
+  const [nodeCount, setNodeCount] = useState<number>(initialData?.node_count ?? DEFAULT_NODE_COUNT);
+  const [tasksPerNode, setTasksPerNode] = useState<number>(initialData?.tasks_per_node ?? DEFAULT_TASKS_PER_NODE);
   const [timeLimit, setTimeLimit] = useState<number>(initialData?.time_limit ?? 0);
   const [ephemeralStorage, setEphemeralStorage] = useState<string>(initialData?.ephemeral_storage || "");
   const [runner, setRunner] = useState<string>(initialData?.runner || "");
@@ -124,6 +131,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         job_type: jobType,
         cpu_count: cpuCount,
         memory_demand: memoryDemand,
+        node_count: nodeCount,
+        tasks_per_node: tasksPerNode,
         time_limit: timeLimit,
         ephemeral_storage: ephemeralStorage,
         runner: runner,
@@ -163,6 +172,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       // Advanced
       if (payload.cpu_count !== undefined) setCpuCount(payload.cpu_count);
       if (payload.memory_demand !== undefined) setMemoryDemand(payload.memory_demand);
+      if (payload.node_count !== undefined && payload.node_count !== null) setNodeCount(payload.node_count);
+      if (payload.tasks_per_node !== undefined && payload.tasks_per_node !== null) setTasksPerNode(payload.tasks_per_node);
       if (payload.time_limit !== undefined) setTimeLimit(payload.time_limit ?? 0);
       if (payload.ephemeral_storage !== undefined) setEphemeralStorage(payload.ephemeral_storage);
       if (payload.runner !== undefined) setRunner(payload.runner);
@@ -328,6 +339,9 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       cpu_count: cpuCount ? cpuCount : null,
       // per_cpu 站点内存随 CPU 自动分配，不下发 memory_demand（后端按核数归一化）。
       memory_demand: IS_PER_CPU_MEMORY ? null : (memoryDemand.trim() ? memoryDemand.trim() : null),
+      // 单节点(<=1)不下发,让后端回落默认 1 —— 保持单节点提交与历史一致。
+      node_count: nodeCount > 1 ? nodeCount : null,
+      tasks_per_node: tasksPerNode > 1 ? tasksPerNode : null,
       time_limit: timeLimit ? timeLimit : null,
       ephemeral_storage: ephemeralStorage.trim() ? ephemeralStorage.trim() : null,
       runner: runner.trim() ? runner.trim() : null,
@@ -518,6 +532,37 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
             )}
           </div>
         </div>
+
+        {MAX_NODE_COUNT > 1 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            {/* Node Count (multi-node MPI; only shown where the site enables it) */}
+            <div>
+              <NumberStepper
+                label={t("jobForm.nodeCount")}
+                value={nodeCount}
+                onChange={setNodeCount}
+                min={1}
+                max={MAX_NODE_COUNT}
+              />
+              <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">
+                {t("jobForm.nodeCountHint")}
+              </p>
+            </div>
+            {/* Tasks per node (MPI ranks per node) */}
+            <div>
+              <NumberStepper
+                label={t("jobForm.tasksPerNode")}
+                value={tasksPerNode}
+                onChange={setTasksPerNode}
+                min={1}
+                max={MAX_CPU_COUNT}
+              />
+              <p className="text-[11px] text-zinc-500 mt-1.5 ml-0.5">
+                {t("jobForm.tasksPerNodeHint")}
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4">
             <SearchableSelect

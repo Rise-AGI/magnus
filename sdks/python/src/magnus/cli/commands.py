@@ -928,6 +928,8 @@ _JOB_PARAM_KEYS: Dict[str, type] = {
     "container_image": str,
     "cpu_count": int,
     "memory_demand": str,
+    "node_count": int,
+    "tasks_per_node": int,
     "time_limit": int,
     "ephemeral_storage": str,
     "runner": str,
@@ -1138,8 +1140,10 @@ Required parameters:
 Optional parameters:
   --gpu-type TEXT           GPU model (e.g. a100, rtx5090)
   --gpu-count INT           Number of GPUs
-  --cpu-count INT           Number of CPUs
+  --cpu-count INT           Number of CPUs (per rank in multi-node jobs)
   --memory-demand TEXT      Memory limit (e.g. 16G)
+  --node-count INT          Nodes for a multi-node MPI job (needs a site with multi-node enabled; default 1)
+  --tasks-per-node INT      MPI ranks per node (default 1)
   --time-limit INT          Max wall-clock minutes (SLURM --time; omit = partition default)
   --ephemeral-storage TEXT  Disk limit (e.g. 10G)
   --container-image TEXT    Container image URI (default: cluster config;

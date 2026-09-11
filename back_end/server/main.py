@@ -157,6 +157,16 @@ def run_migrations()-> None:
             conn.commit()
         logger.info("✅ Migration completed.")
 
+    # 多节点字段（node_count / tasks_per_node）。老库 ADD COLUMN 为 NULL，代码把
+    # NULL 当 1（单节点），与历史行为一致。
+    for _multinode_col in ("node_count", "tasks_per_node"):
+        if _multinode_col not in job_columns:
+            logger.info(f"🔧 Adding {_multinode_col} column to jobs table...")
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {_multinode_col} INTEGER"))
+                conn.commit()
+            logger.info("✅ Migration completed.")
+
     # 索引由 models 声明，create_all 只对新库生效、不会给已存在的 jobs 表补建。
     # 站点上线前落库的老库需要在这里幂等补齐，否则热点读路径（列表分页 / cluster
     # 视图 / 调度循环）会一直全表扫描。索引对应的查询语义见 models/_job.py。

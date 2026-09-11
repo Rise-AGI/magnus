@@ -138,6 +138,8 @@ execution:
   #   mem_per_cpu_mb: 4000               # only used when mem_mode == per_cpu
   #   module_loads:                      # `module load` lines prepended in the job script
   #     - singularity/3.11.3
+  #   mpi_type: pmix                     # multi-node only: srun --mpi value (e.g. pmix / pmi2); null = srun default
+  #   srun_extra_flags: []               # multi-node only: extra flags appended to the srun launcher
 
 cluster:
   registry_mirror: null
@@ -168,6 +170,13 @@ cluster:
   # sooner; default_time_limit imposes one on jobs that omit it.
   # max_time_limit: 1440
   # default_time_limit: null
+  # Multi-node (SLURM MPI) is OPTIONAL and OFF by default: max_node_count=1 keeps
+  # single-node behavior everywhere. Raise it to allow node_count / tasks_per_node
+  # above 1 (also set execution.slurm.mpi_type for the srun launcher). Details in
+  # docs/internals/job-runtime.md.
+  # max_node_count: 1
+  # default_node_count: 1
+  # default_tasks_per_node: 1
   default_cpu_count: 4
   default_memory_demand: 1600M
   default_runner: username

@@ -139,6 +139,15 @@ class _SubmitMixin(_SubmitMixinBase):
             magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['front_end_port']}"
             job_id = str(job.id)
 
+            # 多节点参数：None 归一为 1。node_count=1 && tasks_per_node=1 时下方 sbatch 不发
+            # --nodes/--ntasks、wrapper 走原单容器路径，整条链路字节级不变。mpi_type /
+            # srun_extra_flags 仅多节点 wrapper 的 srun 用到。
+            slurm_exec_config = magnus_config["execution"].get("slurm") or {}
+            mpi_type = slurm_exec_config.get("mpi_type")
+            srun_extra_flags = slurm_exec_config.get("srun_extra_flags") or []
+            node_count = job.node_count if (job.node_count is not None and job.node_count > 0) else 1
+            tasks_per_node = job.tasks_per_node if (job.tasks_per_node is not None and job.tasks_per_node > 0) else 1
+
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}\nTraceback:\n{traceback.format_exc()}")
             job.status = JobStatus.FAILED
@@ -177,6 +186,10 @@ class _SubmitMixin(_SubmitMixinBase):
             entry_command = job.entry_command,
             effective_runner = effective_runner,
             container_runtime = container_runtime,
+            node_count = node_count,
+            tasks_per_node = tasks_per_node,
+            mpi_type = mpi_type,
+            srun_extra_flags = srun_extra_flags,
             enable_custody_drop = self._is_remote_execution(),
         )
 
@@ -232,6 +245,8 @@ class _SubmitMixin(_SubmitMixinBase):
                 cpu_count = job.cpu_count,
                 memory_demand = job.memory_demand,
                 time_limit = job.time_limit,
+                node_count = node_count,
+                tasks_per_node = tasks_per_node,
                 token = job.user.token if job.user.token is not None else "",
             )
 

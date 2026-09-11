@@ -26,6 +26,8 @@ class _ControlMixin:
         cpu_count: Optional[int] = None,
         memory_demand: Optional[str] = None,
         time_limit: Optional[int] = None,
+        node_count: Optional[int] = None,
+        tasks_per_node: Optional[int] = None,
     ) -> str:
         """简单提交：不做 sleep + 状态检查，让 SLURM 自己排队和调度。
 
@@ -107,6 +109,16 @@ class _ControlMixin:
                 command.append(f"--mem={memory_demand}")
         if effective_cpu_count > 0:
             command.append(f"--cpus-per-task={effective_cpu_count}")
+
+        # 多节点：node_count>1 或 tasks_per_node>1 时下发 --nodes / --ntasks-per-node
+        # （每 rank 分 effective_cpu_count 核，总 rank = node_count × tasks_per_node）。
+        # 单节点 (1, 1) 两者都不发 —— sbatch 命令与历史字节级一致（默认 --ntasks=1 单 task），
+        # wrapper 也走原单容器路径。None 视作 1。
+        effective_node_count = node_count if (node_count is not None and node_count > 0) else 1
+        effective_tasks_per_node = tasks_per_node if (tasks_per_node is not None and tasks_per_node > 0) else 1
+        if effective_node_count > 1 or effective_tasks_per_node > 1:
+            command.append(f"--nodes={effective_node_count}")
+            command.append(f"--ntasks-per-node={effective_tasks_per_node}")
 
         # time_limit（分钟）→ --time。SLURM 把裸整数当分钟解析。None 时不下发,
         # 沿用分区默认墙钟（自有站点现状字节级不变）。声明短墙钟的任务在共享集群更易

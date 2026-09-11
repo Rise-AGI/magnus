@@ -9,6 +9,9 @@ wrapper.py 在每个 SLURM job 启动时由 sbatch 调起，负责：
 
 这里是一个巨大的 f-string 模板，纯输入→字符串转换，不依赖 scheduler 实例状态。
 """
+from typing import List, Optional
+
+
 def _build_wrapper_content(
     job_working_table: str,
     job_ephemeral_table: str,
@@ -23,9 +26,50 @@ def _build_wrapper_content(
     entry_command: str,
     effective_runner: str,
     container_runtime: str,
+    node_count: int = 1,
+    tasks_per_node: int = 1,
+    mpi_type: Optional[str] = None,
+    srun_extra_flags: Optional[List[str]] = None,
     enable_custody_drop: bool = False,
 ) -> str:
     success_marker_path = f"{job_working_table}/.magnus_success"
+
+    # 多节点执行：node_count>1 或 tasks_per_node>1 时用 srun 跨节点铺 rank —— 把容器 exec
+    # 包进 `srun [--mpi=<型>] [extra] apptainer exec …`，SLURM 依 sbatch 的 --nodes /
+    # --ntasks-per-node 在每个 task 上拉起一个容器实例（每实例一个 MPI rank），rank 间由
+    # PMIx 引导。单节点(1,1)时下面所有多节点分量都是空串，生成的 wrapper 与历史字节级一致。
+    #
+    # 多节点契约（与单节点不同，须写进用户文档）：entry_command 由 srun **每 rank 跑一次**、
+    # 是一个 MPI 程序，而非用户自己在单容器内调 mpiexec。
+    #
+    # 已知局限（v1，留待真集群迭代，仅多节点路径受影响、单节点不涉及）：
+    # - metrics sidecar 只在 batch step 所在的 node 0 采样；
+    # - SIGTERM 的 cgroup fan-out 也只覆盖 node 0，跨节点优雅信号依赖 srun 原生转发
+    #   （硬杀走 scancel --signal=KILL --full 覆盖全节点，不受影响）；
+    # - MAGNUS_NET_MODE=bridge 与多节点不兼容（会变成 rootlesskit 套 srun，语义不通），
+    #   但 bridge（本地端口发布）与 HPC 跨节点 MPI 实际互斥、不会共用；
+    # - GPU：多节点下 node 0 的 CUDA_VISIBLE_DEVICES 会被 srun 广播给所有 rank（首个租户
+    #   wm2 是 CPU-only 分区、且 CPU job 有 `[ -n "$CUDA_VISIBLE_DEVICES" ]` 守卫不受影响）
+    #   —— 接入多节点 GPU 前须先解决。
+    _is_multinode = (node_count is not None and node_count > 1) or (
+        tasks_per_node is not None and tasks_per_node > 1
+    )
+    if _is_multinode:
+        _srun_parts = ["srun"]
+        if mpi_type:
+            _srun_parts.append(f"--mpi={mpi_type}")
+        _srun_parts.extend(srun_extra_flags or [])
+        srun_prefix = " ".join(_srun_parts) + " "
+        # 多 rank 在同一 node 上共享同一 overlay 镜像文件会互相踩，强制退到 --writable-tmpfs
+        # （每 task 独立 RAM 覆盖层）。注入到 overlay-create 的 if 条件里使其恒假。
+        multinode_overlay_guard = " && false"
+        # overlay-skip 警告里补一个原因 token（带尾随空格作分隔），避免多节点下显示成空括号
+        # "overlay skipped ()"，也避免与 setuid/NO_OVERLAY token 连写成 "multi-nodesetuid…"。
+        multinode_overlay_reason = "multi-node "
+    else:
+        srun_prefix = ""
+        multinode_overlay_guard = ""
+        multinode_overlay_reason = ""
 
     # 容器运行时方言：apptainer 与 singularity(CE) 的 CLI（exec / overlay create /
     # --nv / --contain[all] / --overlay / --writable-tmpfs / --env / --fakeroot /
@@ -586,7 +630,7 @@ fi
 
 if [ -n "$APPTAINER_CONTAIN" ]; then
     APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
-    if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]; then
+    if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]{multinode_overlay_guard}; then
         # An unclean prior run (power loss / SIGKILL) can leave a stale overlay image
         # whose finally-block cleanup never ran; apptainer refuses to create over an
         # existing image. The overlay is strictly per-run scratch, so any leftover is
@@ -602,7 +646,7 @@ if [ -n "$APPTAINER_CONTAIN" ]; then
         APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
     else
         APPTAINER_FLAGS="$APPTAINER_FLAGS --writable-tmpfs"
-        echo "[Magnus] WARNING: overlay skipped (${{{{_setuid_apptainer:+setuid apptainer}}}}${{{{MAGNUS_NO_OVERLAY:+MAGNUS_NO_OVERLAY=1}}}}), ephemeral_storage={{ephemeral_storage}} not enforced, using writable-tmpfs (RAM)" >&2
+        echo "[Magnus] WARNING: overlay skipped ({multinode_overlay_reason}${{{{_setuid_apptainer:+setuid apptainer}}}}${{{{MAGNUS_NO_OVERLAY:+MAGNUS_NO_OVERLAY=1}}}}), ephemeral_storage={{ephemeral_storage}} not enforced, using writable-tmpfs (RAM)" >&2
     fi
 else
     APPTAINER_FLAGS="--nv"
@@ -619,7 +663,7 @@ if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
 fi
 
-APPTAINER_CMD="{runtime_binary} exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
+APPTAINER_CMD="{srun_prefix}{runtime_binary} exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     ROOTLESSKIT_FLAGS="--net=slirp4netns --port-driver=builtin --publish $MAGNUS_PORT_MAP"

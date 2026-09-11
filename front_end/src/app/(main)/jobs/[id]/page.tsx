@@ -548,6 +548,14 @@ export default function JobDetailsPage() {
                   {job.memory_demand ? job.memory_demand : <span className="text-zinc-500 text-xs">{t("jobDetail.stationDefault")}</span>}
                 </span>
               </div>
+              {((job.node_count ?? 1) > 1 || (job.tasks_per_node ?? 1) > 1) ? (
+                <div>
+                  <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.nodes")}</label>
+                  <span className="text-sm text-white font-medium block">
+                    {job.node_count ?? 1} × {job.tasks_per_node ?? 1}
+                  </span>
+                </div>
+              ) : null}
               <div>
                 <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.accelerator")}</label>
                 <span className="text-sm text-white font-medium block">

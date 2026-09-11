@@ -74,6 +74,12 @@ class Job(Base):
     gpu_type: Mapped[str] = mapped_column(String)
     cpu_count: Mapped[int | None] = mapped_column(Integer, default=None)
     memory_demand: Mapped[str | None] = mapped_column(String, default=None)
+    # 多节点（SLURM）：node_count = 申请的节点数，tasks_per_node = 每节点 MPI rank 数。
+    # 总 rank = node_count × tasks_per_node，每 rank 分 cpu_count 核（--cpus-per-task）。
+    # None 视作 1 —— 单节点单 task，即历史行为（sbatch 不发 --nodes/--ntasks、wrapper
+    # 直接 apptainer exec，字节级不变）。多节点是纯 opt-in、仅 SLURM 生效，Docker/local 忽略。
+    node_count: Mapped[int | None] = mapped_column(Integer, default=None)
+    tasks_per_node: Mapped[int | None] = mapped_column(Integer, default=None)
     # 期望最大墙钟（分钟）。None = 不下发 --time，由站点 SLURM 分区默认墙钟决定（保持现状）。
     # 设了它，短任务声明短墙钟即可被共享集群的 backfill 优先插队（否则按分区默认墙钟算、
     # 几乎无法 backfill）。Docker/local 模式由调度器按此超时 kill（与 SLURM --time 对偶）。

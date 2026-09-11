@@ -42,6 +42,11 @@ export interface ClusterConfig {
   max_memory_demand: string;
   default_cpu_count: number;
   default_memory_demand: string;
+  // 多节点上限/默认（SLURM）。旧站点 yaml 未写时为 undefined，前端按 1（单节点）处理，
+  // 多节点表单入口隐藏；站点在 yaml 里配 max_node_count>1 才开放。
+  max_node_count?: number;
+  default_node_count?: number;
+  default_tasks_per_node?: number;
   default_runner: string;
   default_container_image: string;
   default_ephemeral_storage: string;
@@ -73,6 +78,10 @@ export const CLUSTER_CONFIG = parsedConfig;
 export const PHYSICAL_GPUS = CLUSTER_CONFIG.gpus;
 export const MAX_CPU_COUNT = CLUSTER_CONFIG.max_cpu_count;
 export const DEFAULT_CPU_COUNT = CLUSTER_CONFIG.default_cpu_count;
+// 多节点：旧站点 yaml 无此键 → undefined → 兜底 1（单节点），表单入口据此隐藏。
+export const MAX_NODE_COUNT = CLUSTER_CONFIG.max_node_count ?? 1;
+export const DEFAULT_NODE_COUNT = CLUSTER_CONFIG.default_node_count ?? 1;
+export const DEFAULT_TASKS_PER_NODE = CLUSTER_CONFIG.default_tasks_per_node ?? 1;
 export const DEFAULT_MEMORY = CLUSTER_CONFIG.default_memory_demand;
 export const DEFAULT_RUNNER = CLUSTER_CONFIG.default_runner;
 export const DEFAULT_CONTAINER_IMAGE = CLUSTER_CONFIG.default_container_image;

@@ -333,6 +333,14 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         slurm_cfg.setdefault("mem_mode", "explicit")
         slurm_cfg.setdefault("mem_per_cpu_mb", 4000)
         slurm_cfg.setdefault("module_loads", [])
+        # 多节点执行（node_count>1）时 wrapper 用 srun 跨节点铺 rank：
+        # - mpi_type：srun 的 --mpi 值（如 'pmix' / 'pmi2'）。None = 不加,用站点 srun 默认。
+        # - srun_extra_flags：追加到 srun 的逃生阀（站点相关地微调 --cpu-bind / --exclusive 等）。
+        # 单节点路径不涉及这两项，字节级不变。
+        slurm_cfg.setdefault("mpi_type", None)
+        slurm_cfg.setdefault("srun_extra_flags", [])
+        _check_key(slurm_cfg, "mpi_type", str, nullable=True)
+        _check_key(slurm_cfg, "srun_extra_flags", list)
         _check_key(slurm_cfg, "partition", str, nullable=True)
         _check_key(slurm_cfg, "qos", str, nullable=True)
         _check_key(slurm_cfg, "account", str, nullable=True)
@@ -347,7 +355,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
                 f"当前值: {slurm_cfg['mem_per_cpu_mb']}"
             )
         _check_key(slurm_cfg, "module_loads", list)
-        _warn_extra_keys(slurm_cfg, {"partition", "qos", "account", "mem_mode", "mem_per_cpu_mb", "module_loads"}, "execution.slurm")
+        _warn_extra_keys(slurm_cfg, {"partition", "qos", "account", "mem_mode", "mem_per_cpu_mb", "module_loads", "mpi_type", "srun_extra_flags"}, "execution.slurm")
         expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache", "slurm"}
 
     _warn_extra_keys(execution, expected_exec_keys, "execution")
@@ -375,6 +383,11 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         cluster.setdefault("default_container_image", "docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime")
         cluster.setdefault("default_ephemeral_storage", "10G")
         cluster.setdefault("default_system_entry_command", "")
+        # 多节点在 local(单机 Docker)模式无意义,给 1 保持 apply_cluster_defaults /
+        # validate_cluster_limits 两模式字段统一。
+        cluster.setdefault("max_node_count", 1)
+        cluster.setdefault("default_node_count", 1)
+        cluster.setdefault("default_tasks_per_node", 1)
         cluster.setdefault("registry_mirror", None)
     else:
         _check_key(config, "cluster", dict)
@@ -394,12 +407,22 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         cluster.setdefault("default_time_limit", None)
         _check_key(cluster, "max_time_limit", int, nullable=True)
         _check_key(cluster, "default_time_limit", int, nullable=True)
+        # 多节点（SLURM）资源上限/默认。max_node_count 默认 1 → 多节点在所有现存站点
+        # 默认关闭，只有显式抬高的站点（典型是共享超算租户）能申请多节点；单节点路径
+        # （node_count=1 && tasks_per_node=1）字节级不变。
+        cluster.setdefault("max_node_count", 1)
+        cluster.setdefault("default_node_count", 1)
+        cluster.setdefault("default_tasks_per_node", 1)
+        _check_key(cluster, "max_node_count", int)
+        _check_key(cluster, "default_node_count", int)
+        _check_key(cluster, "default_tasks_per_node", int)
         cluster.setdefault("registry_mirror", None)
         _check_key(cluster, "registry_mirror", str, nullable=True)
         _warn_extra_keys(cluster, {
             "name", "gpus", "max_cpu_count", "max_memory_demand", "max_time_limit",
             "default_cpu_count", "default_memory_demand", "default_time_limit", "default_runner",
             "default_container_image", "default_ephemeral_storage", "default_system_entry_command",
+            "max_node_count", "default_node_count", "default_tasks_per_node",
             "registry_mirror", "scheduling",
         }, "cluster")
 
@@ -501,6 +524,8 @@ def is_admin_user(user) -> bool:
 _CLUSTER_DEFAULT_FIELDS = [
     ("cpu_count", "default_cpu_count"),
     ("memory_demand", "default_memory_demand"),
+    ("node_count", "default_node_count"),
+    ("tasks_per_node", "default_tasks_per_node"),
     ("time_limit", "default_time_limit"),
     ("ephemeral_storage", "default_ephemeral_storage"),
     ("runner", "default_runner"),
@@ -582,6 +607,28 @@ def validate_cluster_limits(data: Dict[str, Any])-> None:
     requested_time = data.get("time_limit")
     if max_time is not None and requested_time is not None and requested_time > max_time:
         raise ValueError(f"time_limit={requested_time} exceeds cluster limit ({max_time} min)")
+
+    # 多节点上限。max_node_count 默认 1 → 抬高前任何 node_count>1 的提交都被挡下。
+    # tasks_per_node 只要求为正（每节点 rank 数由站点 node 的核数隐式约束）。
+    max_node = cluster["max_node_count"]
+    requested_nodes = data.get("node_count")
+    if requested_nodes is not None and requested_nodes < 1:
+        raise ValueError(f"node_count={requested_nodes} must be >= 1")
+    if requested_nodes is not None and requested_nodes > max_node:
+        raise ValueError(f"node_count={requested_nodes} exceeds cluster limit ({max_node})")
+    requested_tasks_per_node = data.get("tasks_per_node")
+    if requested_tasks_per_node is not None and requested_tasks_per_node < 1:
+        raise ValueError(f"tasks_per_node={requested_tasks_per_node} must be >= 1")
+    # tasks_per_node > 1 也会激活 wrapper 的 srun / sbatch 的 --ntasks-per-node 多节点路径
+    # （激活条件是 node_count>1 OR tasks_per_node>1），故必须同样受 max_node_count 安全阀
+    # 约束 —— 否则 max_node_count=1（多节点默认关闭）的站点仍能被 SDK/CLI 用
+    # tasks_per_node=N 触发未经该站点验证的多节点执行路径。多节点整体 gate 在
+    # max_node_count>1 之后。
+    if max_node <= 1 and requested_tasks_per_node is not None and requested_tasks_per_node > 1:
+        raise ValueError(
+            f"tasks_per_node={requested_tasks_per_node} requires this station to enable "
+            "multi-node (cluster.max_node_count > 1)"
+        )
 
     raw_gpu_type = data.get("gpu_type") or "cpu"
     gpu_type = raw_gpu_type.strip().lower()

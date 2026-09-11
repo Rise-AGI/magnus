@@ -65,6 +65,8 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
       job_type: full.job_type,
       cpu_count: full.cpu_count,
       memory_demand: full.memory_demand,
+      node_count: full.node_count,
+      tasks_per_node: full.tasks_per_node,
       time_limit: full.time_limit,
       ephemeral_storage: full.ephemeral_storage,
       runner: full.runner,

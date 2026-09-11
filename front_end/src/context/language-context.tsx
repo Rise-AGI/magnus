@@ -148,6 +148,10 @@ const translations = {
   "jobForm.gpuCount": { zh: "GPU 数量", en: "GPU Count" },
   "jobForm.cpuCores": { zh: "CPU 核心数", en: "CPU Cores" },
   "jobForm.cpuCoresHint": { zh: "设为 0 使用默认值 ({value})。", en: "Set to 0 for default ({value})." },
+  "jobForm.nodeCount": { zh: "节点数", en: "Nodes" },
+  "jobForm.nodeCountHint": { zh: "多节点 MPI 任务的节点数；默认 1（单节点）。每节点分配上面的 CPU 核心数。", en: "Nodes for multi-node MPI jobs; default 1 (single node). Each rank gets the CPU cores set above." },
+  "jobForm.tasksPerNode": { zh: "每节点任务数", en: "Tasks / Node" },
+  "jobForm.tasksPerNodeHint": { zh: "每节点的 MPI rank 数；默认 1。总 rank = 节点数 × 每节点任务数。", en: "MPI ranks per node; default 1. Total ranks = nodes × tasks/node." },
   "jobForm.memory": { zh: "内存", en: "Memory" },
   "jobForm.memoryDefault": { zh: "默认：{value}", en: "Default: {value}" },
   "jobForm.memoryPerCpuHint": { zh: "由 CPU 自动分配（每核 {value}）", en: "Auto-allocated per CPU ({value} each)" },
@@ -538,6 +542,7 @@ const translations = {
   "jobDetail.gpuCount": { zh: "GPU 数量", en: "GPU Count" },
   "jobDetail.cpuCores": { zh: "CPU 核心", en: "CPU Cores" },
   "jobDetail.memory": { zh: "内存", en: "Memory" },
+  "jobDetail.nodes": { zh: "节点 × 每节点任务", en: "Nodes × Tasks/Node" },
   "jobDetail.stationDefault": { zh: "（分区默认）", en: "(Station Default)" },
 
   // ===== Job Detail - Entry Command =====
