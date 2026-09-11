@@ -186,12 +186,30 @@ class SignalSafeSpinner:
 
 # === Job Index Resolution ===
 
+# job_id 由 secrets.token_hex(8) 生成，恒为 16 位十六进制。约 (10/16)^16 ≈ 0.05% 的
+# 概率会摇出**全是数字**的 ID（如 3689620425515827），这类 ID 是合法的、必须原样发给
+# 服务端；绝不能被下面的 int() 当成"索引/数字参数"吞掉。
+_JOB_ID_HEX_LEN = 16
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+
+
+def _looks_like_job_id(ref: str) -> bool:
+    """定长 16 位十六进制 token（含可能的全数字形态）即视为 job_id，据此与负索引区分。"""
+    return len(ref) == _JOB_ID_HEX_LEN and all(character in _HEX_DIGITS for character in ref)
+
+
 def _resolve_job_ref(ref: str) -> str:
     """
     解析 job 引用：
     - 负数索引：-1 = 最新，-2 = 第二新，...
     - 否则视为 job_id 原样返回
+
+    先按 16-hex 形状把 job_id 短路认出来——否则一个恰好全数字的合法 job_id 会被 int()
+    误判成索引，导致对它 kill/status/logs 静默走空或报"use negative index"的错话。
     """
+    if _looks_like_job_id(ref):
+        return ref
+
     try:
         idx = int(ref)
     except ValueError:
