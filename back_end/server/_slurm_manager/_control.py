@@ -50,6 +50,21 @@ class _ControlMixin:
         传 `python3 {wrapper_path}`，满足约束。
         """
         slurm_config = magnus_config["execution"]["slurm"]
+        cluster_config = magnus_config["cluster"]
+
+        # GPU 类型路由：gpus>0 时按 gpu_type 查 cluster.gpus 条目，用它声明的 partition
+        # （缺省回退 execution.slurm.partition）+ gres_type（缺省 = 类型名 → 带型号 gres，
+        # 显式 null → 无型号 gres）。CPU job 或无匹配条目（防御性）时下面 partition/gres
+        # 的取值与历史字节级一致。支持 CPU 与各 GPU 类型分处不同 SLURM 分区。
+        gpu_entry = None
+        if gpus > 0 and gpu_type and gpu_type != "cpu":
+            for candidate in cluster_config["gpus"]:
+                if str(candidate.get("value", "")).lower() == gpu_type.lower():
+                    gpu_entry = candidate
+                    break
+        effective_partition = slurm_config["partition"]
+        if gpu_entry is not None and gpu_entry.get("partition"):
+            effective_partition = gpu_entry["partition"]
 
         # module_loads：在 batch script 里、exec wrapper 之前注入 `module load` 行，
         # 让租户站点先把容器运行时（singularity）等放上 PATH。module_loads
@@ -71,7 +86,7 @@ class _ControlMixin:
         # partition / qos / account：租户站点的 SLURM 强制要求这三项；自有
         # 站点配为 None，不下发对应 flag，sbatch 行为与历史一致。
         for flag_name, flag_value in (
-            ("partition", slurm_config["partition"]),
+            ("partition", effective_partition),
             ("qos", slurm_config["qos"]),
             ("account", slurm_config["account"]),
         ):
@@ -85,8 +100,14 @@ class _ControlMixin:
             command.append("--open-mode=append")
 
         if gpus > 0:
-            if gpu_type and gpu_type != "cpu":
-                command.append(f"--gres=gpu:{gpu_type}:{gpus}")
+            # gres 型号：匹配到条目用其 gres_type（config 缺省 = value → 带型号；显式 null
+            # → 无型号）；无匹配条目（防御性）退回历史"按 gpu_type 带型号"行为。
+            if gpu_entry is not None:
+                gres_type = gpu_entry.get("gres_type")
+            else:
+                gres_type = gpu_type if (gpu_type and gpu_type != "cpu") else None
+            if gres_type:
+                command.append(f"--gres=gpu:{gres_type}:{gpus}")
             else:
                 command.append(f"--gres=gpu:{gpus}")
 

@@ -287,12 +287,12 @@ rootlesskit \
 ```bash
 sbatch --parsable \
   --job-name={task_name} \
-  [--partition={partition}] \            # execution.slurm.partition，为 null 时不下发
+  [--partition={partition}] \            # GPU 类型的 partition，否则 execution.slurm.partition；为 null 时不下发
   [--qos={qos}] \                        # execution.slurm.qos，为 null 时不下发
   [--account={account}] \                # execution.slurm.account，为 null 时不下发
   --output={work}/slurm/output.txt \
   [--open-mode=append] \                 # 非覆盖输出时
-  --gres=gpu:{gpu_type}:{gpu_count} \    # 仅 gpu_count > 0 时
+  --gres=gpu:[{gres_type}:]{gpu_count} \ # 仅 gpu_count > 0；无型号 gres 时省去型号名
   --mem={memory_demand} \                # 仅 explicit 内存模式（见下）
   --cpus-per-task={effective_cpu_count} \
   [--time={time_limit}] \                # 单 job 墙钟（分钟），为 null 时不下发
@@ -300,6 +300,8 @@ sbatch --parsable \
 ```
 
 `partition` / `qos` / `account` 仅在 `execution.slurm` 配了才下发；自有站点留 null、不带这些 flag（与历史命令字节级一致），共享集群租户场景在此显式设置。`execution.slurm.module_loads` 的每一项会作为 `module load ...` 前置进 batch 脚本，在运行时上 `PATH` 之前执行。
+
+**按 GPU 类型路由 partition + gres**（`cluster.gpus[]`）：每个 GPU 类型可声明可选的 `partition` 与 `gres_type`。job 请求某 GPU 类型时提交到该类型的 `partition`（未设则回退 `execution.slurm.partition`），`--gres` 用其 `gres_type` —— 缺省 = 类型名（`--gres=gpu:{value}:N`），显式 null 时为无型号 `--gres=gpu:N`。CPU job 以及没配 `partition` 的 GPU 类型都走默认分区。这让单个站点能驱动"CPU 与各 GPU 型号分处不同 SLURM 分区"的共享集群（如 CPU 走默认分区、A100-80G 走独立的 `gpu-a100` 分区且 gres 无型号），或在同一分区靠带型号 gres 承载多种 GPU（`--gres=gpu:rtx5090:N` vs `--gres=gpu:a100:N`）。单分区站点两个字段都不设、命令字节级不变。tenant 模式下 cluster 视图会把默认分区 + 每个不同 GPU 分区的容量与在跑任务聚合展示。
 
 **内存模式**（`execution.slurm.mem_mode`）：
 - `explicit`（默认，自有站点）：原样下发 `--mem={memory_demand}`，请求即分配。

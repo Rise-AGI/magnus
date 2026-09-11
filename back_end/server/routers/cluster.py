@@ -148,6 +148,21 @@ def _scheduler_sort_key(job):
     return (p_score, -job.created_at.timestamp())
 
 
+def _tenant_partitions() -> List[str]:
+    """本租户在共享集群上获授、需纳入 cluster 视图的 SLURM 分区集合：默认（CPU）分区
+    execution.slurm.partition 加上各 GPU 类型自带的 partition（cluster.gpus[]）。去重、
+    保序。GPU 与 CPU 同分区（gpus[].partition 未设）的站点回落成单分区，与历史一致。"""
+    parts: List[str] = []
+    default_partition = magnus_config["execution"]["slurm"]["partition"]
+    if default_partition:
+        parts.append(default_partition)
+    for gpu_entry in magnus_config["cluster"]["gpus"]:
+        gpu_partition = gpu_entry.get("partition")
+        if gpu_partition and gpu_partition not in parts:
+            parts.append(gpu_partition)
+    return parts
+
+
 @router.get(
     "/cluster/stats",
     response_model =ClusterStatsResponse,
@@ -167,16 +182,31 @@ def get_cluster_stats(
     # SlurmManager 涉及阻塞 Shell 命令，必须在线程池中运行 (def)
     slurm_manager = SlurmManager()
     is_tenant = magnus_config["cluster"]["scheduling"]["mode"] == "tenant"
-    # 租户模式 scope 到本租户获授的分区：运行任务 + 资源容量都只看这个分区，呈现真实的
-    # 同分区竞争态，而不把整个共享集群当成"我们的"。独占集群（authoritative）partition
-    # 为 None，看全量、容量取整集群节点快照。
-    tenant_partition = magnus_config["execution"]["slurm"]["partition"] if is_tenant else None
+    # 租户模式 scope 到本租户获授的分区：运行任务 + 资源容量都只看这些分区，呈现真实的
+    # 同分区竞争态，而不把整个共享集群当成"我们的"。CPU 与 GPU 分处不同 SLURM 分区的
+    # 站点（cluster.gpus[].partition）会有多个分区，逐个查询后聚合（按 job id 去重）。
+    # 独占集群（authoritative）分区列表为空，看全量、容量取整集群节点快照。
+    tenant_partitions = _tenant_partitions() if is_tenant else []
     cluster_stats_cache_ttl = magnus_config["server"]["scheduler"]["cluster_stats_cache_ttl"]
-    all_slurm_tasks = _cached_slurm_view(
-        ("running_tasks", tenant_partition),
-        cluster_stats_cache_ttl,
-        lambda: slurm_manager.get_all_running_tasks(partition=tenant_partition),
-    )
+    if tenant_partitions:
+        all_slurm_tasks = []
+        seen_task_ids = set()
+        for tenant_partition in tenant_partitions:
+            part_tasks = _cached_slurm_view(
+                ("running_tasks", tenant_partition),
+                cluster_stats_cache_ttl,
+                lambda tenant_partition=tenant_partition: slurm_manager.get_all_running_tasks(partition=tenant_partition),
+            )
+            for task in part_tasks:
+                if task["id"] not in seen_task_ids:
+                    seen_task_ids.add(task["id"])
+                    all_slurm_tasks.append(task)
+    else:
+        all_slurm_tasks = _cached_slurm_view(
+            ("running_tasks", None),
+            cluster_stats_cache_ttl,
+            lambda: slurm_manager.get_all_running_tasks(partition=None),
+        )
 
     running_slurm_ids = [task["id"] for task in all_slurm_tasks]
 
@@ -276,21 +306,33 @@ def get_cluster_stats(
     # 快照，与 used 同时刻）。GPU 与 used 取大，保证 total >= used —— used 走 squeue
     # job-level，CG 收尾期可能短暂超过快照容量（见 NodeSnapshot docstring）；cpu / mem
     # 直接用快照容量（分区 / 整集群的容量恒 >= 其自身 job 的 used 之和）。
-    if tenant_partition:
-        snapshot = _cached_slurm_view(
-            ("partition_snapshot", tenant_partition),
-            cluster_stats_cache_ttl,
-            lambda: slurm_manager.get_partition_snapshot(tenant_partition),
-        )
+    if tenant_partitions:
+        # 多分区（CPU + 各 GPU 分区）容量求和 = 本租户获授的总容量；单分区站点即单次迭代，
+        # 与历史一致。求和假定各分区节点不相交（本特性目标拓扑：CPU 与各 GPU 型号分处独立
+        # 节点池）；若某分区共享节点，其容量会被重复计入 total —— 仅影响展示，used 因按 job
+        # id 去重不受影响。
+        snap_total_gpus = snap_cpu_total = snap_mem_total_mb = 0
+        for tenant_partition in tenant_partitions:
+            part_snapshot = _cached_slurm_view(
+                ("partition_snapshot", tenant_partition),
+                cluster_stats_cache_ttl,
+                lambda tenant_partition=tenant_partition: slurm_manager.get_partition_snapshot(tenant_partition),
+            )
+            snap_total_gpus += part_snapshot.total_gpus
+            snap_cpu_total += part_snapshot.cpu_total
+            snap_mem_total_mb += part_snapshot.mem_total_mb
     else:
-        snapshot = _cached_slurm_view(
+        node_snapshot = _cached_slurm_view(
             ("node_snapshot", None),
             cluster_stats_cache_ttl,
             lambda: slurm_manager.get_node_snapshot(),
         )
-    display_total = max(snapshot.total_gpus, used_gpus)
-    cpu_total = snapshot.cpu_total
-    mem_total_mb = snapshot.mem_total_mb
+        snap_total_gpus = node_snapshot.total_gpus
+        snap_cpu_total = node_snapshot.cpu_total
+        snap_mem_total_mb = node_snapshot.mem_total_mb
+    display_total = max(snap_total_gpus, used_gpus)
+    cpu_total = snap_cpu_total
+    mem_total_mb = snap_mem_total_mb
     free_gpus = max(0, display_total - used_gpus)
 
     # --- 5. Running 列表分页切片 ---

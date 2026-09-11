@@ -287,12 +287,12 @@ rootlesskit \
 ```bash
 sbatch --parsable \
   --job-name={task_name} \
-  [--partition={partition}] \            # execution.slurm.partition, omitted when null
+  [--partition={partition}] \            # GPU type's partition, else execution.slurm.partition; omitted when null
   [--qos={qos}] \                        # execution.slurm.qos, omitted when null
   [--account={account}] \                # execution.slurm.account, omitted when null
   --output={work}/slurm/output.txt \
   [--open-mode=append] \                 # unless output is overwritten
-  --gres=gpu:{gpu_type}:{gpu_count} \    # only when gpu_count > 0
+  --gres=gpu:[{gres_type}:]{gpu_count} \ # only when gpu_count > 0; type name dropped for untyped gres
   --mem={memory_demand} \                # explicit mem_mode only (see below)
   --cpus-per-task={effective_cpu_count} \
   [--time={time_limit}] \                # per-job walltime in minutes, omitted when null
@@ -300,6 +300,8 @@ sbatch --parsable \
 ```
 
 `partition` / `qos` / `account` are emitted only when set under `execution.slurm`; self-owned sites leave them null and the flags are absent (byte-identical to the historical command). Tenant clusters that mandate them set them here. Any `execution.slurm.module_loads` entries are prepended to the batch script as `module load ...` lines before the runtime is on `PATH`.
+
+**Per-GPU-type partition + gres routing** (`cluster.gpus[]`): each GPU type may declare its own optional `partition` and `gres_type`. When a job requests that GPU type it is submitted to the type's `partition` (falling back to `execution.slurm.partition` when unset), and `--gres` uses its `gres_type` — the type name by default (`--gres=gpu:{value}:N`), or an untyped `--gres=gpu:N` when `gres_type` is null. CPU jobs, and GPU types without a `partition`, use the default partition. This lets one station drive a shared cluster that splits CPU and each GPU model into separate SLURM partitions (e.g. CPU jobs on the default partition, A100-80G jobs on a dedicated `gpu-a100` partition with untyped gres), or host multiple GPU models in one partition distinguished by typed gres (e.g. `--gres=gpu:rtx5090:N` vs `--gres=gpu:a100:N`). Single-partition sites set neither field and the command is byte-identical to before. In tenant mode the cluster view aggregates capacity and running tasks across the default partition plus every distinct GPU partition.
 
 **Memory mode** (`execution.slurm.mem_mode`):
 - `explicit` (default, self-owned sites): `--mem={memory_demand}` is passed verbatim — the request equals the allocation.

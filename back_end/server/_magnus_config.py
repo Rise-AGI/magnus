@@ -431,6 +431,20 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     # 集群的租户、只按 QOS 配额 eager 提交、把排队/backfill 交给外部 SLURM 自身
     # fairshare 调度（共享集群租户）。default authoritative 保持现状。local 与 HPC 两模式通用。
     cluster = config["cluster"]
+
+    # 每个 GPU 类型条目可带可选 partition / gres_type，支持 CPU 与 GPU 分处不同 SLURM
+    # 分区、以及 gres 不带型号的站点（典型是共享超算把 GPU 单列成独立分区）：
+    # - partition 缺省 None → 提交时回退 execution.slurm.partition（单分区站点字节级不变）；
+    #   非空 → 该 GPU 类型的 job 提交到这个分区（CPU job 仍走默认分区）。
+    # - gres_type 缺省 = value → `--gres=gpu:<value>:N`（现状）；显式 null → 无型号
+    #   `--gres=gpu:N`（分区已隔离该 GPU 类型、gres 不注册型号名的站点）。
+    for gpu_entry in cluster["gpus"]:
+        _check_key(gpu_entry, "value", str)
+        gpu_entry.setdefault("partition", None)
+        gpu_entry.setdefault("gres_type", gpu_entry["value"])
+        _check_key(gpu_entry, "partition", str, nullable=True)
+        _check_key(gpu_entry, "gres_type", str, nullable=True)
+
     cluster.setdefault("scheduling", {"mode": "authoritative"})
     scheduling = cluster["scheduling"]
     _check_key(scheduling, "mode", str)
