@@ -256,7 +256,22 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     # 高频 poll / 多查看者下的远端查询开销，代价是 cluster 页面至多陈旧这么多秒。
     scheduler_cfg.setdefault("cluster_stats_cache_ttl", 0)
     _check_key(scheduler_cfg, "cluster_stats_cache_ttl", int)
-    _warn_extra_keys(scheduler_cfg, {"heartbeat_interval", "snapshot_interval", "cluster_stats_cache_ttl"}, "server.scheduler")
+    # workspace_size_cap：持久 job 工作区（{root}/workspace/jobs，含每个 job 收尾后保留的
+    # 日志 / metrics / 结果标记）的总量上限。低频后台 janitor 超限时按 mtime 从最旧的终态
+    # job 目录起滚动淘汰（never 动活跃 job），把历史维持在上限内。缺省 "50G"；设为 None
+    # （YAML 里 ~ / null）关闭上限、无限保留。启动即校验能否解析成字节数，fail-fast 挡住笔误。
+    scheduler_cfg.setdefault("workspace_size_cap", "50G")
+    _check_key(scheduler_cfg, "workspace_size_cap", str, nullable=True)
+    if scheduler_cfg["workspace_size_cap"]:
+        # 启动即校验能否解析成字节数且为正,fail-fast 挡住笔误：畸形串（"50X"）在
+        # _parse_size_string 的 int() 抛错,"0" / 负值会让"超限"永假、一次性淘汰全部
+        # 终态历史 —— 关闭上限应显式设 null，而非 0。
+        if _parse_size_string(scheduler_cfg["workspace_size_cap"]) <= 0:
+            raise ValueError(
+                "❌ server.scheduler.workspace_size_cap 必须是正的大小串(如 '50G'),"
+                f"或设为 null 关闭上限；当前值: {scheduler_cfg['workspace_size_cap']!r}"
+            )
+    _warn_extra_keys(scheduler_cfg, {"heartbeat_interval", "snapshot_interval", "cluster_stats_cache_ttl", "workspace_size_cap"}, "server.scheduler")
 
     # service_proxy 配置
     service_proxy = server["service_proxy"]

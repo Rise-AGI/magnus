@@ -9,6 +9,7 @@
 - _submit.py:           PENDING job 提交到 SLURM/Docker
 - _resources.py:        镜像拉取 + 仓库 clone（Preparing → Pending）
 - _job_lifecycle.py:    success/OOM marker、working table 清理
+- _workspace_gc.py:     持久 job 工作区总量上限的低频滚动回收（size-capped LRU）
 - _staging.py:          远端执行（transport=ssh）下 job 工作区的跨界搬运（本机执行 no-op）
 - _wrapper_template.py: SLURM compute node 上 wrapper.py 源码生成器
 

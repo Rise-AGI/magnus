@@ -83,7 +83,7 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 |------|----------|--------|--------|------|
 | `{work}/repository/` | prepare → cleanup | resource_manager | 容器 (bind) | git checkout，容器内的工作目录 |
 | `{work}/wrapper.py` | submit → cleanup | scheduler | SLURM | 生成的执行入口 |
-| `{work}/slurm/output.txt` | submit → 永久 | SLURM | API (日志) | sbatch --output 指向此处 |
+| `{work}/slurm/output.txt` | submit → 保留(受 workspace_size_cap 淘汰) | SLURM | API (日志) | sbatch --output 指向此处 |
 | `{work}/.magnus_user_script.sh` | wrapper 执行 → cleanup | wrapper.py | 容器 (bind) | 用户入口脚本 |
 | `{work}/.magnus_success` | epilogue → sync_reality | wrapper.py | scheduler | 成功标记，存在即 SUCCESS |
 | `{work}/.magnus_oom` | epilogue（仅在 ret≠0 时写）→ sync_reality / cleanup | wrapper.py（探测 cgroup memory.events） | scheduler | OOM 标记，存在即表示 job 所在 cgroup 内发生过内核 OOM-kill；调度器据此把 `job.result` 改写为内存超限提示，覆盖通用 FAILED 字符串。Docker 模式改用 `docker inspect .State.OOMKilled` 取代此文件。 |
@@ -92,11 +92,13 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 | `{ephemeral}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | 可写层，job 结束后删除 |
 | `{ephemeral}/.magnus_tmp/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
 | `{ephemeral}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
-| `{work}/metrics/` | submit → 永久 | wrapper sidecar + 用户代码 | routers/metrics.py | Magnus Metrics Protocol v1 JSONL 指标文件 |
+| `{work}/metrics/` | submit → 保留(受 workspace_size_cap 淘汰) | wrapper sidecar + 用户代码 | routers/metrics.py | Magnus Metrics Protocol v1 JSONL 指标文件 |
 
 当 `ephemeral_root` 拆到独立盘时，`{ephemeral}/` 由后端账户创建，而 job 可能以别的 OS 用户运行，因此提交阶段给该目录授予与 working table 在仓库准备阶段相同的 runner + 后端账户 ACL（共享 `setfacl` helper）——runner 需在此创建 overlay / apptainer tmp，后端需在 cleanup 时回收它们。
 
 **cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。它是 keep-whitelist：只保留 `slurm/`、`metrics/`、`.magnus_result`、`.magnus_action`，working table 下其余一切都删——包括用户写进 workspace bind mount 的任意文件（例如直接把 checkpoint / 输出堆进 `$MAGNUS_HOME/workspace` 而不走 `file_custody` / `.magnus_result`）。`ephemeral_root` 拆分时独立的 `{ephemeral}/` 目录整体删除。
+
+保留下来的产物（`slurm/`、`metrics/`、marker）还受一个跨-job 的总量上限约束：`server.scheduler.workspace_size_cap` 限定 `workspace/jobs` 的总大小，低频调度 janitor（`_reclaim_workspace_over_cap`）在终态总量超限时按 mtime 从最旧的终态 job 目录起整目录淘汰——绝不碰活跃 job，且只删磁盘产物（DB job 记录保留）。
 
 ## 信号与终止
 
@@ -318,6 +320,7 @@ sbatch --parsable \
    - SLURM 报 FAILED/CANCELLED/TIMEOUT → FAILED
 2. **`_make_decisions`**: 调度 PENDING/PAUSED job
 3. **`_record_snapshot`**: 每 `snapshot_interval`（默认 300 秒）记录集群快照
+4. **`_reclaim_workspace_over_cap`**: 至多每小时一次，当 `workspace/jobs` 下终态 job 目录总量超过 `scheduler.workspace_size_cap` 时按最旧优先滚动淘汰
 
 ## 资源准备
 
@@ -399,6 +402,7 @@ server:
   scheduler:
     heartbeat_interval: 2                   # 心跳间隔 (秒)
     snapshot_interval: 300                  # 集群快照间隔 (秒)
+    workspace_size_cap: 50G                 # 终态 job 工作区目录总量上限 (LRU); null 关闭
     allow_root: false                       # 是否允许 root runner
   resource_cache:
     container_cache_size: 80G               # SIF 缓存上限 (LRU)

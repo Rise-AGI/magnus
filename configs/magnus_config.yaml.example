@@ -58,6 +58,14 @@ server:
                                  # Set to a few seconds on remote (transport: ssh)
                                  # sites to cut per-poll socket round-trips; the page
                                  # then trails reality by at most this many seconds.
+    workspace_size_cap: 50G      # total-size cap on the persistent job workspace
+                                 # ({server.root}/workspace/jobs, i.e. the per-job
+                                 # logs/metrics/result markers kept after a job ends).
+                                 # A low-frequency janitor evicts whole terminal-job
+                                 # dirs oldest-first once the total exceeds this, never
+                                 # touching active jobs. null disables the cap (retain
+                                 # everything). Only reclaims on-disk artifacts; DB job
+                                 # records are always kept.
   service_proxy:
     max_concurrency: 1024
   file_custody:

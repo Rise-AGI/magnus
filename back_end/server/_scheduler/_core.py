@@ -15,6 +15,7 @@ from ._decisions import _DecisionsMixin
 from ._resources import _ResourcesMixin
 from ._job_lifecycle import _JobLifecycleMixin
 from ._staging import _StagingMixin
+from ._workspace_gc import _WorkspaceGCMixin
 
 
 class MagnusScheduler(
@@ -24,6 +25,7 @@ class MagnusScheduler(
     _ResourcesMixin,
     _JobLifecycleMixin,
     _StagingMixin,
+    _WorkspaceGCMixin,
 ):
     """Job 调度器主类。
 
@@ -34,6 +36,7 @@ class MagnusScheduler(
     - _ResourcesMixin: 镜像拉取 + 仓库 clone (Preparing → Pending)
     - _JobLifecycleMixin: success/OOM marker、working table 清理
     - _StagingMixin: 远端执行（transport=ssh）下 job 工作区的跨界搬运（本机执行 no-op）
+    - _WorkspaceGCMixin: 持久 job 工作区总量上限的低频滚动回收
     """
 
     def __init__(self):
@@ -52,6 +55,7 @@ class MagnusScheduler(
                 self.enabled = False
             self.docker_manager = None
         self.last_snapshot_time = datetime.min.replace(tzinfo=timezone.utc)
+        self.last_workspace_gc_time = datetime.min.replace(tzinfo=timezone.utc)
         self.preparing_jobs: Dict[str, asyncio.Task] = {}  # job_id -> Task
         # preparing_jobs 被两类执行体并发动：调度循环（event loop，建/清 task）与
         # terminate_job（sync 端点，跑在 FastAPI 线程池）。用一把锁串起所有 dict 访问，
@@ -78,6 +82,9 @@ class MagnusScheduler(
             # scontrol，秒级，且 auto_connect 时可能触发 socket 重建）——同样丢线程池，
             # 否则会周期性阻塞 event loop。tick 串行执行，线程内独占无并发。
             await asyncio.to_thread(self._record_snapshot)
+            # 低频容量回收：内部按 _WORKSPACE_GC_INTERVAL_SECONDS 自节流，遍历 workspace
+            # 做 du 是阻塞 I/O，同 _sync/_record_snapshot 一样卸到线程池，不占 event loop。
+            await asyncio.to_thread(self._reclaim_workspace_over_cap)
         except Exception as error:
             logger.error(f"Scheduler tick failed: {error}", exc_info=True)
 

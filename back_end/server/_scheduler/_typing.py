@@ -37,6 +37,7 @@ class _SchedulerProtocol:
     docker_manager: Optional["DockerManager"]
     enabled: bool
     last_snapshot_time: datetime
+    last_workspace_gc_time: datetime
     preparing_jobs: Dict[str, asyncio.Task[Any]]
     _preparing_jobs_lock: "threading.Lock"
     _loop: Optional[asyncio.AbstractEventLoop]
@@ -97,6 +98,9 @@ class _SchedulerProtocol:
     def _stage_out_final(self, job_id: str) -> None: ...
     def _stage_out_custody(self, job_id: str) -> None: ...
     def _cleanup_remote_job(self, job_id: str) -> None: ...
+
+    # === _workspace_gc.py ===
+    def _reclaim_workspace_over_cap(self) -> None: ...
 
     # === _sync.py ===
     def _record_snapshot(self) -> None: ...

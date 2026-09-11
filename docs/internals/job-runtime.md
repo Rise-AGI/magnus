@@ -83,7 +83,7 @@ All paths are based on `{magnus_root}/workspace/jobs/{job_id}/` (abbreviated bel
 |------|----------|--------|--------|------|
 | `{work}/repository/` | prepare → cleanup | resource_manager | container (bind) | git checkout, the working directory inside the container |
 | `{work}/wrapper.py` | submit → cleanup | scheduler | SLURM | generated execution entry point |
-| `{work}/slurm/output.txt` | submit → permanent | SLURM | API (logs) | sbatch --output points here |
+| `{work}/slurm/output.txt` | submit → retained (until workspace_size_cap eviction) | SLURM | API (logs) | sbatch --output points here |
 | `{work}/.magnus_user_script.sh` | wrapper exec → cleanup | wrapper.py | container (bind) | user entry script |
 | `{work}/.magnus_success` | epilogue → sync_reality | wrapper.py | scheduler | success marker; its existence means SUCCESS |
 | `{work}/.magnus_oom` | epilogue (on non-zero ret) → sync_reality / cleanup | wrapper.py (cgroup memory.events probe) | scheduler | OOM marker; its existence means the kernel OOM-killed something inside the job's cgroup. Scheduler rewrites `job.result` to a memory-limit message instead of the generic FAILED string. Docker mode uses `docker inspect .State.OOMKilled` instead of this file. |
@@ -92,11 +92,13 @@ All paths are based on `{magnus_root}/workspace/jobs/{job_id}/` (abbreviated bel
 | `{ephemeral}/ephemeral_overlay.img` | Phase 2 → finally | wrapper shell | apptainer | writable layer, deleted after job ends |
 | `{ephemeral}/.magnus_tmp/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_TMPDIR |
 | `{ephemeral}/.magnus_cache/` | Phase 2 → cleanup | apptainer | apptainer | APPTAINER_CACHEDIR |
-| `{work}/metrics/` | submit → permanent | wrapper sidecar + user code | routers/metrics.py | Magnus Metrics Protocol v1 JSONL metrics files |
+| `{work}/metrics/` | submit → retained (until workspace_size_cap eviction) | wrapper sidecar + user code | routers/metrics.py | Magnus Metrics Protocol v1 JSONL metrics files |
 
 When `ephemeral_root` is split onto a separate disk, `{ephemeral}/` is created by the backend account but the job may run as a different OS user, so submission grants that dir the same runner + backend-account ACL the working table receives during repo preparation (shared `setfacl` helper) — the runner needs to create the overlay / apptainer tmp there, and the backend needs to reclaim them at cleanup.
 
 **cleanup** refers to `_clean_up_working_table()`, called when the job ends (SUCCESS/FAILED/TERMINATED/PAUSED). It is a keep-whitelist: only `slurm/`, `metrics/`, `.magnus_result` and `.magnus_action` survive; everything else under the working table is removed — including anything the user wrote into the workspace bind mount (e.g. checkpoints or outputs dumped straight into `$MAGNUS_HOME/workspace` instead of going through `file_custody` / `.magnus_result`). The separate `{ephemeral}/` dir is dropped wholesale when `ephemeral_root` is split out.
+
+The retained artifacts (`slurm/`, `metrics/`, markers) are additionally subject to a cross-job size cap: `server.scheduler.workspace_size_cap` bounds the total size of `workspace/jobs`, and a low-frequency scheduler janitor (`_reclaim_workspace_over_cap`) evicts whole terminal-job directories oldest-first by mtime once the terminal total exceeds it — active jobs are never touched, and only on-disk artifacts are removed (DB job records are kept).
 
 ## Signaling and Termination
 
@@ -318,6 +320,7 @@ Heartbeat interval is `scheduler.heartbeat_interval` (default 2 seconds); each t
    - SLURM reports FAILED/CANCELLED/TIMEOUT → FAILED
 2. **`_make_decisions`**: schedule PENDING/PAUSED jobs
 3. **`_record_snapshot`**: record a cluster snapshot every `snapshot_interval` (default 300 seconds)
+4. **`_reclaim_workspace_over_cap`**: at most hourly, evict oldest terminal-job directories under `workspace/jobs` while their total exceeds `scheduler.workspace_size_cap`
 
 ## Resource preparation
 
@@ -399,6 +402,7 @@ server:
   scheduler:
     heartbeat_interval: 2                   # heartbeat interval (seconds)
     snapshot_interval: 300                  # cluster snapshot interval (seconds)
+    workspace_size_cap: 50G                 # cap on terminal-job workspace dirs (LRU); null disables
     allow_root: false                       # whether to allow root runner
   resource_cache:
     container_cache_size: 80G               # SIF cache cap (LRU)
