@@ -337,6 +337,7 @@ sbatch --parsable \
 **仓库克隆** (`_resource_manager.ensure_repo`):
 - 缓存目录 `{magnus_root}/repo_cache/`，LRU 淘汰，上限 `resource_cache.repo_cache_size`
 - 缓存 → copy 到 `{work}/repository/` → fetch + checkout 到指定 commit SHA
+- clone 与 fetch 各有 3 次重试 + 指数退避；磁盘满直接失败，不重试
 - `setfacl` 设置 runner 用户权限（容器内以 runner 身份执行时需要）
 
 ## 子 Magnus (嵌套容器)

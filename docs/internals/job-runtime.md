@@ -337,6 +337,7 @@ Executed in parallel in the PREPARING phase:
 **Repo clone** (`_resource_manager.ensure_repo`):
 - Cache directory `{magnus_root}/repo_cache/`, LRU eviction, cap `resource_cache.repo_cache_size`
 - cache → copy to `{work}/repository/` → fetch + checkout to the specified commit SHA
+- Clone and fetch each get 3 retries + exponential backoff; an out-of-space failure fails immediately
 - `setfacl` sets runner user permissions (required when executing inside the container as the runner)
 
 ## Child Magnus (nested containers)

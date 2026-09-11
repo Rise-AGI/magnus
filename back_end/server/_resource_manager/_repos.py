@@ -6,7 +6,7 @@ import time
 import shutil
 import asyncio
 import functools
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from library import is_disk_full_stderr, disk_full_message
 
@@ -19,13 +19,21 @@ from ._config import (
     REPO_FRESHNESS_TTL_SECONDS,
     GIT_FETCH_MAX_RETRIES,
     GIT_FETCH_TIMEOUT_SECONDS,
+    GIT_CLONE_MAX_RETRIES,
     GIT_CAT_FILE_TIMEOUT_SECONDS,
     CACHE_FETCH_TIMESTAMP_FILENAME,
     FULL_SHA_PATTERN,
 )
 
 
-class _ReposMixin:
+if TYPE_CHECKING:
+    from ._typing import _ResourceManagerProtocol
+    _ReposMixinBase = _ResourceManagerProtocol
+else:
+    _ReposMixinBase = object
+
+
+class _ReposMixin(_ReposMixinBase):
 
     async def _resolve_default_branch(self, repo_url: str) -> Optional[str]:
         """
@@ -48,8 +56,12 @@ class _ReposMixin:
             except asyncio.TimeoutError:
                 logger.warning(f"git ls-remote timed out ({timeout_seconds}s), attempt {attempt + 1}/{max_retries}: {repo_url}")
                 if proc is not None:
-                    proc.kill()
-                    await proc.wait()
+                    # 进程可能已自行退出，ProcessLookupError 不该盖掉超时处理。
+                    try:
+                        proc.kill()
+                        await proc.wait()
+                    except ProcessLookupError:
+                        pass
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                 continue
@@ -125,8 +137,12 @@ class _ReposMixin:
         try:
             await asyncio.wait_for(proc.communicate(), timeout=GIT_CAT_FILE_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            # 进程可能已自行退出，ProcessLookupError 不该盖掉超时处理。
+            try:
+                proc.kill()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
             logger.warning(
                 f"git cat-file timed out ({GIT_CAT_FILE_TIMEOUT_SECONDS}s) "
                 f"on {cache_path} for {sha}; treating as miss"
@@ -150,8 +166,12 @@ class _ReposMixin:
                     proc.communicate(), timeout=GIT_FETCH_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+                # 进程可能已自行退出，ProcessLookupError 不该盖掉超时处理。
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except ProcessLookupError:
+                    pass
                 logger.warning(
                     f"git fetch timed out ({GIT_FETCH_TIMEOUT_SECONDS}s), "
                     f"attempt {attempt + 1}/{GIT_FETCH_MAX_RETRIES}: {repo_url}"
@@ -159,6 +179,15 @@ class _ReposMixin:
                 if attempt < GIT_FETCH_MAX_RETRIES - 1:
                     await asyncio.sleep(2 ** attempt)
                 continue
+            except asyncio.CancelledError:
+                # 优雅关闭：终止子进程，避免孤儿 git fetch。cache 目录是既有仓库，
+                # 中断留下的 pack 临时文件由 git 自身回收，无需清理。
+                try:
+                    proc.terminate()
+                    await proc.wait()
+                except ProcessLookupError:
+                    pass
+                raise
 
             if proc.returncode == 0:
                 return True
@@ -180,6 +209,75 @@ class _ReposMixin:
                 await asyncio.sleep(2 ** attempt)
 
         return False
+
+    async def _clone_into_cache(
+        self,
+        repo_url: str,
+        branch: str,
+        cache_path: str,
+    ) -> Tuple[bool, Optional[str]]:
+        """把仓库 clone 进 cache，带重试和指数退避。返回 (成功, 失败时的用户可见消息)。
+
+        重试语义与 _fetch_in_cache 对齐。首次 clone 同样要穿越上游 / 代理，而它是
+        传输量最大、最容易撞上瞬时故障（限流、连接重置）的那一次；不重试的话一次
+        抖动就让整个 job 失败。与 fetch 不同的是这里不设超时，理由见
+        GIT_CLONE_MAX_RETRIES 的注释。
+        """
+        clone_error = ""
+        for attempt in range(GIT_CLONE_MAX_RETRIES):
+            proc = await asyncio.create_subprocess_exec(
+                "git", "clone", "--branch", branch, "--single-branch", repo_url, cache_path,
+                stdout = asyncio.subprocess.DEVNULL,
+                stderr = asyncio.subprocess.PIPE,
+                env = _git_env,
+            )
+            try:
+                _, stderr = await proc.communicate()
+            except asyncio.CancelledError:
+                # 优雅关闭：先终止子进程，避免孤儿 git clone 继续往 cache 目录写，
+                # 再清掉半成品（顺序反了就是边写边删）。进程可能恰好已自行退出，
+                # terminate 的 ProcessLookupError 不能盖掉 CancelledError。
+                try:
+                    proc.terminate()
+                    await proc.wait()
+                except ProcessLookupError:
+                    pass
+                if os.path.exists(cache_path):
+                    shutil.rmtree(cache_path, ignore_errors=True)
+                raise
+
+            if proc.returncode == 0:
+                return True, None
+
+            clone_error = stderr.decode().strip()
+            # 失败会留下半个 cache 目录，而 git clone 拒绝写入已存在的非空目录 ——
+            # 不清掉的话后续重试（以及下一个 job）会连环失败在"目标已存在"上。
+            if os.path.exists(cache_path):
+                shutil.rmtree(cache_path, ignore_errors=True)
+                if os.path.exists(cache_path):
+                    # 清不掉（权限等）时后续重试必然栽在"目标已存在"上，那条消息还会
+                    # 把真正的根因从用户可见错误里挤掉 —— 带着真错误立刻停。
+                    logger.error(
+                        f"Clone cleanup left {cache_path} in place; "
+                        f"not retrying ({repo_url}): {clone_error}"
+                    )
+                    return False, f"git clone failed: {clone_error}"
+            # 磁盘满不会在 backoff 期间自愈 —— 和 fetch / image pull 同理，直接
+            # fail-fast，不烧 retry/backoff 预算。
+            if is_disk_full_stderr(clone_error):
+                logger.error(f"Clone aborted (disk full) ({repo_url}): {clone_error}")
+                return False, disk_full_message(magnus_repo_cache_path)
+            logger.warning(
+                f"Clone failed (rc={proc.returncode}), "
+                f"attempt {attempt + 1}/{GIT_CLONE_MAX_RETRIES}: {repo_url} — {clone_error}"
+            )
+            if attempt < GIT_CLONE_MAX_RETRIES - 1:
+                await asyncio.sleep(2 ** attempt)
+
+        logger.error(
+            f"Clone failed after {GIT_CLONE_MAX_RETRIES} attempts ({repo_url}): {clone_error}"
+        )
+        return False, f"git clone failed: {clone_error}"
 
     async def ensure_repo(
         self,
@@ -239,22 +337,13 @@ class _ReposMixin:
                 start_time = time.time()
                 logger.info(f"Cloning repo to cache: {repo_url} -> {cache_path}")
 
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "clone", "--branch", branch, "--single-branch", repo_url, cache_path,
-                    stdout = asyncio.subprocess.DEVNULL,
-                    stderr = asyncio.subprocess.PIPE,
-                    env = _git_env,
+                clone_ok, clone_error = await self._clone_into_cache(
+                    repo_url = repo_url,
+                    branch = branch,
+                    cache_path = cache_path,
                 )
-                _, stderr = await proc.communicate()
-
-                if proc.returncode != 0:
-                    clone_error = stderr.decode().strip()
-                    logger.error(f"Clone failed ({repo_url}): {clone_error}")
-                    if os.path.exists(cache_path):
-                        shutil.rmtree(cache_path, ignore_errors=True)
-                    if is_disk_full_stderr(clone_error):
-                        return False, disk_full_message(magnus_repo_cache_path), None
-                    return False, f"git clone failed: {clone_error}", None
+                if not clone_ok:
+                    return False, clone_error, None
 
                 elapsed = time.time() - start_time
                 logger.info(f"Repo cached: {cache_path} ({elapsed:.1f}s)")

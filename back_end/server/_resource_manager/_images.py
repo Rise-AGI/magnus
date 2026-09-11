@@ -6,7 +6,7 @@ import time
 import shutil
 import asyncio
 import tempfile
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from library import disk_free_bytes, is_disk_full_stderr, disk_full_message
 
@@ -15,7 +15,14 @@ from . import logger, magnus_apptainer_cache_path, magnus_container_cache_path
 from ._config import _rewrite_image_for_mirror, MIN_FREE_BYTES_FOR_PULL
 
 
-class _ImagesMixin:
+if TYPE_CHECKING:
+    from ._typing import _ResourceManagerProtocol
+    _ImagesMixinBase = _ResourceManagerProtocol
+else:
+    _ImagesMixinBase = object
+
+
+class _ImagesMixin(_ImagesMixinBase):
 
     async def ensure_image(self, image: str, force: bool = False) -> Tuple[bool, Optional[str]]:
         """
@@ -58,8 +65,13 @@ class _ImagesMixin:
         try:
             _, stderr = await proc.communicate()
         except asyncio.CancelledError:
-            proc.terminate()
-            await proc.wait()
+            # 进程可能恰好已自行退出，terminate 的 ProcessLookupError 不能盖掉
+            # CancelledError。
+            try:
+                proc.terminate()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
             raise
 
         if proc.returncode != 0:
@@ -141,9 +153,14 @@ class _ImagesMixin:
                     try:
                         _, stderr = await proc.communicate()
                     except asyncio.CancelledError:
-                        # 优雅关闭：终止子进程，避免孤儿 apptainer 进程
-                        proc.terminate()
-                        await proc.wait()
+                        # 优雅关闭：终止子进程，避免孤儿 apptainer 进程。进程可能恰好
+                        # 已自行退出，terminate 的 ProcessLookupError 不能盖掉
+                        # CancelledError。
+                        try:
+                            proc.terminate()
+                            await proc.wait()
+                        except ProcessLookupError:
+                            pass
                         if os.path.exists(pull_dest):
                             try:
                                 os.remove(pull_dest)

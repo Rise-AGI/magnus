@@ -75,6 +75,10 @@ DEFAULT_BRANCH_CACHE_TTL_SECONDS = 300
 GIT_FETCH_MAX_RETRIES = 3
 GIT_FETCH_TIMEOUT_SECONDS = 30
 
+# 首次 clone 的重试次数（与 fetch 对齐）。clone 不设超时 —— 它要拉全量历史，
+# 大仓库的正常耗时远超 fetch 的 30s 阈值，设了会把"慢"误判成"坏"。
+GIT_CLONE_MAX_RETRIES = 3
+
 # cat-file 只读本地 object db，正常毫秒级；这里只是为了在 NFS / 盘满等异常
 # I/O 场景下避免无限期阻塞整个 fanout（此 subprocess 是在 repo_lock 内调用）
 GIT_CAT_FILE_TIMEOUT_SECONDS = 5
