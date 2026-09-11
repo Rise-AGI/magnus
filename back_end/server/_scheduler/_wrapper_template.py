@@ -85,10 +85,16 @@ def _build_wrapper_content(
     runtime_var_prefix = container_runtime.upper()
     runtime_env_prefix = f"{runtime_var_prefix}ENV"
 
-    # 每-rank 启动器（仅多节点）。shell 引导层里那句 <PREFIX>ENV_CUDA_VISIBLE_DEVICES 是在
-    # batch 脚本里算的 —— 只有 node 0 执行它，srun 再把这份环境原样铺给所有 rank，于是别的
-    # 节点上的容器会拿到 node 0 的卡号。改成由每个 rank 在自己的节点上跑这个启动器，用本
-    # task 的 CUDA_VISIBLE_DEVICES（SLURM 按节点设的真值）重算一次再 exec 真正的容器命令。
+    # 每-rank 启动器（仅多节点）。它由 srun 在**每个节点**上执行，因此能看到 SLURM 为本
+    # task 设的真实环境；node 0 的 batch 脚本看不到别的节点的那一份。启动器做两件事：
+    #
+    # (1) CUDA_VISIBLE_DEVICES：shell 引导层里那句 <PREFIX>ENV_CUDA_VISIBLE_DEVICES 是在
+    #     batch 脚本里算的，srun 把这份环境原样铺给所有 rank，别的节点上的容器就会拿到
+    #     node 0 的卡号。这里用本 task 的值重算一次。
+    # (2) SLURM_* / PMI_* / PMIX_*：容器运行时会清掉宿主环境（实测容器内这些变量一个不剩），
+    #     而 MPI 程序正是靠它们完成 PMI 引导 —— 不转发的话跨节点的 rank 各自以为自己是
+    #     单进程作业，多节点退化成"同时跑 N 份"。逐个转成 <PREFIX>ENV_* 注进容器。
+    #
     # heredoc 分隔符加引号 → 内容一律不在 node 0 展开；`exec "$@"` 让启动器对容器命令本身
     # 完全透明（参数由 node 0 的 $APPTAINER_CMD 词法切分后原样传入）。
     if _is_multinode:
@@ -98,6 +104,9 @@ def _build_wrapper_content(
 if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
     export {runtime_env_prefix}_CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES"
 fi
+while IFS='=' read -r _name _value; do
+    [ -n "$_name" ] && export "{runtime_env_prefix}_$_name=$_value"
+done < <(env | grep -E '^(SLURM_|PMI_|PMIX_)')
 exec "$@"
 MAGNUS_RANK_LAUNCH_EOF
 
