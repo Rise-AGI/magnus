@@ -40,7 +40,8 @@ def _build_wrapper_content(
     # PMIx 引导。单节点(1,1)时下面所有多节点分量都是空串，生成的 wrapper 与历史字节级一致。
     #
     # 多节点契约（与单节点不同，须写进用户文档）：entry_command 由 srun **每 rank 跑一次**、
-    # 是一个 MPI 程序，而非用户自己在单容器内调 mpiexec。
+    # 是一个 MPI 程序，而非用户自己在单容器内调 mpiexec。gpu_count 也按 SLURM 的 --gres
+    # 语义解释为**每节点**卡数，全任务总卡数 = node_count × gpu_count。
     #
     # 已知局限（v1，留待真集群迭代，仅多节点路径受影响、单节点不涉及）：
     # - metrics sidecar 只在 batch step 所在的 node 0 采样；
@@ -48,9 +49,8 @@ def _build_wrapper_content(
     #   （硬杀走 scancel --signal=KILL --full 覆盖全节点，不受影响）；
     # - MAGNUS_NET_MODE=bridge 与多节点不兼容（会变成 rootlesskit 套 srun，语义不通），
     #   但 bridge（本地端口发布）与 HPC 跨节点 MPI 实际互斥、不会共用；
-    # - GPU：多节点下 node 0 的 CUDA_VISIBLE_DEVICES 会被 srun 广播给所有 rank（首个租户
-    #   wm2 是 CPU-only 分区、且 CPU job 有 `[ -n "$CUDA_VISIBLE_DEVICES" ]` 守卫不受影响）
-    #   —— 接入多节点 GPU 前须先解决。
+    # - GPU metrics 只反映 node 0 分到的卡（sidecar 同样只在 node 0 采样）；各 rank 容器内
+    #   看到的卡是对的（见下方每-rank 启动器），只是非 node 0 的没被采集。
     _is_multinode = (node_count is not None and node_count > 1) or (
         tasks_per_node is not None and tasks_per_node > 1
     )
@@ -84,6 +84,28 @@ def _build_wrapper_content(
     runtime_binary = container_runtime
     runtime_var_prefix = container_runtime.upper()
     runtime_env_prefix = f"{runtime_var_prefix}ENV"
+
+    # 每-rank 启动器（仅多节点）。shell 引导层里那句 <PREFIX>ENV_CUDA_VISIBLE_DEVICES 是在
+    # batch 脚本里算的 —— 只有 node 0 执行它，srun 再把这份环境原样铺给所有 rank，于是别的
+    # 节点上的容器会拿到 node 0 的卡号。改成由每个 rank 在自己的节点上跑这个启动器，用本
+    # task 的 CUDA_VISIBLE_DEVICES（SLURM 按节点设的真值）重算一次再 exec 真正的容器命令。
+    # heredoc 分隔符加引号 → 内容一律不在 node 0 展开；`exec "$@"` 让启动器对容器命令本身
+    # 完全透明（参数由 node 0 的 $APPTAINER_CMD 词法切分后原样传入）。
+    if _is_multinode:
+        rank_launch_path = "{work_dir}/.magnus_rank_launch.sh"
+        multinode_rank_launch_block = f"""cat > {rank_launch_path} <<'MAGNUS_RANK_LAUNCH_EOF'
+#!/bin/bash
+if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
+    export {runtime_env_prefix}_CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES"
+fi
+exec "$@"
+MAGNUS_RANK_LAUNCH_EOF
+
+"""
+        rank_launch_prefix = f"bash {rank_launch_path} "
+    else:
+        multinode_rank_launch_block = ""
+        rank_launch_prefix = ""
 
     # 容器内 user-script 前导追加的两段 shell。
     # (1) 平台 sdk 注入（SLURM 执行通用，owned 本机 + 远端租户）：若 .magnus_sdk 已随工作区进容器，把它顶到
@@ -663,7 +685,7 @@ if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
     APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
 fi
 
-APPTAINER_CMD="{srun_prefix}{runtime_binary} exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
+{multinode_rank_launch_block}APPTAINER_CMD="{srun_prefix}{rank_launch_prefix}{runtime_binary} exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     ROOTLESSKIT_FLAGS="--net=slirp4netns --port-driver=builtin --publish $MAGNUS_PORT_MAP"
