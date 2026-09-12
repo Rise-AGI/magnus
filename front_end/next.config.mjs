@@ -36,6 +36,8 @@ const clusterConfig = {
   ...magnusConfig.cluster,
   mem_mode: slurmConfig.mem_mode ?? 'explicit',
   mem_per_cpu_mb: slurmConfig.mem_per_cpu_mb ?? 4000,
+  // 展示时区从 server.display_timezone 注入（后端同名配置项是唯一真源，缺省 UTC+8）。
+  display_timezone: magnusConfig.server.display_timezone ?? 'Asia/Shanghai',
 };
 
 /** @type {import('next').NextConfig} */

@@ -3,7 +3,7 @@
 
 import { useRouter } from "next/navigation";
 import { RefreshCw, Trash2, Dna } from "lucide-react";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
@@ -69,7 +69,7 @@ export function SkillTable({
             )}
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                {skill.user && <UserAvatar user={skill.user} subText={formatBeijingTime(skill.updated_at)} />}
+                {skill.user && <UserAvatar user={skill.user} subText={formatStationTime(skill.updated_at)} />}
               </div>
               <div className="flex gap-2 shrink-0">
                 <button onClick={(e) => { e.stopPropagation(); onClone(skill); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95" title={t("skills.clone")}>
@@ -149,7 +149,7 @@ export function SkillTable({
                         entityId={skill.id}
                         entityTitle={skill.title}
                         avatarSize="sm"
-                        subText={formatBeijingTime(skill.updated_at)}
+                        subText={formatStationTime(skill.updated_at)}
                         onTransferred={() => onRefresh?.()}
                       />
                     </div>

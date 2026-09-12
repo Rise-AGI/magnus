@@ -9,7 +9,7 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { UserAvatar } from "@/components/ui/user-avatar";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { useLanguage } from "@/context/language-context";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useFromHref } from "@/hooks/use-from-href";
@@ -85,7 +85,7 @@ export function ServiceTable({
               )}
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  {svc.owner && <UserAvatar user={svc.owner} subText={formatBeijingTime(svc.updated_at)} />}
+                  {svc.owner && <UserAvatar user={svc.owner} subText={formatStationTime(svc.updated_at)} />}
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button onClick={(e) => { e.stopPropagation(); onClone(svc); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95">
@@ -237,7 +237,7 @@ export function ServiceTable({
                         entityId={svc.id}
                         entityTitle={svc.name}
                         avatarSize="sm"
-                        subText={formatBeijingTime(svc.updated_at)}
+                        subText={formatStationTime(svc.updated_at)}
                         onTransferred={() => onRefresh?.()}
                       />
                     </div>

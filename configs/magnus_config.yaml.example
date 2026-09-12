@@ -22,6 +22,12 @@ server:
   # custody instead of inlining. defaults shown; omit to keep them.
   # max_field_bytes: 65536
   # max_large_field_bytes: 1048576
+  # timezone the web UI renders timestamps in (IANA name). Everything is stored and
+  # served as UTC instants; this only decides which wall clock they are shown on.
+  # Defaults to Asia/Shanghai. Point it at the cluster's own zone so the UI agrees
+  # with SLURM output and node logs. This is the single source of truth -- the
+  # frontend reads it from here at build time.
+  # display_timezone: Asia/Shanghai
   cors_origins:
     - http://your-server-ip:3011       # production frontend
     - http://localhost:3013            # dev frontend (port+2)

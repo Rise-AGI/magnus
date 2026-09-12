@@ -12,7 +12,7 @@ import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { UserAvatar } from "@/components/ui/user-avatar";
 import { PersonHoverCard } from "@/components/ui/person-hover-card";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useFromHref } from "@/hooks/use-from-href";
@@ -93,11 +93,11 @@ export function JobTable({
                       warm={{ name: job.user.name, avatar_url: job.user.avatar_url ?? null }}
                     >
                       <span className="inline-flex">
-                        <UserAvatar user={job.user} subText={formatBeijingTime(job.created_at)} />
+                        <UserAvatar user={job.user} subText={formatStationTime(job.created_at)} />
                       </span>
                     </PersonHoverCard>
                   ) : (
-                    <UserAvatar user={job.user} subText={formatBeijingTime(job.created_at)} />
+                    <UserAvatar user={job.user} subText={formatStationTime(job.created_at)} />
                   )}
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
@@ -244,14 +244,14 @@ export function JobTable({
                           <span className="inline-flex">
                             <UserAvatar
                               user={job.user}
-                              subText={formatBeijingTime(job.created_at)}
+                              subText={formatStationTime(job.created_at)}
                             />
                           </span>
                         </PersonHoverCard>
                       ) : (
                         <UserAvatar
                           user={job.user}
-                          subText={formatBeijingTime(job.created_at)}
+                          subText={formatStationTime(job.created_at)}
                         />
                       )}
                     </div>

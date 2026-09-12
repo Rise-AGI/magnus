@@ -2,7 +2,7 @@
 "use client";
 
 import { RefreshCw, Trash2, Container, Loader2 } from "lucide-react";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
@@ -117,10 +117,10 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                         email: img.user.email || undefined,
                         avatar_url: img.user.avatar_url || undefined,
                       } as User}
-                      subText={img.updated_at ? formatBeijingTime(img.updated_at) : "-"}
+                      subText={img.updated_at ? formatStationTime(img.updated_at) : "-"}
                     />
                   ) : (
-                    <span className="text-xs text-zinc-500">{img.updated_at ? formatBeijingTime(img.updated_at) : "-"}</span>
+                    <span className="text-xs text-zinc-500">{img.updated_at ? formatStationTime(img.updated_at) : "-"}</span>
                   )}
                 </div>
                 {img.id !== null && (
@@ -195,7 +195,7 @@ export function ImageTable({ data, loading, onView, onDelete, onRefresh }: Image
                           entityId={String(img.id)}
                           entityTitle={img.filename}
                           avatarSize="sm"
-                          subText={img.updated_at ? formatBeijingTime(img.updated_at) : ""}
+                          subText={img.updated_at ? formatStationTime(img.updated_at) : ""}
                           onTransferred={() => onRefresh?.()}
                         />
                       ) : (

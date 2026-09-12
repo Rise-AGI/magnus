@@ -1,10 +1,10 @@
 # back_end/server/models/_explorer.py
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, text
+from sqlalchemy import Boolean, ForeignKey, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
-from ._helpers import generate_hex_id
+from ._helpers import generate_hex_id, UtcDateTime
 
 
 class ExplorerSession(Base):
@@ -14,8 +14,8 @@ class ExplorerSession(Base):
     user: Mapped["User"] = relationship("User")
     title: Mapped[str] = mapped_column(String, default="New Session")
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     messages: Mapped[list["ExplorerMessage"]] = relationship(
         back_populates = "session",
         cascade = "all, delete-orphan",
@@ -30,4 +30,4 @@ class ExplorerMessage(Base):
     session: Mapped["ExplorerSession"] = relationship(back_populates="messages")
     role: Mapped[str] = mapped_column(String)
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))

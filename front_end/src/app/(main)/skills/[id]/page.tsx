@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 import { client } from "@/lib/api";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { useLanguage } from "@/context/language-context";
 import { NotFound } from "@/components/ui/not-found";
 import { PageLoader } from "@/components/ui/page-loader";
@@ -257,7 +257,7 @@ export default function SkillDetailPage() {
                <span className="text-zinc-700 hidden md:inline">|</span>
                <span className="flex items-center gap-1.5">
                  <Clock className="w-3.5 h-3.5" />
-                 {formatBeijingTime(skill.updated_at)}
+                 {formatStationTime(skill.updated_at)}
                </span>
             </div>
           </div>

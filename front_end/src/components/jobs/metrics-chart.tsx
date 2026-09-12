@@ -10,6 +10,7 @@ import { POLL_INTERVAL } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
 import { BarChart3, Clock, Hash } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { formatStationClockSeconds } from "@/lib/utils";
 
 
 interface MetricStream {
@@ -44,8 +45,7 @@ function labelsKey(labels: Record<string, string>): string {
 }
 
 function formatTime(ms: number): string {
-  const d = new Date(ms);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return formatStationClockSeconds(ms);
 }
 
 function formatValue(v: number, unit: string | null): string {

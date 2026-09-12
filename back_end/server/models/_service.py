@@ -1,9 +1,10 @@
 # back_end/server/models/_service.py
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Enum as SQLEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
+from ._helpers import UtcDateTime
 from ._job import JobType
 
 
@@ -15,7 +16,7 @@ class Service(Base):
     name: Mapped[str] = mapped_column(String)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_activity_time: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_activity_time: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
     current_job_id: Mapped[str | None] = mapped_column(String, ForeignKey("jobs.id"), nullable=True)
     current_job: Mapped["Job"] = relationship()
     assigned_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -38,4 +39,4 @@ class Service(Base):
     runner: Mapped[str | None] = mapped_column(String, nullable=True)
     container_image: Mapped[str | None] = mapped_column(String, nullable=True)
     system_entry_command: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))

@@ -58,10 +58,7 @@ class ServiceManager:
                     db.add(service)
 
                 elif job.status == JobStatus.RUNNING:
-                    last_activity = service.last_activity_time
-                    if last_activity and last_activity.tzinfo is None:
-                        last_activity = last_activity.replace(tzinfo=timezone.utc)
-                    idle_duration = (now - last_activity).total_seconds()
+                    idle_duration = (now - service.last_activity_time).total_seconds()
                     idle_limit_seconds = service.idle_timeout * 60
 
                     # 约定 idle_timeout=0 表示永不 Scale Down

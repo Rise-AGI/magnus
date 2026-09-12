@@ -17,7 +17,7 @@ import { useLanguage } from "@/context/language-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { usePolling } from "@/hooks/use-polling";
 import { useUrlPagination } from "@/hooks/use-url-pagination";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 
 import { User } from "@/types/auth";
 
@@ -320,7 +320,7 @@ export default function ImagesPage() {
                     <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("images.detail.created")}</label>
                     <span className="text-sm text-zinc-400 font-mono flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5" />
-                      {formatBeijingTime(viewingImage.created_at)}
+                      {formatStationTime(viewingImage.created_at)}
                     </span>
                   </div>
                 )}
@@ -329,7 +329,7 @@ export default function ImagesPage() {
                     <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">{t("images.detail.updated")}</label>
                     <span className="text-sm text-zinc-400 font-mono flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5" />
-                      {formatBeijingTime(viewingImage.updated_at)}
+                      {formatStationTime(viewingImage.updated_at)}
                     </span>
                   </div>
                 )}

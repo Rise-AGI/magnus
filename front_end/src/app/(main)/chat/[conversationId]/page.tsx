@@ -7,7 +7,7 @@ import { client } from "@/lib/api";
 import { API_BASE } from "@/lib/config";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { ConversationSettingsDrawer } from "@/components/chat/conversation-settings-drawer";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { PersonHoverCard } from "@/components/ui/person-hover-card";
@@ -493,7 +493,7 @@ export default function ConversationPage() {
                   <div className="flex items-center justify-center my-4 gap-3">
                     <div className="flex-1 h-px bg-zinc-800/60" />
                     <span className="text-[10px] text-zinc-600 px-1 flex-shrink-0 tabular-nums">
-                      {formatBeijingTime(msg.created_at)}
+                      {formatStationTime(msg.created_at)}
                     </span>
                     <div className="flex-1 h-px bg-zinc-800/60" />
                   </div>

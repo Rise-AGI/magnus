@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { Bell, Check, Info, AlertCircle, X, CheckCheck } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { useLanguage } from "@/context/language-context";
+import { formatStationClock } from "@/lib/utils";
 
 // --- Types ---
 // ! PROTECTED: Schema aligned with potential backend response.
@@ -62,9 +63,7 @@ export function NotificationsPopover() {
     }
   };
 
-  const formatTime = (isoString: string) => {
-    return new Date(isoString).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  };
+  const formatTime = (isoString: string) => formatStationClock(isoString);
 
   return (
     <Popover.Root>

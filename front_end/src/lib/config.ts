@@ -55,6 +55,8 @@ export interface ClusterConfig {
   // 内存按「核数 × mem_per_cpu_mb」由站点自动分配，不是独立可调字段。
   mem_mode: string;
   mem_per_cpu_mb: number;
+  // 展示时区（IANA 名），由 next.config.mjs 从后端 server.display_timezone 注入。
+  display_timezone?: string;
 }
 
 const clusterConfigJson = requireEnv(
@@ -76,6 +78,9 @@ if (!parsedConfig.gpus) {
 export const CLUSTER_CONFIG = parsedConfig;
 
 export const PHYSICAL_GPUS = CLUSTER_CONFIG.gpus;
+// 全站展示时间统一用它渲染（见 lib/utils.ts）。后端 server.display_timezone 是唯一真源；
+// 这里的兜底只在旧 yaml 没有该键时生效，与后端默认值保持一致。
+export const DISPLAY_TIMEZONE = CLUSTER_CONFIG.display_timezone ?? "Asia/Shanghai";
 export const MAX_CPU_COUNT = CLUSTER_CONFIG.max_cpu_count;
 export const DEFAULT_CPU_COUNT = CLUSTER_CONFIG.default_cpu_count;
 // 多节点：旧站点 yaml 无此键 → undefined → 兜底 1（单节点），表单入口据此隐藏。

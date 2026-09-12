@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 
 import { client } from "@/lib/api";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { useLanguage } from "@/context/language-context";
 import { POLL_INTERVAL } from "@/lib/config";
 
@@ -261,7 +261,7 @@ export default function ServiceDetailsPage() {
               <span className="text-zinc-700 hidden md:inline">|</span>
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
-                {formatBeijingTime(service.updated_at)}
+                {formatStationTime(service.updated_at)}
               </span>
             </div>
           </div>

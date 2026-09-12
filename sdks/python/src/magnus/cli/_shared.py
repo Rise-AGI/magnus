@@ -326,6 +326,11 @@ def _format_time(iso_str: Optional[str]) -> str:
         return "-"
     try:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        # 服务端发的是带偏移量的时刻，换算到本机时区再显示；否则 UTC 会被原样当成
+        # 墙上时间示人。老服务端可能仍发不带偏移量的裸时间，那种情况无从判断时区，
+        # 只能原样显示。
+        if dt.tzinfo is not None:
+            dt = dt.astimezone()
         return dt.strftime("%m-%d %H:%M")
     except Exception:
         return iso_str[:16]

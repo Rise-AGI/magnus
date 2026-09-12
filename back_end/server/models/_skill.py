@@ -1,9 +1,10 @@
 # back_end/server/models/_skill.py
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
+from ._helpers import UtcDateTime
 
 
 class Skill(Base):
@@ -13,8 +14,8 @@ class Skill(Base):
     description: Mapped[str] = mapped_column(String)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     user: Mapped["User"] = relationship("User")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     files: Mapped[list["SkillFile"]] = relationship(
         back_populates="skill",
         cascade="all, delete-orphan",
@@ -28,4 +29,4 @@ class SkillFile(Base):
     skill: Mapped["Skill"] = relationship(back_populates="files")
     path: Mapped[str] = mapped_column(String)
     content: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

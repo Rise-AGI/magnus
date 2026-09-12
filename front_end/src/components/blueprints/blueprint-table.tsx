@@ -3,7 +3,7 @@
 
 import { useRouter } from "next/navigation";
 import { Play, RefreshCw, Trash2, FileCode } from "lucide-react";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
 import { TransferableAuthor } from "@/components/ui/transferable-author";
@@ -71,7 +71,7 @@ export function BlueprintTable({
             )}
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                {bp.user && <UserAvatar user={bp.user} subText={formatBeijingTime(bp.updated_at)} />}
+                {bp.user && <UserAvatar user={bp.user} subText={formatStationTime(bp.updated_at)} />}
               </div>
               <div className="flex gap-2 shrink-0">
                 <button onClick={(e) => { e.stopPropagation(); onClone(bp); }} className="p-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 border border-zinc-700/50 active:scale-95" title={t("blueprints.clone")}>
@@ -154,7 +154,7 @@ export function BlueprintTable({
                         entityId={bp.id}
                         entityTitle={bp.title}
                         avatarSize="sm"
-                        subText={formatBeijingTime(bp.updated_at)}
+                        subText={formatStationTime(bp.updated_at)}
                         onTransferred={() => onRefresh?.()}
                       />
                     </div>

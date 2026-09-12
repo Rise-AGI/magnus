@@ -13,7 +13,7 @@ import { client } from "@/lib/api";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { POLL_INTERVAL } from "@/lib/config";
 import { Job } from "@/types/job";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { AvatarCircle } from "@/components/ui/user-avatar";
@@ -355,7 +355,7 @@ export default function JobDetailsPage() {
               <span className="text-zinc-700 hidden md:inline">|</span>
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
-                {formatBeijingTime(job.created_at)}
+                {formatStationTime(job.created_at)}
               </span>
             </div>
 

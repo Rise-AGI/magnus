@@ -1,10 +1,10 @@
 # back_end/server/models/_user.py
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
-from ._helpers import generate_hex_id
+from ._helpers import generate_hex_id, UtcDateTime
 
 
 class User(Base):
@@ -14,7 +14,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String)
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
     token: Mapped[str | None] = mapped_column(String, nullable=True)
     user_type: Mapped[str] = mapped_column(String, default="human")
     parent_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)

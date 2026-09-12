@@ -12,7 +12,7 @@ import { AvatarCircle } from "@/components/ui/user-avatar";
 import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import { UserDetail } from "@/types/auth";
 
 
@@ -354,7 +354,7 @@ export function PeopleDrawer({ isOpen, onClose, user, onRefresh }: PeopleDrawerP
                 {/* Joined */}
                 <div className="flex items-baseline gap-5">
                   <span className="text-sm font-medium text-zinc-300 shrink-0">{t("people.drawer.created")}</span>
-                  <span className="text-sm text-zinc-400 font-mono">{formatBeijingTime(user.created_at)}</span>
+                  <span className="text-sm text-zinc-400 font-mono">{formatStationTime(user.created_at)}</span>
                 </div>
               </div>
             </div>

@@ -4,7 +4,7 @@ import json
 import subprocess
 import traceback
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from .._magnus_config import magnus_config
@@ -438,10 +438,13 @@ class _ResourceQueryMixin:
                     # _unwrap_slurm_int 兼容两种 schema。下面 cpu / mem / node_count
                     # 同款处理。
                     start_ts = _unwrap_slurm_int(job.get("start_time"))
+                    # squeue 给的是 epoch 秒（绝对时刻）。按 UTC 还原成带偏移量的
+                    # ISO 串，与 ORM 侧的 UtcDateTime 同一个时间基准；用本地时区还原
+                    # 会得到一个不带偏移量的裸时间，消费方只能猜时区。
                     if start_ts:
-                        start_time_str = datetime.fromtimestamp(start_ts).isoformat()
+                        start_time_str = datetime.fromtimestamp(start_ts, timezone.utc).isoformat()
                     else:
-                        start_time_str = datetime.now().isoformat()
+                        start_time_str = datetime.now(timezone.utc).isoformat()
 
                     # 优先解析 gres_detail，例如 "gpu:rtx5090:1(IDX:0)"
                     gpu_count = 0

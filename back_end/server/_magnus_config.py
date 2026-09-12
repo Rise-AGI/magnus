@@ -191,10 +191,16 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(server, "scheduler", dict)
     _check_key(server, "service_proxy", dict)
     _check_key(server, "file_custody", dict)
+    # 前端展示时间用的时区（IANA 名）。后端一切时刻都以 UTC 存取传（models 的
+    # UtcDateTime），这里只决定"渲染成哪儿的墙上时间" —— 站点用户通常与集群同处一地，
+    # 显示集群所在时区才与 SLURM / 节点日志的时间对得上。这是该时区的唯一真源，前端由
+    # next.config.mjs 从这里注入，不在前端另写一份。
+    server.setdefault("display_timezone", "Asia/Shanghai")
+    _check_key(server, "display_timezone", str)
 
     expected_server_keys = {
         "address", "front_end_port", "back_end_port", "root", "ephemeral_root",
-        "max_field_bytes", "max_large_field_bytes",
+        "max_field_bytes", "max_large_field_bytes", "display_timezone",
         "database", "auth", "scheduler", "service_proxy", "file_custody",
         "cors_origins",
     }

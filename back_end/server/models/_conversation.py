@@ -1,11 +1,11 @@
 # back_end/server/models/_conversation.py
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Enum as SQLEnum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
-from ._helpers import generate_hex_id
+from ._helpers import generate_hex_id, UtcDateTime
 
 
 class ConversationType(str, enum.Enum):
@@ -26,8 +26,8 @@ class Conversation(Base):
     type: Mapped[ConversationType] = mapped_column(SQLEnum(ConversationType))
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     members: Mapped[list["ConversationMember"]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",
@@ -46,8 +46,8 @@ class ConversationMember(Base):
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), index=True)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     role: Mapped[str] = mapped_column(String, default="member")
-    last_read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    joined_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_read_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    joined_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
     conversation: Mapped["Conversation"] = relationship(back_populates="members")
     user: Mapped["User"] = relationship("User")
     __table_args__ = (
@@ -62,6 +62,6 @@ class Message(Base):
     sender_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     content: Mapped[str] = mapped_column(Text)
     message_type: Mapped[MessageType] = mapped_column(SQLEnum(MessageType), default=MessageType.TEXT)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
     sender: Mapped["User"] = relationship("User")

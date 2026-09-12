@@ -19,7 +19,7 @@ import {
 import { client } from "@/lib/api";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
-import { formatBeijingTime } from "@/lib/utils";
+import { formatStationTime } from "@/lib/utils";
 import type { UserDetail } from "@/types/auth";
 import { AvatarCircle } from "./user-avatar";
 
@@ -168,7 +168,7 @@ export function PersonHoverCard({
               </div>
               {detail && (
                 <div className="mt-1 text-[11px] text-zinc-600 font-mono">
-                  {t("people.drawer.created")} · {formatBeijingTime(detail.created_at)}
+                  {t("people.drawer.created")} · {formatStationTime(detail.created_at)}
                 </div>
               )}
             </div>

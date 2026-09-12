@@ -2,7 +2,7 @@
 import time
 import threading
 from typing import Callable, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import or_
@@ -249,7 +249,7 @@ def get_cluster_stats(
             try:
                 start_dt = datetime.fromisoformat(task["start_time"])
             except ValueError:
-                start_dt = datetime.now()
+                start_dt = datetime.now(timezone.utc)
 
             # external job 的 cpu / mem 已由 get_all_running_tasks 从 squeue 采到，
             # 一并填入让 cluster 页面与 magnus 原生 job 的资源展示对齐：前端按
@@ -290,8 +290,11 @@ def get_cluster_stats(
     magnus_group = [j for j in all_running_jobs if j.job_type != JobType.EXTERNAL]
     external_group = [j for j in all_running_jobs if j.job_type == JobType.EXTERNAL]
 
-    magnus_group.sort(key=lambda x: x.start_time or datetime.min, reverse=True)
-    external_group.sort(key=lambda x: x.start_time or datetime.min, reverse=True)
+    # start_time 现在一律是 aware（ORM 侧 UtcDateTime / SLURM 侧带偏移量），哨兵也得
+    # 是 aware，否则缺 start_time 的 job 一参与排序就 aware/naive 相比抛 TypeError。
+    _epoch_start = datetime.min.replace(tzinfo=timezone.utc)
+    magnus_group.sort(key=lambda x: x.start_time or _epoch_start, reverse=True)
+    external_group.sort(key=lambda x: x.start_time or _epoch_start, reverse=True)
 
     sorted_all_running = magnus_group + external_group
 

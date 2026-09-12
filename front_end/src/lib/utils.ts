@@ -2,11 +2,16 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
-export function formatBeijingTime(isoString: string | undefined | null) {
+import { DISPLAY_TIMEZONE } from "./config";
+
+// 后端发出的时间一律是带偏移量的 UTC 时刻（models 的 UtcDateTime + SLURM 侧同基准），
+// 所以这里直接交给 Date 解析即可 —— 不要再手工补 "Z"：那是后端曾经发不带偏移量的裸时间
+// 时的将就做法，一旦时间源换成本地时区（SLURM 就是），补 Z 会把它整体读偏一个时区。
+// 渲染时区取 DISPLAY_TIMEZONE（后端 server.display_timezone 注入，缺省 UTC+8），全站一份。
+export function formatStationTime(isoString: string | undefined | null) {
   if (!isoString) return "--";
-  const date = new Date(isoString.endsWith("Z") ? isoString : `${isoString}Z`);
-  return date.toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
+  return new Date(isoString).toLocaleString('zh-CN', {
+    timeZone: DISPLAY_TIMEZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -14,6 +19,27 @@ export function formatBeijingTime(isoString: string | undefined | null) {
     minute: '2-digit',
     hour12: false
   }).replace(/\//g, '-');
+}
+
+// 只显示时分（图表轴、通知列表等）。
+export function formatStationClock(value: string | number | Date) {
+  return new Date(value).toLocaleTimeString('zh-CN', {
+    timeZone: DISPLAY_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+// 时分秒（metrics 图表的密集时间轴）。
+export function formatStationClockSeconds(value: string | number | Date) {
+  return new Date(value).toLocaleTimeString('zh-CN', {
+    timeZone: DISPLAY_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
 }
 
 export function cn(...inputs: ClassValue[]) {
@@ -105,7 +131,7 @@ function stableJsonStringify(obj: any): string {
 
 export function formatRelativeTime(isoString: string | undefined | null): string {
   if (!isoString) return "";
-  const date = new Date(isoString.endsWith("Z") ? isoString : `${isoString}Z`);
+  const date = new Date(isoString);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
@@ -115,7 +141,7 @@ export function formatRelativeTime(isoString: string | undefined | null): string
   if (diffHour < 24) return `${diffHour}h`;
   const diffDay = Math.floor(diffHour / 24);
   if (diffDay < 30) return `${diffDay}d`;
-  return formatBeijingTime(isoString);
+  return formatStationTime(isoString);
 }
 
 export async function computeStableHash(data: any): Promise<string> {
