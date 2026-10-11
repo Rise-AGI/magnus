@@ -1,11 +1,15 @@
 # back_end/server/models/_job.py
 import enum
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from sqlalchemy import Enum as SQLEnum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, column_property, defer, joinedload, mapped_column, relationship
 
 from ..database import Base
 from ._helpers import generate_hex_id, UtcDateTime
+
+if TYPE_CHECKING:
+    from ._user import User
 
 
 class JobType(str, enum.Enum):
@@ -116,6 +120,22 @@ class ClusterSnapshot(Base):
     magnus_used_gpus: Mapped[int] = mapped_column(Integer)
 
 
+def job_metadata_load_options():
+    """Load scheduling/list metadata without materializing commands or artifacts.
+
+    A consumer that needs payload text must explicitly load a full Job. Fail
+    instead of silently issuing large per-row SELECTs from a polling loop.
+    """
+    return (
+        defer(Job.entry_command, raiseload=True),
+        defer(Job.system_entry_command, raiseload=True),
+        defer(Job.dockerfile, raiseload=True),
+        defer(Job.build_result, raiseload=True),
+        defer(Job.result, raiseload=True),
+        defer(Job.action, raiseload=True),
+    )
+
+
 def job_list_load_options():
     """Loader options shared by every query that returns jobs in a LIST / embedded
     view. Defers the heavy Text columns so they are neither read from disk nor
@@ -132,11 +152,6 @@ def job_list_load_options():
     Spread into a query: ``db.query(Job).options(*job_list_load_options())``.
     """
     return (
-        defer(Job.entry_command, raiseload=True),
-        defer(Job.system_entry_command, raiseload=True),
-        defer(Job.dockerfile, raiseload=True),
-        defer(Job.build_result, raiseload=True),
-        defer(Job.result, raiseload=True),
-        defer(Job.action, raiseload=True),
+        *job_metadata_load_options(),
         joinedload(Job.user),
     )

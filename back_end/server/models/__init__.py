@@ -14,10 +14,17 @@
 - _conversation.py:  ConversationType, MessageType, Conversation, ConversationMember, Message
 - _helpers.py:       generate_hex_id
 """
-from ..database import Base
-from ._helpers import generate_hex_id
+from ..database import Base as Base
+from ._helpers import generate_hex_id as generate_hex_id
 from ._user import User
-from ._job import Job, JobType, JobStatus, ClusterSnapshot, job_list_load_options
+from ._job import (
+    Job,
+    JobType,
+    JobStatus,
+    ClusterSnapshot,
+    job_list_load_options,
+    job_metadata_load_options,
+)
 from ._blueprint import Blueprint, BlueprintUserPreference, blueprint_list_load_options
 from ._service import Service
 from ._skill import Skill, SkillFile
@@ -39,6 +46,7 @@ __all__ = [
     "JobStatus",
     "ClusterSnapshot",
     "job_list_load_options",
+    "job_metadata_load_options",
     "Blueprint",
     "Service",
     "BlueprintUserPreference",

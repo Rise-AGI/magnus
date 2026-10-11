@@ -13,7 +13,7 @@ from library.fundamental.scheduling import (
     select_easy_backfill,
 )
 from ..database import SessionLocal
-from ..models import Job, JobStatus, JobType
+from ..models import Job, JobStatus, JobType, job_metadata_load_options
 from .._magnus_config import is_local_mode, magnus_config
 from .._size_utils import _parse_size_string
 from . import logger
@@ -77,7 +77,10 @@ class _DecisionsMixin(_DecisionsMixinBase):
            调度逻辑全部在 magnus 内决策，SLURM 只接收已被 backfill 验证过资源
            的提交，不再承担排队 / 优先级仲裁工作
         """
-        with SessionLocal() as db:
+        # Preemption commits must not expire these metadata snapshots and cause
+        # per-row reloads of deferred payloads. Submission uses a fresh session
+        # and rechecks Job state; writes below guard their expected prior state.
+        with SessionLocal(expire_on_commit=False) as db:
             priority_map = {
                 JobType.A1: 4,
                 JobType.A2: 3,
@@ -87,7 +90,9 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
             # Preparing/Building both recover through the same preparation task.
             # Keep cancelled tasks registered until their filesystem I/O drains.
-            preparing_jobs = db.query(Job).filter(Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING])).all()
+            # These rows only identify tasks to start. Commands and Dockerfiles
+            # are loaded once by each preparation task, not on every tick.
+            preparing_jobs = db.query(Job.id).filter(Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING])).all()
             for job in preparing_jobs:
                 with self._preparing_jobs_lock:
                     if job.id in self.preparing_jobs:
@@ -127,18 +132,23 @@ class _DecisionsMixin(_DecisionsMixinBase):
             # 释放，立即 resubmit 会让旧+新两个 SLURM step 同时占资源 + 让 cluster
             # endpoint 在新 slurm_id 写入后丢失旧 slurm_id 的 magnus 关联。等
             # _sync_reality_slurm 在 SLURM 真正释放后清空 slurm_job_id 才进这里。
-            paused_jobs = db.query(Job).filter(
+            paused_jobs = db.query(Job.id).filter(
                 Job.status == JobStatus.PAUSED,
                 Job.slurm_job_id.is_(None),
             ).all()
             for job in paused_jobs:
-                job.status = JobStatus.PREPARING
-                logger.info(f"Job {job.id} re-entering preparation after preemption")
+                changed = db.query(Job).filter(
+                    Job.id == job.id,
+                    Job.status == JobStatus.PAUSED,
+                    Job.slurm_job_id.is_(None),
+                ).update({Job.status: JobStatus.PREPARING}, synchronize_session=False)
+                if changed:
+                    logger.info(f"Job {job.id} re-entering preparation after preemption")
             if paused_jobs:
                 db.commit()
 
             # Phase 3: 调度 Pending 任务
-            schedulable_jobs = db.query(Job).filter(
+            schedulable_jobs = db.query(Job).options(*job_metadata_load_options()).filter(
                 Job.status == JobStatus.PENDING
             ).all()
 
@@ -263,7 +273,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
         needed = job.gpu_count - free_gpus
 
-        running_b_jobs = db.query(Job).filter(
+        running_b_jobs = db.query(Job).options(*job_metadata_load_options()).filter(
             Job.status == JobStatus.RUNNING,
             Job.job_type.in_([JobType.B1, JobType.B2])
         ).all()
@@ -305,7 +315,6 @@ class _DecisionsMixin(_DecisionsMixinBase):
             )
 
         self._clean_up_working_table(job.id)
-        job.status = JobStatus.PAUSED
         # slurm_job_id 不在这里清空：scancel 后 SLURM job 进入 CG (COMPLETING)
         # 阶段跑 epilog（含 GPU reset 等），可能持续数十秒。期间 cluster endpoint
         # 看 squeue 还能见到这个 slurm_job_id，若 magnus 端立即清空，cluster 的
@@ -314,5 +323,13 @@ class _DecisionsMixin(_DecisionsMixinBase):
         # 仍在 hold 资源，新 step 无法调度且新 slurm_id 写入后旧 slurm_id 永久
         # 丢失 magnus 关联。改由 _sync_reality_slurm 在 SLURM 真正报终态后清空，
         # Phase 2.5 用 `slurm_job_id IS None` 过滤等真正释放再 resubmit。
-        job.start_time = None
+        # A terminate/completion in another session must not be resurrected by
+        # this decision snapshot after the external cancellation has finished.
+        db.query(Job).filter(
+            Job.id == job.id,
+            Job.status == JobStatus.RUNNING,
+        ).update({
+            Job.status: JobStatus.PAUSED,
+            Job.start_time: None,
+        }, synchronize_session=False)
         db.commit()
