@@ -143,6 +143,137 @@ models.Base.metadata.create_all(
 )
 
 
+def _repair_legacy_job_metrics_reference() -> None:
+    """Repair the dangling jobs_old reference left by an old jobs-table rebuild.
+
+    Preserve real orphan metrics and unrelated foreign-key violations. Counts
+    stay in SQLite: deployed metrics tables can contain millions of rows.
+    """
+    connection = engine.raw_connection()
+    cursor = connection.cursor()
+    foreign_keys = 0
+    try:
+        foreign_keys = cursor.execute("PRAGMA foreign_keys").fetchone()[0]
+        references = cursor.execute("PRAGMA foreign_key_list(job_metrics)").fetchall()
+        legacy_references = [row for row in references if row[2].lower() == "jobs_old"]
+        if not legacy_references:
+            return
+        if (
+            len(legacy_references) != 1
+            or legacy_references[0][3:5] != ("job_id", "id")
+            or sum(row[0] == legacy_references[0][0] for row in references) != 1
+        ):
+            raise RuntimeError("Cannot safely repair job_metrics: unrecognized jobs_old reference")
+        if cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='jobs_old' COLLATE NOCASE",
+        ).fetchone():
+            logger.warning("Skipping job_metrics reference repair: jobs_old still exists")
+            return
+        if not cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs' COLLATE NOCASE",
+        ).fetchone():
+            raise RuntimeError("Cannot repair job_metrics reference: jobs table is missing")
+
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.execute("BEGIN IMMEDIATE")
+        original = cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='job_metrics'",
+        ).fetchone()[0]
+        # Mask literals/comments before matching SQL syntax. A default or comment
+        # containing a FOREIGN KEY example must not become a migration target.
+        protected_tokens = re.compile(
+            r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`(?:``|[^`])*`|\[[^\]]*\]|--[^\r\n]*|/\*[\s\S]*?\*/",
+        )
+        masked = protected_tokens.sub(
+            lambda match: match[0] if match[0].lower() in {
+                '"job_metrics"', '"job_id"', '"jobs_old"', '"id"',
+            } else " " * len(match[0]),
+            original,
+        )
+        matches = list(re.finditer(
+            r'\bFOREIGN\s+KEY\s*\(\s*(?:"job_id"|job_id)\s*\)\s+'
+            r'REFERENCES\s+(?P<target>"jobs_old"|jobs_old)\s*\(\s*(?:"id"|id)\s*\)',
+            masked,
+            flags = re.IGNORECASE,
+        ))
+        if len(matches) != 1:
+            raise RuntimeError("Cannot safely repair job_metrics: unrecognized foreign-key definition")
+        start, end = matches[0].span("target")
+        create_sql = original[:start] + '"jobs"' + original[end:]
+        create_sql, changes = re.subn(
+            r'^CREATE\s+TABLE\s+(?:"job_metrics"|job_metrics)(?=\s|\()',
+            'CREATE TABLE "job_metrics_reference_migration"',
+            create_sql,
+            count = 1,
+            flags = re.IGNORECASE,
+        )
+        if changes != 1:
+            raise RuntimeError("Cannot safely repair job_metrics: unrecognized table definition")
+
+        counts_sql = (
+            "SELECT COUNT(*), COALESCE(SUM(job_metrics.job_id IS NOT NULL AND jobs.id IS NULL), 0) "
+            "FROM job_metrics LEFT JOIN jobs ON jobs.id=job_metrics.job_id"
+        )
+        original_counts = cursor.execute(counts_sql).fetchone()
+        uses_autoincrement = bool(re.search(
+            r"\bAUTOINCREMENT\b",
+            masked,
+            flags = re.IGNORECASE,
+        ))
+        sequence = None
+        if uses_autoincrement:
+            sequence = cursor.execute("SELECT seq FROM sqlite_sequence WHERE name='job_metrics'").fetchone()
+        objects = cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE tbl_name='job_metrics' "
+            "AND type IN ('index','trigger') AND sql IS NOT NULL",
+        ).fetchall()
+        columns = cursor.execute("PRAGMA table_info(job_metrics)").fetchall()
+        quoted_columns = ", ".join('"' + row[1].replace('"', '""') + '"' for row in columns)
+        if not re.search(
+            r"\bWITHOUT\s+ROWID\b",
+            masked,
+            flags = re.IGNORECASE,
+        ):
+            column_names = {row[1].lower() for row in columns}
+            rowid_alias = next(
+                (name for name in ("_rowid_", "rowid", "oid") if name not in column_names),
+                None,
+            )
+            if rowid_alias is None:
+                raise RuntimeError("Cannot preserve job_metrics rowids: all SQLite rowid aliases are shadowed")
+            quoted_columns = f'"{rowid_alias}", ' + quoted_columns
+        cursor.execute(create_sql)
+        cursor.execute(
+            f"INSERT INTO job_metrics_reference_migration ({quoted_columns}) "
+            f"SELECT {quoted_columns} FROM job_metrics",
+        )
+        cursor.execute("DROP TABLE job_metrics")
+        cursor.execute("ALTER TABLE job_metrics_reference_migration RENAME TO job_metrics")
+        if uses_autoincrement:
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name='job_metrics'")
+            if sequence is not None:
+                cursor.execute(
+                    "INSERT INTO sqlite_sequence(name, seq) VALUES ('job_metrics', ?)",
+                    sequence,
+                )
+        for (ddl,) in objects:
+            cursor.execute(ddl)
+        if cursor.execute(counts_sql).fetchone() != original_counts:
+            raise RuntimeError("Job metrics counts changed during reference repair; migration rolled back")
+        connection.commit()
+        logger.info(
+            "Repaired job_metrics foreign key to jobs, preserving %s rows",
+            original_counts[0],
+        )
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        cursor.execute(f"PRAGMA foreign_keys={int(foreign_keys)}")
+        cursor.close()
+        connection.close()
+
+
 def _make_job_container_image_nullable() -> None:
     """SQLite table rebuild preserving the deployed schema, indexes and triggers.
 
@@ -240,6 +371,7 @@ def run_migrations()-> None:
         if column not in job_columns:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {column} TEXT"))
+    _repair_legacy_job_metrics_reference()
     _make_job_container_image_nullable()
 
     # 索引由 models 声明，create_all 只对新库生效、不会给已存在的 jobs 表补建。
