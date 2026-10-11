@@ -61,8 +61,9 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
         以下 backfill / 抢占描述针对 authoritative 模式。
 
-        状态流转：Preparing → Pending → Queued → Running
+        状态流转：Preparing ↔ Building → Pending → Queued → Running
         - Preparing: 系统正在准备资源（镜像、仓库）
+        - Building:  正在构建环境；仓库准备独立进行
         - Pending:   资源就绪，等待调度决策
         - Queued:    已提交到 SLURM，等待执行
         - Running:   SLURM 正在执行
@@ -84,10 +85,9 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 JobType.B2: 1,
             }
 
-            # Phase 1: 启动 Preparing 任务的资源准备。check-then-set 在锁内做，与
-            # terminate_job（线程池）的 pop 原子互斥；create_task 是同步的（仅在 loop
-            # 上排程），锁内调用无阻塞风险。
-            preparing_jobs = db.query(Job).filter(Job.status == JobStatus.PREPARING).all()
+            # Preparing/Building both recover through the same preparation task.
+            # Keep cancelled tasks registered until their filesystem I/O drains.
+            preparing_jobs = db.query(Job).filter(Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING])).all()
             for job in preparing_jobs:
                 with self._preparing_jobs_lock:
                     if job.id in self.preparing_jobs:
@@ -97,9 +97,8 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
             # Phase 2: 清理已完成的 preparing tasks。锁内 snapshot + 摘出已完成 task，
             # 锁外再处理其结果 —— task.exception() / db.commit 不能在锁内（会把锁占给慢
-            # I/O，阻塞 terminate_job 的线程池访问）。terminate_job 取消的 task 已被它自己
-            # 摘出，这里见不到；对仍在此的 cancelled task 跳过（task.exception() 会抛
-            # CancelledError）。pop 用默认值兜底，防与 terminate_job 的竞态。
+            # I/O，阻塞 terminate_job 的线程池访问）。取消的 task 在收尾后同样由这里
+            # 摘出；跳过 task.exception()，否则它会抛 CancelledError。
             with self._preparing_jobs_lock:
                 done_tasks = [(jid, task) for jid, task in self.preparing_jobs.items() if task.done()]
                 for jid, _ in done_tasks:
@@ -113,11 +112,14 @@ class _DecisionsMixin(_DecisionsMixinBase):
                     # _clean_up_working_table 在远端执行下含 ssh `rm -rf`（+ 可能触发 socket
                     # 重建），这里跑在事件循环上，丢线程池避免阻塞 loop。
                     await asyncio.to_thread(self._clean_up_working_table, jid)
-                    failed_job = db.query(Job).filter(Job.id == jid).first()
-                    if failed_job and failed_job.status == JobStatus.PREPARING:
-                        failed_job.status = JobStatus.FAILED
-                        failed_job.result = f"Resource preparation crashed: {exc}"
-                        db.commit()
+                    db.query(Job).filter(
+                        Job.id == jid,
+                        Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
+                    ).update({
+                        Job.status: JobStatus.FAILED,
+                        Job.result: f"Resource preparation crashed: {exc}",
+                    }, synchronize_session=False)
+                    db.commit()
 
             # Phase 2.5: 抢占恢复 — PAUSED 任务重新准备资源（镜像/仓库在抢占时已被清理）。
             # `slurm_job_id IS NULL` 过滤把 SLURM 仍在 CG (COMPLETING) 阶段释放

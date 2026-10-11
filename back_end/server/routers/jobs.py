@@ -12,7 +12,7 @@ Job 权限模型：
 """
 import os
 import logging
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -24,6 +24,8 @@ from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
 from .._magnus_config import magnus_config, is_admin_user, is_local_mode, apply_cluster_defaults, normalize_per_cpu_resources, validate_cluster_limits
 from .._scheduler import scheduler
+from .._resource_manager import resource_manager
+from .._resource_manager._build_progress import BuildProgress
 from .auth import get_current_user
 from library import escape_like
 
@@ -40,7 +42,7 @@ MAX_MARKER_PREVIEW_SIZE = 1024 * 1024
 # 撑大列表页。防止任何字段被塞进 MB 级 payload 撑爆 DB 与列表序列化。上限可配、向后兼容。
 # （job / blueprint / skill / service 列表均已用轻量投影省掉大字段——列表不 ship 命令 / 代码 /
 #   文件内容，只有详情端点带全，故大档上限只影响详情 / 提交路径。）
-_LARGE_TEXT_FIELDS = frozenset({"entry_command", "system_entry_command", "code", "cached_params"})
+_LARGE_TEXT_FIELDS = frozenset({"entry_command", "system_entry_command", "dockerfile", "code", "cached_params"})
 
 
 def enforce_field_size_limits(
@@ -80,6 +82,13 @@ def create_job(
     SDK /jobs/submit 和 Blueprint /run 都收敛到这里。
     负责：填充集群默认值、校验资源上限、节点可用性 precheck、创建 ORM 对象、写入数据库。
     """
+    # All submission paths, including Blueprint, share this contract.
+    job_dict = JobSubmission.model_validate(job_dict).model_dump()
+    if job_dict["dockerfile"] is not None and not magnus_config["execution"]["image_build"]["enabled"]:
+        raise HTTPException(
+            status_code = 503,
+            detail = "Dockerfile builds are not enabled on this Magnus site",
+        )
     apply_cluster_defaults(job_dict)
     normalize_per_cpu_resources(job_dict)
     validate_cluster_limits(job_dict)
@@ -203,6 +212,62 @@ def get_jobs(
     return {"total": total, "items": jobs}
 
 
+@router.get("/jobs/capabilities")
+def get_job_capabilities(
+    _: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return {
+        "dockerfile": True,
+        "image_build_enabled": magnus_config["execution"]["image_build"]["enabled"],
+        "default_repository": {"namespace": "Rise-AGI", "repo_name": "magnus"},
+    }
+
+
+@router.get("/jobs/{job_id}/build")
+def get_job_build(
+    job_id: str,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    job = db.query(
+        models.Job.id,
+        models.Job.has_dockerfile,
+        models.Job.status,
+        models.Job.created_at,
+    ).filter(models.Job.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.has_dockerfile:
+        raise HTTPException(status_code=404, detail="This job does not use a Dockerfile")
+    progress = resource_manager.builds.get_progress(
+        job_id,
+        building = job.status == JobStatus.BUILDING,
+    )
+    if progress is not None:
+        return progress
+    if job.status in (JobStatus.PREPARING, JobStatus.BUILDING):
+        # Preparation may not have registered its build yet, including during
+        # restart recovery. Keep waiting time stable across repeated requests.
+        return BuildProgress(started_at=job.created_at.timestamp()).snapshot()
+    raise HTTPException(status_code=410, detail="Build diagnostics are unavailable")
+
+
+@router.get("/jobs/{job_id}/build/logs")
+def get_job_build_logs(
+    job_id: str,
+    page: int = Query(default=-1, description="Page number, -1 for last page"),
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    job = db.query(models.Job.id, models.Job.has_dockerfile).filter(models.Job.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.has_dockerfile:
+        raise HTTPException(status_code=404, detail="This job does not use a Dockerfile")
+    log_path = resource_manager.builds.get_log_path(job_id)
+    return _read_log_page(str(log_path), page)
+
+
 @router.get(
     "/jobs/{job_id}",
     response_model =JobResponse,
@@ -279,9 +344,6 @@ def get_job_logs_paginated(
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
 )-> Dict[str, Any]:
-    PAGE_SIZE = 200 * 1024
-    OVERLAP = 0.3
-
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -289,19 +351,33 @@ def get_job_logs_paginated(
     root_path = magnus_config['server']['root']
     # 双模式共用：SLURM 由 sbatch --output 写，Docker 由 _scheduler._dump_docker_logs 追加。
     log_path = f"{root_path}/workspace/jobs/{job_id}/slurm/output.txt"
+    if not os.path.exists(log_path):
+        msg = ""
+        if job.status == JobStatus.FAILED:
+            if job.result and job.result != ".magnus_result":
+                msg = f"[System] {job.result}\n"
+            else:
+                msg = "Job failed. No output was produced.\n"
+        elif job.status in [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING]:
+            msg = "Waiting for output stream...\n"
+        elif job.status == JobStatus.BUILDING:
+            msg = "Building environment; see the build log for progress...\n"
+        elif job.status == JobStatus.PREPARING:
+            msg = "Preparing resources...\n"
+        return {"logs": msg, "page": 0, "total_pages": 1}
+
+    return _read_log_page(log_path, page)
+
+
+def _read_log_page(
+    log_path: str,
+    page: int,
+) -> Dict[str, Any]:
+    PAGE_SIZE = 200 * 1024
+    OVERLAP = 0.3
     try:
-        if not os.path.exists(log_path):
-            msg = ""
-            if job.status == JobStatus.FAILED:
-                if job.result and job.result != ".magnus_result":
-                    msg = f"[System] {job.result}\n"
-                else:
-                    msg = "Job failed. No output was produced.\n"
-            elif job.status in [JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING]:
-                msg = "Waiting for output stream...\n"
-            elif job.status == JobStatus.PREPARING:
-                msg = "Preparing resources...\n"
-            return {"logs": msg, "page": 0, "total_pages": 1}
+        if not os.path.isfile(log_path):
+            return {"logs": "", "page": 0, "total_pages": 1}
 
         file_size = os.path.getsize(log_path)
 
@@ -332,7 +408,7 @@ def get_job_logs_paginated(
         return {"logs": content, "page": page, "total_pages": total_pages}
 
     except Exception as e:
-        logger.exception(f"[logs] Error for job={job_id}")
+        logger.exception("Error reading job log %s", log_path)
         return {"logs": f"Error reading logs: {str(e)}", "page": 0, "total_pages": 1}
 
 

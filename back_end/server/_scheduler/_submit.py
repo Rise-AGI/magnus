@@ -1,6 +1,7 @@
 # back_end/server/_scheduler/_submit.py
 import os
 import re
+import json
 import sys
 import traceback
 from typing import TYPE_CHECKING, List
@@ -19,6 +20,7 @@ from . import (
     magnus_remote_container_cache_path,
 )
 from ._wrapper_template import _build_wrapper_content
+from ._relay_build_cache import remote_built_sif_path
 
 if TYPE_CHECKING:
     from ._typing import _SchedulerProtocol
@@ -93,6 +95,24 @@ def _render_docker_user_script(entry_command: str) -> str:
 class _SubmitMixin(_SubmitMixinBase):
     """提交决策已经做完的 PENDING job 到 SLURM 或 Docker 后端。"""
 
+    def _built_environment_ready(
+        self,
+        db: Session,
+        job: Job,
+    ) -> bool:
+        if job.dockerfile is None:
+            return True
+        result = json.loads(job.build_result or "{}")
+        if result and resource_manager.builds.is_available(result):
+            return True
+        # Artifacts are disposable. Recover a missing runtime copy by preparing
+        # again, but do not overwrite a concurrent user termination.
+        db.query(Job).filter(Job.id == job.id, Job.status == JobStatus.PENDING).update({
+            Job.status: JobStatus.PREPARING,
+        }, synchronize_session=False)
+        db.commit()
+        return False
+
     def _submit_to_slurm(self, db: Session, job: Job) -> bool:
         """
         提交任务到 SLURM 队列
@@ -106,6 +126,8 @@ class _SubmitMixin(_SubmitMixinBase):
             return False
 
         try:
+            if not self._built_environment_ready(db, job):
+                return False
             user_magnus = magnus_config["cluster"]["default_runner"]
             effective_runner = job.runner if job.runner is not None else user_magnus
 
@@ -155,14 +177,20 @@ class _SubmitMixin(_SubmitMixinBase):
             db.commit()
             return False
 
-        local_sif_path = resource_manager.get_sif_path(job.container_image)
-        # 执行端 SIF 路径：本机执行下逐字等于本机路径；远端执行下指向 remote_root 下
-        # 的 container_cache（同名 SIF，文件本身如何落远端是来源相关的另一回事）。
-        remote_sif_path = (
-            f"{magnus_remote_container_cache_path}/{os.path.basename(local_sif_path)}"
-            if self._is_remote_execution()
-            else local_sif_path
-        )
+        build_digest = None
+        if job.dockerfile is not None:
+            build_result = json.loads(job.build_result or "{}")
+            local_sif_path = build_result["sif_path"]
+            build_digest = build_result["digest"]
+        else:
+            local_sif_path = resource_manager.get_sif_path(job.container_image)
+        remote_sif_path = local_sif_path
+        if self._is_remote_execution():
+            remote_sif_path = (
+                remote_built_sif_path(build_digest)
+                if build_digest is not None
+                else f"{magnus_remote_container_cache_path}/{os.path.basename(local_sif_path)}"
+            )
         default_system_entry_command = magnus_config["cluster"]["default_system_entry_command"]
         base_system_entry_command = job.system_entry_command if job.system_entry_command else default_system_entry_command
         system_entry_command = base_system_entry_command.strip()
@@ -208,7 +236,12 @@ class _SubmitMixin(_SubmitMixinBase):
         # 本机执行下 no-op。失败按提交失败处理，不把无 wrapper 的 job 交给 sbatch。
         try:
             self._stage_in_job(job_id, wrapper_path)
-            self._stage_in_resources(job_id, local_sif_path, local_repo_dir)
+            self._stage_in_resources(
+                job_id,
+                local_sif_path,
+                local_repo_dir,
+                build_digest=build_digest,
+            )
             # 无网计算节点：把 entry_command / system_entry_command 引用的 custody 文件预置
             # 进远端 dropin，让 in-job `magnus receive` 读盘而非打 HTTP（download 侧的离线通道，
             # 对称于上传侧的 drop + _stage_out_custody）。本机执行下 no-op。
@@ -279,6 +312,13 @@ class _SubmitMixin(_SubmitMixinBase):
             return False
 
         try:
+            if not self._built_environment_ready(db, job):
+                return False
+            if job.dockerfile is not None:
+                build_result = json.loads(job.build_result or "{}")
+                runtime_image = build_result["docker_image"]
+            else:
+                runtime_image = job.container_image
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             self._init_job_working_dir(job_working_table)
 
@@ -340,7 +380,7 @@ class _SubmitMixin(_SubmitMixinBase):
 
             self.docker_manager.run_container(
                 container_name=container_name,
-                image=job.container_image,
+                image=runtime_image,
                 entry_command=container_cmd,
                 bind_mounts=bind_mounts,
                 env_vars=env_vars,

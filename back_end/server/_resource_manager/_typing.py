@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 from typing import Dict, Tuple
 
+from ._builds import ImageBuildManager
+
 
 class _ResourceManagerProtocol:
     """Cross-mixin attribute / method declarations for static analysis.
@@ -28,6 +30,7 @@ class _ResourceManagerProtocol:
     repo_locks: Dict[str, asyncio.Lock]
     _default_branch_cache: Dict[str, Tuple[str, float]]
     _default_branch_locks: Dict[str, asyncio.Lock]
+    builds: ImageBuildManager
 
     # === _manager.py ===
     def get_sif_path(self, image: str) -> str: ...

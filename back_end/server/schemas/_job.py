@@ -2,7 +2,7 @@
 """Job submission / response schemas."""
 from datetime import datetime
 from typing import Any, List, Optional
-from pydantic import BaseModel, computed_field, field_validator
+from pydantic import BaseModel, computed_field, field_validator, model_validator
 
 from ..models import JobType, JobStatus
 from ._user import UserInfo
@@ -11,8 +11,8 @@ from ._user import UserInfo
 class JobSubmission(BaseModel):
     task_name: str
     entry_command: str
-    repo_name: str
-    branch: Optional[str] = None            # None = fallback: main → master → default
+    repo_name: Optional[str] = None
+    branch: Optional[str] = None            # None = repository default branch
     commit_sha: Optional[str] = None        # None = HEAD
     gpu_type: str = "cpu"
     description: Optional[str] = None
@@ -20,6 +20,7 @@ class JobSubmission(BaseModel):
     gpu_count: int = 0
     job_type: JobType = JobType.A2
     container_image: Optional[str] = None
+    dockerfile: Optional[str] = None
     cpu_count: Optional[int] = None
     memory_demand: Optional[str] = None
     node_count: Optional[int] = None        # 申请节点数（SLURM 多节点）。None = 单节点（历史行为）
@@ -34,12 +35,25 @@ class JobSubmission(BaseModel):
     def _strip_whitespace(cls, v: Optional[str]) -> Optional[str]:
         return v.strip() if isinstance(v, str) else v
 
+    @model_validator(mode="after")
+    def _validate_sources(self):
+        if self.dockerfile is not None:
+            if not self.dockerfile.strip():
+                raise ValueError("dockerfile must not be empty")
+            if self.container_image is not None:
+                raise ValueError("Provide either container_image or dockerfile, not both")
+        if not self.repo_name or not self.repo_name.strip():
+            if self.namespace != "Rise-AGI":
+                raise ValueError("repo_name is required with a custom namespace")
+            self.repo_name = "magnus"
+        return self
+
 
 class JobListItem(BaseModel):
     """列表 / 看板 / 内嵌视图里的轻量 job 投影。
 
-    刻意不含 4 个重 Text 列（entry_command / system_entry_command / result /
-    action）—— 它们单行可达几十 MB（例如内联大 prompt 的批量 job），一页 100 行
+    刻意不含重 Text 列（命令、Dockerfile、内部构建结果、result / action）——
+    它们单行可达几十 MB（例如内联大 prompt 的批量 job），一页 100 行
     就会序列化上 GB，并发轮询下拖垮整站。列表 UI 从不渲染这些列；需要它们的详情
     视图走 GET /jobs/{id}（返回完整 ``JobResponse``）按需取。查询侧配合
     ``models.job_list_load_options`` defer 掉这些列，做到既不读盘也不序列化。
@@ -53,6 +67,7 @@ class JobListItem(BaseModel):
     branch: Optional[str] = None
     commit_sha: Optional[str] = None
     container_image: Optional[str] = None
+    has_dockerfile: bool = False
     gpu_count: int
     gpu_type: str
     cpu_count: Optional[int] = None
@@ -93,9 +108,10 @@ class JobListItem(BaseModel):
 
 
 class JobResponse(JobListItem):
-    """完整 job 视图（详情 / 提交返回）。在轻量投影之上补齐 4 个重 Text 列，
-    仅用于单条 job 的 endpoint（GET /jobs/{id}、提交返回），绝不进列表。"""
+    """完整 job 视图（详情 / 提交返回）。补齐公开的重 Text 字段，
+    仅用于单条 job 的 endpoint，绝不进列表；build_result 是内部状态。"""
     entry_command: str
+    dockerfile: Optional[str] = None
     system_entry_command: Optional[str] = None
     result: Optional[str] = None
     action: Optional[str] = None

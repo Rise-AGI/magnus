@@ -1,6 +1,7 @@
 # back_end/server/_scheduler/_resources.py
 import os
 import re
+import json
 import asyncio
 import subprocess
 from typing import TYPE_CHECKING, Optional, Tuple
@@ -11,6 +12,7 @@ from ..database import SessionLocal
 from ..models import Job, JobStatus, CachedImage
 from .._magnus_config import magnus_config, is_local_mode
 from .._resource_manager import resource_manager, _image_to_sif_filename
+from .._resource_manager._helpers import _run_blocking_io
 from . import logger, magnus_workspace_path, magnus_container_cache_path
 
 if TYPE_CHECKING:
@@ -85,7 +87,7 @@ def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
 
 
 class _ResourcesMixin(_ResourcesMixinBase):
-    """Job 资源准备：镜像拉取（共享 task）、仓库 clone、Preparing → Pending 状态推进。"""
+    """并行准备 Job 环境与仓库；构建可共享，资源全部就绪后才进入 Pending。"""
 
     async def _pull_image_shared(self, image_uri: str, user_id: Optional[str]) -> Tuple[bool, Optional[str]]:
         """独立于 job 的镜像拉取 task，自管 DB 状态。
@@ -117,14 +119,19 @@ class _ResourcesMixin(_ResourcesMixinBase):
         return await asyncio.shield(task)
 
     async def _prepare_job_resources(self, job_id: str):
-        """异步准备任务资源：镜像 + 仓库（并行）"""
-        # Phase 1 — 读 job 信息 + 注册 pulling 状态（短 session）
+        """Prepare independent environment/repository inputs, then atomically advance.
+
+        Repository preparation joins its filesystem workers and reaps its Git
+        processes on cancellation. Cancel both branches when either fails, then
+        drain them before cleanup can delete their working directory.
+        """
+        preparation_states = (JobStatus.PREPARING, JobStatus.BUILDING)
         with SessionLocal() as db:
             job = db.query(Job).filter(Job.id == job_id).first()
-            if not job or job.status != JobStatus.PREPARING:
+            if not job or job.status not in preparation_states:
                 return
-
             container_image = job.container_image
+            dockerfile = job.dockerfile
             effective_runner = job.runner or magnus_config["cluster"]["default_runner"]
             namespace = job.namespace
             repo_name = job.repo_name
@@ -133,14 +140,10 @@ class _ResourcesMixin(_ResourcesMixinBase):
             user_id = job.user_id
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             repo_dir = f"{job_working_table}/repository"
-
             guarantee_file_exist(job_working_table, is_directory=True)
 
-        # Phase 2 — 长 I/O（无 session）
-        # 镜像拉取解耦：shield 保护，job cancel 不中断拉取
-        (image_ok, image_err), (repo_ok, repo_result, resolved_branch) = await asyncio.gather(
-            self._ensure_image_decoupled(container_image, user_id),
-            resource_manager.ensure_repo(
+        async def prepare_repository():
+            repo_ok, repo_result, resolved_branch = await resource_manager.ensure_repo(
                 namespace = namespace,
                 repo_name = repo_name,
                 branch = branch,
@@ -148,38 +151,89 @@ class _ResourcesMixin(_ResourcesMixinBase):
                 target_dir = repo_dir,
                 runner = effective_runner,
                 job_working_dir = job_working_table,
-            ),
-        )
-
-        # Phase 3 — 回写状态（短 session）
-        with SessionLocal() as db:
-            job = db.query(Job).filter(Job.id == job_id).first()
-            if not job or job.status != JobStatus.PREPARING:
-                # _clean_up_working_table 在远端执行下含 ssh `rm -rf`（+ 可能触发 socket
-                # 重建），_prepare_job_resources 跑在事件循环上，丢线程池避免阻塞 loop。
-                await asyncio.to_thread(self._clean_up_working_table, job_id)
-                return
-
-            if not image_ok:
-                job.status = JobStatus.FAILED
-                job.result = f"Failed to pull image: {image_err}"
-                db.commit()
-                logger.error(f"Job {job_id} failed: {image_err}")
-                return
-
+            )
             if not repo_ok:
-                job.status = JobStatus.FAILED
-                job.result = f"Failed to clone repo: {repo_result}"
+                raise RuntimeError(f"Failed to clone repo: {repo_result}")
+            # Freeze HEAD as soon as Git resolves it, not after a long build.
+            with SessionLocal() as db:
+                db.query(Job).filter(Job.id == job_id, Job.status.in_(preparation_states)).update({
+                    Job.commit_sha: repo_result,
+                    Job.branch: resolved_branch or branch,
+                }, synchronize_session=False)
                 db.commit()
-                logger.error(f"Job {job_id} failed: {repo_result}")
+
+        async def prepare_environment():
+            if dockerfile is None:
+                if container_image is None:
+                    raise RuntimeError("Job has neither a container image nor a Dockerfile")
+                image_ok, image_error = await self._ensure_image_decoupled(container_image, user_id)
+                if not image_ok:
+                    raise RuntimeError(f"Failed to pull image: {image_error}")
                 return
+            with SessionLocal() as db:
+                active = db.query(Job).filter(Job.id == job_id, Job.status.in_(preparation_states)).update({
+                    Job.status: JobStatus.BUILDING,
+                }, synchronize_session=False)
+                db.commit()
+            if not active:
+                raise asyncio.CancelledError()
+            result = await resource_manager.builds.ensure(
+                job_id = job_id,
+                dockerfile = dockerfile,
+            )
+            with self._preparing_jobs_lock:
+                self._build_pinned_jobs.add(job_id)
+            with SessionLocal() as db:
+                active = db.query(Job).filter(Job.id == job_id, Job.status.in_(preparation_states)).update({
+                    Job.build_result: json.dumps(result),
+                    Job.status: JobStatus.PREPARING,
+                }, synchronize_session=False)
+                db.commit()
+            if not active:
+                raise asyncio.CancelledError()
 
-            assert repo_result is not None
-            job.commit_sha = repo_result
-
-            if resolved_branch is not None:
-                job.branch = resolved_branch
-
-            job.status = JobStatus.PENDING
-            db.commit()
-            logger.info(f"Job {job_id} resources ready, status -> PENDING")
+        repo_task = asyncio.create_task(prepare_repository())
+        environment_task = asyncio.create_task(prepare_environment())
+        ready = False
+        try:
+            pending = {repo_task, environment_task}
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
+            with SessionLocal() as db:
+                ready = bool(db.query(Job).filter(Job.id == job_id, Job.status.in_(preparation_states)).update({
+                    Job.status: JobStatus.PENDING,
+                }, synchronize_session=False))
+                db.commit()
+            if ready:
+                logger.info(f"Job {job_id} resources ready, status -> PENDING")
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            with SessionLocal() as db:
+                db.query(Job).filter(Job.id == job_id, Job.status.in_(preparation_states)).update({
+                    Job.status: JobStatus.FAILED,
+                    Job.result: str(error),
+                }, synchronize_session=False)
+                db.commit()
+            logger.error(f"Job {job_id} preparation failed: {error}")
+        finally:
+            if not ready:
+                repo_task.cancel()
+                environment_task.cancel()
+                # Drain repository I/O before deleting its destination. Further
+                # cancellation requests must not detach the filesystem worker.
+                drain = asyncio.gather(repo_task, environment_task, return_exceptions=True)
+                while not drain.done():
+                    try:
+                        await asyncio.shield(drain)
+                    except asyncio.CancelledError:
+                        continue
+                resource_manager.builds.release(job_id)
+                with self._preparing_jobs_lock:
+                    self._build_pinned_jobs.discard(job_id)
+                await _run_blocking_io(
+                    self._clean_up_working_table,
+                    job_id,
+                )

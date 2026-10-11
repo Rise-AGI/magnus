@@ -89,7 +89,7 @@ def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int,
         models.Job.status.in_([JobStatus.PENDING, JobStatus.PAUSED])
     ).all()
     preparing_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
-        models.Job.status == JobStatus.PREPARING
+        models.Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING])
     ).all()
 
     pending_jobs_orm.sort(key=_scheduler_sort_key, reverse=True)
@@ -358,7 +358,7 @@ def get_cluster_stats(
         *([not_running_in_slurm] if not_running_in_slurm is not None else []),
     ).all()
     preparing_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
-        models.Job.status == JobStatus.PREPARING,
+        models.Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
         *([not_running_in_slurm] if not_running_in_slurm is not None else []),
     ).all()
 
@@ -430,7 +430,7 @@ def get_my_active_jobs(
     ).all()
     preparing_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
         models.Job.user_id.in_(user_ids),
-        models.Job.status == JobStatus.PREPARING,
+        models.Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
     ).all()
 
     # 对排队任务应用调度排序

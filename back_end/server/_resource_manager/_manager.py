@@ -9,6 +9,7 @@ from ._helpers import _image_to_sif_filename, _repo_to_cache_dirname
 from ._cache import _CacheMixin
 from ._images import _ImagesMixin
 from ._repos import _ReposMixin
+from ._builds import ImageBuildManager
 
 
 class ResourceManager(_CacheMixin, _ImagesMixin, _ReposMixin):
@@ -27,6 +28,7 @@ class ResourceManager(_CacheMixin, _ImagesMixin, _ReposMixin):
         # repo_url -> asyncio.Lock, 用于串行化同 repo 的 ls-remote，
         # 让 fanout 里先到的解析结果被后到者复用
         self._default_branch_locks: Dict[str, asyncio.Lock] = {}
+        self.builds = ImageBuildManager()
 
     def get_sif_path(self, image: str) -> str:
         return os.path.join(magnus_container_cache_path, _image_to_sif_filename(image))

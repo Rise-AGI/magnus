@@ -80,6 +80,54 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
 
     is_local = backend == "local"
 
+    # Opt-in: existing sites neither need buildctl nor contact a builder.
+    execution.setdefault("image_build", {})
+    image_build = execution["image_build"]
+    if not isinstance(image_build, dict):
+        raise TypeError("execution.image_build must be a mapping")
+    build_defaults = {
+        "enabled": False,
+        "address": None,
+        "buildctl": "buildctl",
+        "platform": "linux/amd64",
+        "max_concurrent": 2,
+        "timeout_seconds": 3600,
+        "cache_size": "40G",
+        "min_free_space": "5G",
+        "tls_ca": None,
+        "tls_cert": None,
+        "tls_key": None,
+        "tls_server_name": None,
+    }
+    for key, value in build_defaults.items():
+        image_build.setdefault(key, value)
+    _check_key(image_build, "enabled", bool)
+    if image_build["enabled"]:
+        for key in ("address", "buildctl", "platform", "cache_size", "min_free_space"):
+            _check_key(image_build, key, str)
+            if not image_build[key].strip():
+                raise ValueError(f"execution.image_build.{key} must not be empty")
+        for key in ("max_concurrent", "timeout_seconds"):
+            _check_key(image_build, key, int)
+            if isinstance(image_build[key], bool) or image_build[key] <= 0:
+                raise ValueError(f"execution.image_build.{key} must be positive")
+        for key in ("cache_size", "min_free_space"):
+            if _parse_size_string(image_build[key]) <= 0:
+                raise ValueError(f"execution.image_build.{key} must be a positive size")
+        if not image_build["platform"].startswith("linux/"):
+            raise ValueError("execution.image_build.platform must target Linux containers")
+        address = image_build["address"]
+        if not address.startswith(("unix://", "npipe://", "tcp://")):
+            raise ValueError("execution.image_build.address must use unix://, npipe:// or tcp://")
+        for key in ("tls_ca", "tls_cert", "tls_key", "tls_server_name"):
+            _check_key(image_build, key, str, nullable=True)
+        if address.startswith("tcp://") and not all(image_build[key] for key in ("tls_ca", "tls_cert", "tls_key")):
+            raise ValueError("TCP image builders require tls_ca, tls_cert and tls_key (mTLS)")
+        for key in ("tls_ca", "tls_cert", "tls_key"):
+            if image_build[key] and not Path(image_build[key]).is_file():
+                raise ValueError(f"execution.image_build.{key} file does not exist")
+    _warn_extra_keys(image_build, set(build_defaults), "execution.image_build")
+
     # transport：magnus 执行 SLURM CLI（及后续跨界文件搬运）的位置。
     # local = 本机 subprocess（magnus 与 SLURM controller 同机，自有/独占集群现状）；
     # ssh = 经已建立的 SSH ControlMaster socket 驱动远程站点（共享集群租户场景：在唯一可达的
@@ -364,7 +412,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _warn_extra_keys(slurm_cfg, {"partition", "qos", "account", "mem_mode", "mem_per_cpu_mb", "module_loads", "mpi_type", "srun_extra_flags"}, "execution.slurm")
         expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache", "slurm"}
 
-    _warn_extra_keys(execution, expected_exec_keys, "execution")
+    _warn_extra_keys(execution, expected_exec_keys | {"image_build"}, "execution")
 
     resource_cache = execution["resource_cache"]
     _check_key(resource_cache, "container_cache_size", str)
@@ -563,6 +611,8 @@ def apply_cluster_defaults(data: Dict[str, Any])-> Dict[str, Any]:
     """
     cluster = magnus_config["cluster"]
     for field, default_key in _CLUSTER_DEFAULT_FIELDS:
+        if field == "container_image" and data.get("dockerfile") is not None:
+            continue
         if field not in data:
             continue
         if data[field] is None or (field == "cpu_count" and data[field] == 0):

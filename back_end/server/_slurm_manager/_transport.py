@@ -15,9 +15,91 @@ import os
 import posixpath
 import shlex
 import subprocess
+import threading
 from typing import Dict, List, Optional
 
 from ._ssh_auto_connect import ensure_control_master
+
+
+def _stream_file_to_command(
+    command: List[str],
+    local_path: str,
+    *,
+    prefix: bytes,
+    timeout: float,
+) -> subprocess.CompletedProcess:
+    """Send a small header and a binary file without buffering the file in RAM.
+
+    Separate readers drain bounded output tails while the writer feeds stdin;
+    this also supports Windows anonymous pipes and early receiver cache hits.
+    """
+    with open(local_path, "rb") as source:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert process.stdin is not None
+        assert process.stdout is not None
+        assert process.stderr is not None
+        write_errors = []
+        stdout_tail = bytearray()
+        stderr_tail = bytearray()
+
+        def write_input():
+            try:
+                process.stdin.write(prefix)
+                while block := source.read(1024 * 1024):
+                    process.stdin.write(block)
+            except BrokenPipeError:
+                # A validated cache hit exits before consuming the image.
+                pass
+            except OSError as error:
+                write_errors.append(error)
+            finally:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+
+        def drain(
+            stream,
+            tail,
+        ):
+            with stream:
+                while block := stream.read(8192):
+                    tail.extend(block)
+                    del tail[:-65536]
+
+        threads = [
+            threading.Thread(target=write_input),
+            threading.Thread(target=drain, args=(process.stdout, stdout_tail)),
+            threading.Thread(target=drain, args=(process.stderr, stderr_tail)),
+        ]
+        try:
+            for thread in threads:
+                thread.start()
+            process.wait(timeout=timeout)
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            for thread in threads:
+                if thread.ident is not None:
+                    thread.join()
+        if write_errors and process.returncode == 0:
+            # Windows may report a closed receiver pipe as EINVAL, not EPIPE.
+            error = write_errors[0]
+            if not (os.name == "nt" and error.errno == 22):
+                raise error
+        return subprocess.CompletedProcess(
+            command,
+            process.returncode,
+            bytes(stdout_tail).decode("utf-8", errors="replace"),
+            bytes(stderr_tail).decode("utf-8", errors="replace"),
+        )
 
 
 class _Transport:
@@ -46,6 +128,17 @@ class _Transport:
 
     def push(self, local_path: str, remote_path: str) -> None:
         """把本机 local_path（文件或目录树）搬到执行端的 remote_path。"""
+        raise NotImplementedError
+
+    def run_with_file_input(
+        self,
+        command: List[str],
+        local_path: str,
+        *,
+        prefix: bytes = b"",
+        timeout: float,
+    ) -> subprocess.CompletedProcess:
+        """Run a command receiving a binary file after an optional stdin header."""
         raise NotImplementedError
 
     def fetch(self, remote_path: str, local_path: str) -> None:
@@ -78,6 +171,21 @@ class _LocalTransport(_Transport):
     def push(self, local_path: str, remote_path: str) -> None:
         # 本机执行：调用方把远端路径映射回同一个本地路径，工作区本就在原地，无需搬运。
         return
+
+    def run_with_file_input(
+        self,
+        command: List[str],
+        local_path: str,
+        *,
+        prefix: bytes = b"",
+        timeout: float,
+    ) -> subprocess.CompletedProcess:
+        return _stream_file_to_command(
+            command,
+            local_path,
+            prefix=prefix,
+            timeout=timeout,
+        )
 
     def fetch(self, remote_path: str, local_path: str) -> None:
         # 同 push：本机执行端与 magnus 同机同盘，没有要搬回的东西。
@@ -174,6 +282,32 @@ class _SshControlMasterTransport(_Transport):
             capture_output = True,
             text = True,
             check = check,
+        )
+
+    def run_with_file_input(
+        self,
+        command: List[str],
+        local_path: str,
+        *,
+        prefix: bytes = b"",
+        timeout: float,
+    ) -> subprocess.CompletedProcess:
+        self._ensure_socket()
+        ssh_command = [
+            "ssh",
+            "-T",
+            "-o",
+            "BatchMode=yes",
+            "-S",
+            self._control_path,
+            f"{self._user}@{self._host}",
+            " ".join(shlex.quote(token) for token in command),
+        ]
+        return _stream_file_to_command(
+            ssh_command,
+            local_path,
+            prefix=prefix,
+            timeout=timeout,
         )
 
     def push(self, local_path: str, remote_path: str) -> None:

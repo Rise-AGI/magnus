@@ -42,6 +42,7 @@ class _SchedulerProtocol:
     _preparing_jobs_lock: "threading.Lock"
     _loop: Optional[asyncio.AbstractEventLoop]
     _image_pull_tasks: Dict[str, asyncio.Task[Any]]
+    _build_pinned_jobs: set[str]
     _docker_log_cursors: Dict[str, Optional[str]]
 
     # === _job_lifecycle.py ===
@@ -72,6 +73,7 @@ class _SchedulerProtocol:
     async def _prepare_job_resources(self, job_id: str) -> None: ...
 
     # === _submit.py ===
+    def _built_environment_ready(self, db: "Session", job: "Job") -> bool: ...
     def _submit_to_slurm(self, db: "Session", job: "Job") -> bool: ...
     def _submit_to_docker(self, db: "Session", job: "Job") -> bool: ...
     def _extract_bind_mounts_from_system_entry_command(
@@ -92,6 +94,8 @@ class _SchedulerProtocol:
         job_id: str,
         local_sif_path: str,
         local_repo_dir: str,
+        *,
+        build_digest: str | None = None,
     ) -> None: ...
     def _stage_in_custody(self, job_id: str, *command_sources: str) -> None: ...
     def _stage_out_logs(self, job_id: str) -> None: ...

@@ -12,7 +12,7 @@ stdout、metrics 要回读到本机给 scheduler / 前端端点。本 mixin 收�
 
 搬运一律按**文件粒度**（marker 逐个、output.txt 单文件、metrics 先列目录再逐个），
 不搬目录树 —— scp -r 把源目录落进既存目标目录时是否嵌套有跨版本歧义，逐文件杜绝
-该歧义。SIF / repo 等大件如何落远端是来源相关的另一回事（见后续 commit），不在此。
+该歧义。SIF / repo 的 relay 搬运也在此收口；native build 的有界缓存由独立模块管理。
 """
 import os
 import re
@@ -28,6 +28,7 @@ from . import (
     magnus_remote_workspace_path,
     magnus_remote_container_cache_path,
 )
+from ._relay_build_cache import stage_built_sif
 
 # Directory (inside the job working tree) where the in-container SDK drops custody
 # uploads on no-network remote execution, paired with the SDK's MAGNUS_CUSTODY_DROP_DIR.
@@ -232,10 +233,13 @@ class _StagingMixin(_StagingMixinBase):
         job_id: str,
         local_sif_path: str,
         local_repo_dir: str,
+        *,
+        build_digest: str | None = None,
     ) -> None:
         """relay 模式：把控制机本地拉好的 SIF + 仓库推到远端站点。
 
-        - SIF 落远端 container_cache 持久缓存：先 `test -f` 探在不在，**命中即跳过传输**
+        - Dockerfile 构建产物使用独立的有界缓存，保护活跃 Job 并在传输前预留空间。
+        - 既有 container_image SIF 落远端 container_cache：先 `test -f` 探在不在，**命中即跳过传输**
           （满足"命中镜像的后续 job 本地级延迟"）；未命中先推到 `.partial.<job>` 临时名
           再原子 `mv` 就位 —— 半路失败不会在缓存留下残缺 SIF 被后续 job 当命中误用。
         - 仓库每任务推到远端 job 工作区（与本地每任务 clone 的模型一致；持久 repo 缓存 +
@@ -249,19 +253,27 @@ class _StagingMixin(_StagingMixinBase):
             return
         transport = self.slurm_manager.transport
 
-        remote_sif_path = (
-            f"{magnus_remote_container_cache_path}/{os.path.basename(local_sif_path)}"
-        )
-        already_cached = transport.run(["test", "-f", remote_sif_path])
-        if already_cached.returncode != 0:
-            staged_sif_path = f"{remote_sif_path}.partial.{job_id}"
-            transport.push(local_sif_path, staged_sif_path)
-            promoted = transport.run(["mv", "-f", staged_sif_path, remote_sif_path])
-            if promoted.returncode != 0:
-                raise RuntimeError(
-                    f"failed to promote staged SIF {staged_sif_path} -> {remote_sif_path} "
-                    f"(rc={promoted.returncode}): {promoted.stderr.strip()}"
-                )
+        if build_digest is not None:
+            stage_built_sif(
+                transport,
+                local_sif_path,
+                build_digest,
+                job_id = job_id,
+            )
+        else:
+            remote_sif_path = (
+                f"{magnus_remote_container_cache_path}/{os.path.basename(local_sif_path)}"
+            )
+            already_cached = transport.run(["test", "-f", remote_sif_path])
+            if already_cached.returncode != 0:
+                staged_sif_path = f"{remote_sif_path}.partial.{job_id}"
+                transport.push(local_sif_path, staged_sif_path)
+                promoted = transport.run(["mv", "-f", staged_sif_path, remote_sif_path])
+                if promoted.returncode != 0:
+                    raise RuntimeError(
+                        f"failed to promote staged SIF {staged_sif_path} -> {remote_sif_path} "
+                        f"(rc={promoted.returncode}): {promoted.stderr.strip()}"
+                    )
 
         # 仓库是目录：scp -r 落进一个**已存在**的同名目录会嵌套（remote/repository/
         # repository）。unique job-id + pause 时清远端使它通常不预存在，这里仍先 rm -rf

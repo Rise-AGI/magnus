@@ -130,7 +130,7 @@ def _shutdown_service_resources_sync(service_id: str, db: Session):
     if service.current_job_id:
         job = db.query(models.Job).filter(models.Job.id == service.current_job_id).first()
         
-        if job and job.status in [JobStatus.PREPARING, JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.PAUSED]:
+        if job and job.status in [JobStatus.PREPARING, JobStatus.BUILDING, JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.PAUSED]:
             try:
                 logger.info(f"Terminating job {job.id} for service {service.id} via Scheduler...")
                 scheduler.terminate_job(db, job)
@@ -203,7 +203,7 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 status = JobStatus.PREPARING,
                 job_type = service.job_type,
                 # NOTE: Service.container_image is schema-nullable (models/_service.py: Mapped[str | None]),
-                # while Job.container_image is NOT NULL. New services route through apply_cluster_defaults,
+                # and ordinary service jobs still require an image. New services route through apply_cluster_defaults,
                 # but legacy rows predating that helper may still hold NULL — keep this fallback as defense in depth.
                 container_image = service.container_image or magnus_config["cluster"]["default_container_image"],
                 system_entry_command = service.system_entry_command,

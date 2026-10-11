@@ -129,6 +129,22 @@ execution:
   backend: slurm                         # slurm | local
   container_runtime: apptainer           # apptainer | singularity (slurm) | docker (local)
   allow_root: false
+  # Optional native Dockerfile environments. Existing sites need no builder.
+  # A dedicated BuildKit worker owns its layer cache and must have resource/disk
+  # limits configured by the operator. Hard disk ceilings require a volume quota.
+  # image_build:
+  #   enabled: false
+  #   address: unix:///run/user/1000/buildkit/buildkitd.sock
+  #   buildctl: buildctl
+  #   platform: linux/amd64              # one Linux target; independent of the job repo
+  #   max_concurrent: 2
+  #   timeout_seconds: 3600
+  #   cache_size: 40G
+  #   min_free_space: 5G
+  #   tls_ca: null                       # tcp:// builders require all three mTLS files
+  #   tls_cert: null
+  #   tls_key: null
+  #   tls_server_name: null
   resource_cache:
     container_cache_size: 80G
     repo_cache_size: 20G

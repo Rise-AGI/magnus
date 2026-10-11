@@ -2,6 +2,8 @@
 import anyio
 import asyncio
 import shutil
+import re
+import json
 import logging
 import uvicorn
 import argparse
@@ -19,6 +21,7 @@ from ._scheduler import scheduler
 from ._service_manager import service_manager
 from ._file_custody_manager import file_custody_manager
 from ._metrics_collector import DockerMetricsCollector
+from ._resource_manager import resource_manager
 from .routers.images import recover_stuck_images
 from ._feishu_client import feishu_client
 
@@ -107,7 +110,9 @@ LOCAL_INSTALL_HINTS = {
 }
 
 def _check_system_dependencies() -> None:
-    deps = LOCAL_DEPENDENCIES if is_local_mode else HPC_DEPENDENCIES
+    deps = dict(LOCAL_DEPENDENCIES if is_local_mode else HPC_DEPENDENCIES)
+    if magnus_config["execution"]["image_build"]["enabled"]:
+        deps["镜像构建 (BuildKit)"] = [magnus_config["execution"]["image_build"]["buildctl"]]
     missing: Dict[str, List[str]] = {}
     for category, commands in deps.items():
         not_found = [cmd for cmd in commands if shutil.which(cmd) is None]
@@ -138,6 +143,70 @@ models.Base.metadata.create_all(
 )
 
 
+def _make_job_container_image_nullable() -> None:
+    """SQLite table rebuild preserving the deployed schema, indexes and triggers.
+
+    Recreate from sqlite_master rather than the current ORM: old sites may have
+    additional columns or indexes. No user data or foreign-key targets are renamed.
+    The full copy/drop/rename is one transaction, before serving any requests.
+    """
+    connection = engine.raw_connection()
+    cursor = connection.cursor()
+    foreign_keys = 0
+    try:
+        foreign_keys = cursor.execute("PRAGMA foreign_keys").fetchone()[0]
+        columns = cursor.execute("PRAGMA table_info(jobs)").fetchall()
+        if not any(row[1] == "container_image" and row[3] for row in columns):
+            return
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.execute("BEGIN IMMEDIATE")
+        existing_violations = set(cursor.execute("PRAGMA foreign_key_check").fetchall())
+        original = cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone()[0]
+        create_sql, changes = re.subn(
+            r'((?:"container_image"|container_image)\s+[A-Za-z]+(?:\(\d+\))?)\s+NOT\s+NULL\b',
+            r'\1',
+            original,
+            count = 1,
+            flags = re.IGNORECASE,
+        )
+        if changes != 1:
+            raise RuntimeError("Cannot safely migrate jobs.container_image: unrecognized table definition")
+        create_sql, changes = re.subn(
+            r'^CREATE\s+TABLE\s+(?:"jobs"|jobs)(?=\s|\()',
+            'CREATE TABLE "jobs_image_build_migration"',
+            create_sql,
+            count = 1,
+            flags = re.IGNORECASE,
+        )
+        if changes != 1:
+            raise RuntimeError("Cannot safely migrate jobs: unrecognized table name")
+        objects = cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE tbl_name='jobs' AND type IN ('index','trigger') AND sql IS NOT NULL"
+        ).fetchall()
+        quoted_columns = ", ".join('"' + row[1].replace('"', '""') + '"' for row in columns)
+        if "WITHOUT ROWID" not in original.upper():
+            # Keep rowids too: foreign_key_check reports them, and old sites may
+            # contain pre-existing orphan rows while enforcement was disabled.
+            quoted_columns = '"_rowid_", ' + quoted_columns
+        cursor.execute(create_sql)
+        cursor.execute(f"INSERT INTO jobs_image_build_migration ({quoted_columns}) SELECT {quoted_columns} FROM jobs")
+        cursor.execute("DROP TABLE jobs")
+        cursor.execute("ALTER TABLE jobs_image_build_migration RENAME TO jobs")
+        for (ddl,) in objects:
+            cursor.execute(ddl)
+        if set(cursor.execute("PRAGMA foreign_key_check").fetchall()) - existing_violations:
+            raise RuntimeError("Foreign-key check failed while migrating jobs; migration rolled back")
+        connection.commit()
+        logger.info("Migrated jobs.container_image to nullable, preserving rows and indexes")
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        cursor.execute(f"PRAGMA foreign_keys={int(foreign_keys)}")
+        cursor.close()
+        connection.close()
+
+
 def run_migrations()-> None:
     from sqlalchemy import inspect, text
     inspector = inspect(engine)
@@ -166,6 +235,12 @@ def run_migrations()-> None:
                 conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {_multinode_col} INTEGER"))
                 conn.commit()
             logger.info("✅ Migration completed.")
+
+    for column in ("dockerfile", "build_result"):
+        if column not in job_columns:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {column} TEXT"))
+    _make_job_container_image_nullable()
 
     # 索引由 models 声明，create_all 只对新库生效、不会给已存在的 jobs 表补建。
     # 站点上线前落库的老库需要在这里幂等补齐，否则热点读路径（列表分页 / cluster
@@ -344,6 +419,24 @@ async def lifespan(
     # 镜像恢复：清理上次异常退出遗留的 .tmp 和卡在 pulling/refreshing 的记录
     recover_stuck_images()
 
+    # Restore cache protection before any new preparation or cache collection.
+    with SessionLocal() as db:
+        rows = db.query(models.Job.id, models.Job.build_result).filter(
+            models.Job.build_result.isnot(None),
+            (models.Job.status.in_([
+                models.JobStatus.PREPARING,
+                models.JobStatus.BUILDING,
+                models.JobStatus.PENDING,
+                models.JobStatus.QUEUED,
+                models.JobStatus.RUNNING,
+                models.JobStatus.PAUSED,
+            ]) | models.Job.slurm_job_id.isnot(None)),
+        ).all()
+        pins = {job_id: json.loads(result) for job_id, result in rows}
+    resource_manager.builds.restore_pins(pins)
+    with scheduler._preparing_jobs_lock:
+        scheduler._build_pinned_jobs.update(pins)
+
     scheduler_task = asyncio.create_task(run_scheduler_loop())
     service_manager_task = asyncio.create_task(service_manager.start_background_loop())
     file_custody_task = asyncio.create_task(file_custody_manager.cleanup_loop())
@@ -388,6 +481,12 @@ async def lifespan(
         logger.info("Scheduler loop stopped.")
 
     file_custody_manager.shutdown()
+    with scheduler._preparing_jobs_lock:
+        preparing_tasks = list(scheduler.preparing_jobs.values())
+    for task in preparing_tasks:
+        task.cancel()
+    await asyncio.gather(*preparing_tasks, return_exceptions=True)
+    await resource_manager.builds.shutdown()
 
 
 app = FastAPI(

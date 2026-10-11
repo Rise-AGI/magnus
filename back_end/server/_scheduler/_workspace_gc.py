@@ -3,7 +3,7 @@
 
 每个 job 收尾后（见 _job_lifecycle._clean_up_working_table）其工作区被裁到只剩
 日志 / metrics / 结果标记，但这些保留产物会随 job 累积无限增长。本 janitor 把
-`{root}/workspace/jobs` 里**终态** job 目录的总量维持在 `server.scheduler.
+`{root}/workspace/jobs` 与 `{root}/build_diagnostics` 里**终态** job 产物的总量维持在 `server.scheduler.
 workspace_size_cap` 之内：超限时按 mtime 从最旧的终态目录起滚动淘汰（LRU），保住
 近期历史、绝不触碰仍活跃的 job。与 per-job 收尾正交（那是每 job 一次的裁剪，这是
 跨 job 的总量控制），故独立成 mixin。淘汰只删磁盘工作区,不动 DB 里的 job 记录。
@@ -14,12 +14,14 @@ workspace_size_cap` 之内：超限时按 mtime 从最旧的终态目录起滚�
 job 的磁盘压力由写入链路的 fail-fast 兜（见 disk-space awareness），不由本 cap 兼任。
 """
 import os
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Set, Tuple
 from pywheels.file_tools import delete_file
 from ..database import SessionLocal
 from ..models import Job, JobStatus
 from .._magnus_config import magnus_config
+from .._resource_manager import resource_manager
 from .._size_utils import _parse_size_string
 from . import logger, magnus_workspace_path
 
@@ -35,6 +37,7 @@ else:
 _ACTIVE_JOB_STATUSES = (
     JobStatus.PENDING,
     JobStatus.PREPARING,
+    JobStatus.BUILDING,
     JobStatus.QUEUED,
     JobStatus.RUNNING,
     JobStatus.PAUSED,
@@ -43,6 +46,19 @@ _ACTIVE_JOB_STATUSES = (
 # 回收的低频节流间隔（秒）。总量核算要遍历终态目录做一次 du，成本随历史规模增长，故低频
 # 跑（对偶 _record_snapshot 的 snapshot_interval 节流）。
 _WORKSPACE_GC_INTERVAL_SECONDS = 3600
+
+
+@dataclass
+class _TerminalJobArtifacts:
+    job_id: str
+    modified_at: float = 0
+    directories: list[tuple[str, int]] = field(default_factory=list)
+
+    @property
+    def size_bytes(
+        self,
+    ) -> int:
+        return sum(size for _, size in self.directories)
 
 
 class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
@@ -61,8 +77,6 @@ class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
         cap_bytes = _parse_size_string(cap_config)
 
         jobs_root = f"{magnus_workspace_path}/jobs"
-        if not os.path.isdir(jobs_root):
-            return
 
         # 先读活跃 job 集合，再据它把活跃目录从计量与淘汰里一并排除 —— 计量口径与淘汰口径
         # 严格一致。活跃态在查询后至多迁往终态（终态不可逆），这类目录本轮被跳过、下轮再收，
@@ -70,43 +84,95 @@ class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
         with SessionLocal() as db:
             active_job_ids = {
                 row[0]
-                for row in db.query(Job.id).filter(Job.status.in_(_ACTIVE_JOB_STATUSES)).all()
+                for row in db.query(Job.id).filter(
+                    Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None),
+                ).all()
             }
+        with self._preparing_jobs_lock:
+            active_job_ids.update(self.preparing_jobs)
 
         try:
-            terminal_dirs = _measure_terminal_job_dirs(jobs_root, active_job_ids)
+            terminal_jobs = _measure_terminal_job_artifacts(
+                jobs_root,
+                active_job_ids,
+            )
         except OSError as error:
-            logger.warning(f"Workspace GC skipped: cannot scan {jobs_root}: {error}")
+            logger.warning(f"Workspace GC skipped: cannot scan retained Job artifacts: {error}")
             return
 
-        total_bytes = sum(size for _, size, _ in terminal_dirs)
+        total_bytes = sum(artifacts.size_bytes for artifacts in terminal_jobs)
         if total_bytes <= cap_bytes:
             return
 
         # 最旧优先：mtime 记录最后一次写入（job 完成 / 最后产物落盘），据此做历史的 LRU
         # 淘汰，删到终态总量回落到上限以下为止。
-        terminal_dirs.sort(key=lambda entry: entry[0])
+        terminal_jobs.sort(key=lambda artifacts: artifacts.modified_at)
         reclaimed_bytes = 0
         removed_count = 0
-        for _, size, path in terminal_dirs:
+        for artifacts in terminal_jobs:
             if total_bytes - reclaimed_bytes <= cap_bytes:
                 break
+            # A new Job may have created its directory after the initial DB
+            # snapshot. Recheck before deleting either directory in its group.
+            with SessionLocal() as db:
+                active = db.query(Job.id).filter(
+                    Job.id == artifacts.job_id,
+                    Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None),
+                ).first() is not None
+            with self._preparing_jobs_lock:
+                active = active or artifacts.job_id in self.preparing_jobs
+            if active:
+                total_bytes -= artifacts.size_bytes
+                continue
             # delete_file(pywheels) 自己吞掉所有异常、从不 raise，所以删完必须回看目录是否
             # 真没了再记账 —— 否则一次失败的 unlink 会被误记成已回收，可能让循环提前 break、
             # 把仍超上限的 workspace 当成已回落，并在日志里谎报成功。
-            delete_file(path)
-            if os.path.exists(path):
-                logger.warning(f"Workspace GC: failed to remove {path}; still over cap")
-                continue
-            reclaimed_bytes += size
-            removed_count += 1
+            removed_all = True
+            for path, size in artifacts.directories:
+                delete_file(path)
+                if os.path.lexists(path):
+                    logger.warning(f"Workspace GC: failed to remove {path}; still over cap")
+                    removed_all = False
+                    continue
+                reclaimed_bytes += size
+            removed_count += int(removed_all)
 
-        if removed_count:
+        if reclaimed_bytes:
             logger.info(
-                f"Workspace GC: evicted {removed_count} old terminal job dir(s), "
+                f"Workspace GC: evicted retained artifacts for {removed_count} old terminal Job(s), "
                 f"reclaimed ~{reclaimed_bytes // (1024 * 1024)} MB "
                 f"(terminal total was {total_bytes // (1024 * 1024)} MB, cap {cap_config})"
             )
+
+
+def _measure_terminal_job_artifacts(
+    jobs_root: str,
+    active_job_ids: Set[str],
+) -> list[_TerminalJobArtifacts]:
+    """Charge and evict each Job's execution and private build logs together.
+
+    The diagnostics scan is independent of workspace existence, so interrupted
+    preparation and partially completed cleanup cannot strand unbounded logs.
+    Jobs without build diagnostics retain their existing size and mtime order.
+    """
+    grouped: dict[str, _TerminalJobArtifacts] = {}
+    diagnostics_root = str(resource_manager.builds.diagnostics_root)
+    for root in (jobs_root, diagnostics_root):
+        try:
+            measured = _measure_terminal_job_dirs(root, active_job_ids)
+        except FileNotFoundError:
+            continue
+        for modified_at, size, path in measured:
+            job_id = os.path.basename(path)
+            if root == diagnostics_root:
+                try:
+                    resource_manager.builds.diagnostics_directory(job_id)
+                except (OSError, ValueError):
+                    continue
+            artifacts = grouped.setdefault(job_id, _TerminalJobArtifacts(job_id))
+            artifacts.modified_at = max(artifacts.modified_at, modified_at)
+            artifacts.directories.append((path, size))
+    return list(grouped.values())
 
 
 def _measure_terminal_job_dirs(

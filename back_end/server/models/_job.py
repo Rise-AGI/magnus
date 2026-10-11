@@ -2,7 +2,7 @@
 import enum
 from datetime import datetime, timezone
 from sqlalchemy import Enum as SQLEnum, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.orm import Mapped, defer, joinedload, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, defer, joinedload, mapped_column, relationship
 
 from ..database import Base
 from ._helpers import generate_hex_id, UtcDateTime
@@ -38,6 +38,7 @@ class JobStatus(str, enum.Enum):
 
     PENDING = "Pending"
     PREPARING = "Preparing"
+    BUILDING = "Building"
     QUEUED = "Queued"
     RUNNING = "Running"
     PAUSED  = "Paused"
@@ -68,7 +69,11 @@ class Job(Base):
     branch: Mapped[str | None] = mapped_column(String, nullable=True)
     commit_sha: Mapped[str | None] = mapped_column(String, nullable=True)
     entry_command: Mapped[str] = mapped_column(Text)
-    container_image: Mapped[str] = mapped_column(String)
+    container_image: Mapped[str | None] = mapped_column(String, nullable=True)
+    dockerfile: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Internal resolved artifact; user input remains dockerfile/container_image.
+    build_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    has_dockerfile = column_property(dockerfile.isnot(None))
     system_entry_command: Mapped[str | None] = mapped_column(Text, nullable=True)
     gpu_count: Mapped[int] = mapped_column(Integer)
     gpu_type: Mapped[str] = mapped_column(String)
@@ -129,6 +134,8 @@ def job_list_load_options():
     return (
         defer(Job.entry_command, raiseload=True),
         defer(Job.system_entry_command, raiseload=True),
+        defer(Job.dockerfile, raiseload=True),
+        defer(Job.build_result, raiseload=True),
         defer(Job.result, raiseload=True),
         defer(Job.action, raiseload=True),
         joinedload(Job.user),

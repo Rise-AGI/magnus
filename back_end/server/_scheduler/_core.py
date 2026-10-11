@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 from sqlalchemy.orm import Session
 from ..models import Job, JobStatus
+from ..database import SessionLocal
+from .._resource_manager import resource_manager
 from .._slurm_manager import SlurmManager
 from .._docker_manager import DockerManager
 from .._magnus_config import is_local_mode
@@ -33,7 +35,7 @@ class MagnusScheduler(
     - _SyncMixin: 把 SLURM/Docker 真实状态拉回数据库 + 集群快照
     - _SubmitMixin: 把 PENDING job 提交到后端
     - _DecisionsMixin: EASY backfill + 抢占
-    - _ResourcesMixin: 镜像拉取 + 仓库 clone (Preparing → Pending)
+    - _ResourcesMixin: 环境（拉取或构建）与仓库并行准备，全部就绪后进入 Pending
     - _JobLifecycleMixin: success/OOM marker、working table 清理
     - _StagingMixin: 远端执行（transport=ssh）下 job 工作区的跨界搬运（本机执行 no-op）
     - _WorkspaceGCMixin: 持久 job 工作区总量上限的低频滚动回收
@@ -65,6 +67,7 @@ class MagnusScheduler(
         self._preparing_jobs_lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._image_pull_tasks: Dict[str, asyncio.Task] = {}  # image_uri -> shared pull Task
+        self._build_pinned_jobs: set[str] = set()
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
 
     async def tick(self):
@@ -78,6 +81,7 @@ class MagnusScheduler(
             # subprocess 调用（docker logs / slurm queries）放线程池，避免阻塞 event loop
             await asyncio.to_thread(self._sync_reality)
             await self._make_decisions()
+            await asyncio.to_thread(self._release_finished_builds)
             # _record_snapshot 也会跑 slurm 查询（远端 transport 下是骑 socket 的 squeue/
             # scontrol，秒级，且 auto_connect 时可能触发 socket 重建）——同样丢线程池，
             # 否则会周期性阻塞 event loop。tick 串行执行，线程内独占无并发。
@@ -93,15 +97,6 @@ class MagnusScheduler(
         if not self.enabled:
             logger.warning("Scheduler disabled, skipping termination logic.")
             return
-
-        # 取消 Preparing 状态的异步任务。本函数跑在 FastAPI 线程池：先在锁内把 task 摘出
-        # （与调度循环的建/清原子互斥），再经 call_soon_threadsafe 把 cancel 调度回 loop
-        # 线程执行 —— asyncio.Task.cancel() 跨线程直调不安全。摘出后调度循环 Phase 2 不会
-        # 再见到它，无 double-pop。
-        with self._preparing_jobs_lock:
-            preparing_task = self.preparing_jobs.pop(job.id, None)
-        if preparing_task is not None and self._loop is not None:
-            self._loop.call_soon_threadsafe(preparing_task.cancel)
 
         if job.slurm_job_id:
             if is_local_mode:
@@ -127,7 +122,6 @@ class MagnusScheduler(
                     token = job.user.token if job.user.token is not None else "",
                 )
 
-        self._clean_up_working_table(job.id)
         job.status = JobStatus.TERMINATED
         if is_local_mode:
             # Docker 模式没有 SLURM 那种 CG 收尾窗口，stop_container +
@@ -144,6 +138,42 @@ class MagnusScheduler(
         # 路径一致。
         job.start_time = None
         db.commit()
+        # Persist TERMINATED first: late build/repository completions use a
+        # conditional update and cannot resurrect this job as Pending. Retain
+        # its task until filesystem workers drain; workspace GC also checks it.
+        with self._preparing_jobs_lock:
+            preparing_task = self.preparing_jobs.get(job.id)
+        if preparing_task is not None and not preparing_task.done() and self._loop is not None:
+            job_id = job.id
+            def cancel_preparation():
+                # The task may finish between the thread's observation and this
+                # callback. In that case cancellation is a no-op; still clean up.
+                if preparing_task.done():
+                    cleanup = asyncio.create_task(asyncio.to_thread(self._clean_up_working_table, job_id))
+                    with self._preparing_jobs_lock:
+                        self.preparing_jobs[job_id] = cleanup
+                else:
+                    preparing_task.cancel()
+            self._loop.call_soon_threadsafe(cancel_preparation)
+        else:
+            self._clean_up_working_table(job.id)
+
+    def _release_finished_builds(self) -> None:
+        """Release artifacts only after submit/staging and external resources drain."""
+        with self._preparing_jobs_lock:
+            candidates = self._build_pinned_jobs - set(self.preparing_jobs)
+        if not candidates:
+            return
+        with SessionLocal() as db:
+            finished = db.query(Job.id).filter(
+                Job.id.in_(candidates),
+                Job.status.in_([JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED]),
+                Job.slurm_job_id.is_(None),
+            ).all()
+        for (job_id,) in finished:
+            resource_manager.builds.release(job_id)
+        with self._preparing_jobs_lock:
+            self._build_pinned_jobs.difference_update(job_id for (job_id,) in finished)
 
     def signal_job(self, job: Job) -> None:
         """向运行中的 job 进程发送 SIGTERM。
