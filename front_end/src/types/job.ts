@@ -13,7 +13,7 @@ export interface Job {
   commit_sha: string | null;
   gpu_count: number;
   gpu_type: string;
-  // 列表 / 看板走轻量投影（后端 JobListItem），不含这两个可能高达几十 MB 的命令列；
+  // 列表 / 看板走轻量投影，不包含命令和 Dockerfile 原文；
   // 详情视图（GET /jobs/{id} → JobResponse）才带全。故这里是 optional，消费方按需拉详情。
   entry_command?: string;
   job_type: string;
@@ -26,7 +26,9 @@ export interface Job {
   time_limit?: number | null;
   ephemeral_storage?: string | null;
   runner?: string | null;
-  container_image: string;
+  container_image: string | null;
+  dockerfile?: string | null;
+  has_dockerfile?: boolean;
   system_entry_command?: string;
   result?: string;
   action?: string;
@@ -34,4 +36,28 @@ export interface Job {
   // JobListItem.is_releasing computed field）。前端拿来直接做 UX 决策，避免
   // 重复实现 `status × slurm_job_id` 组合推断。
   is_releasing?: boolean;
+}
+
+export interface JobCapabilities {
+  dockerfile: boolean;
+  image_build_enabled: boolean;
+}
+
+export interface JobBuildProgress {
+  phase: "waiting" | "building" | "exporting" | "loading" | "converting" | "ready" | "failed" | "cancelled";
+  elapsed_seconds: number;
+  terminal: boolean;
+  current_step: string | null;
+  steps: {
+    id: string;
+    name: string;
+    cached: boolean;
+    completed: boolean;
+    error: string | null;
+  }[];
+  cached_steps: number;
+  completed_steps: number;
+  total_steps: number;
+  log_tail: string;
+  error: string | null;
 }

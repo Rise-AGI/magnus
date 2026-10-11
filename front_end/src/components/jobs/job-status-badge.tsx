@@ -1,6 +1,7 @@
 // front_end/src/components/jobs/job-status-badge.tsx
 import { Play, CheckCircle2, AlertCircle, PauseCircle, Clock, Ban, Loader2 } from "lucide-react";
 import { useLanguage } from "@/context/language-context";
+import { JobBuildProgressPopover } from "@/components/jobs/job-build-progress";
 
 interface JobStatusBadgeProps {
   status: string;
@@ -11,9 +12,12 @@ interface JobStatusBadgeProps {
   isReleasing?: boolean;
   size?: "sm" | "md";
   animate?: boolean;
+  jobId?: string;
+  onViewBuildLogs?: () => void;
+  children?: React.ReactNode;
 }
 
-export function JobStatusBadge({ status, isReleasing = false, size = "sm", animate = true }: JobStatusBadgeProps) {
+export function JobStatusBadge({ status, isReleasing = false, size = "sm", animate = true, jobId, onViewBuildLogs, children }: JobStatusBadgeProps) {
   const { t } = useLanguage();
 
   const config = {
@@ -23,6 +27,7 @@ export function JobStatusBadge({ status, isReleasing = false, size = "sm", anima
     Paused:     { color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20", icon: PauseCircle },
     Pending:    { color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20", icon: Clock },
     Preparing:  { color: "text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/20", icon: Loader2 },
+    Building:   { color: "text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/20", icon: Loader2 },
     Terminated: { color: "text-zinc-400", bg: "bg-zinc-500/10", border: "border-zinc-500/20", icon: Ban },
   // @ts-ignore
   }[status] || { color: "text-zinc-400", bg: "bg-zinc-800", border: "border-zinc-700", icon: Clock };
@@ -32,21 +37,18 @@ export function JobStatusBadge({ status, isReleasing = false, size = "sm", anima
   const displayText = t(`jobStatus.${status.toLowerCase()}` as any) || status;
   const releasingText = t("jobStatus.releasing");
 
-  if (size === "md") {
-    const shouldAnimate = animate && (status === 'Running' || status === 'Preparing' || isReleasing);
-    return (
-      <div className="flex items-center gap-2">
-        <Icon className={`w-5 h-5 ${config.color} ${shouldAnimate ? 'animate-pulse' : ''}`} />
+  const isAnimated = animate && (["Running", "Preparing", "Building"].includes(status) || isReleasing);
+  const badge = size === "md" ? (
+      <span className="inline-flex items-center gap-2">
+        <Icon className={`w-5 h-5 ${config.color} ${isAnimated ? 'animate-pulse' : ''}`} />
         {isReleasing && (
           <span className={`text-xs font-medium ${config.color} opacity-70`}>· {releasingText}</span>
         )}
-      </div>
-    );
-  }
-
-  return (
+        {children}
+      </span>
+  ) : (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border shadow-sm ${config.bg} ${config.color} ${config.border}`}>
-      {(status === 'Running' || status === 'Preparing' || isReleasing) && animate && (
+      {isAnimated && (
         <span className="relative flex h-1.5 w-1.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-current"></span>
           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-current"></span>
@@ -58,4 +60,8 @@ export function JobStatusBadge({ status, isReleasing = false, size = "sm", anima
       )}
     </span>
   );
+
+  return jobId && status === "Building" ? (
+    <JobBuildProgressPopover jobId={jobId} status={status} onViewBuildLogs={onViewBuildLogs}>{badge}</JobBuildProgressPopover>
+  ) : badge;
 }

@@ -6,7 +6,9 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { NumberStepper } from "@/components/ui/number-stepper";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { CodeEditor } from "@/components/ui/code-editor";
 import { client } from "@/lib/api";
+import { JobCapabilities } from "@/types/job";
 import { useLanguage } from "@/context/language-context";
 import {
   PHYSICAL_GPUS,
@@ -59,6 +61,7 @@ export interface JobFormData {
   ephemeral_storage?: string | null;
   runner?: string | null;
   container_image?: string | null;
+  dockerfile?: string | null;
   system_entry_command?: string | null;
 }
 
@@ -91,6 +94,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   const [jobType, setJobType] = useState(initialData?.job_type || "A2");
 
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
   
   const [errorField, setErrorField] = useState<string | null>(null);
@@ -107,13 +111,38 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   const [ephemeralStorage, setEphemeralStorage] = useState<string>(initialData?.ephemeral_storage || "");
   const [runner, setRunner] = useState<string>(initialData?.runner || "");
   const [containerImage, setContainerImage] = useState<string>(initialData?.container_image || DEFAULT_CONTAINER_IMAGE);
+  const [environmentSource, setEnvironmentSource] = useState<"image" | "dockerfile">(initialData?.dockerfile ? "dockerfile" : "image");
+  const [dockerfile, setDockerfile] = useState(initialData?.dockerfile ?? "");
+  const [capabilities, setCapabilities] = useState<JobCapabilities | null>(null);
+  const [capabilitiesUnavailable, setCapabilitiesUnavailable] = useState(false);
   const [systemEntryCommand, setSystemEntryCommand] = useState<string>(initialData?.system_entry_command || DEFAULT_SYSTEM_ENTRY_COMMAND);
 
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const commandRef = useRef<HTMLTextAreaElement>(null);
   const systemCommandRef = useRef<HTMLTextAreaElement>(null);
   const actionRef = useRef<HTMLDivElement>(null);
-  const lastBranchRef = useRef(initialData?.branch || "");
+  const repoRequestRef = useRef(0);
+  const submittingRef = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    client("/api/jobs/capabilities", { signal: controller.signal })
+      .then((data: JobCapabilities) => { if (!controller.signal.aborted) setCapabilities(data); })
+      .catch(() => { if (!controller.signal.aborted) setCapabilitiesUnavailable(true); });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => () => { repoRequestRef.current += 1; }, []);
+
+  const resetRepository = () => {
+    repoRequestRef.current += 1;
+    setLoading(false);
+    setHasScanned(false);
+    setBranches([]);
+    setCommits([]);
+    setSelectedBranch("");
+    setSelectedCommit("");
+  };
 
   // === Imperative Handle for Clipboard Actions ===
   useImperativeHandle(ref, () => ({
@@ -136,12 +165,19 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         time_limit: timeLimit,
         ephemeral_storage: ephemeralStorage,
         runner: runner,
-        container_image: containerImage,
+        ...(environmentSource === "dockerfile"
+          ? { dockerfile }
+          : { container_image: containerImage }),
         system_entry_command: systemEntryCommand,
       };
     },
     applyPayload: (payload: any) => {
       if (!payload) return;
+
+      if (payload.dockerfile?.trim() && payload.container_image?.trim()) {
+        setErrorMessage(t("jobForm.error.environmentConflict"));
+        return;
+      }
 
       // Identity
       if (payload.task_name !== undefined) setTaskName(payload.task_name);
@@ -150,20 +186,14 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       if (payload.description !== undefined) setDescription(payload.description);
 
       // Git Source
-      if (payload.namespace !== undefined) setNamespace(payload.namespace);
-      if (payload.repo_name !== undefined) setRepoName(payload.repo_name);
-      else if (payload.repoName !== undefined) setRepoName(payload.repoName);
+      resetRepository();
+      setNamespace(payload.namespace ?? "Rise-AGI");
+      setRepoName(payload.repo_name ?? payload.repoName ?? "");
 
-      if (payload.branch !== undefined) setSelectedBranch(payload.branch);
-      if (payload.commit_sha !== undefined) setSelectedCommit(payload.commit_sha);
+      setSelectedBranch(payload.branch ?? "");
+      setSelectedCommit(payload.commit_sha ?? "");
       if (payload.entry_command !== undefined) setCommand(payload.entry_command);
       
-      // Bypass scan requirement if software info is already present
-      if (payload.namespace && (payload.repo_name || payload.repoName) 
-        && payload.branch && payload.commit_sha) {
-        setHasScanned(true);
-      }
-
       // Resources
       if (payload.gpu_count !== undefined) setGpuCount(payload.gpu_count);
       if (payload.gpu_type !== undefined) setGpuType(payload.gpu_type);
@@ -171,14 +201,22 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       
       // Advanced
       if (payload.cpu_count !== undefined) setCpuCount(payload.cpu_count);
-      if (payload.memory_demand !== undefined) setMemoryDemand(payload.memory_demand);
+      if (payload.memory_demand !== undefined) setMemoryDemand(payload.memory_demand ?? "");
       if (payload.node_count !== undefined && payload.node_count !== null) setNodeCount(payload.node_count);
       if (payload.tasks_per_node !== undefined && payload.tasks_per_node !== null) setTasksPerNode(payload.tasks_per_node);
       if (payload.time_limit !== undefined) setTimeLimit(payload.time_limit ?? 0);
-      if (payload.ephemeral_storage !== undefined) setEphemeralStorage(payload.ephemeral_storage);
-      if (payload.runner !== undefined) setRunner(payload.runner);
-      if (payload.container_image !== undefined) setContainerImage(payload.container_image);
-      if (payload.system_entry_command !== undefined) setSystemEntryCommand(payload.system_entry_command);
+      if (payload.ephemeral_storage !== undefined) setEphemeralStorage(payload.ephemeral_storage ?? "");
+      if (payload.runner !== undefined) setRunner(payload.runner ?? "");
+      if (payload.dockerfile != null) {
+        setDockerfile(payload.dockerfile);
+        setEnvironmentSource("dockerfile");
+        setContainerImage(DEFAULT_CONTAINER_IMAGE);
+      } else {
+        setDockerfile("");
+        setEnvironmentSource("image");
+        setContainerImage(payload.container_image ?? DEFAULT_CONTAINER_IMAGE);
+      }
+      if (payload.system_entry_command !== undefined) setSystemEntryCommand(payload.system_entry_command ?? "");
 
       // Auto-scroll to actions
       setTimeout(() => {
@@ -246,92 +284,69 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   };
 
   const fetchBranches = useCallback(async () => {
-    if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace is required"); return; }
-    if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo Name is required"); return; }
+    const effectiveNamespace = namespace.trim() || "Rise-AGI";
+    if (!repoName.trim() && effectiveNamespace !== "Rise-AGI") {
+      setErrorField("repo"); setErrorMessage(t("jobForm.error.repoRequired")); return;
+    }
+    const request = ++repoRequestRef.current;
     
     setLoading(true);
     setErrorField(null); setErrorMessage(null);
 
-    if (mode === 'create') {
-        setBranches([]); setCommits([]); setSelectedBranch(""); setSelectedCommit(""); 
-    }
-    
     try {
-      const data = await client(`/api/github/${namespace}/${repoName}/branches`);
+      const data = await client(`/api/github/${encodeURIComponent(effectiveNamespace)}/${encodeURIComponent(repoName.trim() || "magnus")}/branches`);
+      if (request !== repoRequestRef.current) return;
       setBranches(data);
       setHasScanned(true);
-      if (mode === 'create' && data.length > 0) {
-        setSelectedBranch(data[0].name);
-      }
     } catch (e: any) {
+      if (request !== repoRequestRef.current) return;
       console.error(e);
       setRepoError(gitErrorMessage(e.message || "git_error"));
       setHasScanned(false);
     } finally {
-      setLoading(false); 
+      if (request === repoRequestRef.current) setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [namespace, repoName, mode]);
-
-  // Init for Clone Mode (run once on mount)
-  const cloneInitRef = useRef(false);
-  useEffect(() => {
-    if (cloneInitRef.current) return;
-    if (mode === 'clone' && initialData) {
-        cloneInitRef.current = true;
-        setHasScanned(true);
-        fetchBranches();
-    }
-  }, [mode, initialData, fetchBranches]);
+  }, [namespace, repoName, gitErrorMessage, t]);
 
   // Fetch commits when branch changes
   useEffect(() => {
-    if (!selectedBranch || !hasScanned) return;
-
-    const branchChanged = selectedBranch !== lastBranchRef.current;
-    lastBranchRef.current = selectedBranch;
-
-    if (branchChanged) {
-      setCommits([]);
-      setSelectedCommit("");
-    }
+    setCommits([]);
+    if (!selectedBranch || !hasScanned || !branches.some(branch => branch.name === selectedBranch)) return;
+    const controller = new AbortController();
 
     const fetchCommits = async () => {
       try {
-        const data = await client(`/api/github/${namespace}/${repoName}/commits?branch=${selectedBranch}`);
+        const data = await client(`/api/github/${encodeURIComponent(namespace.trim() || "Rise-AGI")}/${encodeURIComponent(repoName.trim() || "magnus")}/commits?branch=${encodeURIComponent(selectedBranch)}`, { signal: controller.signal });
+        if (controller.signal.aborted) return;
         setCommits(data);
-        if (data.length > 0 && (mode === 'create' || branchChanged)) {
-            setSelectedCommit("HEAD");
-        }
       } catch (e: any) {
+        if (controller.signal.aborted) return;
         console.error("Fetch commits failed", e);
         setRepoError(gitErrorMessage(e.message || "git_error"));
       }
     };
 
     fetchCommits();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBranch, hasScanned, namespace, repoName, mode]);
+    return () => controller.abort();
+  }, [selectedBranch, hasScanned, branches, namespace, repoName, gitErrorMessage]);
 
   const handleLaunch = async () => {
+    if (submittingRef.current) return;
     setErrorField(null); setErrorMessage(null);
 
     if (!taskName.trim()) { setErrorField("taskName"); setErrorMessage("⚠️ Task Name is required"); scrollToError("field-taskName"); return; }
-    if (!namespace.trim()) { setErrorField("namespace"); setErrorMessage("⚠️ Namespace required"); scrollToError("field-namespace"); return; }
-    if (!repoName.trim()) { setErrorField("repo"); setErrorMessage("⚠️ Repo required"); scrollToError("field-repo"); return; }
-    if (!hasScanned) { setErrorField("repo"); setErrorMessage("⚠️ Please Scan Repo first"); scrollToError("field-repo"); return; }
-    if (!selectedBranch) { setErrorField("branch"); setErrorMessage("⚠️ Select Branch"); scrollToError("field-branch"); return; }
-    if (!selectedCommit) { setErrorField("commit"); setErrorMessage("⚠️ Select Commit"); scrollToError("field-commit"); return; }
+    if (!repoName.trim() && namespace.trim() && namespace.trim() !== "Rise-AGI") { setErrorField("repo"); setErrorMessage(t("jobForm.error.repoRequired")); scrollToError("field-repo"); return; }
     if (!gpuType) { setErrorMessage("⚠️ Select GPU Type"); return; }
     if (!command.trim()) { setErrorField("command"); setErrorMessage("⚠️ Command required"); scrollToError("field-command"); return; }
+    if (environmentSource === "dockerfile" && !dockerfile.trim()) { setErrorField("dockerfile"); setErrorMessage(t("jobForm.error.dockerfileRequired")); scrollToError("field-environment"); return; }
 
     const payload = {
       task_name: taskName,
       description: description,
-      namespace,
-      repo_name: repoName,
-      branch: selectedBranch,
-      commit_sha: selectedCommit,
+      namespace: namespace.trim() || "Rise-AGI",
+      repo_name: repoName.trim() || null,
+      branch: selectedBranch.trim() || null,
+      commit_sha: selectedCommit.trim() || null,
       entry_command: command,
       gpu_count: gpuCount,
       gpu_type: gpuType,
@@ -345,16 +360,38 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
       time_limit: timeLimit ? timeLimit : null,
       ephemeral_storage: ephemeralStorage.trim() ? ephemeralStorage.trim() : null,
       runner: runner.trim() ? runner.trim() : null,
-      container_image: containerImage.trim() ? containerImage.trim() : null,
+      ...(environmentSource === "dockerfile"
+        ? { dockerfile }
+        : { container_image: containerImage.trim() || null }),
       system_entry_command: systemEntryCommand.trim() ? systemEntryCommand.trim() : null,
     };
     
+    submittingRef.current = true;
+    setSubmitting(true);
     try {
+      if (environmentSource === "dockerfile") {
+        // Older servers may ignore unknown fields; verify support before submitting.
+        let currentCapabilities: JobCapabilities;
+        try {
+          currentCapabilities = await client("/api/jobs/capabilities");
+        } catch {
+          setCapabilitiesUnavailable(true);
+          throw new Error(t("jobForm.buildUnavailable"));
+        }
+        setCapabilities(currentCapabilities);
+        setCapabilitiesUnavailable(false);
+        if (!currentCapabilities.dockerfile || !currentCapabilities.image_build_enabled) {
+          throw new Error(t("jobForm.buildDisabled"));
+        }
+      }
       await client("/api/jobs/submit", { json: payload });
       onSuccess(); 
     } catch (e: any) {
       console.error(e);
       setErrorMessage(e.message || "Submit Failed");
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   };
 
@@ -411,7 +448,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
                 ${errorField === 'namespace' ? 'animate-shake border-red-500' : 'border-zinc-800'}`} 
               value={namespace} 
               placeholder="e.g. Rise-AGI"
-              onChange={e => { setNamespace(e.target.value); setHasScanned(false); clearError('namespace'); }}
+              onChange={e => { setNamespace(e.target.value); resetRepository(); clearError('namespace'); }}
             />
           </div>
           <div id="field-repo">
@@ -421,10 +458,11 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
                 ${errorField === 'repo' ? 'animate-shake border-red-500' : 'border-zinc-800'}`} 
               value={repoName} 
               placeholder="e.g. magnus"
-              onChange={e => { setRepoName(e.target.value); setHasScanned(false); clearError('repo'); }}
+              onChange={e => { setRepoName(e.target.value); resetRepository(); clearError('repo'); }}
             />
           </div>
         </div>
+        <p className="text-xs text-zinc-500 mb-3">{t("jobForm.defaultRepository")}</p>
         <button
             onClick={fetchBranches}
             disabled={loading}
@@ -440,29 +478,60 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
 
         <div className="grid grid-cols-1 gap-0">
           <SearchableSelect
-            id="field-branch" label={t("jobForm.branch")} disabled={!hasScanned} placeholder="Select branch..." className="mb-4"
-            value={selectedBranch} onChange={(v) => { setSelectedBranch(v); clearError('branch'); }}
-            options={branches.map(b => ({ label: b.name, value: b.name }))}
-            hasError={errorField === 'branch'}
+            id="field-branch" label={t("jobForm.branch")} placeholder={t("jobForm.defaultBranch")} className="mb-4"
+            value={selectedBranch} allowCustomValue
+            onChange={value => { setSelectedBranch(value); setSelectedCommit(""); clearError("branch"); }}
+            options={branches.map(branch => ({ label: branch.name, value: branch.name }))}
           />
           <SearchableSelect
-            id="field-commit" label={t("jobForm.commit")} disabled={!hasScanned} placeholder="Select commit..." className="mb-4"
-            value={selectedCommit} onChange={(v) => { setSelectedCommit(v); clearError('commit'); }}
+            id="field-commit" label={t("jobForm.commit")} placeholder="HEAD" className="mb-4"
+            value={selectedCommit} allowCustomValue
+            onChange={value => { setSelectedCommit(value); clearError("commit"); }}
             options={[
-              {
-                label: t("jobForm.latestCommit"),
-                value: "HEAD",
-                meta: t("jobForm.useLatestCode")
-              },
-              ...commits.map(c => ({
-                label: c.message,
-                value: c.sha,
-                meta: `${c.sha.substring(0, 7)} • ${c.author}`
-              }))
+              { label: t("jobForm.latestCommit"), value: "HEAD", meta: t("jobForm.useLatestCode") },
+              ...commits.map(commit => ({ label: commit.message, value: commit.sha, meta: `${commit.sha.substring(0, 7)} • ${commit.author}` })),
             ]}
-            hasError={errorField === 'commit'}
           />
         </div>
+      </div>
+
+      <div id="field-environment">
+        <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">
+          {t("jobForm.environment")}
+          <div className="h-px bg-zinc-800 flex-grow ml-2" />
+        </h3>
+        <div className="flex gap-2 mb-3" role="group" aria-label={t("jobForm.environment")}>
+          {(["image", "dockerfile"] as const).map(source => (
+            <button
+              key={source} type="button" aria-pressed={environmentSource === source}
+              onClick={() => { setEnvironmentSource(source); clearError("dockerfile"); }}
+              className={`px-3 py-2 rounded-lg text-sm border transition-colors ${environmentSource === source ? "bg-blue-500/10 text-blue-400 border-blue-500/40" : "border-zinc-800 text-zinc-400 hover:text-zinc-200"}`}
+            >
+              {source === "image" ? t("jobForm.containerImage") : "Dockerfile"}
+            </button>
+          ))}
+        </div>
+        {environmentSource === "image" ? (
+          <input
+            aria-label={t("jobForm.containerImage")}
+            className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none placeholder-zinc-700 font-mono"
+            value={containerImage}
+            placeholder={t("jobForm.containerImageDefault", { value: DEFAULT_CONTAINER_IMAGE })}
+            onChange={e => setContainerImage(e.target.value)}
+          />
+        ) : (
+          <>
+            <div className={`rounded-lg border bg-zinc-950 overflow-auto max-h-[400px] ${errorField === "dockerfile" ? "border-red-500" : "border-zinc-800"}`}>
+              <CodeEditor filename="Dockerfile" value={dockerfile} onChange={value => { setDockerfile(value); clearError("dockerfile"); }} minHeight="180px" />
+            </div>
+            <p className="text-xs text-zinc-500 mt-2">{t("jobForm.dockerfileHint")}</p>
+            {(capabilitiesUnavailable || (capabilities && (!capabilities.dockerfile || !capabilities.image_build_enabled))) && (
+              <p className="text-xs text-amber-400 mt-2" role="status">
+                {t(capabilitiesUnavailable ? "jobForm.buildUnavailable" : "jobForm.buildDisabled")}
+              </p>
+            )}
+          </>
+        )}
       </div>
 
       {/* Job Scheduling */}
@@ -644,22 +713,6 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
                 </div>
               </div>
 
-              {/* Container Image Override */}
-              <div className="sm:col-span-2">
-                <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
-                  {t("jobForm.containerImage")}
-                </label>
-                <div className="relative">
-                    <input
-                    type="text"
-                    className="w-full bg-zinc-950 border border-zinc-800 px-3 py-2.5 rounded-lg text-white text-sm focus:border-blue-500 outline-none transition-all placeholder-zinc-700 font-mono"
-                    value={containerImage}
-                    placeholder={t("jobForm.containerImageDefault", { value: DEFAULT_CONTAINER_IMAGE })}
-                    onChange={e => setContainerImage(e.target.value)}
-                  />
-                </div>
-              </div>
-
               {/* System Entry Command Override */}
               <div className="sm:col-span-2">
                 <label className="text-xs uppercase tracking-wider mb-1.5 block font-medium text-zinc-500">
@@ -720,7 +773,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
             </button>
             <button
                 onClick={handleLaunch}
-                className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                disabled={submitting}
+                className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-wait"
             >
                 {mode === 'create' ? t("jobForm.launchJob") : t("jobForm.reLaunch")}
             </button>

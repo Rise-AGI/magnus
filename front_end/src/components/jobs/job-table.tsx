@@ -60,7 +60,7 @@ export function JobTable({
           // inflight release (后端 JobListItem.is_releasing): scancel 已发但 SLURM
           // CG 还在收尾。这种状态下再次 terminate 在后端层 idempotent 但 UX 上
           // 误导用户以为 cancel 没生效，故 UI 隐藏终结按钮。
-          const isActive = ["Pending", "Preparing", "Running", "Paused"].includes(job.status) && !job.is_releasing;
+          const isActive = ["Pending", "Preparing", "Building", "Running", "Paused"].includes(job.status) && !job.is_releasing;
           const isOwner = currentUser?.id === job.user?.id;
           // External SLURM tasks are mock entries surfaced from the queue; Magnus has no
           // record of them and cannot clone or terminate them via /api/jobs/{id}.
@@ -81,7 +81,7 @@ export function JobTable({
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <JobPriorityBadge type={job.job_type} />
-                  <JobStatusBadge status={job.status} isReleasing={job.is_releasing} />
+                  <JobStatusBadge jobId={job.id} status={job.status} isReleasing={job.is_releasing} />
                 </div>
               </div>
 
@@ -148,7 +148,7 @@ export function JobTable({
               // inflight release (后端 JobListItem.is_releasing): scancel 已发但 SLURM
               // CG 还在收尾。这种状态下再次 terminate 在后端层 idempotent 但 UX 上
               // 误导用户以为 cancel 没生效，故 UI 隐藏终结按钮。
-              const isActive = ["Pending", "Preparing", "Running", "Paused"].includes(job.status) && !job.is_releasing;
+              const isActive = ["Pending", "Preparing", "Building", "Running", "Paused"].includes(job.status) && !job.is_releasing;
               const isOwner = currentUser?.id === job.user?.id;
               // External SLURM tasks are mock entries surfaced from the queue; Magnus has no
               // record of them and cannot clone or terminate them via /api/jobs/{id}.
@@ -186,7 +186,7 @@ export function JobTable({
                   </td>
 
                   <td className="px-6 py-4 align-top text-center">
-                    <JobStatusBadge status={job.status} isReleasing={job.is_releasing} />
+                    <JobStatusBadge jobId={job.id} status={job.status} isReleasing={job.is_releasing} />
                   </td>
 
                   <td className="px-6 py-4 align-top">

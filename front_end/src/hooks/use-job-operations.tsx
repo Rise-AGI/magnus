@@ -1,5 +1,5 @@
 // front_end/src/hooks/use-job-operations.tsx
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Job } from "@/types/job";
 import { JobFormData } from "@/components/jobs/job-form";
 import { client } from "@/lib/api";
@@ -19,6 +19,7 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
   const [cloneData, setCloneData] = useState<JobFormData | null>(null);
   // 用于强制刷新 Form (主要用于详情页连续克隆场景)
   const [formKey, setFormKey] = useState(0);
+  const cloneRequestRef = useRef(0);
 
   // --- Terminate Dialog State ---
   const [jobToTerminate, setJobToTerminate] = useState<Job | null>(null);
@@ -33,6 +34,7 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
 
   // 打开新建窗口
   const handleNewJob = () => {
+    cloneRequestRef.current += 1;
     setDrawerMode("create");
     setCloneData(null);
     setSelectedJobId(null);
@@ -44,14 +46,19 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
   // system_entry_command（可能高达几十 MB）。点击克隆时按需拉一次完整 job 再回填表单，
   // 保证克隆保真；正常 job 这一步近乎无感，只有内联超大命令的 job 才会真正搬运其体量。
   const handleCloneJob = async (job: Job) => {
-    setDrawerMode("clone");
-    setSelectedJobId(job.id);
-    let full: Job = job;
+    const request = ++cloneRequestRef.current;
+    let full: Job;
     try {
       full = await client(`/api/jobs/${job.id}`);
     } catch (e) {
+      if (request !== cloneRequestRef.current) return;
       console.error("Failed to load job detail for clone", e);
+      setErrorMessage(t("jobOps.cloneFailed"));
+      return;
     }
+    if (request !== cloneRequestRef.current) return;
+    setDrawerMode("clone");
+    setSelectedJobId(job.id);
     setCloneData({
       taskName: full.task_name, // 克隆时往往需要修改名字，这里保持原名或让用户自己改
       description: full.description || "",
@@ -71,6 +78,7 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
       ephemeral_storage: full.ephemeral_storage,
       runner: full.runner,
       container_image: full.container_image,
+      dockerfile: full.dockerfile,
       system_entry_command: full.system_entry_command,
     });
     setFormKey((k) => k + 1);
@@ -129,7 +137,7 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
       mode: drawerMode,
       initialData: cloneData,
       formKey: `${drawerMode}-${selectedJobId}-${formKey}`,
-      onClose: () => setIsDrawerOpen(false),
+      onClose: () => { cloneRequestRef.current += 1; setIsDrawerOpen(false); },
       onSuccess: () => {
         setIsDrawerOpen(false);
         setTimeout(() => {

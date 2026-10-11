@@ -17,12 +17,14 @@ interface SearchableSelectProps {
   className?: string;
   placement?: "top" | "bottom";
   minimal?: boolean;
+  allowCustomValue?: boolean;
 }
 
 export function SearchableSelect({
   label, value, options, onChange, placeholder, disabled, hasError, id, className = "",
   placement = "bottom",
-  minimal = false
+  minimal = false,
+  allowCustomValue = false,
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -117,7 +119,17 @@ export function SearchableSelect({
               `}
               placeholder={disabled ? "Waiting..." : (placeholder || "Search...")}
               value={query}
-              onChange={(e) => { setQuery(e.target.value); setIsOpen(true); }}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (allowCustomValue) onChange(e.target.value);
+                setIsOpen(true);
+              }}
+              onKeyDown={e => {
+                if (allowCustomValue && e.key === "Enter") {
+                  e.preventDefault();
+                  setIsOpen(false);
+                }
+              }}
               onFocus={() => !disabled && !minimal && setIsOpen(true)}
               onClick={() => minimal && !disabled && setIsOpen(!isOpen)}
             />

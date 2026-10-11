@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft, Terminal, Clock, GitBranch, Cpu, Box, AlignLeft, RefreshCw, Activity,
   ArrowDownToLine, ArrowUpToLine, ChevronUp, ChevronDown, Copy, Check, SquareX, Send,
@@ -12,10 +12,11 @@ import { AnsiUp } from "ansi_up";
 import { client } from "@/lib/api";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { POLL_INTERVAL } from "@/lib/config";
-import { Job } from "@/types/job";
+import { Job, JobBuildProgress } from "@/types/job";
 import { formatStationTime } from "@/lib/utils";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
+import { CodeEditor } from "@/components/ui/code-editor";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import RenderMarkdown from "@/components/ui/render-markdown";
@@ -30,6 +31,9 @@ import { useBackNavigation } from "@/hooks/use-back-navigation";
 import { MetricsChart } from "@/components/jobs/metrics-chart";
 
 const ansiUp = new AnsiUp();
+const ReadOnlyDockerfile = React.memo(function ReadOnlyDockerfile({ value }: { value: string }) {
+  return <CodeEditor filename="Dockerfile" value={value} readOnly minHeight="100px" />;
+});
 
 function processCarriageReturns(text: string): string {
   return text.replaceAll("\r", "\n");
@@ -107,6 +111,7 @@ export default function JobDetailsPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
   const params = useParams();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const jobId = params.id as string;
   const isSlurmTask = decodeURIComponent(jobId).endsWith("(slurm)");
@@ -117,6 +122,21 @@ export default function JobDetailsPage() {
   const [activeTab, setActiveTab] = useState<"console" | "description" | "metrics" | "artifacts">("console");
 
   const [logs, setLogs] = useState("");
+  const [logSelection, setLogSelection] = useState<"run" | "build" | null>(null);
+  const [failedBuildJobId, setFailedBuildJobId] = useState<string | null>(null);
+  const hasDockerfile = !!(job?.has_dockerfile || job?.dockerfile);
+  const failedDockerfileJobId = hasDockerfile && job?.id === jobId && job.status === "Failed" ? jobId : null;
+  const defaultToBuildLogs = hasDockerfile && (
+    searchParams.get("logs") === "build"
+    || job?.status === "Building"
+    || (job?.status === "Failed" && failedBuildJobId === jobId)
+  );
+  const logSource = logSelection ?? (defaultToBuildLogs ? "build" : "run");
+  const logIsActive = !!job && (logSource === "build"
+    ? ["Preparing", "Building"].includes(job.status)
+    : ["Pending", "Preparing", "Building", "Running"].includes(job.status));
+  const [logError, setLogError] = useState(false);
+  const logRequestRef = useRef<AbortController | null>(null);
   const [logPage, setLogPage] = useState(-1);
   const [logTotalPages, setLogTotalPages] = useState(1);
   const [followMode, setFollowMode] = useState(false);
@@ -125,6 +145,7 @@ export default function JobDetailsPage() {
   const lastClickTimeRef = useRef(0);
 
   const [copiedCommand, setCopiedCommand] = useState(false);
+  const [copiedEnvironment, setCopiedEnvironment] = useState(false);
   const copyToClipboard = async (text: string, setCopied: (v: boolean) => void) => {
     try {
         await navigator.clipboard.writeText(text);
@@ -169,37 +190,78 @@ export default function JobDetailsPage() {
 
   // Fetch logs for a specific page
   const fetchLogs = useCallback(async (page: number) => {
+    logRequestRef.current?.abort();
+    const controller = new AbortController();
+    logRequestRef.current = controller;
     try {
-      const res = await client(`/api/jobs/${jobId}/logs?page=${page}`);
+      const endpoint = logSource === "build" ? "build/logs" : "logs";
+      const res = await client(`/api/jobs/${jobId}/${endpoint}?page=${page}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       setLogs(res.logs || "");
       setLogPage(res.page ?? 0);
       setLogTotalPages(res.total_pages ?? 1);
+      setLogError(false);
     } catch (e) {
+      if (controller.signal.aborted) return;
+      setLogError(true);
       console.error("Failed to fetch logs", e);
     }
+  }, [jobId, logSource]);
+
+  useEffect(() => {
+    setLogSelection(null);
   }, [jobId]);
+
+  useEffect(() => {
+    setFailedBuildJobId(null);
+    if (!failedDockerfileJobId) return;
+
+    // A Failed job may have built successfully before failing during execution.
+    // Read the build's final phase once, independently of the job polling cadence.
+    const controller = new AbortController();
+    const fetchBuildOutcome = async () => {
+      try {
+        const progress: JobBuildProgress = await client(`/api/jobs/${failedDockerfileJobId}/build`, { signal: controller.signal });
+        if (!controller.signal.aborted && progress.phase === "failed") {
+          setFailedBuildJobId(failedDockerfileJobId);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) console.error("Failed to fetch build outcome", error);
+      }
+    };
+    fetchBuildOutcome();
+    return () => controller.abort();
+  }, [failedDockerfileJobId]);
+
+  useEffect(() => {
+    setLogs("");
+    setLogError(false);
+    setLogPage(-1);
+    setLogTotalPages(1);
+    return () => logRequestRef.current?.abort();
+  }, [jobId, logSource]);
 
   // Initial log load + auto-enable follow mode for running jobs
   useEffect(() => {
     if (isSlurmTask) return;
     fetchLogs(-1);
-    if (job && ['Pending', 'Preparing', 'Running'].includes(job.status)) {
-      setFollowMode(true);
-    }
+    setFollowMode(logIsActive);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId, isSlurmTask, job?.status, fetchLogs]);
+  }, [jobId, isSlurmTask, job?.status, fetchLogs, logIsActive]);
 
   // Follow mode polling
   useEffect(() => {
     if (!followMode) return;
-    if (job && !['Pending', 'Preparing', 'Running'].includes(job.status)) {
+    if (!logIsActive) {
       setFollowMode(false);
       return;
     }
-    const interval = setInterval(() => fetchLogs(-1), POLL_INTERVAL);
+    const interval = setInterval(() => {
+      if (!document.hidden && activeTab === "console") fetchLogs(-1);
+    }, POLL_INTERVAL);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followMode, job?.status, fetchLogs]);
+  }, [followMode, logIsActive, fetchLogs, activeTab]);
 
   // Execute pending scroll after logs update
   useEffect(() => {
@@ -363,20 +425,25 @@ export default function JobDetailsPage() {
 
           {/* Status Card */}
           <div className="flex flex-col md:flex-row md:items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-4 md:px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
-            <div className="flex items-center gap-4">
-              <JobStatusBadge status={job.status} isReleasing={job.is_releasing} size="md" />
-              <div className="flex flex-col">
+            <JobStatusBadge
+              jobId={job.id}
+              status={job.status}
+              isReleasing={job.is_releasing}
+              size="md"
+              onViewBuildLogs={() => { setLogSelection("build"); setActiveTab("console"); }}
+            >
+              <span className="flex flex-col ml-2">
                 <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.status")}</span>
                 <span className={`text-base font-bold tracking-wide
                   ${job.status === "Running" ? "text-blue-400" :
                     job.status === "Success" ? "text-green-400" :
                     job.status === "Failed" ? "text-red-400" :
-                    job.status === "Preparing" ? "text-cyan-400" : "text-zinc-300"}`}>
+                    ["Preparing", "Building"].includes(job.status) ? "text-cyan-400" : "text-zinc-300"}`}>
                   {/* status 是运行时动态值，无法满足 TranslationKey 字面量类型 */}
                   {t(`jobStatus.${job.status.toLowerCase()}` as any)?.toUpperCase() || job.status.toUpperCase()}
                 </span>
-              </div>
-            </div>
+              </span>
+            </JobStatusBadge>
             {/* Owner */}
             {job.user && (
               <div className="md:ml-4 md:pl-4 md:border-l border-zinc-700/50">
@@ -417,7 +484,7 @@ export default function JobDetailsPage() {
               {/* Terminate Button：inflight release (is_releasing) 时隐藏，避免用户对
                   自己已 cancel、SLURM 仍在 CG 收尾的 job 重复点 cancel 而困惑。 */}
               {(user?.id === job.user?.id || user?.is_admin)
-                && ["Pending", "Preparing", "Running", "Paused"].includes(job.status)
+                && ["Pending", "Preparing", "Building", "Running", "Paused"].includes(job.status)
                 && !job.is_releasing && (
                 <button
                   onClick={() => onClickTerminate(job)}
@@ -569,8 +636,28 @@ export default function JobDetailsPage() {
             </div>
           </div>
 
+          <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Box className="w-4 h-4 text-zinc-400" />
+                <h3 className="text-sm font-semibold text-zinc-200">{job.dockerfile ? "Dockerfile" : t("jobForm.containerImage")}</h3>
+              </div>
+              <button
+                onClick={() => copyToClipboard(job.dockerfile ?? job.container_image ?? "", setCopiedEnvironment)}
+                className="text-zinc-500 hover:text-zinc-200 transition-colors" title={t("action.copy")}
+              >
+                {copiedEnvironment ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+            {job.dockerfile ? (
+              <div className="max-h-72 overflow-auto bg-zinc-950">
+                <ReadOnlyDockerfile value={job.dockerfile} />
+              </div>
+            ) : <div className="p-4 text-xs text-zinc-300 font-mono break-all">{job.container_image || t("jobDetail.stationDefault")}</div>}
+          </div>
+
           {/* Entry Command */}
-          <div className="flex-1 min-h-0 flex flex-col bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
+          <div className="flex-1 min-h-[180px] flex flex-col bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
             <div className="shrink-0 px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-zinc-400" />
@@ -655,6 +742,25 @@ export default function JobDetailsPage() {
             )}
           </div>
 
+          {activeTab === "console" && hasDockerfile && (
+            <div className="flex gap-2 px-4 py-2 border-b border-zinc-800" role="group" aria-label={t("jobBuild.logSource")}>
+              {(["run", "build"] as const).map(source => (
+                <button
+                  key={source} type="button" aria-pressed={source === logSource}
+                  onClick={() => setLogSelection(source)}
+                  className={`px-3 py-1 rounded text-xs transition-colors ${source === logSource ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+                >
+                  {t(source === "build" ? "jobBuild.buildLogs" : "jobBuild.runLogs")}
+                </button>
+              ))}
+              {logError && (
+                <button onClick={() => fetchLogs(logPage)} className="text-xs text-red-400 self-center hover:underline" role="status">
+                  {t("jobBuild.retryLogs")}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Content Area */}
           <div className="relative flex-1 min-h-0 bg-zinc-950">
 
@@ -709,7 +815,7 @@ export default function JobDetailsPage() {
                     <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-3 min-h-[400px]">
                       <Terminal className="w-10 h-10 opacity-20" />
                       <p>
-                        {job && ['Pending', 'Preparing', 'Running'].includes(job.status)
+                        {job && ['Pending', 'Preparing', 'Building', 'Running'].includes(job.status)
                           ? t("jobDetail.waitingOutput")
                           : t("jobDetail.noOutput")}
                       </p>
@@ -749,7 +855,7 @@ export default function JobDetailsPage() {
                     <ArtifactContent text={job.result} />
                   ) : (
                     <p className="text-sm text-zinc-600 italic">
-                      {['Pending', 'Preparing', 'Running'].includes(job.status)
+                      {['Pending', 'Preparing', 'Building', 'Running'].includes(job.status)
                         ? t("jobDetail.waitingOutput")
                         : t("jobDetail.noResult")}
                     </p>
@@ -762,7 +868,7 @@ export default function JobDetailsPage() {
                     <ArtifactContent text={job.action} />
                   ) : (
                     <p className="text-sm text-zinc-600 italic">
-                      {['Pending', 'Preparing', 'Running'].includes(job.status)
+                      {['Pending', 'Preparing', 'Building', 'Running'].includes(job.status)
                         ? t("jobDetail.waitingOutput")
                         : t("jobDetail.noAction")}
                     </p>

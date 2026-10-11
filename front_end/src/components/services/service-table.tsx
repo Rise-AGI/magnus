@@ -57,7 +57,7 @@ export function ServiceTable({
     return (
       <div className={`space-y-3 ${className}`}>
         {services.map((svc) => {
-          const isJobAlive = svc.current_job?.status && ["Pending", "Preparing", "Running", "Paused"].includes(svc.current_job.status);
+          const isJobAlive = svc.current_job?.status && ["Pending", "Preparing", "Building", "Running", "Paused"].includes(svc.current_job.status);
 
           return (
             <div
@@ -145,7 +145,7 @@ export function ServiceTable({
               } else {
                 // Active State Check
                 const currentStatus = svc.current_job?.status;
-                const isJobAlive = currentStatus && ["Pending", "Preparing", "Running", "Paused"].includes(currentStatus);
+                const isJobAlive = currentStatus && ["Pending", "Preparing", "Building", "Running", "Paused"].includes(currentStatus);
 
                 if (isJobAlive) {
                   // Active Job Running

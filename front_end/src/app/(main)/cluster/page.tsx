@@ -106,6 +106,7 @@ export default function ClusterPage() {
           "Pending": 1,
           "Paused": 1,
           "Preparing": 2,
+          "Building": 2,
         };
         return reconciled.sort(
           (a, b) => (bucketOrder[a.status] ?? 99) - (bucketOrder[b.status] ?? 99)

@@ -144,6 +144,9 @@ export function JobFormHelp() {
           <HelpField name="Entry Command">
             {t("help.jobForm.entryCommand")}
           </HelpField>
+          <HelpField name="Container Image / Dockerfile">
+            {t("jobForm.dockerfileHint")}
+          </HelpField>
         </HelpFieldList>
       </HelpSection>
 

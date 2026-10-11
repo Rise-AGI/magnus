@@ -6,6 +6,7 @@ import { highlight, languages } from "prismjs";
 import "prismjs/components/prism-clike";
 import "prismjs/components/prism-python";
 import "prismjs/components/prism-bash";
+import "prismjs/components/prism-docker";
 import "prismjs/components/prism-yaml";
 import "prismjs/components/prism-json";
 import "prismjs/components/prism-markdown";
@@ -23,6 +24,7 @@ const EXT_TO_LANG: Record<string, string> = {
 
 function detectLanguage(filename?: string): string {
   if (!filename) return "python";
+  if (filename === "Dockerfile" || filename.endsWith(".Dockerfile")) return "docker";
   const dot = filename.lastIndexOf(".");
   if (dot === -1) return "python";
   return EXT_TO_LANG[filename.substring(dot)] || "python";

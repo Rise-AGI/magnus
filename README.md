@@ -204,6 +204,7 @@ See [Job Runtime Documentation](docs/internals/job-runtime.md) for container exe
 - [SDK & CLI Guide](docs/guides/sdk-and-cli.md) — Python API, async support, and the full CLI reference
 - [Blueprint Crafting Guide](docs/guides/blueprint-crafting.md) — Type annotations, parameter metadata, file transfer
 - [Local Mode](docs/guides/local-mode.md) — Run Magnus locally with Docker instead of SLURM
+- [Dockerfile Jobs](docs/guides/image-building.md) — Build a cached runtime directly from a Job's Dockerfile
 - [Metrics Protocol](docs/guides/metrics.md) — Cross-language metrics reporting protocol for Jobs
 
 <details>

@@ -162,6 +162,15 @@ const translations = {
   "jobForm.runAsUser": { zh: "运行用户", en: "Run As User" },
   "jobForm.runAsUserDefault": { zh: "默认：{value}", en: "Default: {value}" },
   "jobForm.containerImage": { zh: "容器镜像", en: "Container Image" },
+  "jobForm.environment": { zh: "运行环境", en: "Environment" },
+  "jobForm.defaultRepository": { zh: "仓库可留空，默认使用 Rise-AGI/magnus 的 HEAD。扫描仅用于查找分支和提交。", en: "Leave the repository empty to use Rise-AGI/magnus HEAD. Scanning only helps find branches and commits." },
+  "jobForm.defaultBranch": { zh: "留空使用默认分支", en: "Leave empty for the default branch" },
+  "jobForm.dockerfileHint": { zh: "Dockerfile 定义运行环境，构建时无法读取任务仓库。任务代码在运行时挂载。", en: "The Dockerfile defines the environment. The job repository is mounted at runtime and is not available during the build." },
+  "jobForm.buildDisabled": { zh: "本站尚未启用镜像构建，可使用容器镜像提交任务。", en: "Image builds are not enabled on this station. You can submit with a container image." },
+  "jobForm.buildUnavailable": { zh: "无法确认本站支持镜像构建，请稍后重试或使用容器镜像。", en: "Could not verify image build support. Retry later or use a container image." },
+  "jobForm.error.repoRequired": { zh: "使用其他命名空间时，请填写仓库名称。", en: "A repository name is required for a custom namespace." },
+  "jobForm.error.dockerfileRequired": { zh: "请填写 Dockerfile，或切换为容器镜像。", en: "Enter a Dockerfile or choose a container image." },
+  "jobForm.error.environmentConflict": { zh: "配置同时包含镜像和 Dockerfile，请仅保留一种环境来源。", en: "The config contains both an image and a Dockerfile. Keep only one environment source." },
   "jobForm.containerImageDefault": { zh: "默认：{value}", en: "Default: {value}" },
   "jobForm.systemEntryCommand": { zh: "系统入口指令", en: "System Entry Command" },
   "jobForm.systemEntryCommandDefault": { zh: "留空使用默认值", en: "Leave empty for default" },
@@ -381,6 +390,7 @@ const translations = {
   "jobOps.terminateDesc": { zh: "确定要终止 {name} 吗？此操作将立即停止进程且不可撤销。", en: "Are you sure you want to terminate {name}? This action will stop the process immediately and cannot be undone." },
   "jobOps.terminateBtn": { zh: "终止", en: "Terminate" },
   "jobOps.terminateFailed": { zh: "终止任务失败", en: "Failed to terminate job" },
+  "jobOps.cloneFailed": { zh: "无法加载完整任务配置，请重试克隆。", en: "Could not load the full job configuration. Please retry cloning." },
   "jobOps.signalTitle": { zh: "发送 SIGTERM？", en: "Send SIGTERM?" },
   "jobOps.signalDesc": { zh: "向「{name}」发送 SIGTERM 信号。装了信号处理器的任务可借此优雅收尾（保存进度、释放资源等）；未装处理器的任务不响应 —— 想强制结束请改用「终止」。任务状态不变。", en: "Send SIGTERM to \"{name}\". A task with a signal handler can perform a graceful teardown (save progress, release resources, etc.); a task without one does not respond — use Terminate to force-kill. The task status stays unchanged." },
   "jobOps.signalBtn": { zh: "发送", en: "Send" },
@@ -521,8 +531,30 @@ const translations = {
   "jobStatus.paused": { zh: "已暂停", en: "Paused" },
   "jobStatus.pending": { zh: "排队中", en: "Pending" },
   "jobStatus.preparing": { zh: "准备中", en: "Preparing" },
+  "jobStatus.building": { zh: "构建中", en: "Building" },
   "jobStatus.terminated": { zh: "已终止", en: "Terminated" },
   "jobStatus.releasing": { zh: "释放中", en: "Releasing" },
+
+  // ===== Job Image Build =====
+  "jobBuild.title": { zh: "环境构建", en: "Environment Build" },
+  "jobBuild.loading": { zh: "加载构建进度", en: "Loading build progress" },
+  "jobBuild.loadFailed": { zh: "加载失败，请重试。", en: "Could not load. Please retry." },
+  "jobBuild.retryLogs": { zh: "日志加载失败，点击重试", en: "Logs unavailable. Click to retry" },
+  "jobBuild.elapsed": { zh: "已用 {seconds} 秒", en: "{seconds}s elapsed" },
+  "jobBuild.steps": { zh: "已完成 {completed}/{total} 步，{cached} 步使用缓存", en: "{completed}/{total} steps complete, {cached} cached" },
+  "jobBuild.cached": { zh: "缓存命中", en: "Cached" },
+  "jobBuild.viewLogs": { zh: "查看构建日志", en: "View build logs" },
+  "jobBuild.logSource": { zh: "日志来源", en: "Log source" },
+  "jobBuild.buildLogs": { zh: "构建日志", en: "Build logs" },
+  "jobBuild.runLogs": { zh: "运行日志", en: "Run logs" },
+  "jobBuild.phase.waiting": { zh: "等待构建", en: "Waiting for a build slot" },
+  "jobBuild.phase.building": { zh: "构建镜像", en: "Building image" },
+  "jobBuild.phase.exporting": { zh: "导出镜像", en: "Exporting image" },
+  "jobBuild.phase.loading": { zh: "加载镜像", en: "Loading image" },
+  "jobBuild.phase.converting": { zh: "转换运行格式", en: "Converting runtime image" },
+  "jobBuild.phase.ready": { zh: "环境就绪", en: "Environment ready" },
+  "jobBuild.phase.failed": { zh: "构建失败", en: "Build failed" },
+  "jobBuild.phase.cancelled": { zh: "构建已取消", en: "Build cancelled" },
 
   // ===== Job Detail - Header =====
   "jobDetail.status": { zh: "状态", en: "Status" },
@@ -641,18 +673,18 @@ const translations = {
     zh: "通过此表单向 Magnus 调度系统提交计算任务。任务将根据优先级和集群资源可用性自动调度执行。",
     en: "Submit compute tasks to the Magnus scheduling system via this form. Tasks will be automatically scheduled based on priority and cluster resource availability."
   },
-  "help.jobForm.requiredFields": { zh: "必填字段", en: "Required Fields" },
+  "help.jobForm.requiredFields": { zh: "任务配置", en: "Job Configuration" },
   "help.jobForm.taskName": {
     zh: "任务名称，用于在任务列表中标识和搜索。建议使用有意义的命名，如 train-resnet50-epoch100。",
     en: "Task name, used to identify and search in the task list. Use meaningful names like train-resnet50-epoch100."
   },
   "help.jobForm.namespace": {
-    zh: "GitHub 仓库的组织名和仓库名。系统会通过 SSH 拉取代码，确保仓库已配置正确的访问权限。",
-    en: "GitHub organization and repository name. The system pulls code via SSH, ensure the repository has correct access permissions."
+    zh: "GitHub 仓库的组织名和仓库名。留空默认使用 Rise-AGI/magnus 的 HEAD；私有仓库需要站点具备访问权限。",
+    en: "GitHub organization and repository name. Leave empty for Rise-AGI/magnus HEAD; private repositories require station access."
   },
   "help.jobForm.branch": {
-    zh: "点击 Scan Repository 后可选择分支和具体提交。HEAD 表示使用该分支的最新提交。",
-    en: "Click Scan Repository to select a branch and specific commit. HEAD means using the latest commit of that branch."
+    zh: "可直接输入，也可扫描仓库辅助选择。分支留空使用默认分支，提交留空或填写 HEAD 使用最新提交，准备时固定实际 SHA。",
+    en: "Enter directly or scan for suggestions. An empty branch uses the default branch; an empty commit or HEAD uses its latest commit, resolved to a SHA during preparation."
   },
   "help.jobForm.entryCommand": {
     zh: "任务启动命令，支持多行。每行作为独立命令顺序执行，工作目录为仓库根目录。",
@@ -694,8 +726,8 @@ const translations = {
   },
   "help.jobForm.configReuse": { zh: "配置复用", en: "Configuration Reuse" },
   "help.jobForm.configReuseDesc": {
-    zh: "右上角提供配置的导出和导入功能。点击复制按钮可将当前配置导出为 JSON，点击粘贴按钮可从剪贴板导入之前保存的配置。支持跨浏览器、跨设备复用配置。",
-    en: "Export and import configuration options are available in the top right. Click the copy button to export current configuration as JSON, click paste to import previously saved configuration. Supports cross-browser and cross-device configuration reuse."
+    zh: "右上角可复制或粘贴 YAML 配置，包含选中的容器镜像或 Dockerfile。支持跨浏览器、跨设备复用。",
+    en: "Copy or paste YAML configuration at the top right, including the selected container image or Dockerfile. Configurations can be reused across browsers and devices."
   },
   "help.jobForm.runtimeEnv": { zh: "运行时环境", en: "Runtime Environment" },
   "help.jobForm.runtimeEnvDesc": {
