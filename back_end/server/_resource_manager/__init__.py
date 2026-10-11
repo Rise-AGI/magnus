@@ -3,7 +3,7 @@
 
 主类 ResourceManager 由若干 mixin 组装：
 
-- _helpers.py:    零依赖纯函数（目录大小、镜像/仓库名规范化）
+- _helpers.py:    零依赖工具函数（目录大小、目录树删除、镜像/仓库名规范化）
 - _config.py:     全局常量与全局只读状态（mirror 改写、cache 上限、git env、TTL、SHA pattern）
 - _cache.py:      LRU cache 清理 + 启动时孤儿清理
 - _images.py:     镜像拉取（apptainer pull on HPC / docker pull on local）

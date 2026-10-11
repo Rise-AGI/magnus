@@ -335,9 +335,11 @@ sbatch --parsable \
 - 3 次重试 + 指数退避，非瞬态错误（unauthorized, not found）直接失败
 
 **仓库克隆** (`_resource_manager.ensure_repo`):
-- 缓存目录 `{magnus_root}/repo_cache/`，LRU 淘汰，上限 `resource_cache.repo_cache_size`
-- 缓存 → copy 到 `{work}/repository/` → fetch + checkout 到指定 commit SHA
+- 缓存目录 `{magnus_root}/repo_cache/`，每个 (namespace, repo, branch) 一个目录、名字带哈希后缀，不同三元组不会共用目录；LRU 淘汰，上限 `resource_cache.repo_cache_size`
+- 按需在缓存里 fetch → copy 到 `{work}/repository/` → checkout 到指定 commit SHA
 - clone 与 fetch 各有 3 次重试 + 指数退避；磁盘满直接失败，不重试
+- 用不了的缓存目录（本身不是 git 仓库、HEAD 解析不到 commit、残留 `index.lock` —— clone 被杀、拷贝中断、`.git` 损坏留下的现场）按未命中处理：删掉重新 clone
+- job 重新进入准备阶段（例如后端重启后）时重建 `repository/` 副本，不沿用残留的那份
 - `setfacl` 设置 runner 用户权限（容器内以 runner 身份执行时需要）
 
 ## 子 Magnus (嵌套容器)

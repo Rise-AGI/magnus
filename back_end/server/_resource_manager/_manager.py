@@ -20,6 +20,7 @@ class ResourceManager(_CacheMixin, _ImagesMixin, _ReposMixin):
 
     def __init__(self):
         self.image_locks: Dict[str, asyncio.Lock] = {}
+        # repo cache 目录 -> asyncio.Lock，一个目录一把锁
         self.repo_locks: Dict[str, asyncio.Lock] = {}
         # repo_url -> (default_branch, expires_at_epoch_seconds)
         self._default_branch_cache: Dict[str, Tuple[str, float]] = {}

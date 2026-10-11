@@ -79,9 +79,10 @@ GIT_FETCH_TIMEOUT_SECONDS = 30
 # 大仓库的正常耗时远超 fetch 的 30s 阈值，设了会把"慢"误判成"坏"。
 GIT_CLONE_MAX_RETRIES = 3
 
-# cat-file 只读本地 object db，正常毫秒级；这里只是为了在 NFS / 盘满等异常
-# I/O 场景下避免无限期阻塞整个 fanout（此 subprocess 是在 repo_lock 内调用）
-GIT_CAT_FILE_TIMEOUT_SECONDS = 5
+# cache 上的本地只读 git 查询（cat-file 查对象在不在、rev-parse 验 cache 本身能不能用）
+# 正常毫秒级；这里只是为了在 NFS / 盘满等异常 I/O 场景下避免无限期阻塞整个 fanout
+# （这些 subprocess 都在 repo_lock 内调用）
+GIT_LOCAL_QUERY_TIMEOUT_SECONDS = 5
 
 # cache 的上次 fetch 时间戳文件名，放在 <cache>/.git/ 里避免污染 working tree
 CACHE_FETCH_TIMESTAMP_FILENAME = "magnus_fetch_ts"

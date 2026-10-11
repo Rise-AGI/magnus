@@ -335,9 +335,11 @@ Executed in parallel in the PREPARING phase:
 - 3 retries + exponential backoff; non-transient errors (unauthorized, not found) fail immediately
 
 **Repo clone** (`_resource_manager.ensure_repo`):
-- Cache directory `{magnus_root}/repo_cache/`, LRU eviction, cap `resource_cache.repo_cache_size`
-- cache → copy to `{work}/repository/` → fetch + checkout to the specified commit SHA
+- Cache directory `{magnus_root}/repo_cache/`, one directory per (namespace, repo, branch) with a hash suffix so distinct triples never share one, LRU eviction, cap `resource_cache.repo_cache_size`
+- fetch in the cache when needed → copy to `{work}/repository/` → checkout to the specified commit SHA
 - Clone and fetch each get 3 retries + exponential backoff; an out-of-space failure fails immediately
+- A cache directory that cannot be used (not a git repository of its own, HEAD not resolving to a commit, or a stale `index.lock` — what a killed clone, an interrupted copy or a damaged `.git` leaves) is treated as a miss: removed and cloned again
+- A job re-entering preparation (e.g. after a backend restart) rebuilds its `repository/` copy instead of trusting a leftover one
 - `setfacl` sets runner user permissions (required when executing inside the container as the runner)
 
 ## Child Magnus (nested containers)
