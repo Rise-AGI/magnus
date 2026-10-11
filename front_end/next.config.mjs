@@ -42,6 +42,8 @@ const clusterConfig = {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // 唯一的 next/image 使用已禁用优化，关闭未使用的图片优化接口。
+  images: { unoptimized: true },
   env: {
     NEXT_PUBLIC_FRONT_END_PORT: magnusConfig.server.front_end_port.toString(),
     NEXT_PUBLIC_BACK_END_PORT: magnusConfig.server.back_end_port.toString(),
