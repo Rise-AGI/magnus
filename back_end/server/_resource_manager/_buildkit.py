@@ -17,6 +17,38 @@ class ImageBuildError(RuntimeError):
     pass
 
 
+def _build_error_detail(
+    stderr: str,
+) -> str:
+    """Keep solve errors and Dockerfile locations without replaying progress."""
+    diagnostics: list[str] = []
+    saw_progress = False
+    identifiers = {"vertexes": "digest", "statuses": "vertex", "logs": "vertex", "warnings": "vertex"}
+    for line in stderr.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            diagnostics.append(line)
+            continue
+        if not isinstance(event, dict) or not event or not event.keys() <= identifiers.keys() or any(
+            not isinstance(items, list) or any(
+                not isinstance(item, dict) or not isinstance(item.get(identifiers[key]), str)
+                or ("error" in item and (key != "vertexes" or not isinstance(item["error"], str)))
+                for item in items
+            )
+            for key, items in event.items()
+        ):
+            diagnostics.append(line)
+            continue
+        saw_progress = True
+        diagnostics.extend(
+            vertex["error"] for vertex in event.get("vertexes", []) if vertex.get("error")
+        )
+    # Preserve the original tail when the stream contains no usable diagnostic.
+    detail = "\n".join(diagnostics) if saw_progress and any(line.strip() for line in diagnostics) else stderr
+    return detail[-8192:]
+
+
 async def _stop_process(
     process: asyncio.subprocess.Process,
 ) -> None:
@@ -170,7 +202,8 @@ async def run_command(
         cleanup.result()
         raise
     if process.returncode:
-        detail = errors.decode("utf-8", errors="replace")[-8192:]
+        detail = errors.decode("utf-8", errors="replace")
+        detail = _build_error_detail(detail) if on_line is not None else detail[-8192:]
         raise ImageBuildError(f"{Path(arguments[0]).name} exited with {process.returncode}: {detail}")
     if output_overflow and on_line is None:
         raise ImageBuildError(f"{Path(arguments[0]).name} returned too much data to inspect safely")
