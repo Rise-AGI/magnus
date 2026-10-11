@@ -61,6 +61,10 @@ logs = get_job_build_logs(job_id)
 
 TCP worker 使用配置的 TLS 文件。站点凭据不进入 Dockerfile、Job 命令或日志。Worker 需要访问基础镜像和软件源；无网 tenant 计算节点通过 relay 接收 SIF，无需直接访问 builder。
 
+基础镜像的 registry mirror 在 worker 的 `buildkitd.toml` 中配置；现有 `cluster.registry_mirror` 只作用于 Magnus 的镜像拉取，不会自动配置 BuildKit。上线时应在 worker 的实际网络环境中验证 `FROM` 拉取和 `RUN` 安装依赖，宿主机能访问软件源并不足以证明构建可用，尤其在 IPv4/IPv6 出口权限不同时。
+
+Rootless 限制宿主权限，但不自动提供网络隔离。RootlessKit 默认共享宿主网络，构建中的 `RUN` 可以访问宿主 loopback 和局域网；需要隔离时另选受支持的网络驱动，并核验其 DNS、出口和软件源访问。参见 [BuildKit rootless 部署说明](https://github.com/moby/buildkit/blob/master/docs/rootless.md)。
+
 后端重启后，资源准备会等待已知的遗留构建进程退出，再清理其临时目录，等待上限为 `timeout_seconds`。进程租约不完整，或另一个后端仍在使用同一根目录时，需要运维检查；Magnus 不会删除无法确认归属的临时目录。
 
 预算覆盖构建缓存、受管运行副本和导出/转换 scratch。relay 对远端构建镜像缓存独立应用同样的容量和剩余空间配置，在传输前预留空间并保护活跃 Job。只清理 Magnus 管理的文件/镜像，不执行用户级全局 Docker prune，也不回收原有拉取镜像缓存。BuildKit 周期 GC 不是瞬时磁盘配额：严格物理上限需要受限文件系统/卷，包括 scratch，并配合剩余空间和并发限制。Docker 共享 image store 也要规划容量。使用保护导致无法回收时应明确失败，不能删除活跃运行环境。
