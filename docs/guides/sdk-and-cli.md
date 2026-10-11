@@ -177,7 +177,7 @@ print(job_id)
 |-----------|------|----------|---------|-------------|
 | `task_name` | str | Yes | - | Task name |
 | `entry_command` | str | Yes | - | Entry command |
-| `repo_name` | str | Yes | - | Repository name |
+| `repo_name` | str \| None | No | None | Repository name; omitted selects `Rise-AGI/magnus` |
 | `branch` | str \| None | No | None | Branch name (None = server-side detects default branch) |
 | `commit_sha` | str \| None | No | None | Commit SHA (None = HEAD) |
 | `gpu_type` | str | No | "cpu" | GPU model ("cpu" means no GPU used) |
@@ -186,6 +186,7 @@ print(job_id)
 | `job_type` | str | No | "A2" | Priority (A1/A2/B1/B2) |
 | `description` | str \| None | No | None | Task description (Markdown) |
 | `container_image` | str \| None | No | None | Container image (None = cluster default) |
+| `dockerfile` | str \| None | No | None | Keyword-only Dockerfile text; replaces `container_image`, builds with an empty context |
 | `cpu_count` | int \| None | No | None | CPU count (None = cluster default) |
 | `memory_demand` | str \| None | No | None | Memory demand (None = cluster default; ignored as an independent knob on `per_cpu` clusters, where it folds into the core count) |
 | `time_limit` | int \| None | No | None | Max walltime in minutes (SLURM `--time`; None = partition default) |

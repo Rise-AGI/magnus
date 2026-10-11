@@ -672,7 +672,7 @@ class MagnusClient:
     def _build_job_payload(
         task_name: str,
         entry_command: str,
-        repo_name: str,
+        repo_name: Optional[str],
         branch: Optional[str],
         commit_sha: Optional[str],
         gpu_type: str,
@@ -689,7 +689,13 @@ class MagnusClient:
         ephemeral_storage: Optional[str],
         runner: Optional[str],
         system_entry_command: Optional[str],
+        dockerfile: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if repo_name is None or not repo_name.strip():
+            if namespace not in ("", "Rise-AGI"):
+                raise MagnusError("repo_name is required when namespace is not Rise-AGI")
+            repo_name = "magnus"
+            namespace = "Rise-AGI"
         payload: Dict[str, Any] = {
             "task_name": task_name,
             "entry_command": entry_command,
@@ -704,6 +710,7 @@ class MagnusClient:
             ("commit_sha", commit_sha),
             ("description", description),
             ("container_image", container_image),
+            ("dockerfile", dockerfile),
             ("cpu_count", cpu_count),
             ("memory_demand", memory_demand),
             ("node_count", node_count),
@@ -721,7 +728,7 @@ class MagnusClient:
         self,
         task_name: str,
         entry_command: str,
-        repo_name: str,
+        repo_name: Optional[str] = None,
         branch: Optional[str] = None,
         commit_sha: Optional[str] = None,
         gpu_type: str = "cpu",
@@ -739,12 +746,25 @@ class MagnusClient:
         runner: Optional[str] = None,
         system_entry_command: Optional[str] = None,
         timeout: float = 10.0,
+        *,
+        dockerfile: Optional[str] = None,
     ) -> str:
+        if dockerfile is not None:
+            if not dockerfile.strip():
+                raise MagnusError("dockerfile must not be blank")
+            if container_image is not None:
+                raise MagnusError("Choose either dockerfile or container_image")
+            capabilities = self.get_job_capabilities(timeout=timeout)
+            if capabilities.get("dockerfile") is not True:
+                raise MagnusError("This server does not support Dockerfile jobs; upgrade the server first")
+            if not capabilities.get("image_build_enabled"):
+                raise MagnusError("Dockerfile builds are not enabled on this site")
         payload = self._build_job_payload(
             task_name, entry_command, repo_name, branch, commit_sha,
             gpu_type, gpu_count, namespace, job_type, description,
             container_image, cpu_count, memory_demand, node_count, tasks_per_node, time_limit, ephemeral_storage,
             runner, system_entry_command,
+            dockerfile=dockerfile,
         )
         try:
             resp = self.http.post("/jobs/submit", json=payload, timeout=timeout)
@@ -759,7 +779,7 @@ class MagnusClient:
         self,
         task_name: str,
         entry_command: str,
-        repo_name: str,
+        repo_name: Optional[str] = None,
         branch: Optional[str] = None,
         commit_sha: Optional[str] = None,
         gpu_type: str = "cpu",
@@ -777,6 +797,8 @@ class MagnusClient:
         runner: Optional[str] = None,
         system_entry_command: Optional[str] = None,
         timeout: float = 10.0,
+        *,
+        dockerfile: Optional[str] = None,
     ) -> str:
         return await asyncio.to_thread(
             self.submit_job,
@@ -784,13 +806,14 @@ class MagnusClient:
             gpu_type, gpu_count, namespace, job_type, description,
             container_image, cpu_count, memory_demand, node_count, tasks_per_node, time_limit, ephemeral_storage,
             runner, system_entry_command, timeout,
+            dockerfile=dockerfile,
         )
 
     def execute_job(
         self,
         task_name: str,
         entry_command: str,
-        repo_name: str,
+        repo_name: Optional[str] = None,
         branch: Optional[str] = None,
         commit_sha: Optional[str] = None,
         gpu_type: str = "cpu",
@@ -810,6 +833,8 @@ class MagnusClient:
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
         execute_action: bool = True,
+        *,
+        dockerfile: Optional[str] = None,
     ) -> Optional[str]:
         job_id = self.submit_job(
             task_name=task_name, entry_command=entry_command,
@@ -821,6 +846,7 @@ class MagnusClient:
             memory_demand=memory_demand, node_count=node_count, tasks_per_node=tasks_per_node,
             time_limit=time_limit, ephemeral_storage=ephemeral_storage,
             runner=runner, system_entry_command=system_entry_command,
+            dockerfile=dockerfile,
         )
         return self._poll_job_completion(job_id, timeout, poll_interval, execute_action)
 
@@ -828,7 +854,7 @@ class MagnusClient:
         self,
         task_name: str,
         entry_command: str,
-        repo_name: str,
+        repo_name: Optional[str] = None,
         branch: Optional[str] = None,
         commit_sha: Optional[str] = None,
         gpu_type: str = "cpu",
@@ -848,6 +874,8 @@ class MagnusClient:
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
         execute_action: bool = True,
+        *,
+        dockerfile: Optional[str] = None,
     ) -> Optional[str]:
         job_id = await self.submit_job_async(
             task_name=task_name, entry_command=entry_command,
@@ -859,10 +887,85 @@ class MagnusClient:
             memory_demand=memory_demand, node_count=node_count, tasks_per_node=tasks_per_node,
             time_limit=time_limit, ephemeral_storage=ephemeral_storage,
             runner=runner, system_entry_command=system_entry_command,
+            dockerfile=dockerfile,
         )
         return await self._poll_job_completion_async(job_id, timeout, poll_interval, execute_action)
 
     # === Job Management ===
+
+    def get_job_capabilities(
+        self,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Discover submission features before sending fields old servers ignore."""
+        try:
+            response = self.http.get("/jobs/capabilities", timeout=timeout)
+            if response.status_code == 404:
+                return {"dockerfile": False, "image_build_enabled": False}
+            self._handle_error(response)
+            result = response.json()
+            if not isinstance(result, dict):
+                raise MagnusError("Invalid job capabilities response")
+            return result
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while checking job capabilities.")
+        except httpx.TransportError as error:
+            raise self._network_error("checking job capabilities", error)
+
+    async def get_job_capabilities_async(
+        self,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.get_job_capabilities, timeout)
+
+    def get_job_build(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            response = self.http.get(f"/jobs/{job_id}/build", timeout=timeout)
+            self._handle_error(response)
+            return response.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting build progress.")
+        except httpx.TransportError as error:
+            raise self._network_error("getting build progress", error)
+
+    async def get_job_build_async(
+        self,
+        job_id: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.get_job_build, job_id, timeout)
+
+    def get_job_build_logs(
+        self,
+        job_id: str,
+        page: int = -1,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        try:
+            response = self.http.get(
+                f"/jobs/{job_id}/build/logs",
+                params={"page": page},
+                timeout=timeout,
+            )
+            self._handle_error(response)
+            return response.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting build logs.")
+        except httpx.TransportError as error:
+            raise self._network_error("getting build logs", error)
+
+    async def get_job_build_logs_async(
+        self,
+        job_id: str,
+        page: int = -1,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(self.get_job_build_logs, job_id, page, timeout)
+
 
     def list_jobs(
         self,

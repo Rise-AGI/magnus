@@ -177,7 +177,7 @@ print(job_id)
 |------|------|------|--------|------|
 | `task_name` | str | 是 | - | 任务名称 |
 | `entry_command` | str | 是 | - | 入口命令 |
-| `repo_name` | str | 是 | - | 仓库名称 |
+| `repo_name` | str \| None | 否 | None | 仓库名称；省略时选择 `Rise-AGI/magnus` |
 | `branch` | str \| None | 否 | None | 分支名（None = 服务端检测默认分支） |
 | `commit_sha` | str \| None | 否 | None | Commit SHA（None = HEAD） |
 | `gpu_type` | str | 否 | "cpu" | GPU 型号（"cpu" 表示不使用 GPU） |
@@ -186,6 +186,7 @@ print(job_id)
 | `job_type` | str | 否 | "A2" | 优先级（A1/A2/B1/B2） |
 | `description` | str \| None | 否 | None | 任务描述（Markdown） |
 | `container_image` | str \| None | 否 | None | 容器镜像（None = 集群默认） |
+| `dockerfile` | str \| None | 否 | None | Keyword-only Dockerfile 文本，替代 `container_image`，使用空 context 构建 |
 | `cpu_count` | int \| None | 否 | None | CPU 数量（None = 集群默认） |
 | `memory_demand` | str \| None | 否 | None | 内存需求（None = 集群默认；在 `per_cpu` 集群上不是独立旋钮，会折算进核数） |
 | `time_limit` | int \| None | 否 | None | 最大墙钟（分钟，SLURM `--time`；None = 分区默认） |

@@ -17,6 +17,8 @@ from .. import (
     get_job_result as api_get_job_result,
     get_job_action as api_get_job_action,
     get_job_logs as api_get_job_logs,
+    get_job_build as api_get_job_build,
+    get_job_build_logs as api_get_job_build_logs,
     get_metric_streams as api_get_metric_streams,
     get_metric_points as api_get_metric_points,
     save_metric_chart as api_save_metric_chart,
@@ -125,6 +127,7 @@ _JOB_PARAM_KEYS: Dict[str, type] = {
     "job_type": str,
     "description": str,
     "container_image": str,
+    "dockerfile": str,
     "cpu_count": int,
     "memory_demand": str,
     "node_count": int,
@@ -147,6 +150,10 @@ def _parse_job_args(args: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if arg.startswith("--"):
             key = arg[2:].replace("-", "_")
 
+            if key in ("dockerfile", "dockerfile_file") and (
+                i + 1 >= len(args) or args[i + 1].startswith("--")
+            ):
+                raise MagnusError(f"--{key.replace('_', '-')} requires a value")
             if i + 1 < len(args) and not args[i + 1].startswith("--"):
                 value = args[i + 1]
                 i += 2
@@ -154,7 +161,16 @@ def _parse_job_args(args: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 value = "true"
                 i += 1
 
-            if key in _CLI_KEY_TYPES:
+            if key in ("dockerfile", "dockerfile_file"):
+                if "dockerfile" in job_params:
+                    raise MagnusError("Specify only one of --dockerfile and --dockerfile-file")
+                if key == "dockerfile_file":
+                    try:
+                        value = Path(value).read_text(encoding="utf-8-sig")
+                    except (OSError, UnicodeError) as error:
+                        raise MagnusError(f"Cannot read Dockerfile: {error}") from error
+                job_params["dockerfile"] = value
+            elif key in _CLI_KEY_TYPES:
                 cli_config[key] = _coerce_cli_value(key, value)
             elif key in _JOB_PARAM_KEYS:
                 expected_type = _JOB_PARAM_KEYS[key]
@@ -215,17 +231,19 @@ def _display_job_result(
             console.rule()
 
 
-_REQUIRED_JOB_KEYS = ["task_name", "repo_name", "branch", "commit_sha", "entry_command"]
+_REQUIRED_JOB_KEYS = ["task_name", "entry_command"]
 
 _JOB_PARAMS_DOC = """
 Required parameters:
   --task-name TEXT          Job display name
-  --repo-name TEXT          Repository name
-  --branch TEXT             Git branch
-  --commit-sha TEXT         Git commit SHA
   --entry-command TEXT      Command to execute
 
 Optional parameters:
+  --repo-name TEXT          Repository name (default: Rise-AGI/magnus)
+  --branch TEXT             Git branch (default: repository default branch)
+  --commit-sha TEXT         Git revision (default: HEAD)
+  --dockerfile TEXT         Build the runtime from Dockerfile text, with an empty context
+  --dockerfile-file PATH    Read Dockerfile text from a local UTF-8 file
   --gpu-type TEXT           GPU model (e.g. a100, rtx5090)
   --gpu-count INT           Number of GPUs
   --cpu-count INT           Number of CPUs (per rank in multi-node jobs)
@@ -272,6 +290,8 @@ def _validate_job_params(params: Dict[str, Any]) -> None:
 
 STATUS_COLORS = {
     "Pending": "yellow",
+    "Preparing": "cyan",
+    "Building": "cyan",
     "Running": "cyan",
     "Success": "green",
     "Failed": "red",
@@ -449,6 +469,25 @@ def job_logs_subcmd(
       magnus job logs <job-id>
     """
     _do_job_logs(job_ref=_extract_job_ref(ctx), page=page)
+
+
+@job_app.command(name="build", context_settings=_JOB_REF_CTX)
+def job_build_cmd(
+    ctx: typer.Context,
+    logs: bool = typer.Option(False, "--logs", help="Show build logs instead of progress"),
+    page: int = typer.Option(-1, "--page", "-p", help="Build log page (-1 for last)"),
+):
+    """Inspect a Dockerfile job's build progress or logs: magnus job build JOB_ID."""
+    try:
+        job_id = _resolve_job_ref(_extract_job_ref(ctx))
+        if logs:
+            result = api_get_job_build_logs(job_id, page=page)
+            console.print(str(result.get("logs", "")), markup=False, highlight=False)
+        else:
+            _output_data(api_get_job_build(job_id), "json")
+    except MagnusError as error:
+        print_error(str(error))
+        raise typer.Exit(code=1)
 
 
 def _do_job_result(job_ref: str) -> None:
