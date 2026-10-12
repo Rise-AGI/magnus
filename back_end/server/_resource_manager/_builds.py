@@ -24,6 +24,7 @@ from .._magnus_config import is_local_mode, magnus_config
 from .._size_utils import _parse_size_string
 from ._build_progress import BuildProgress, write_json
 from ._buildkit import BuildKitClient, ImageBuildError, blocking_io, run_command
+from ._scratch_windows import prepare_private_directory as _prepare_windows_scratch_root
 
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,9 @@ def _file_signature(
         information.st_ino,
         information.st_size,
         information.st_mtime_ns,
-        information.st_ctime_ns,
+        # Windows stat() and fstat() can disagree on deprecated st_ctime after
+        # a rename. Both expose the same creation time through st_birthtime.
+        information.st_birthtime_ns if os.name == "nt" else information.st_ctime_ns,
     )
 
 
@@ -99,6 +102,63 @@ def _process_exists(
         kernel.CloseHandle(handle)
 
 
+def _prepare_scratch_root(
+    directory: Path,
+) -> Path:
+    """Create a private leaf without following a pre-created link.
+
+    Configured parent symlinks are resolved once. On POSIX, descriptor-relative
+    traversal validates every ancestor that can rename a descendant; sticky
+    shared directories such as /dev/shm remain usable.
+    """
+    directory = directory.parent.resolve() / directory.name
+    if os.name == "nt":
+        try:
+            return _prepare_windows_scratch_root(directory)
+        except OSError as error:
+            raise ImageBuildError(str(error)) from error
+
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    descriptor = os.open(directory.anchor, flags)
+    try:
+        for component in directory.parts[1:-1]:
+            parent = os.fstat(descriptor)
+            if parent.st_uid not in {0, os.geteuid()} or (
+                parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX
+            ):
+                raise ImageBuildError("Image build scratch has an untrusted writable parent directory")
+            try:
+                os.mkdir(component, mode=0o700, dir_fd=descriptor)
+            except FileExistsError:
+                pass
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        parent = os.fstat(descriptor)
+        if parent.st_uid not in {0, os.geteuid()} or (
+            parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX
+        ):
+            raise ImageBuildError("Image build scratch has an untrusted writable parent directory")
+        try:
+            os.mkdir(directory.name, mode=0o700, dir_fd=descriptor)
+        except FileExistsError:
+            pass
+        leaf = os.open(directory.name, flags, dir_fd=descriptor)
+        try:
+            information = os.fstat(leaf)
+            if information.st_uid != os.geteuid():
+                raise ImageBuildError("Image build scratch directory belongs to another account")
+            os.fchmod(leaf, 0o700)
+            current = os.stat(directory.name, dir_fd=descriptor, follow_symlinks=False)
+            if (information.st_dev, information.st_ino) != (current.st_dev, current.st_ino):
+                raise ImageBuildError("Image build scratch directory changed during initialization")
+        finally:
+            os.close(leaf)
+    finally:
+        os.close(descriptor)
+    return directory
+
+
 @dataclass
 class _BuildOperation:
     key: str
@@ -119,7 +179,14 @@ class ImageBuildManager:
         self.enabled = self.config.get("enabled", False)
         self.root = Path(magnus_config["server"]["root"]) / "image_build_cache"
         self._diagnostics_root = Path(magnus_config["server"]["root"]) / "build_diagnostics"
-        self.temporary_root = Path(magnus_config["server"]["ephemeral_root"]) / "image_build_tmp"
+        # Tags and explicitly shared scratch parents are partitioned by station.
+        self.namespace = hashlib.sha256(str(self.root.resolve()).encode()).hexdigest()[:16]
+        self.legacy_temporary_root = Path(magnus_config["server"]["ephemeral_root"]) / "image_build_tmp"
+        scratch_root = self.config.get("scratch_root")
+        self.temporary_root = (
+            Path(scratch_root) / f"magnus-build-{self.namespace}"
+            if scratch_root else self.legacy_temporary_root
+        )
         self.client = BuildKitClient(self.config)
         self.lock = threading.RLock()
         # Verification runs in filesystem workers. Its lock never protects Job
@@ -132,6 +199,9 @@ class ImageBuildManager:
         self.pins: dict[str, str] = {}
         self.results: dict[str, dict] = {}
         self.evicting: set[str] = set()
+        # Event-loop-only reservations, serialized with GC and publication.
+        self.incoming_paths: set[Path] = set()
+        self.pending_tags: set[str] = set()
         self.initialized = False
         self.stopping = False
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -140,9 +210,10 @@ class ImageBuildManager:
         self.inventory_lock = asyncio.Lock()
         self.slots = asyncio.Semaphore(self.config.get("max_concurrent", 2))
         self.budget = _parse_size_string(self.config.get("cache_size", "40G"))
+        self.scratch_budget = self.config.get("scratch_size_bytes") or _parse_size_string(
+            self.config.get("scratch_size") or self.config.get("cache_size", "40G"),
+        )
         self.free_floor = _parse_size_string(self.config.get("min_free_space", "5G"))
-        # Dedicated image tags prevent cleanup from touching operator-owned tags.
-        self.namespace = hashlib.sha256(str(self.root.resolve()).encode()).hexdigest()[:16]
 
     def restore_pins(
         self,
@@ -420,12 +491,14 @@ class ImageBuildManager:
                 return
             self.loop = asyncio.get_running_loop()
             await blocking_io(self.root.mkdir, parents=True, exist_ok=True)
-            await blocking_io(self.temporary_root.mkdir, mode=0o700, parents=True, exist_ok=True)
+            previous_root = self.temporary_root
+            self.temporary_root = await blocking_io(_prepare_scratch_root, self.temporary_root)
+            if self.legacy_temporary_root == previous_root:
+                self.legacy_temporary_root = self.temporary_root
+            elif os.path.lexists(self.legacy_temporary_root):
+                self.legacy_temporary_root = await blocking_io(_prepare_scratch_root, self.legacy_temporary_root)
             if os.name == "posix":
                 await blocking_io(os.chmod, self.root, 0o755)
-                # Scratch may live on a shared filesystem. Only completed SIFs
-                # belong in the runner-readable cache; recipes/archives do not.
-                await blocking_io(os.chmod, self.temporary_root, 0o700)
             loaded = await asyncio.to_thread(self._read_index)
             with self.lock:
                 self.results.update(loaded)
@@ -475,7 +548,9 @@ class ImageBuildManager:
     ) -> bool:
         """Reclaim verified abandoned scratch and report children still running."""
         waiting = False
-        for directory in self.temporary_root.glob("build-*"):
+        for directory in (
+            directory for root in self._scratch_roots() for directory in root.glob("build-*")
+        ):
             if not directory.is_dir() or directory.is_symlink():
                 continue
             try:
@@ -534,16 +609,19 @@ class ImageBuildManager:
                 operation.result = result
                 for job_id in operation.waiters:
                     self.pins[job_id] = result["digest"]
-            try:
-                if is_local_mode:
-                    output = await run_command(
-                        ["docker", "image", "inspect", "--format", "{{.Id}}", result["docker_tag"]],
-                    )
-                    valid = output.strip() == result["docker_image"]
-                else:
-                    valid = await blocking_io(self.is_available, result)
-            except ImageBuildError:
-                valid = False
+        # Pins protect the selected artifact while validation runs. A first
+        # SIF checksum can be a large read and must not serialize other hits.
+        try:
+            if is_local_mode:
+                output = await run_command(
+                    ["docker", "image", "inspect", "--format", "{{.Id}}", result["docker_tag"]],
+                )
+                valid = output.strip() == result["docker_image"]
+            else:
+                valid = await blocking_io(self.is_available, result)
+        except ImageBuildError:
+            valid = False
+        async with self.maintenance_lock:
             if valid:
                 with self.lock:
                     self.results[operation.key]["accessed_at"] = time.time()
@@ -697,107 +775,176 @@ class ImageBuildManager:
         archive: Path,
         temporary_tag: str,
     ) -> dict:
-        # Serialization covers lookup, publication and GC. No threading lock is
-        # held while importing or converting an image.
+        incoming: Path | None = None
+        digest: str | None = None
+        published_digest: str | None = None
+        published_result: dict | None = None
+        previous_result: dict | None = None
+        try:
+            await self._ensure_budget()
+            # Register ownership before Docker can install its temporary tag.
+            # Orphan GC may run throughout load, conversion and copying.
+            if is_local_mode:
+                async with self.maintenance_lock:
+                    self.pending_tags.add(temporary_tag)
+                operation.progress.set_phase("loading")
+                await run_command(
+                    ["docker", "load", "--input", str(archive)],
+                    on_line=operation.progress.append,
+                    timeout=self.config["timeout_seconds"],
+                    process_directory=directory,
+                )
+                output = await run_command(
+                    ["docker", "image", "inspect", "--format", "{{json .}}", temporary_tag],
+                )
+                inspected = json.loads(output)
+                identifier = inspected["Id"]
+                if not isinstance(identifier, str) or not _DIGEST.fullmatch(identifier):
+                    raise ImageBuildError("Docker returned an invalid image content identifier")
+                digest = identifier
+                result = {
+                    "key": operation.key,
+                    "digest": digest,
+                    "docker_image": digest,
+                    "docker_tag": self._docker_tag(digest),
+                    "size_bytes": int(inspected["Size"]),
+                }
+            else:
+                operation.progress.set_phase("converting")
+                temporary_sif = directory / "image.sif"
+                environment = os.environ.copy()
+                environment["APPTAINER_CACHEDIR"] = str(directory / "apptainer-cache")
+                environment["APPTAINER_TMPDIR"] = str(directory / "apptainer-tmp")
+                await blocking_io((directory / "apptainer-tmp").mkdir)
+                memory = self.config.get("conversion_memory_bytes") or _parse_size_string(
+                    self.config.get("conversion_memory", "1G"),
+                )
+                # mksquashfs -mem bounds its cache allocation, not the whole
+                # conversion process. The explicit suffix is portable across
+                # the supported mksquashfs versions.
+                squashfs_arguments = (
+                    f"-processors {self.config.get('conversion_cpus', 2)} "
+                    f"-mem {max(1, memory // (1024 * 1024))}M"
+                )
+                await run_command(
+                    [
+                        "apptainer", "build", "--mksquashfs-args", squashfs_arguments,
+                        str(temporary_sif), f"docker-archive:{archive}",
+                    ],
+                    on_line=operation.progress.append,
+                    environment=environment,
+                    timeout=self.config["timeout_seconds"],
+                    process_directory=directory,
+                )
+                await run_command(["apptainer", "inspect", str(temporary_sif)])
+                await self._ensure_budget()
+                digest = await blocking_io(_hash_file, temporary_sif)
+                path = self._sif_path(digest)
+                incoming = self.root / f".{digest.split(':')[1]}.{uuid.uuid4().hex}.tmp"
+                async with self.maintenance_lock:
+                    self.incoming_paths.add(incoming)
+                # The two roots can be different filesystems. Only the final
+                # rename belongs to publication; a large copy must not block a
+                # cached image or pressure monitoring for another request.
+                await blocking_io(shutil.copyfile, temporary_sif, incoming)
+                await blocking_io(os.chmod, incoming, 0o644)
+                result = {
+                    "key": operation.key,
+                    "digest": digest,
+                    "sif_path": str(path),
+                    "size_bytes": (await blocking_io(incoming.stat)).st_size,
+                }
+            # Account for the live archive, conversion scratch and incoming
+            # runtime copy before cleanup, even if conversion finished between
+            # monitor samples. This remains a soft, sampled station budget.
+            await self._ensure_budget()
+            await blocking_io(self._clear_scratch_payload, directory)
+            async with self.maintenance_lock:
+                try:
+                    # A cancelled subprocess/rename can already have published
+                    # its output, so rollback ownership starts before the call.
+                    published_digest = digest
+                    if is_local_mode:
+                        await run_command(
+                            ["docker", "tag", temporary_tag, result["docker_tag"]],
+                            process_directory=directory,
+                        )
+                        await self._remove_docker_tag(temporary_tag)
+                    else:
+                        await blocking_io(os.replace, incoming, path)
+                    await self._ensure_budget_locked(frozenset({digest}))
+                    result["accessed_at"] = time.time()
+                    with self.lock:
+                        previous_result = self.results.get(operation.key)
+                        self.results[operation.key] = result
+                        operation.result = result
+                        published_result = result
+                        for job_id in operation.waiters:
+                            self.pins[job_id] = digest
+                    await self._save_index()
+                    return dict(result)
+                except BaseException:
+                    # Rollback must finish before another publisher/collector
+                    # can observe the canonical tag/file or index.
+                    cleanup = asyncio.create_task(self._rollback_import(
+                        operation,
+                        published_digest,
+                        published_result,
+                        previous_result,
+                        temporary_tag,
+                    ))
+                    await self._join_cleanup(cleanup)
+                    raise
+        finally:
+            cleanup = asyncio.create_task(self._release_import_reservations(
+                incoming,
+                temporary_tag,
+            ))
+            await self._join_cleanup(cleanup)
+
+    @staticmethod
+    def _clear_scratch_payload(
+        directory: Path,
+    ) -> None:
+        # Keep the ownership/process lease through the publication transaction.
+        # Startup must wait for an interrupted Docker tag command before GC.
+        for path in directory.iterdir():
+            if path.name in {"owner.json", "process.json"}:
+                continue
+            if path.is_dir() and not path.is_symlink() and not path.is_junction():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+    @staticmethod
+    async def _join_cleanup(
+        cleanup: asyncio.Task,
+    ) -> None:
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                continue
+        cleanup.result()
+
+    async def _release_import_reservations(
+        self,
+        incoming: Path | None,
+        temporary_tag: str,
+    ) -> None:
         async with self.maintenance_lock:
-            digest: str | None = None
-            published_result: dict | None = None
-            previous_result: dict | None = None
             try:
                 if is_local_mode:
-                    operation.progress.set_phase("loading")
-                    await run_command(
-                        ["docker", "load", "--input", str(archive)],
-                        on_line=operation.progress.append,
-                        timeout=self.config["timeout_seconds"],
-                        process_directory=directory,
-                    )
-                    output = await run_command(
-                        ["docker", "image", "inspect", "--format", "{{json .}}", temporary_tag],
-                    )
-                    inspected = json.loads(output)
-                    identifier = inspected["Id"]
-                    if not isinstance(identifier, str) or not _DIGEST.fullmatch(identifier):
-                        raise ImageBuildError("Docker returned an invalid image content identifier")
-                    digest = identifier
-                    tag = self._docker_tag(digest)
-                    await run_command(["docker", "tag", temporary_tag, tag])
-                    await self._remove_docker_tag(temporary_tag)
-                    result = {
-                        "key": operation.key,
-                        "digest": digest,
-                        "docker_image": digest,
-                        "docker_tag": tag,
-                        "size_bytes": int(inspected["Size"]),
-                    }
-                else:
-                    operation.progress.set_phase("converting")
-                    temporary_sif = directory / "image.sif"
-                    environment = os.environ.copy()
-                    environment["APPTAINER_CACHEDIR"] = str(directory / "apptainer-cache")
-                    environment["APPTAINER_TMPDIR"] = str(directory / "apptainer-tmp")
-                    await blocking_io((directory / "apptainer-tmp").mkdir)
-                    await run_command(
-                        ["apptainer", "build", str(temporary_sif), f"docker-archive:{archive}"],
-                        on_line=operation.progress.append,
-                        environment=environment,
-                        timeout=self.config["timeout_seconds"],
-                        process_directory=directory,
-                    )
-                    await run_command(["apptainer", "inspect", str(temporary_sif)])
-                    digest = await blocking_io(_hash_file, temporary_sif)
-                    path = self._sif_path(digest)
-                    await blocking_io(os.chmod, temporary_sif, 0o644)
-                    # root and ephemeral_root may live on different filesystems.
-                    # Copy into root before atomic publication; relay uses this
-                    # immutable filename rather than the Dockerfile fingerprint.
-                    incoming = self.root / f".{digest.split(':')[1]}.{uuid.uuid4().hex}.tmp"
-                    try:
-                        await blocking_io(shutil.copyfile, temporary_sif, incoming)
-                        await blocking_io(os.chmod, incoming, 0o644)
-                        await blocking_io(os.replace, incoming, path)
-                    finally:
-                        await blocking_io(incoming.unlink, missing_ok=True)
-                    result = {
-                        "key": operation.key,
-                        "digest": digest,
-                        "sif_path": str(path),
-                        "size_bytes": path.stat().st_size,
-                    }
-                # Count completed runtime copies, without charging their now
-                # disposable conversion scratch twice at the publication boundary.
-                await blocking_io(shutil.rmtree, directory, True)
-                # This immutable result is visible in inventory before index.json.
-                # Protect it during pressure collection until waiter pins exist.
-                await self._ensure_budget_locked(frozenset({digest}))
-                result["accessed_at"] = time.time()
-                with self.lock:
-                    previous_result = self.results.get(operation.key)
-                    self.results[operation.key] = result
-                    operation.result = result
-                    published_result = result
-                    for job_id in operation.waiters:
-                        self.pins[job_id] = digest
-                await self._save_index()
-                return dict(result)
-            except BaseException:
-                # Hold publication ownership until rollback finishes. A second
-                # cancellation must not strand a completed import outside the
-                # index or let the next collector race its removal.
-                cleanup = asyncio.create_task(self._rollback_import(
-                    operation,
-                    digest,
-                    published_result,
-                    previous_result,
-                    temporary_tag,
-                ))
-                while not cleanup.done():
-                    try:
-                        await asyncio.shield(cleanup)
-                    except asyncio.CancelledError:
-                        continue
-                cleanup.result()
-                raise
+                    await self._discard_import_tag(temporary_tag)
+                elif incoming is not None:
+                    await blocking_io(incoming.unlink, missing_ok=True)
+            except (ImageBuildError, OSError):
+                # A failed cleanup becomes an ordinary orphan for a later GC.
+                logger.exception("Cannot remove temporary imported image")
+            finally:
+                self.pending_tags.discard(temporary_tag)
+                if incoming is not None:
+                    self.incoming_paths.discard(incoming)
 
     async def _rollback_import(
         self,
@@ -859,12 +1006,30 @@ class ImageBuildManager:
             if output.strip():
                 await run_command(["docker", "image", "rm", tag])
 
+    def _scratch_roots(
+        self,
+    ) -> tuple[Path, ...]:
+        roots = (self.temporary_root,)
+        if self.legacy_temporary_root != self.temporary_root and self.legacy_temporary_root.exists():
+            roots += (self.legacy_temporary_root,)
+        return roots
+
     def _local_usage(
         self,
-    ) -> tuple[int, int]:
-        size = _directory_size(self.root) + _directory_size(self.temporary_root)
-        free = min(shutil.disk_usage(self.root).free, shutil.disk_usage(self.temporary_root).free)
-        return size, free
+    ) -> tuple[int, int, int]:
+        size = _directory_size(self.root)
+        scratch_size = 0
+        free = shutil.disk_usage(self.root).free
+        for root in self._scratch_roots():
+            occupied = _directory_size(root)
+            scratch_size += occupied
+            # An empty legacy directory is no longer used after a configured
+            # move and need not meet the new scratch volume's free-space floor.
+            if root == self.temporary_root or occupied:
+                free = min(free, shutil.disk_usage(root).free)
+            if not root.is_relative_to(self.root):
+                size += occupied
+        return size, free, scratch_size
 
     async def _docker_inventory(
         self,
@@ -915,14 +1080,14 @@ class ImageBuildManager:
 
     async def _usage(
         self,
-    ) -> tuple[int, int]:
-        size, free = await asyncio.to_thread(self._local_usage)
+    ) -> tuple[int, int, int]:
+        size, free, scratch_size = await asyncio.to_thread(self._local_usage)
         if is_local_mode:
             inventory = await self._docker_inventory()
             # Include interrupted imports absent from index.json. Shared layers
             # can be counted more than once, making this accounting conservative.
             size += sum(value["size"] for value in inventory.values())
-        return size, free
+        return size, free, scratch_size
 
     async def _remove_orphans(
         self,
@@ -934,6 +1099,8 @@ class ImageBuildManager:
         if is_local_mode:
             for digest, value in (await self._docker_inventory()).items():
                 for tag in value["tags"]:
+                    if tag in self.pending_tags:
+                        continue
                     if digest in live and tag == self._docker_tag(digest):
                         continue
                     try:
@@ -946,12 +1113,15 @@ class ImageBuildManager:
                 if _DIGEST.fullmatch(digest) and digest not in live:
                     await blocking_io(self._remove_sif, digest)
             for path in await asyncio.to_thread(lambda: list(self.root.glob(".*.tmp"))):
-                await blocking_io(path.unlink, missing_ok=True)
+                if path not in self.incoming_paths:
+                    await blocking_io(path.unlink, missing_ok=True)
 
     async def _check_budget(
         self,
     ) -> None:
-        local_size, free = await self._usage()
+        local_size, free, scratch_size = await self._usage()
+        if scratch_size > self.scratch_budget:
+            raise _CacheBudgetError("Image build scratch budget exceeded; reduce the image or increase the scratch budget")
         worker_size = await self.client.disk_usage()
         if local_size + worker_size > self.budget:
             raise _CacheBudgetError("Image build cache budget exceeded; reduce the image or increase the station budget")
@@ -993,7 +1163,7 @@ class ImageBuildManager:
     ) -> None:
         await self._remove_orphans(protected)
         worker_size = await self.client.disk_usage()
-        local_size, free = await self._usage()
+        local_size, free, _ = await self._usage()
         target = int(self.budget * 0.8)
         with self.lock:
             products = {value["digest"]: dict(value) for value in self.results.values()}
@@ -1018,7 +1188,7 @@ class ImageBuildManager:
                     if removed:
                         self.results = {key: value for key, value in self.results.items() if value["digest"] != digest}
                     self.evicting.discard(digest)
-            local_size, free = await self._usage()
+            local_size, free, _ = await self._usage()
         await self._save_index()
         if local_size + worker_size > target or free < self.free_floor:
             await self.client.prune(max(0, target - local_size))

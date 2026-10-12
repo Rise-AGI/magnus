@@ -94,6 +94,10 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         "timeout_seconds": 3600,
         "cache_size": "40G",
         "min_free_space": "5G",
+        "scratch_root": None,
+        "scratch_size": None,
+        "conversion_cpus": 2,
+        "conversion_memory": "1G",
         "tls_ca": None,
         "tls_cert": None,
         "tls_key": None,
@@ -103,17 +107,33 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         image_build.setdefault(key, value)
     _check_key(image_build, "enabled", bool)
     if image_build["enabled"]:
-        for key in ("address", "buildctl", "platform", "cache_size", "min_free_space"):
+        for key in ("address", "buildctl", "platform", "cache_size", "min_free_space", "conversion_memory"):
             _check_key(image_build, key, str)
             if not image_build[key].strip():
                 raise ValueError(f"execution.image_build.{key} must not be empty")
-        for key in ("max_concurrent", "timeout_seconds"):
+        for key in ("max_concurrent", "timeout_seconds", "conversion_cpus"):
             _check_key(image_build, key, int)
             if isinstance(image_build[key], bool) or image_build[key] <= 0:
                 raise ValueError(f"execution.image_build.{key} must be positive")
         for key in ("cache_size", "min_free_space"):
             if _parse_size_string(image_build[key]) <= 0:
                 raise ValueError(f"execution.image_build.{key} must be a positive size")
+        _check_key(image_build, "scratch_root", str, nullable=True)
+        scratch_root = image_build["scratch_root"]
+        if scratch_root is not None:
+            if not scratch_root.strip() or not Path(scratch_root).expanduser().is_absolute():
+                raise ValueError("execution.image_build.scratch_root must be an absolute path")
+            image_build["scratch_root"] = str(Path(scratch_root).expanduser().resolve())
+        _check_key(image_build, "scratch_size", str, nullable=True)
+        scratch_size = image_build["scratch_size"]
+        image_build["scratch_size_bytes"] = _parse_size_string(
+            image_build["cache_size"] if scratch_size is None else scratch_size,
+        )
+        if image_build["scratch_size_bytes"] <= 0:
+            raise ValueError("execution.image_build.scratch_size must be a positive size")
+        image_build["conversion_memory_bytes"] = _parse_size_string(image_build["conversion_memory"])
+        if image_build["conversion_memory_bytes"] < 1024 ** 2:
+            raise ValueError("execution.image_build.conversion_memory must be at least 1M")
         if not image_build["platform"].startswith("linux/"):
             raise ValueError("execution.image_build.platform must target Linux containers")
         address = image_build["address"]
@@ -126,7 +146,11 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         for key in ("tls_ca", "tls_cert", "tls_key"):
             if image_build[key] and not Path(image_build[key]).is_file():
                 raise ValueError(f"execution.image_build.{key} file does not exist")
-    _warn_extra_keys(image_build, set(build_defaults), "execution.image_build")
+    _warn_extra_keys(
+        image_build,
+        set(build_defaults) | {"scratch_size_bytes", "conversion_memory_bytes"},
+        "execution.image_build",
+    )
 
     # transport：magnus 执行 SLURM CLI（及后续跨界文件搬运）的位置。
     # local = 本机 subprocess（magnus 与 SLURM controller 同机，自有/独占集群现状）；

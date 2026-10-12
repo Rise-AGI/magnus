@@ -141,6 +141,10 @@ execution:
   #   timeout_seconds: 3600
   #   cache_size: 40G
   #   min_free_space: 5G
+  #   scratch_root: null                 # absolute parent; null keeps ephemeral_root/image_build_tmp
+  #   scratch_size: null                 # aggregate scratch ceiling; null inherits cache_size
+  #   conversion_cpus: 2                 # mksquashfs processors for local SIF conversion
+  #   conversion_memory: 1G              # mksquashfs working-memory limit, not a process/cgroup limit
   #   tls_ca: null                       # tcp:// builders require all three mTLS files
   #   tls_cert: null
   #   tls_key: null
