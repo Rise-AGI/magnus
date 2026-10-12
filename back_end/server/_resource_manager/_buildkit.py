@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import csv
 import io
 import json
@@ -21,14 +22,28 @@ def _build_error_detail(
     stderr: str,
 ) -> str:
     """Keep solve errors and Dockerfile locations without replaying progress."""
-    diagnostics: list[str] = []
+    diagnostics = io.StringIO()
     saw_progress = False
+    has_diagnostic = False
     identifiers = {"vertexes": "digest", "statuses": "vertex", "logs": "vertex", "warnings": "vertex"}
-    for line in stderr.splitlines():
+
+    def append(
+        line: str,
+    ) -> None:
+        nonlocal has_diagnostic
+        diagnostics.write(line)
+        diagnostics.write("\n")
+        has_diagnostic = has_diagnostic or bool(line.strip())
+
+    for line in io.StringIO(stderr, newline=None):
+        line = line.removesuffix("\n")
+        if not line.lstrip().startswith("{"):
+            append(line)
+            continue
         try:
             event = json.loads(line)
         except ValueError:
-            diagnostics.append(line)
+            append(line)
             continue
         if not isinstance(event, dict) or not event or not event.keys() <= identifiers.keys() or any(
             not isinstance(items, list) or any(
@@ -38,14 +53,14 @@ def _build_error_detail(
             )
             for key, items in event.items()
         ):
-            diagnostics.append(line)
+            append(line)
             continue
         saw_progress = True
-        diagnostics.extend(
-            vertex["error"] for vertex in event.get("vertexes", []) if vertex.get("error")
-        )
+        for vertex in event.get("vertexes", []):
+            if vertex.get("error"):
+                append(vertex["error"])
     # Preserve the original tail when the stream contains no usable diagnostic.
-    detail = "\n".join(diagnostics) if saw_progress and any(line.strip() for line in diagnostics) else stderr
+    detail = diagnostics.getvalue().removesuffix("\n") if saw_progress and has_diagnostic else stderr
     return detail[-8192:]
 
 
@@ -119,24 +134,44 @@ async def run_command(
     ) -> None:
         nonlocal output_overflow
         pending = bytearray()
+        decoder = None
         while chunk := await stream.read(65536):
             destination.extend(chunk)
             if destination is output and len(destination) > 4 * 1024 * 1024:
                 output_overflow = True
             del destination[:-4 * 1024 * 1024]
             if on_line is None:
+                await asyncio.sleep(0)
                 continue
             pending.extend(chunk)
-            while b"\n" in pending:
-                line, _, remainder = pending.partition(b"\n")
-                pending = bytearray(remainder)
-                on_line(line.decode("utf-8", errors="replace"))
-            # Unbounded output without a newline cannot exhaust server memory.
+            start = 0
+            lines = 0
+            while (end := pending.find(b"\n", start)) >= 0:
+                if decoder is not None:
+                    on_line(decoder.decode(pending[start:end], final=True))
+                    decoder = None
+                else:
+                    on_line(pending[start:end].decode("utf-8", errors="replace") if end > start else "")
+                start = end + 1
+                lines += 1
+                if lines % 256 == 0:
+                    # Already-buffered reads need not suspend. Bound each batch
+                    # so cancellation and other Jobs can run during noisy output.
+                    await asyncio.sleep(0)
+            if start:
+                del pending[:start]
+            # Keep bounded fragments for unbroken lines, preserving UTF-8 bytes
+            # split at the limit. Delete only the portion actually delivered.
             if len(pending) > 1024 * 1024:
-                on_line(pending[:1024 * 1024].decode("utf-8", errors="replace"))
-                pending.clear()
-        if pending and on_line:
-            on_line(pending.decode("utf-8", errors="replace"))
+                if decoder is None:
+                    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+                on_line(decoder.decode(pending[:1024 * 1024]))
+                del pending[:1024 * 1024]
+            await asyncio.sleep(0)
+        if on_line:
+            final = decoder.decode(pending, final=True) if decoder else pending.decode("utf-8", errors="replace")
+            if final:
+                on_line(final)
 
     async def cleanup_command() -> None:
         try:
@@ -203,7 +238,7 @@ async def run_command(
         raise
     if process.returncode:
         detail = errors.decode("utf-8", errors="replace")
-        detail = _build_error_detail(detail) if on_line is not None else detail[-8192:]
+        detail = await blocking_io(_build_error_detail, detail) if on_line is not None else detail[-8192:]
         raise ImageBuildError(f"{Path(arguments[0]).name} exited with {process.returncode}: {detail}")
     if output_overflow and on_line is None:
         raise ImageBuildError(f"{Path(arguments[0]).name} returned too much data to inspect safely")

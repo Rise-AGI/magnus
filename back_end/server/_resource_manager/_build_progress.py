@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import codecs
 import json
 import os
 import threading
@@ -14,6 +15,8 @@ from pathlib import Path
 
 
 LOG_LIMIT = 4 * 1024 * 1024
+LOG_CHUNK_LIMIT = 16 * 1024
+LOG_CHUNK_COUNT = LOG_LIMIT // LOG_CHUNK_LIMIT + 1
 TAIL_LIMIT = 16 * 1024
 STEP_LIMIT = 128
 TRUNCATION_MARKER = b"[Earlier build output was truncated]\n"
@@ -50,9 +53,12 @@ class BuildProgress:
         self.finished: float | None = None
         self.error: str | None = None
         self.steps: OrderedDict[str, dict] = OrderedDict()
-        self.logs: deque[tuple[int, bytes]] = deque()
+        # Offsets address bytes, independently of append calls and block merges.
+        # Even millions of empty lines retain at most LOG_CHUNK_COUNT objects.
+        self.logs: deque[tuple[int, bytearray]] = deque()
         self.log_size = 0
         self.sequence = 0
+        self.log_decoders: OrderedDict[tuple[str, str], codecs.IncrementalDecoder] = OrderedDict()
         self.written: dict[str, int] = {}
         self.cancelled_directories: set[str] = set()
         self.disk_lock = threading.Lock()
@@ -68,6 +74,11 @@ class BuildProgress:
             self.updated = time.time()
             if phase in {"ready", "failed", "cancelled"}:
                 self.finished = self.updated
+                for decoder in self.log_decoders.values():
+                    final = decoder.decode(b"", final=True)
+                    if final:
+                        self.append(final)
+                self.log_decoders.clear()
         if error:
             self.append(error)
 
@@ -81,10 +92,21 @@ class BuildProgress:
         if len(chunk) > LOG_LIMIT:
             chunk = TRUNCATION_MARKER + chunk[-(LOG_LIMIT - len(TRUNCATION_MARKER)):]
         with self.lock:
-            self.sequence += 1
-            self.logs.append((self.sequence, chunk))
+            if self.logs and len(self.logs[-1][1]) + len(chunk) <= LOG_CHUNK_LIMIT:
+                self.logs[-1][1].extend(chunk)
+                self.sequence += len(chunk)
+            else:
+                remaining = memoryview(chunk)
+                while remaining:
+                    if not self.logs or len(self.logs[-1][1]) == LOG_CHUNK_LIMIT:
+                        self.logs.append((self.sequence, bytearray()))
+                    block = self.logs[-1][1]
+                    count = min(LOG_CHUNK_LIMIT - len(block), len(remaining))
+                    block.extend(remaining[:count])
+                    self.sequence += count
+                    remaining = remaining[count:]
             self.log_size += len(chunk)
-            while self.log_size > LOG_LIMIT and self.logs:
+            while self.log_size > LOG_LIMIT or len(self.logs) > LOG_CHUNK_COUNT:
                 self.log_size -= len(self.logs.popleft()[1])
             self.updated = time.time()
 
@@ -92,12 +114,20 @@ class BuildProgress:
         self,
         line: str,
     ) -> None:
+        if not line.lstrip().startswith("{"):
+            self.append(line)
+            return
         try:
             event = json.loads(line)
         except (ValueError, TypeError):
             self.append(line)
             return
-        if not isinstance(event, dict):
+        if not isinstance(event, dict) or not event or not event.keys() <= {
+            "vertexes", "statuses", "logs", "warnings",
+        } or any(
+            not isinstance(items, list) or any(not isinstance(item, dict) for item in items)
+            for items in event.values()
+        ):
             self.append(line)
             return
         with self.lock:
@@ -120,12 +150,29 @@ class BuildProgress:
                     self.append(f"{step['name']}{suffix}")
                 if step["error"]:
                     self.append(step["error"])
+            invalid_log = False
             for log in event.get("logs", []):
                 try:
                     decoded = base64.b64decode(log.get("data", ""), validate=True)
                 except (ValueError, TypeError, binascii.Error):
+                    invalid_log = True
                     continue
-                self.append(decoded.decode("utf-8", errors="replace"))
+                stream = (str(log.get("vertex", ""))[:128], str(log.get("stream", ""))[:16])
+                decoder = self.log_decoders.get(stream)
+                if decoder is None:
+                    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+                    self.log_decoders[stream] = decoder
+                self.log_decoders.move_to_end(stream)
+                text = decoder.decode(decoded)
+                if text:
+                    self.append(text)
+                while len(self.log_decoders) > STEP_LIMIT * 2:
+                    _, expired = self.log_decoders.popitem(last=False)
+                    final = expired.decode(b"", final=True)
+                    if final:
+                        self.append(final)
+            if invalid_log:
+                self.append(line)
             self.updated = time.time()
 
     def snapshot(
@@ -136,7 +183,14 @@ class BuildProgress:
         with self.lock:
             steps = [dict(step) for step in self.steps.values()]
             active = [step for step in steps if not step["completed"]]
-            tail = b"".join(chunk for _, chunk in self.logs)[-TAIL_LIMIT:]
+            tail_chunks = []
+            remaining = TAIL_LIMIT
+            for _, chunk in reversed(self.logs):
+                tail_chunks.append(bytes(chunk[-remaining:]))
+                remaining -= len(tail_chunks[-1])
+                if remaining <= 0:
+                    break
+            tail = b"".join(reversed(tail_chunks))
             finished = time.time() if cancelled else self.finished
             return {
                 "phase": "cancelled" if cancelled else self.phase,
@@ -174,9 +228,12 @@ class BuildProgress:
             destination = directory / "output.txt"
             with self.lock:
                 previous = self.written.get(str(directory), 0)
-                chunks = [chunk for sequence, chunk in self.logs if sequence > previous]
+                chunks = [
+                    bytes(chunk[max(0, previous - offset):])
+                    for offset, chunk in self.logs if offset + len(chunk) > previous
+                ]
                 last_sequence = self.sequence
-                missed_output = bool(self.logs and self.logs[0][0] > previous + 1)
+                missed_output = bool(self.logs and self.logs[0][0] > previous)
             addition = b"".join(chunks)
             # The memory queue may have wrapped before a waiter's first flush,
             # or between flushes. Mark that gap even if the disk file is small.
