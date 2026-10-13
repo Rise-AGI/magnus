@@ -1,8 +1,7 @@
 # back_end/server/routers/files.py
-import asyncio
 import logging
 from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -23,6 +22,29 @@ router = APIRouter()
 
 class FileCustodyResponse(BaseModel):
     file_secret: str
+
+
+class CustodyFileResponse(FileResponse):
+    """Keep custody bytes leased until streaming finishes or the client leaves."""
+
+    def __init__(
+        self,
+        token: str,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._custody_token = token
+
+    async def __call__(
+        self,
+        scope,
+        receive,
+        send,
+    ) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await file_custody_manager.release_file_async(self._custody_token)
 
 
 @router.post("/files/upload", response_model=FileCustodyResponse)
@@ -49,13 +71,12 @@ async def upload_file(
     logger.info(f"File upload from {user.name}: {filename}, expire_minutes={expire_minutes}, max_downloads={max_downloads}")
 
     try:
-        token = await asyncio.to_thread(
-            file_custody_manager.store_file,
-            filename,
-            file.file,
-            expire_minutes,
-            is_directory,
-            max_downloads,
+        token = await file_custody_manager.store_file_async(
+            filename = filename,
+            file_obj = file.file,
+            expire_minutes = expire_minutes,
+            is_directory = is_directory,
+            max_downloads = max_downloads,
         )
     except CustodyLimitError as e:
         raise HTTPException(status_code=429, detail=str(e))
@@ -67,21 +88,25 @@ async def upload_file(
 
 
 @router.get("/files/download/{token}")
-async def download_file(token: str, background_tasks: BackgroundTasks):
+async def download_file(
+    token: str,
+):
     result = file_custody_manager.get_file_path(token)
     if result is None:
         raise HTTPException(status_code=404, detail="File not found or expired")
 
-    file_path, filename, is_directory, exhausted = result
+    file_path, filename, is_directory, _ = result
     headers = {}
     if is_directory:
         headers["X-Magnus-Directory"] = "true"
 
-    if exhausted:
-        background_tasks.add_task(file_custody_manager.delete_entry, token)
-
-    return FileResponse(
-        path = str(file_path),
-        filename = filename,
-        headers = headers,
-    )
+    try:
+        return CustodyFileResponse(
+            token = token,
+            path = str(file_path),
+            filename = filename,
+            headers = headers,
+        )
+    except BaseException:
+        await file_custody_manager.release_file_async(token)
+        raise

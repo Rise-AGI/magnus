@@ -685,13 +685,9 @@ async def upload_chat_media(
 
     # 防路径穿越：仅取文件名部分
     filename = os.path.basename(file.filename or "image") or "image"
-    token = await asyncio.to_thread(
-        file_custody_manager.store_file,
-        filename,
-        file.file,
-        None,
-        False,
-        None,
-        True,
+    token = await file_custody_manager.store_file_async(
+        filename = filename,
+        file_obj = file.file,
+        permanent = True,
     )
     return {"url": f"/api/files/download/{token}", "token": token}

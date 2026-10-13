@@ -46,3 +46,7 @@ class CustodyEntry:
     max_downloads: Optional[int] = None
     download_count: int = 0
     file_size: int = 0
+    writing: bool = False
+    active_readers: int = 0
+    delete_pending: bool = False
+    deleting: bool = False

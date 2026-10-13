@@ -600,25 +600,29 @@ async def upload_avatar(
     if file.content_type not in _ALLOWED_AVATAR_TYPES:
         raise HTTPException(status_code=400, detail=f"Unsupported image type: {file.content_type}")
 
-    # 删除旧头像
     old_url = target.avatar_url or ""
-    if "/api/files/download/" in old_url:
-        old_token = old_url.rsplit("/", 1)[-1]
-        await asyncio.to_thread(file_custody_manager.delete_entry, old_token)
-
     content = await file.read()
     if len(content) > _MAX_AVATAR_SIZE:
         raise HTTPException(status_code=400, detail="Avatar file too large (max 2 MB)")
     assert file.filename is not None
-    token = await asyncio.to_thread(
-        file_custody_manager.store_file,
-        filename=file.filename,
-        file_obj=io.BytesIO(content),
-        permanent=True,
+    token = await file_custody_manager.store_file_async(
+        filename = file.filename,
+        file_obj = io.BytesIO(content),
+        permanent = True,
     )
 
     target.avatar_url = f"/api/files/download/{token}"
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        await asyncio.to_thread(file_custody_manager.delete_entry, token)
+        raise
+    # Retire the previous avatar only after its replacement is stored and the
+    # owning record commits. A rejected upload leaves the old URL usable.
+    if "/api/files/download/" in old_url:
+        old_token = old_url.rsplit("/", 1)[-1]
+        await asyncio.to_thread(file_custody_manager.delete_entry, old_token)
 
     logger.info(f"User {current_user.id} updated avatar for user {user_id}")
 

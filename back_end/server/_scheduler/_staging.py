@@ -293,7 +293,7 @@ class _StagingMixin(_StagingMixinBase):
         上传侧 drop）。token 在 custody 里查不到（无效 / 过期）则跳过 —— in-job 取不到时与
         本机模式"文件不存在"语义一致。
 
-        刻意用 `get_entry` 而非 `get_file_path`：stage-in 是 host 把文件**预置**进 job 工作区，
+        stage-in 持有不计下载次数的读取租约：host 把文件**预置**进 job 工作区，
         不是用户那次"下载"，不消耗 max_downloads —— 否则默认 max_downloads=1 会让 fan-out
         （一次上传 → N 个 job receive 同一 secret）在第二个 job 就拿不到文件。用户那次 download
         从 dropin 读文件系统，本就不碰 custody 计数。"""
@@ -310,39 +310,42 @@ class _StagingMixin(_StagingMixinBase):
         remote_dropin = f"{self._remote_job_working_table(job_id)}/{_CUSTODY_DROPIN_SUBDIR}"
         local_dropin = os.path.join(self._local_job_working_table(job_id), _CUSTODY_DROPIN_SUBDIR)
         for token in tokens:
-            entry = file_custody_manager.get_entry(token)
-            if entry is None:
+            acquired = file_custody_manager.acquire_file(
+                token,
+                count_download = False,
+            )
+            if acquired is None:
                 logger.info(
                     f"Job {job_id} stage-in: custody token {token} unavailable "
                     f"(missing/expired); skipped"
                 )
                 continue
-            file_path = entry.file_dir / entry.original_filename
-            if not file_path.exists():
-                continue
-            remote_entry = f"{remote_dropin}/{token}"
-            made = transport.run(["mkdir", "-p", remote_entry])
-            if made.returncode != 0:
-                raise RuntimeError(
-                    f"failed to create remote dropin dir {remote_entry} "
-                    f"(rc={made.returncode}): {made.stderr.strip()}"
-                )
-            transport.push(str(file_path), f"{remote_entry}/{entry.original_filename}")
-            # meta.json：host 本地写一份再推，SDK dropin 读取侧据此解析 filename / is_directory
-            # （与上传侧 _drop_file 的 meta 同构）。
-            local_entry = os.path.join(local_dropin, token)
-            os.makedirs(local_entry, exist_ok=True)
-            meta_path = os.path.join(local_entry, "meta.json")
-            with open(meta_path, "w", encoding="utf-8") as meta_file:
-                json.dump(
-                    {
-                        "token": token,
-                        "filename": entry.original_filename,
-                        "is_directory": entry.is_directory,
-                    },
-                    meta_file,
-                )
-            transport.push(meta_path, f"{remote_entry}/meta.json")
+            file_path, filename, is_directory, _ = acquired
+            try:
+                remote_entry = f"{remote_dropin}/{token}"
+                made = transport.run(["mkdir", "-p", remote_entry])
+                if made.returncode != 0:
+                    raise RuntimeError(
+                        f"failed to create remote dropin dir {remote_entry} "
+                        f"(rc={made.returncode}): {made.stderr.strip()}"
+                    )
+                transport.push(str(file_path), f"{remote_entry}/{filename}")
+                # meta.json follows the SDK's offline drop-dir format.
+                local_entry = os.path.join(local_dropin, token)
+                os.makedirs(local_entry, exist_ok=True)
+                meta_path = os.path.join(local_entry, "meta.json")
+                with open(meta_path, "w", encoding="utf-8") as meta_file:
+                    json.dump(
+                        {
+                            "token": token,
+                            "filename": filename,
+                            "is_directory": is_directory,
+                        },
+                        meta_file,
+                    )
+                transport.push(meta_path, f"{remote_entry}/meta.json")
+            finally:
+                file_custody_manager.release_file(token)
 
     def _stage_out_logs(self, job_id: str) -> None:
         """把远端 SLURM stdout 与 metrics 拉回本机（live 镜像）。RUNNING 期间每 tick
