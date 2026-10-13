@@ -277,6 +277,19 @@ SDK/CLI 的特殊行为：对 FileSecret 参数，SDK 自动将本地路径上�
 echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
 ```
 
+先用 `magnus custody` 或 `custody_file()` 取得 `SECRET`，检查非空后再写成功结果。必需成果上传失败必须让任务以非零状态退出；仅打包成功不算完成交付。Shell runner 可使用：
+
+```bash
+if ! SECRET=$(magnus custody ./output --secret-only); then
+    echo "Required output upload failed" >&2
+    exit 1
+fi
+test -n "$SECRET" || exit 1
+echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
+```
+
+文件代管沿用 `magnus-secret` 协议。普通 secret 会受 TTL、下载次数和后端重启影响。HTTP 上传每次使用一个请求，公网网关限制仍然适用。离线 relay 任务先暂存成果，由控制器导入后才可取回。完整约定见 [SDK 文件传输指南](sdk-and-cli.zh-CN.md#custody_file---代管文件)。
+
 当前 Web 端不会执行任意 shell，只会识别安全白名单形式的 `magnus receive ...`，并映射成浏览器下载。
 
 兼容旧蓝图时还有一个补充规则：

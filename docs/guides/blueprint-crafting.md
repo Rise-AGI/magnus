@@ -277,6 +277,19 @@ If a Blueprint task re-hosts its file artifacts as a new `magnus-secret`, it is 
 echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
 ```
 
+Obtain `SECRET` with `magnus custody` or `custody_file()` and check that it is nonempty before writing a success result. Required-output upload failure must propagate as a nonzero job exit; packaging success alone is insufficient. For a shell runner:
+
+```bash
+if ! SECRET=$(magnus custody ./output --secret-only); then
+    echo "Required output upload failed" >&2
+    exit 1
+fi
+test -n "$SECRET" || exit 1
+echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
+```
+
+Custody uses the existing `magnus-secret` protocol. Ordinary secrets expire by TTL/download count and on backend restart. HTTP uploads are single-request transfers, so public gateway limits still apply. Offline relay jobs stage outputs locally; the controller imports them before the secret can be retrieved. See the [SDK file-transfer guide](sdk-and-cli.md#custody_file---put-a-file-into-custody) for the full contract.
+
 Currently the Web side does not execute arbitrary shell; it only recognizes the safe whitelist form `magnus receive ...` and maps it to a browser download.
 
 For backward compatibility with older Blueprints, there is an additional rule:

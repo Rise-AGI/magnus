@@ -866,9 +866,9 @@ After a job completes, results typically fall into two categories:
 Example:
 
 ```bash
+SECRET=$(magnus custody ./outputs/checkpoint-1200 --secret-only) || exit 1
+test -n "$SECRET" || exit 1
 echo '{"success": true, "best_step": 1200}' > "$MAGNUS_RESULT"
-
-SECRET=$(magnus custody ./outputs/checkpoint-1200)
 echo "magnus receive $SECRET --output ./checkpoint-1200" > "$MAGNUS_ACTION"
 ```
 
@@ -963,8 +963,9 @@ python train.py \
 4. Return transfer after training:
 
 ```bash
+SECRET=$(magnus custody /tmp/output --secret-only) || exit 1
+test -n "$SECRET" || exit 1
 echo '{"success": true, "message": "training finished"}' > "$MAGNUS_RESULT"
-SECRET=$(magnus custody /tmp/output)
 echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
 ```
 
@@ -1012,7 +1013,12 @@ Additional notes:
 - Directories are automatically packed and uploaded; automatically unpacked on download
 - `expire_minutes` is subject to the maximum TTL configured on the server
 - `max_downloads=1` is suitable for "one-off return"; when not set, downloads are unlimited
-- File custody is a transit layer, not a long-term archival system; files are cleaned up by the server after expiration
+- File custody is a transit layer, not a long-term archival system. Ordinary secrets are limited by TTL/download count and do not survive a backend restart; retrieve required results promptly.
+- `magnus custody` / `custody_file()` upload a file or directory; `magnus receive` / `download_file()` retrieve it. HTTP transfers currently use a single request, without chunked upload sessions or resumable retries. A public gateway can impose a smaller upload limit than Magnus; increasing the timeout cannot bypass an HTTP 413 response.
+- A required output is delivered only after custody succeeds and returns a nonempty secret. Treat upload errors as job errors; do not write a successful result or exit zero merely because computation or local packaging finished. On offline relay sites, the SDK stages the output locally and its secret becomes downloadable after the controller imports it.
+- Downloads stage beside the destination and replace it after transfer and extraction succeed. Allow disk space for both the previous output and its replacement; an interrupted transfer keeps the previous output. Replacing a directory uses a rollback rename, not a crash-atomic directory exchange. An HTTP retry still starts from the beginning and may fail if a one-download secret has already been consumed.
+- With `overwrite=False`, an existing destination is never intentionally replaced. On POSIX, directory publication and filesystems without hard links use exclusive creation followed by a copy; the new destination can be visible before that copy finishes.
+- HTTP errors include the status, a bounded diagnostic, and a request ID when supplied. Retain these for investigation; avoid logging credentials or treating a Job's `Success` status as proof that a particular output secret exists.
 
 #### Manual Upload/Download Loop
 
@@ -1883,11 +1889,13 @@ Upload a file to the backend for custody, returning a file secret.
 ```bash
 magnus custody results.csv
 magnus custody ./output_dir --expire-minutes 120
+SECRET=$(magnus custody ./output_dir --secret-only) || exit 1
 ```
 
 **Options**:
 - `-t, --expire-minutes`: expiration time (minutes), default 60
 - `-d, --max-downloads`: max downloads, default unlimited
+- `--secret-only`: print the bare secret and a newline to stdout, without progress or success messages; use this when capturing output in scripts. The default interactive output is unchanged.
 
 ### magnus connect
 

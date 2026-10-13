@@ -1,16 +1,20 @@
 # sdks/python/src/magnus/http_download.py
 import os
+import errno
 import json
 import time
 import shutil
 import logging
 import httpx
 import tempfile
+from contextlib import contextmanager
+from email.message import Message
 from pathlib import Path
 from typing import Optional
 
-from .file_transfer import normalize_secret, get_tmp_base, ENV_CUSTODY_DROPIN_DIR
+from .file_transfer import normalize_secret, ENV_CUSTODY_DROPIN_DIR
 from .exceptions import _ServerError
+from ._http_errors import http_error_detail
 
 logger = logging.getLogger("magnus")
 
@@ -18,7 +22,7 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE = 2.0
 _MAX_BACKOFF = 30.0
 _TRANSIENT_ERRORS = (httpx.TransportError,)
-_SMALL_FILE_THRESHOLD = 5 * 1024 * 1024  # 5 MB
+_WINDOWS = os.name == "nt"
 
 
 def _magnus_error(msg: str) -> Exception:
@@ -31,13 +35,163 @@ def _get_download_url(token: str) -> str:
     return f"{default_client.api_base}/files/download/{token}"
 
 
-def _prepare_target(target: Path, overwrite: bool) -> None:
-    """Clear an existing target (honoring overwrite) and ensure its parent exists."""
-    if target.exists():
-        if not overwrite:
-            raise FileExistsError(f"Target path already exists: {target}")
-        shutil.rmtree(target) if target.is_dir() else target.unlink()
-    target.parent.mkdir(parents=True, exist_ok=True)
+def _target_path(
+    target_path: Optional[str],
+    filename: str,
+) -> Path:
+    # Do not follow a pre-existing destination symlink when replacing a file.
+    return Path(os.path.abspath(target_path or filename))
+
+
+@contextmanager
+def _temporary_download(
+    parent: Path,
+):
+    temporary = Path(tempfile.mkdtemp(prefix=".magnus-download-", dir=parent))
+    try:
+        yield temporary
+    finally:
+        previous = temporary / "previous"
+        if previous.exists() or previous.is_symlink():
+            # If rollback itself failed (e.g. a filesystem permission change),
+            # automatic temporary cleanup must not delete the user's old data.
+            logger.warning("Previous download retained at %s", previous)
+        else:
+            shutil.rmtree(temporary)
+
+
+def _publish_download(
+    source: Path,
+    target: Path,
+    overwrite: bool,
+    temporary: Path,
+) -> Path:
+    """Publish complete data on the destination filesystem, retaining the old copy
+    until transfer/extraction/copying has succeeded. Directory replacement uses
+    a rollback name because portable rename cannot replace a nonempty directory.
+    """
+    exists = target.exists() or target.is_symlink()
+    if exists and not overwrite:
+        raise FileExistsError(f"Target path already exists: {target}")
+    if not overwrite:
+        _publish_without_overwrite(source, target)
+    elif exists and (source.is_dir() or target.is_dir()) and not target.is_symlink():
+        if target.resolve() in (Path.cwd().resolve(), *Path.cwd().resolve().parents):
+            raise _magnus_error("Cannot replace the working directory or its ancestors")
+        previous = temporary / "previous"
+        target.replace(previous)
+        try:
+            source.replace(target)
+        except BaseException:
+            previous.replace(target)
+            raise
+        try:
+            shutil.rmtree(previous) if previous.is_dir() else previous.unlink()
+        except OSError:
+            # The new output is already published. Keep the old copy for manual
+            # cleanup instead of reporting a failed download and retrying it.
+            logger.warning("Could not remove previous download at %s", previous)
+    else:
+        source.replace(target)
+    return target
+
+
+def _remove_created_target(
+    target: Path,
+    created: os.stat_result,
+) -> None:
+    try:
+        current = target.lstat()
+        if not created.st_ino or (current.st_dev, current.st_ino) != (created.st_dev, created.st_ino):
+            return
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Incomplete download retained at %s", target)
+
+
+def _copy_file_exclusively(
+    source: Path,
+    target: Path,
+) -> None:
+    # Filesystems such as FAT/FUSE may not support hard links. Exclusive open
+    # preserves no-overwrite semantics, but the new file is visible during copy.
+    created = None
+    try:
+        with open(target, "xb") as output:
+            created = os.fstat(output.fileno())
+            with open(source, "rb") as incoming:
+                shutil.copyfileobj(incoming, output, length=65536)
+            output.flush()
+    except BaseException:
+        if created is not None:
+            _remove_created_target(target, created)
+        raise
+
+
+def _publish_without_overwrite(
+    source: Path,
+    target: Path,
+) -> None:
+    if _WINDOWS:
+        # Windows rename rejects an existing destination for files/directories.
+        os.rename(source, target)
+    elif source.is_dir():
+        target.mkdir()
+        created = target.lstat()
+        try:
+            shutil.copytree(source, target, dirs_exist_ok=True, symlinks=True)
+        except BaseException:
+            _remove_created_target(target, created)
+            raise
+    else:
+        try:
+            os.link(source, target)
+        except OSError as error:
+            if error.errno not in {errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS, errno.EPERM, errno.EXDEV}:
+                raise
+            _copy_file_exclusively(source, target)
+
+
+def _extract_directory(
+    archive: Path,
+    temporary: Path,
+) -> Path:
+    import tarfile
+    extracted_dir = temporary / "extracted"
+    extracted_dir.mkdir()
+    with tarfile.open(archive) as tar:
+        tar.extractall(extracted_dir, filter="data")
+    extracted = list(extracted_dir.iterdir())
+    if len(extracted) != 1 or not extracted[0].is_dir() or extracted[0].is_symlink():
+        raise _magnus_error("Expected one directory in the custody archive")
+    source = extracted[0]
+    if _safe_filename(source.name) != source.name:
+        raise _magnus_error("Invalid directory name in custody archive")
+    # data-filter confinement is relative to extracted_dir. Publication moves
+    # only its single child, so links must stay inside that child as well.
+    for entry in source.rglob("*"):
+        if entry.is_symlink() and not entry.resolve().is_relative_to(source.resolve()):
+            raise _magnus_error("Custody archive link escapes its directory")
+    return source
+
+
+def _safe_filename(
+    filename: str,
+) -> Optional[str]:
+    # Treat both POSIX and Windows separators as paths on every client OS.
+    name = filename.replace("\\", "/").rsplit("/", 1)[-1].strip().rstrip(".")
+    if (not name or name in (".", "..") or any(ord(char) < 32 for char in name)
+            or any(char in name for char in ':<>"|?*')):
+        return None
+    stem = name.split(".", 1)[0].upper()
+    if stem in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+        return None
+    return name
 
 
 def _read_staged_dropin(
@@ -71,35 +225,26 @@ def _read_staged_dropin(
         return None
     # meta.filename was sanitized host-side at upload; basename again defensively
     # before joining, since this materializes a file on the caller's disk.
-    filename = os.path.basename(str(meta.get("filename", "")))
-    if not filename or filename in (".", ".."):
+    if not isinstance(meta, dict):
+        return None
+    filename = _safe_filename(str(meta.get("filename", "")))
+    if not filename:
         return None
     is_directory = bool(meta.get("is_directory", False))
     src = entry_dir / filename
     if not src.exists():
         return None
 
-    if is_directory:
-        import tarfile
-        with tempfile.TemporaryDirectory(dir=get_tmp_base()) as tmp:
-            tmp_dir = Path(tmp)
-            with tarfile.open(src) as tar:
-                tar.extractall(tmp_dir, filter="data")
-            extracted = list(tmp_dir.iterdir())
-            if len(extracted) != 1:
-                raise _magnus_error(
-                    f"Expected 1 item from staged archive, got {len(extracted)}: {extracted}"
-                )
-            source = extracted[0]
-            target = Path(target_path).resolve() if target_path else Path.cwd() / source.name
-            _prepare_target(target, overwrite)
-            shutil.move(str(source), str(target))
-            return target
-
-    target = Path(target_path).resolve() if target_path else Path.cwd() / filename
-    _prepare_target(target, overwrite)
-    shutil.copy2(str(src), str(target))
-    return target
+    parent = _target_path(target_path, filename).parent
+    parent.mkdir(parents=True, exist_ok=True)
+    with _temporary_download(parent) as temporary:
+        if is_directory:
+            source = _extract_directory(src, temporary)
+        else:
+            source = temporary / "payload"
+            shutil.copy2(src, source)
+        target = _target_path(target_path, source.name if is_directory else filename)
+        return _publish_download(source, target, overwrite, temporary)
 
 
 def _download_once(
@@ -109,53 +254,49 @@ def _download_once(
     overwrite: bool,
 ) -> Path:
     with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
-        if resp.status_code == 404:
-            raise _magnus_error("File not found or expired")
         if resp.status_code >= 500:
-            raise _ServerError(f"Server error {resp.status_code}")
+            raise _ServerError(http_error_detail(resp))
         if not resp.is_success:
-            raise _magnus_error(f"Download failed (HTTP {resp.status_code})")
+            detail = http_error_detail(resp)
+            if resp.status_code == 404:
+                detail = f"File not found or expired ({detail})"
+            raise _magnus_error(detail)
 
         filename = _parse_filename(resp.headers) or "download"
         is_directory = resp.headers.get("x-magnus-directory", "").lower() == "true"
         content_length_str = resp.headers.get("content-length")
 
-        # Fast path: small non-directory files read into memory, skip temp dir
-        if (not is_directory
-            and content_length_str is not None
-            and int(content_length_str) < _SMALL_FILE_THRESHOLD):
-            target = Path(target_path).resolve() if target_path else Path.cwd() / filename
-            _prepare_target(target, overwrite)
-            data = resp.read()
-            target.write_bytes(data)
-            return target
+        expected_length = None
+        if content_length_str is not None:
+            try:
+                expected_length = int(content_length_str)
+            except ValueError:
+                raise _magnus_error("Invalid download Content-Length") from None
+            if expected_length < 0:
+                raise _magnus_error("Invalid download Content-Length")
 
-        # Standard path: stream to temp dir, then move
-        with tempfile.TemporaryDirectory(dir=get_tmp_base()) as tmp:
-            tmp_dir = Path(tmp)
-            tmp_file = tmp_dir / filename
+        parent = _target_path(target_path, filename).parent
+        parent.mkdir(parents=True, exist_ok=True)
+        # Same-filesystem staging makes publication a rename instead of an
+        # unsafe delete followed by a possibly failing cross-device copy.
+        with _temporary_download(parent) as tmp_dir:
+            tmp_file = tmp_dir / "payload"
             with open(tmp_file, "wb") as f:
                 for chunk in resp.iter_bytes(chunk_size=65536):
                     f.write(chunk)
 
+            # HTTP Content-Length counts encoded wire bytes, not decoded file
+            # size (e.g. gzip). HTTPX tracks this before content decoding.
+            if expected_length is not None and resp.num_bytes_downloaded != expected_length:
+                raise httpx.RemoteProtocolError("Incomplete download response")
+
             if is_directory:
-                import tarfile
-                with tarfile.open(tmp_file) as tar:
-                    tar.extractall(tmp_dir, filter="data")
-                tmp_file.unlink()
-                extracted = list(tmp_dir.iterdir())
-                if len(extracted) != 1:
-                    raise _magnus_error(
-                        f"Expected 1 item from archive, got {len(extracted)}: {extracted}"
-                    )
-                source = extracted[0]
+                source = _extract_directory(tmp_file, tmp_dir)
             else:
                 source = tmp_file
 
-            target = Path(target_path).resolve() if target_path else Path.cwd() / source.name
-            _prepare_target(target, overwrite)
-            shutil.move(str(source), str(target))
-            return target
+            target = _target_path(target_path, source.name if is_directory else filename)
+            return _publish_download(source, target, overwrite, tmp_dir)
 
 
 def download_file(
@@ -201,12 +342,7 @@ async def download_file_async(
 
 
 def _parse_filename(headers: httpx.Headers) -> Optional[str]:
-    cd = headers.get("content-disposition", "")
-    if "filename=" not in cd:
-        return None
-    for part in cd.split(";"):
-        part = part.strip()
-        if part.startswith("filename="):
-            name = part[len("filename="):]
-            return name.strip('"').strip("'")
-    return None
+    message = Message()
+    message["content-disposition"] = headers.get("content-disposition", "")
+    filename = message.get_filename()
+    return _safe_filename(filename) if filename else None

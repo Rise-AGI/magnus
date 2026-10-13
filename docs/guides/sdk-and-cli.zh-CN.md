@@ -866,9 +866,9 @@ magnus receive "$DATASET_SECRET" --output /tmp/dataset
 示例：
 
 ```bash
+SECRET=$(magnus custody ./outputs/checkpoint-1200 --secret-only) || exit 1
+test -n "$SECRET" || exit 1
 echo '{"success": true, "best_step": 1200}' > "$MAGNUS_RESULT"
-
-SECRET=$(magnus custody ./outputs/checkpoint-1200)
 echo "magnus receive $SECRET --output ./checkpoint-1200" > "$MAGNUS_ACTION"
 ```
 
@@ -963,8 +963,9 @@ python train.py \
 4. 训练结束后回传：
 
 ```bash
+SECRET=$(magnus custody /tmp/output --secret-only) || exit 1
+test -n "$SECRET" || exit 1
 echo '{"success": true, "message": "training finished"}' > "$MAGNUS_RESULT"
-SECRET=$(magnus custody /tmp/output)
 echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
 ```
 
@@ -1012,7 +1013,12 @@ with open(os.environ["MAGNUS_ACTION"], "w") as f:
 - 目录会被自动打包上传；下载时自动解压
 - `expire_minutes` 受服务端配置的最大 TTL 限制
 - `max_downloads=1` 适合“一次性回传”；不设时表示不限制下载次数
-- 文件代管是中转层，不是长期归档系统；过期后文件会被服务端清理
+- 文件代管是中转层，不是长期归档系统。普通 secret 受 TTL 和下载次数限制，后端重启后也会失效；必需的结果应及时取回。
+- `magnus custody` / `custody_file()` 上传文件或目录，`magnus receive` / `download_file()` 取回。HTTP 传输目前每次使用一个请求，没有分片上传会话或断点续传；公网网关的上传上限可能低于 Magnus，延长超时不能绕过 HTTP 413。
+- 必需成果只有在 custody 成功并返回非空 secret 后，才算完成交付。上传失败应让任务失败，不能仅因计算或本地打包完成，就写成功结果或以 0 退出。离线 relay 站点由 SDK 暂存输出，控制器导入后 secret 才可下载。
+- 下载在目标目录旁暂存，传输和解包成功后才替换旧目标。请为新旧两份数据预留空间；传输中断会保留旧目标。目录替换使用可回退的重命名，并非可抵御进程崩溃的原子目录交换。HTTP 重试仍从头开始，一次性 secret 若已消耗，重试可能失败。
+- `overwrite=False` 不会主动替换已有目标。在 POSIX 上发布目录，或文件系统不支持硬链接时，会先独占创建目标再复制；新目标可能在复制完成前就已可见。
+- HTTP 错误包含状态码、有长度限制的诊断，以及响应提供的 request ID。排查时保留这些信息，避免记录凭证；Job 的 `Success` 不等于某个成果 secret 已存在。
 
 #### 手动上传/下载闭环
 
@@ -1883,11 +1889,13 @@ magnus receive 7919-calm-boat-fire --output ./downloads/result.tar.gz
 ```bash
 magnus custody results.csv
 magnus custody ./output_dir --expire-minutes 120
+SECRET=$(magnus custody ./output_dir --secret-only) || exit 1
 ```
 
 **选项**：
 - `-t, --expire-minutes`: 过期时间（分钟），默认 60
 - `-d, --max-downloads`: 最大下载次数，默认无限制
+- `--secret-only`：向 stdout 仅输出 secret 和换行，不显示进度或成功提示；脚本捕获结果时使用。默认交互输出保持不变。
 
 ### magnus connect
 

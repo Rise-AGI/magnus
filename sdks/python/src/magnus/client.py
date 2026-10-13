@@ -24,6 +24,7 @@ from .config import (
 )
 from .actions import execute_action
 from .file_transfer import is_file_secret, get_tmp_base, ENV_CUSTODY_DROP_DIR, FILE_SECRET_PREFIX
+from ._http_errors import http_error_detail
 
 logger = logging.getLogger("magnus")
 
@@ -248,13 +249,7 @@ class MagnusClient:
         if response.is_success:
             return
 
-        try:
-            detail = response.json().get("detail", response.text)
-        except ValueError:
-            detail = response.text
-
-        if not detail:
-            detail = f"Server returned HTTP {response.status_code}"
+        detail = http_error_detail(response)
 
         exc_class = self._STATUS_EXCEPTIONS.get(response.status_code)
         if exc_class:
@@ -306,15 +301,18 @@ class MagnusClient:
         for attempt in range(self._TRANSFER_MAX_RETRIES):
             try:
                 file_handle.seek(0)
-                resp = self.http.post(
+                with self.http.stream(
+                    "POST",
                     "/files/upload",
                     files={"file": (filename, file_handle)},
                     data=data,
                     timeout=timeout,
-                )
-                if resp.status_code >= 500:
-                    raise _ServerError(f"Server error {resp.status_code}")
-                return resp
+                ) as resp:
+                    if resp.status_code >= 500:
+                        raise _ServerError(http_error_detail(resp))
+                    self._handle_error(resp)
+                    resp.read()
+                    return resp
             except (*self._TRANSFER_TRANSIENT_ERRORS, _ServerError) as e:
                 last_exc = e
                 if attempt == self._TRANSFER_MAX_RETRIES - 1:

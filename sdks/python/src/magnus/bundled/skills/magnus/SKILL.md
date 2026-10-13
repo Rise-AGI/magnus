@@ -60,6 +60,17 @@ When a blueprint parameter is typed `FileSecret`, passing a local file path trig
 
 Blueprints that produce output files write a `magnus receive` command to `MAGNUS_ACTION`. With `--execute-action true` (default), `magnus run` auto-executes this receive command.
 
+Files also have direct, supported CLI interfaces:
+
+```bash
+magnus custody ./output --expire-minutes 120 --secret-only  # stdout: magnus-secret:...
+magnus receive <file-secret> --output ./downloaded-output
+```
+
+The Python equivalents are `custody_file()` and `download_file()`. A runner must propagate a required-output upload failure as a nonzero exit, and obtain a nonempty secret before reporting delivery success. A successful computation or ZIP command alone does not prove delivery. On offline relay sites, custody stages outputs locally; retrieval becomes available after the controller imports them.
+
+Custody is temporary: ordinary secrets have TTL/download-count limits and become invalid on backend restart. Retrieve required results promptly. HTTP transfers use single requests without resumable upload sessions; public gateways can impose smaller request-size limits than Magnus. Preserve HTTP status and request ID when reporting failures; do not expose credentials or assume a longer timeout fixes HTTP 413.
+
 ## Job Management
 
 ```bash

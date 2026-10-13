@@ -8,6 +8,7 @@ import signal
 import subprocess
 import typer
 import httpx
+from contextlib import nullcontext
 from importlib.metadata import version, PackageNotFoundError
 from typing import List, Optional, Any, Dict, Tuple
 from pathlib import Path
@@ -972,6 +973,7 @@ def custody_cmd(
     path: str = typer.Argument(..., help="File or folder to custody via server relay"),
     expire_minutes: int = typer.Option(60, "--expire-minutes", "-t", help="Time-to-live in minutes for the custodied file"),
     max_downloads: Optional[int] = typer.Option(None, "--max-downloads", "-d", help="Max download count (default: unlimited)"),
+    secret_only: bool = typer.Option(False, "--secret-only", help="Print only the file secret to stdout for scripts"),
 ):
     """
     Custody a file: upload to server for download by others.
@@ -982,6 +984,7 @@ def custody_cmd(
       magnus custody results.csv
       magnus custody ./output_dir --expire-minutes 120
       magnus custody data.csv --max-downloads 5
+      magnus custody results.csv --secret-only
     """
     target = Path(path)
     if not target.exists():
@@ -989,12 +992,19 @@ def custody_cmd(
         raise typer.Exit(code=1)
 
     try:
-        with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Uploading..."):
+        progress = nullcontext() if secret_only else SignalSafeSpinner("[magnus.prefix][Magnus][/magnus.prefix] Uploading...")
+        with progress:
             new_secret = api_custody_file(
                 path=str(target.resolve()),
                 expire_minutes=expire_minutes,
                 max_downloads=max_downloads,
             )
+
+        if not isinstance(new_secret, str) or not new_secret.strip():
+            raise MagnusError("Custody did not return a file secret")
+        if secret_only:
+            typer.echo(new_secret)
+            return
 
         console.print()
         print_msg(f"File custodied successfully. Expires in {expire_minutes} min.")
