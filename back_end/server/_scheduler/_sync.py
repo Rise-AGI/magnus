@@ -44,7 +44,13 @@ class _SyncMixin(_SyncMixinBase):
                 # Aggregate GPU usage DB-side: this runs every heartbeat and the jobs
                 # table can inline tens of MB per row, so materializing the rows just
                 # to sum a column would read those blobs off disk each tick.
-                magnus_usage = db.query(func.coalesce(func.sum(Job.gpu_count), 0)).filter(
+                # gpu_count is per node, while snapshots describe the whole job.
+                magnus_usage = db.query(
+                    func.coalesce(
+                        func.sum(Job.gpu_count * func.coalesce(Job.node_count, 1)),
+                        0,
+                    ),
+                ).filter(
                     Job.slurm_job_id.isnot(None),
                     Job.status.in_([
                         JobStatus.RUNNING,

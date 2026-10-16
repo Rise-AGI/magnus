@@ -1,6 +1,7 @@
 # back_end/server/_slurm_manager/_resource_query.py
 """SLURM 资源查询：scontrol/squeue 解析容量、占用、运行任务列表。"""
 import json
+import re
 import subprocess
 import traceback
 from dataclasses import dataclass
@@ -14,29 +15,86 @@ from ._transport import _Transport
 
 
 def _resolve_default_gpu_model() -> str:
-    """squeue 解析失败时的 GPU 类型 fallback。优先取 magnus_config 配置的第一
-    个 GPU 的 ``value`` 字段（如 "rtx5090" / "a100"）；缺失或异常 fallback
-    "unknown"。
-
-    历史教训：之前硬编码 "rtx5090"（只 work 在某一站点），换到另一站点
-    (a100) 后 cluster endpoint 把无法识别 gpu_type 的 SLURM job 显示成 rtx5090
-    误导用户。读站点 config 让 fallback 跟着站点走。
-
-    取 ``value`` 而非 ``label`` 是为了跟成功解析路径在下游 ``cluster.py`` 经
-    ``.lower().replace(" ","")`` 规范化后**等价**：成功路径 gres_detail 解析
-    给 "A100" / "RTX 5090"，规范化后 "a100" / "rtx5090"；本 fallback 直接给
-    "a100" / "rtx5090"，规范化幂等。如果取 ``label`` ("NVIDIA GeForce RTX 5090")
-    会被规范化成 "nvidiageforcertx5090"，跟前端 PHYSICAL_GPUS 枚举完全对不上。
-    """
+    """Only infer an untyped allocation's model on a single-model station."""
     try:
         gpus = magnus_config.get("cluster", {}).get("gpus") or []
-        if gpus and isinstance(gpus[0], dict):
-            value = gpus[0].get("value")
-            if value:
-                return str(value).lower()
+        models = {
+            str(gpu["value"]).lower()
+            for gpu in gpus
+            if isinstance(gpu, dict) and gpu.get("value")
+        }
+        if len(models) == 1:
+            return next(iter(models))
     except Exception:
         pass
     return "unknown"
+
+
+def _parse_gpu_resources(
+    resources: Optional[str],
+) -> List[Tuple[Optional[str], int]]:
+    """Read GPU counts from GRES or named TRES without interpreting device IDs.
+
+    Slurm annotates each GRES with ``(S:0-1)`` or ``(IDX:0,2)``. Strip those
+    groups before splitting commas/colons. TRES uses ``gres/gpu[:type]=N``;
+    GRES/tres_per_node uses ``[gres/]gpu[:type]:N``. Other resources, including
+    gpumem/gpuutil, are not GPU counts. Preserve the untyped entry separately:
+    in allocated TRES it is the aggregate, not an additional allocation.
+    """
+    if not resources:
+        return []
+    entries = []
+    for item in re.sub(r"\([^)]*\)", "", resources).split(","):
+        parts = item.strip().replace("=", ":").split(":")
+        if (
+            len(parts) not in (2, 3)
+            or parts[0] not in {"gpu", "gres/gpu"}
+            or not re.fullmatch(r"[0-9]+", parts[-1])
+            or (len(parts) == 3 and not parts[1])
+        ):
+            continue
+        model = parts[1].lower() if len(parts) == 3 else None
+        entries.append((model, int(parts[-1])))
+    return entries
+
+
+def _job_gpu_allocation(
+    job: Dict,
+    default_model: str,
+) -> Tuple[int, str]:
+    """Return whole-job GPU allocation, preferring allocated TRES over requests.
+
+    ``gres_detail`` contains node allocations; only the last fallback,
+    ``tres_per_node``, must be multiplied by the allocated node count. See
+    https://slurm.schedmd.com/squeue.html (tres-alloc / tres-per-node).
+    """
+    allocated = _parse_gpu_resources(job.get("tres_alloc_str"))
+    details = job.get("gres_detail") or []
+    if isinstance(details, str):
+        details = [details]
+    detail_entries = [
+        entry
+        for detail in details
+        for entry in _parse_gpu_resources(detail)
+    ]
+    per_node = _parse_gpu_resources(job.get("tres_per_node"))
+    if allocated:
+        aggregate = [count for model, count in allocated if model is None]
+        gpu_count = sum(aggregate) if aggregate else sum(count for _, count in allocated)
+        entries = allocated
+    elif detail_entries:
+        gpu_count = sum(count for _, count in detail_entries)
+        entries = detail_entries
+    else:
+        node_count = _unwrap_slurm_int(job.get("node_count")) or 1
+        gpu_count = sum(count for _, count in per_node) * node_count
+        entries = per_node
+
+    models = {model for model, count in entries if model and count > 0}
+    if not models:
+        models = {model for model, count in detail_entries or per_node if model and count > 0}
+    gpu_type = next(iter(models)) if len(models) == 1 else "mixed" if models else default_model
+    return gpu_count, gpu_type
 
 
 def _unwrap_slurm_int(value) -> int:
@@ -109,49 +167,22 @@ class _ResourceQueryMixin:
 
             total_capacity = 0
             for line in capacity_result.stdout.split('\n'):
-                line = line.strip()
-                if line.startswith("Gres=") and "gpu" in line:
-                    try:
-                        gres_part = line.split("Gres=")[1].split()[0].split('(')[0]
-                        count = int(gres_part.split(':')[-1])
-                        total_capacity += count
-                    except (ValueError, IndexError):
-                        pass
+                for token in line.split():
+                    if token.startswith("Gres="):
+                        total_capacity += sum(
+                            count for _, count in _parse_gpu_resources(token[len("Gres="):])
+                        )
 
             # 步骤 2：squeue 解析 RUNNING + COMPLETING 任务的 GPU 申请总和得到当前总占用。
             # COMPLETING (CG) 阶段 SLURM 物理上仍把 GPU 算 Alloc 不释放给新 job，
             # 必须计入 used，否则 cluster snapshot 的 slurm_used_gpus 会在 epilog
             # 跑期间瞬时低估，跟 check_job_status (CG → RUNNING) 的语义错位。
-            usage_command = [
-                "squeue",
-                "--states=RUNNING,COMPLETING",
-                "--noheader",
-                "--format=%D %b",
-            ]
-            usage_result = self._transport.run(
-                usage_command,
-                check = True,
+            # Use the same whole-job allocation as cluster display/backfill.
+            # squeue %b only reports per-node requests and misses --gpus jobs.
+            total_allocated = sum(
+                task["gpu_count"]
+                for task in self.get_all_running_tasks(_raise_on_error=True)
             )
-
-            total_allocated = 0
-            for line in usage_result.stdout.strip().split('\n'):
-                if not line.strip():
-                    continue
-                parts = line.split(maxsplit=1)
-                if len(parts) < 2:
-                    continue
-
-                num_nodes_str, gres_req = parts[0], parts[1]
-                if "gpu" not in gres_req:
-                    continue
-
-                try:
-                    num_nodes = int(num_nodes_str)
-                    gres_req = gres_req.split('(')[0]
-                    gpu_per_node = int(gres_req.split(':')[-1])
-                    total_allocated += (num_nodes * gpu_per_node)
-                except (ValueError, IndexError):
-                    pass
 
             return total_capacity, total_allocated
 
@@ -186,12 +217,11 @@ class _ResourceQueryMixin:
             # docstring。
             for line in result.stdout.split('\n'):
                 line = line.strip()
-                if line.startswith("Gres=") and "gpu" in line:
-                    try:
-                        gres_part = line.split("Gres=")[1].split()[0].split('(')[0]
-                        total_gpus += int(gres_part.split(':')[-1])
-                    except (ValueError, IndexError):
-                        pass
+                for token in line.split():
+                    if token.startswith("Gres="):
+                        total_gpus += sum(
+                            count for _, count in _parse_gpu_resources(token[len("Gres="):])
+                        )
                 if "CPUTot=" in line:
                     # 同行布局：CPUAlloc=34 CPUEfctv=192 CPUTot=192 CPULoad=...
                     for part in line.split():
@@ -271,11 +301,7 @@ class _ResourceQueryMixin:
                     pass
 
                 gres = fields.get("Gres", "")
-                if "gpu" in gres:
-                    try:
-                        total_gpus += int(gres.split('(')[0].split(':')[-1])
-                    except (ValueError, IndexError):
-                        pass
+                total_gpus += sum(count for _, count in _parse_gpu_resources(gres))
 
             return NodeSnapshot(
                 total_gpus = total_gpus,
@@ -389,7 +415,12 @@ class _ResourceQueryMixin:
             logger.error(f"Failed to check job status {slurm_job_id}: {error}")
             return "UNKNOWN"
 
-    def get_all_running_tasks(self, partition: Optional[str] = None) -> List[Dict]:
+    def get_all_running_tasks(
+        self,
+        partition: Optional[str] = None,
+        *,
+        _raise_on_error: bool = False,
+    ) -> List[Dict]:
         """获取所有正在运行 / 收尾中的 SLURM 任务详情。
 
         包含 RUNNING 与 COMPLETING：CG 阶段 SLURM 物理上仍占 GPU 不释放，且本类
@@ -405,6 +436,9 @@ class _ResourceQueryMixin:
         关键坑点：SLURM job-completion caching 让 ``squeue --json`` 可能返回内存中
         残留的已结束任务（即便用了 ``--states`` 过滤）。代码层面必须再显式检查
         ``job_state`` 是否真的命中 RUNNING / COMPLETING，不能信任 SLURM 自己的过滤。
+
+        内部容量/占用查询使用 ``_raise_on_error``，防止把查询失败的空列表解释成
+        全部GPU空闲；其他既有调用方保留原有失败返回空列表的行为。
         """
         default_gpu_model = _resolve_default_gpu_model()
         command = [
@@ -446,41 +480,10 @@ class _ResourceQueryMixin:
                     else:
                         start_time_str = datetime.now(timezone.utc).isoformat()
 
-                    # 优先解析 gres_detail，例如 "gpu:rtx5090:1(IDX:0)"
-                    gpu_count = 0
-                    gpu_type = default_gpu_model
-                    gres_details = job.get("gres_detail", [])
-
-                    for item in gres_details:
-                        if "gpu" not in item:
-                            continue
-
-                        parts = item.split(':')
-
-                        try:
-                            # parts[-1] 形如 "1(IDX:0)"，取括号前作为数量
-                            count_str = parts[-1].split('(')[0]
-                            count = int(count_str)
-                            gpu_count += count
-                        except (ValueError, IndexError):
-                            pass
-
-                        if len(parts) >= 3:
-                            model_raw = parts[1]
-                            if model_raw.lower().startswith("rtx"):
-                                gpu_type = model_raw.upper().replace("RTX", "RTX ")
-                            else:
-                                gpu_type = model_raw.upper()
-
-                    # Fallback: gres_detail 缺失时退回 tres_per_node
-                    if gpu_count == 0:
-                        tres = job.get("tres_per_node", "")
-                        if "gpu" in tres:
-                            try:
-                                count = int(tres.split(':')[-1])
-                                gpu_count = count
-                            except ValueError:
-                                pass
+                    gpu_count, gpu_type = _job_gpu_allocation(
+                        job = job,
+                        default_model = default_gpu_model,
+                    )
 
                     # CPU / Mem 占用走 squeue (job-level)，理由见 NodeSnapshot
                     # docstring：CG 期间这两个字段仍报 alloc，跟 GPU 行为对齐。
@@ -511,6 +514,8 @@ class _ResourceQueryMixin:
                     })
 
                 except Exception as error:
+                    if _raise_on_error:
+                        raise
                     logger.warning(
                         f"Failed to parse job json: {error}\n"
                         f"Traceback:\n{traceback.format_exc()}"
@@ -520,5 +525,7 @@ class _ResourceQueryMixin:
             return tasks
 
         except Exception as error:
+            if _raise_on_error:
+                raise
             logger.error(f"Failed to query running tasks (json): {error}")
             return []

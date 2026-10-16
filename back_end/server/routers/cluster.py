@@ -18,7 +18,9 @@ from .._slurm_manager import SlurmManager
 
 
 _node_name = magnus_config["cluster"]["name"]
-_gpu_model = magnus_config["cluster"]["gpus"][0]["label"] if magnus_config["cluster"]["gpus"] else "N/A"
+_gpu_model = " / ".join(dict.fromkeys(
+    gpu["label"] for gpu in magnus_config["cluster"]["gpus"]
+)) or "N/A"
 
 
 router = APIRouter()
@@ -301,7 +303,8 @@ def get_cluster_stats(
     # 三个 alloc 维度（gpu / cpu / mem）都从 squeue 的 job-level 数字派生（all_slurm_tasks），
     # alloc 不走 scontrol 的 CPUAlloc / AllocMem——后者在 CG 期间立即清零，跟 squeue 视角
     # 下 job 仍占 cpu / mem 矛盾，详见 _slurm_manager._resource_query.NodeSnapshot docstring。
-    used_gpus = sum(job.gpu_count for job in sorted_all_running)
+    # DB gpu_count is a per-node request; Slurm tasks carry whole-job allocation.
+    used_gpus = sum(task["gpu_count"] for task in all_slurm_tasks)
     used_cpus = sum(task.get("cpu_count", 0) for task in all_slurm_tasks)
     used_mem_mb = sum(task.get("memory_mb", 0) for task in all_slurm_tasks)
 
