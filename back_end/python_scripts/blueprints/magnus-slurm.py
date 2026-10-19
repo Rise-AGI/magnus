@@ -89,6 +89,8 @@ python magnus_slurm.py \\
         description = description,
         repo_name = "magnus",
         entry_command = entry_command,
+        cpu_count = cpu_count,
+        memory_demand = memory_demand,
         gpu_count = gpu_count,
         gpu_type = "rtx5090",
         job_type = JobType.A2,
