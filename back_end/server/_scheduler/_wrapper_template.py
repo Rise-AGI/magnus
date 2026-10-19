@@ -44,7 +44,8 @@ def _build_wrapper_content(
     # 语义解释为**每节点**卡数，全任务总卡数 = node_count × gpu_count。
     #
     # 已知局限（v1，留待真集群迭代，仅多节点路径受影响、单节点不涉及）：
-    # - metrics sidecar 只在 batch step 所在的 node 0 采样；
+    # - CPU/RAM metrics sample the batch-step cgroup on node 0. srun ranks can
+    #   live in sibling step cgroups, so these are not aggregate MPI metrics;
     # - SIGTERM 的 cgroup fan-out 也只覆盖 node 0，跨节点优雅信号依赖 srun 原生转发
     #   （硬杀走 scancel --signal=KILL --full 覆盖全节点，不受影响）；
     # - MAGNUS_NET_MODE=bridge 与多节点不兼容（会变成 rootlesskit 套 srun，语义不通），
@@ -272,6 +273,18 @@ def _allocated_cpus():
             return int(v)
     return os.cpu_count() or 1
 
+def _metric_cgroup_scope(controller):
+    v2_rel, v1_mem, v1_cpu = _cg_paths()
+    path = v2_rel if _is_pure_v2() else (v1_cpu if controller == "cpu" else v1_mem)
+    parts = (path or "").split("/")
+    job_id = os.environ.get("SLURM_JOB_ID")
+    # Without a job-owned cgroup, the sample may cover slurmd or the whole host.
+    if not job_id or "job_" + job_id not in parts:
+        return "unverified_cgroup"
+    if "step_batch" in parts:
+        return "batch_step"
+    return "slurm_step" if any(part.startswith("step_") for part in parts) else "job_node"
+
 def _metrics_sidecar(metrics_dir, stop_event):
     try:
         import socket
@@ -285,12 +298,19 @@ def _metrics_sidecar(metrics_dir, stop_event):
         # CPU utilization is now task-quota relative (cgroup) rather than node-wide
         # (/proc/stat). 100% = task fully using its allocated cores.
         alloc_cpus = float(_allocated_cpus())
+        cpu_basis = next((name.lower().removeprefix("slurm_") for name in
+                          ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE")
+                          if os.environ.get(name, "").isdigit() and int(os.environ[name]) > 0),
+                         "host_cpu_count")
         prev_usage_usec = _read_cpu_usage_usec()
         prev_wall_ms = int(time.time() * 1000)
         while not stop_event.wait(5.0):
             now_ms = int(time.time() * 1000)
             lines = []
-            node_labels = {{"node": hostname}}
+            # srun ranks can be in sibling cgroups. Record the actual scope,
+            # rather than presenting the launcher's usage as a whole MPI job.
+            coverage = {repr("partial" if _is_multinode else "single_task")}
+            node_labels = {{"node": hostname, "coverage": coverage}}
             if allowed_gpus:
                 try:
                     out = subprocess.check_output(
@@ -305,7 +325,8 @@ def _metrics_sidecar(metrics_dir, stop_event):
                         idx, util, mem_mib = parts
                         if idx.strip() not in allowed_gpus:
                             continue
-                        labels = {{"device": f"cuda:{{idx}}", "node": hostname}}
+                        labels = {{"device": f"cuda:{{idx}}", "node": hostname,
+                                   "scope": "device", "coverage": coverage}}
                         lines.append(json.dumps({{
                             "name": "system.gpu.utilization", "kind": "gauge",
                             "value": float(util), "time_unix_ms": now_ms,
@@ -326,12 +347,17 @@ def _metrics_sidecar(metrics_dir, stop_event):
                     d_wall_ms = now_ms - prev_wall_ms
                     if d_wall_ms > 0 and alloc_cpus > 0 and d_usage >= 0:
                         cpu_pct = round((d_usage / (d_wall_ms * 1000.0) / alloc_cpus) * 100, 1)
-                        if cpu_pct > 100.0:
-                            cpu_pct = 100.0
+                        # Keep values above 100: clipping would hide a quota /
+                        # cgroup-scope mismatch rather than explain it.
+                        cpu_scope = _metric_cgroup_scope("cpu")
+                        cpu_labels = dict(node_labels, scope=cpu_scope,
+                                          normalization_cpus=str(alloc_cpus), normalized_by=cpu_basis)
+                        if cpu_scope == "unverified_cgroup":
+                            cpu_labels["coverage"] = "unverified"
                         lines.append(json.dumps({{
                             "name": "system.cpu.utilization", "kind": "gauge",
                             "value": cpu_pct, "time_unix_ms": now_ms,
-                            "unit": "percent", "labels": node_labels,
+                            "unit": "percent", "labels": cpu_labels,
                         }}))
                 if cur_usage_usec is not None:
                     prev_usage_usec = cur_usage_usec
@@ -342,10 +368,14 @@ def _metrics_sidecar(metrics_dir, stop_event):
             try:
                 mem_bytes = _read_memory_used_bytes()
                 if mem_bytes is not None:
+                    memory_scope = _metric_cgroup_scope("memory")
+                    memory_labels = dict(node_labels, scope=memory_scope)
+                    if memory_scope == "unverified_cgroup":
+                        memory_labels["coverage"] = "unverified"
                     lines.append(json.dumps({{
                         "name": "system.memory.used_bytes", "kind": "gauge",
                         "value": float(mem_bytes), "time_unix_ms": now_ms,
-                        "unit": "bytes", "labels": node_labels,
+                        "unit": "bytes", "labels": memory_labels,
                     }}))
             except Exception:
                 pass

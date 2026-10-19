@@ -1,11 +1,10 @@
 # back_end/library/fundamental/scheduling.py
-"""通用调度算法工具：多维资源向量 + EASY backfilling。
+"""Resource vectors and conservative backfill without runtime estimates.
 
-EASY backfilling 由 Lifka 等人 1995 年提出 (Lifka, "The ANL/IBM SP Scheduling
-System", IPPS '95)，目前仍是 SLURM、PBS、LSF 等主流 HPC 调度器的默认
-backfill 策略。核心想法：当队头任务因资源不够而等待时，仍允许后续任务旁路
-启动，前提是它们不会让队头多等一秒——这一安全条件用资源向量算术即可表达，
-不需要任务的 walltime 估计。
+True time-based backfill reserves when and where a waiting job can start:
+https://slurm.schedmd.com/sched_config.html. Here we only spend resources that
+are already free in excess of the head's demand. Callers must separately
+respect placement constraints; aggregate vectors cannot prove node placement.
 """
 from dataclasses import dataclass
 from typing import Generic, List, Sequence, Tuple, TypeVar
@@ -14,6 +13,7 @@ from typing import Generic, List, Sequence, Tuple, TypeVar
 __all__ = [
     "ResourceVector",
     "BackfillCandidate",
+    "select_conservative_backfill",
     "select_easy_backfill",
 ]
 
@@ -103,47 +103,34 @@ class BackfillCandidate(Generic[T]):
     demand: ResourceVector
 
 
-def select_easy_backfill(
+def select_conservative_backfill(
     candidates: Sequence[BackfillCandidate[T]],
     cluster_total: ResourceVector,
     cluster_free: ResourceVector,
 ) -> List[T]:
-    """挑出当下可立即启动的子集，保证不延迟队头。
+    """Select in priority order, reserving the waiting head's current resources.
 
-    ``candidates`` 必须按优先级降序传入（队头在最前）。返回选中 payload 的
-    列表，按选中顺序排列。
+    When the head fits, admit a strict priority prefix. Otherwise a later job
+    may consume only the per-dimension surplus ``max(free - head, 0)``. Spend
+    that surplus cumulatively across selected candidates. Future releases can
+    then satisfy the head at the same point as without these admissions.
 
-    选取规则分两态：
-
-    1. 队头 ``candidates[0]`` 自身能跑（``demand ≤ cluster_free``）：进入
-       严格优先级贪心。从队头依次扫，``demand ≤ remaining_free`` 就选中并
-       从 remaining_free 扣除其需求；遇到第一个装不下的就停，**不**跳过它
-       去捞后面优先级更低的——否则破坏 priority 语义。
-
-    2. 队头自身跑不动（在等资源）：进入 EASY backfill。队头**不**进入选中
-       集（它继续在外面等下一轮），从 ``candidates[1:]`` 中挑同时满足
-       两条件的：
-
-       - ``candidate.demand ≤ remaining_free``：候选自己当下能跑；
-       - ``candidate.demand + head.demand ≤ cluster_total``：EASY 安全条件。
-
-    EASY 安全条件背后的代数（Lifka 1995）：队头等的资源迟早从 in-use
-    任务释放回来。设释放量为 ``released``，释放后空闲为
-    ``F' = cluster_free + released``。若候选先占去 ``c.demand``，那
-    ``F' = cluster_free + released − c.demand``；队头能跑要求
-    ``head.demand ≤ F'``，整理得
-    ``head.demand + c.demand ≤ cluster_free + released``。又有
-    ``cluster_free + released ≤ cluster_total``（已分配的部分总有，
-    总不超过容量），故 ``head.demand + c.demand ≤ cluster_total`` 已是充分
-    条件——无论 in-use 任务何时结束、按什么顺序结束，候选都不会让队头
-    多等一秒。代数直接生效，**不需要 walltime 估计**。
-
-    复杂度 ``O(n)``。算法不可变，输入三向量维度数一致。
+    ``head + candidate <= total`` is only necessary, not sufficient: with
+    total=8, free=2, head=4, admitting a two-unit candidate delays the head when
+    an existing job releases two units. No completion-time inference is made.
+    A head exceeding configured capacity blocks rather than being bypassed.
     """
+    cluster_free._require_same_dimension(cluster_total)
+    if not cluster_free.fits_within(cluster_total):
+        raise ValueError("Free resources cannot exceed total resources")
+    for candidate in candidates:
+        candidate.demand._require_same_dimension(cluster_total)
     if not candidates:
         return []
 
     head = candidates[0]
+    if not head.demand.fits_within(cluster_total):
+        return []
     selected: List[T] = []
     remaining_free = cluster_free
 
@@ -156,14 +143,22 @@ def select_easy_backfill(
             remaining_free = remaining_free - candidate.demand
         return selected
 
-    # 态 2：队头在等，对 candidates[1:] 跑 EASY backfill
-    head_demand = head.demand
+    # Preserve the head's current reservation in every dimension, including
+    # dimensions it already has enough of. Never spend that reservation twice.
+    remaining_surplus = ResourceVector(
+        components = tuple(
+            max(0, free - needed)
+            for free, needed in zip(cluster_free.components, head.demand.components)
+        ),
+    )
     for candidate in candidates[1:]:
-        if not candidate.demand.fits_within(remaining_free):
-            continue
-        if not (candidate.demand + head_demand).fits_within(cluster_total):
+        if not candidate.demand.fits_within(remaining_surplus):
             continue
         selected.append(candidate.payload)
-        remaining_free = remaining_free - candidate.demand
+        remaining_surplus = remaining_surplus - candidate.demand
 
     return selected
+
+
+# Compatibility for existing callers; this is not a time-based EASY scheduler.
+select_easy_backfill = select_conservative_backfill

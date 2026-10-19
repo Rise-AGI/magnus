@@ -14,12 +14,11 @@ PREPARING ─── Async resource preparation (parallel)
   │             ├── ensure_image: docker:// → .sif (LRU cache, 80G)
   │             └── ensure_repo:  git clone → copy → checkout → setfacl
   ▼
-PENDING ───── EASY backfill scheduling (Lifka 1995)
+PENDING ───── Resource admission
   │             ├── Priority sort: A1(4) > A2(3) > B1(2) > B2(1), same-level FIFO
-  │             ├── A-class can preempt RUNNING B-class (B2 first, LIFO)
-  │             ├── Head fits in free → strict-priority greedy admit all that fit
-  │             └── Head waiting → any candidate with demand+head.demand ≤
-  │                                cluster_total may bypass (provably no head delay)
+  │             ├── Known single-node layout → reserve head; backfill only surplus
+  │             ├── Preempt B jobs only with a complete actual-allocation plan
+  │             └── Complex layout → priority head to SLURM; tenant → SLURM queue
   ▼
 QUEUED ────── SLURM sbatch submitted
   │             └── sbatch script: python3 {workspace}/jobs/{id}/wrapper.py
@@ -106,10 +105,10 @@ Magnus distinguishes two external interventions on a running job:
 
 | Action | Entry points | Backend impl | DB state change |
 |--------|-------------|--------------|-----------------|
-| terminate | `POST /api/jobs/{id}/terminate`, `magnus job kill` | SLURM: `scancel --signal=KILL --full` + bare `scancel`; Docker: `docker stop -t 0 && docker rm -f` | Status set to `Terminated` immediately; working dir cleaned |
+| terminate | `POST /api/jobs/{id}/terminate`, `magnus job kill` | SLURM: `scancel --signal=KILL --full` + bare `scancel`; Docker: `docker stop -t 0 && docker rm -f` | After acknowledgement: `Terminated`; SLURM cleanup waits for release and final artifact transfer |
 | signal | `POST /api/jobs/{id}/signal`, `magnus job signal` (Running only) | SLURM: `scancel --signal=TERM --batch <jobid>`; Docker: `docker kill --signal=TERM` | No state change |
 
-**Roles of the two actions**: terminate is an irreversible hard cancel — the scheduler immediately removes the job from running state, releases the slot, and cleans up the working directory; application-level processes get no coordination window. Signal is a pure forwarder — DB is untouched and the user process receives SIGTERM. **The user process with a SIGTERM handler** can use the window to perform its own teardown (save intermediate results / checkpoints, release GPU memory and NCCL resources, close external connections, flush output buffers, etc.); a user process **without a handler** treats SIGTERM as no-op — magnus's wrapper / user-script layer renders the user shell with `SIG_IGN` for SIGTERM (see the SLURM / Docker path sections below for the mechanism) so the protocol's contract is "send-SIGTERM is for graceful shutdown wired into user code; force-kill is `terminate`". Applies broadly: AI training, long-running numerical simulations, streaming data processing — any workload that holds external resources.
+**Roles of the two actions**: terminate requests hard cancellation. Failure to acknowledge cancellation leaves the Job state and workspace intact. After acknowledgement Magnus marks the Job terminated, but counts resources from SLURM until release; it retrieves final artifacts before cleanup. A transfer failure retains the execution ID and workspace for retry without blocking other jobs' finalization. An execution association awaiting finalization is not evidence that physical resources are still allocated. Signal forwards SIGTERM without changing DB state. A user process with a handler can save checkpoints and release resources; without a handler it inherits `SIG_IGN` from the user-script shell. Use terminate for forced cancellation.
 
 A handler that wants its partial state to count as success writes `$MAGNUS_RESULT` (mounted into the container at `$MAGNUS_HOME/workspace/.magnus_result`) and `sys.exit(0)` from inside the handler. magnus reconciles the job to `Success` even if the surrounding process tree was forced down by the signal — see "State convergence" below.
 
@@ -323,6 +322,20 @@ The cluster running list instead uses SLURM's whole-job allocation for both Magn
 `time_limit` (minutes) maps to `--time`; when null no `--time` is emitted and the job runs under the partition's default walltime. Declaring a short walltime makes a job more eligible for backfill on shared clusters.
 
 The environment variables `MAGNUS_RUNNER` and `MAGNUS_TOKEN` are passed via sbatch's process environment.
+
+### Resource accounting boundaries
+
+Requests, allocations, and utilization have different sources. Submission limits and request summaries use the same memory units (unsuffixed SLURM memory means MiB); per-CPU normalization rounds up without first discarding fractional MiB. Explicit memory is rounded to whole MiB per node before multiplying by node count, and sbatch receives that same value. Storage quantities keep their byte convention. Allocations inferred from legacy SLURM request fields carry `allocation_inferred=true` and source fields, rather than claiming direct allocation evidence.
+
+Cluster capacity is the union of selected nodes, not the sum of overlapping partitions. Tenant views include jobs from other partitions sharing those nodes. A job spanning outside that pool still has a correct whole-job row, but summing it overestimates pool allocation: the response marks allocation as an upper bound and free capacity as a lower bound. When allocation itself is inferred, the UI labels the values as estimates instead of strict bounds. Offline/draining capacity and reserved CPU/memory are not advertised as available for new work. Local/Docker allocation is not tracked; free capacity is unknown.
+
+Incomplete accounting and failed queries cannot turn into an empty, fully free cluster. A combined capacity/allocation observation carries its timestamp; cached stale results are bounded and labelled. Refresh failure returns 503 rather than a fresh-looking zero snapshot. Historical GPU samples match observed SLURM IDs to Magnus ownership and sum actual allocation, including CG and DB-state lag. Failed, inferred-GPU or cross-scope observations do not write fabricated exact history. Old samples remain unchanged.
+
+Authoritative scheduling uses whole-job CPU/RAM/GPU demand and actual GPU types. An accepted job not yet observed in allocated resources blocks further admission, preventing repeated promises of the same free capacity. For a fully known single-node layout, backfill spends only the current per-dimension surplus after reserving the head's demand. This is conservative resource reservation, **not time-based EASY**: the old `head + candidate <= total` condition did not prove no delay. Preemption needs a complete plan that recovers every deficient dimension using observed B-job allocations; irrelevant GPU types, inferred allocations or a partial plan do not justify kills. Cancellation is followed by another real resource observation.
+
+For complex/multi-node layouts, aggregate counts cannot prove placement. Magnus sends only the priority head to SLURM and waits for its queue/allocation state; it does not preempt or backfill on an unproven placement assumption. Unknown/default or all-node-memory requests are also resolved by SLURM. Tenant mode continues to delegate queueing and preemption to SLURM. These rules change admission decisions, not the requested SLURM layout.
+
+System metrics identify sampling scope. CPU/RAM from the SLURM batch wrapper carry `scope=batch_step`; with `srun`, MPI ranks may live in sibling cgroups, so coverage is `partial`, not whole-job utilization. Docker CPU/RAM use `scope=container`. GPU samples use `scope=device`: device measurements are not process-attributed usage, and node zero cannot represent remote nodes. CPU samples include their normalization CPU count; values above 100% are retained instead of hiding scope/quota discrepancies. The UI explains coverage for both new labelled samples and historical multi-task jobs. This does not introduce a distributed metrics collector.
 
 ## Scheduler heartbeat and state sync
 

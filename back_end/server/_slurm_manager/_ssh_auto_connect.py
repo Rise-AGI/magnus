@@ -14,7 +14,7 @@ import os
 import subprocess
 import threading
 import time
-from typing import Dict
+from typing import Dict, Optional
 
 # socket 是进程级唯一的全局资源，而 transport 实例可能每请求新建，故单飞锁必须是
 # 模块级 —— 并发命中死 socket 时只让一个线程真正重建，其余在 ensure 的快路径/锁上
@@ -37,6 +37,18 @@ _MAX_PROMPT_ANSWERS = 6
 _MIN_TOTP_VALIDITY_SECONDS = 5
 
 
+def remaining_timeout(
+    deadline: Optional[float],
+    limit: Optional[float] = None,
+) -> Optional[float]:
+    if deadline is None:
+        return limit
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("SSH operation exceeded its time budget")
+    return min(remaining, limit) if limit is not None else remaining
+
+
 def _read_secret(
     auto_connect: Dict,
     inline_key: str,
@@ -51,7 +63,11 @@ def _read_secret(
     return str(auto_connect[inline_key]).strip()
 
 
-def _totp_code_with_margin(totp) -> str:
+def _totp_code_with_margin(
+    totp,
+    *,
+    deadline: Optional[float] = None,
+) -> str:
     """取一个有足够剩余有效期的 TOTP 码。
 
     OTP 临界过期点：若恰在 30s 时间窗的末尾生成码，它可能在远端校验前就过期。这里在
@@ -62,7 +78,11 @@ def _totp_code_with_margin(totp) -> str:
     period = getattr(totp, "interval", 30) or 30
     remaining = period - (time.time() % period)
     if remaining < _MIN_TOTP_VALIDITY_SECONDS:
+        budget = remaining_timeout(deadline)
+        if budget is not None and remaining + 0.5 >= budget:
+            raise TimeoutError("SSH time budget cannot cover the next authentication window")
         time.sleep(remaining + 0.5)
+    remaining_timeout(deadline)
     return totp.now()
 
 
@@ -70,6 +90,8 @@ def master_alive(
     control_path: str,
     host: str,
     user: str,
+    *,
+    deadline: Optional[float] = None,
 ) -> bool:
     """`ssh -O check` 探活既有 master：socket 活返回 0。纯本地控制套接字操作，无网络
     往返、毫秒级。"""
@@ -86,6 +108,7 @@ def master_alive(
         ],
         capture_output = True,
         text = True,
+        timeout = remaining_timeout(deadline),
     )
     return result.returncode == 0
 
@@ -95,18 +118,26 @@ def ensure_control_master(
     host: str,
     user: str,
     auto_connect: Dict,
+    *,
+    deadline: Optional[float] = None,
 ) -> None:
     """确保 master socket 活着：活则快返回（无锁），死则单飞重建（密码 + TOTP）。
 
     双检锁：先无锁探活走快路径（绝大多数调用 socket 都活着，不抢锁、不串行）；只有
     探到死才进锁，进锁后再探一次 —— 并发命中死 socket 时只有第一个线程真正重建，其余
     进锁发现已被重建好即返回。"""
-    if master_alive(control_path, host, user):
+    if master_alive(control_path, host, user, deadline=deadline):
         return
-    with _establish_lock:
-        if master_alive(control_path, host, user):
+    wait = remaining_timeout(deadline)
+    acquired = _establish_lock.acquire() if wait is None else _establish_lock.acquire(timeout=wait)
+    if not acquired:
+        raise TimeoutError("SSH master authentication is still in progress")
+    try:
+        if master_alive(control_path, host, user, deadline=deadline):
             return
-        _establish(control_path, host, user, auto_connect)
+        _establish(control_path, host, user, auto_connect, deadline=deadline)
+    finally:
+        _establish_lock.release()
 
 
 def _establish(
@@ -114,6 +145,8 @@ def _establish(
     host: str,
     user: str,
     auto_connect: Dict,
+    *,
+    deadline: Optional[float] = None,
 ) -> None:
     import pexpect
     import pyotp
@@ -145,20 +178,21 @@ def _establish(
             "BatchMode=no",
             f"{user}@{host}",
         ],
-        timeout = _ESTABLISH_TIMEOUT_SECONDS,
+        timeout = remaining_timeout(deadline, _ESTABLISH_TIMEOUT_SECONDS),
         encoding = "utf-8",
     )
     try:
         patterns = [totp_prompt, password_prompt, pexpect.EOF, pexpect.TIMEOUT]
         for _ in range(_MAX_PROMPT_ANSWERS):
-            index = child.expect(patterns)
+            index = child.expect(patterns, timeout=remaining_timeout(deadline, _ESTABLISH_TIMEOUT_SECONDS))
             if index == 0:
                 # 动态码：取一个剩余有效期足够的码（处理 OTP 临界过期点）。两段提示在
                 # 不同 read 中先后到达，按出现各自处理；列表里把 TOTP 放在 password 前，
                 # 仅在二者同位匹配（实际不会发生）时作平手 tiebreak，避免含 "otp" 又含
                 # "password" 的提示被误判成密码。
-                child.sendline(_totp_code_with_margin(totp))
+                child.sendline(_totp_code_with_margin(totp, deadline=deadline))
             elif index == 1:
+                remaining_timeout(deadline)
                 child.sendline(password)
             elif index == 2:
                 # EOF：ssh -f 在认证成功后已 fork 到后台，前台进程退出。
@@ -175,5 +209,5 @@ def _establish(
         # 关闭并回收前台进程；后台 master（-f fork 出去的）不受影响，持续持有 socket。
         child.close(force=True)
 
-    if not master_alive(control_path, host, user):
+    if not master_alive(control_path, host, user, deadline=deadline):
         raise RuntimeError("ssh ControlMaster 建立后探活失败：socket 未就绪")

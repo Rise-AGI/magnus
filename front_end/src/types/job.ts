@@ -5,6 +5,11 @@ export interface JobResourceSummary {
   basis: "request" | "allocation";
   mode: "slurm_per_cpu" | "slurm_per_node" | "local";
   mode_inferred: boolean;
+  allocation_inferred?: boolean;
+  cpu_source?: string | null;
+  memory_source?: string | null;
+  gpu_source?: string | null;
+  slurm_state?: string | null;
   cpu_count: number | null;
   memory_bytes: number | null;
   gpu_count: number;

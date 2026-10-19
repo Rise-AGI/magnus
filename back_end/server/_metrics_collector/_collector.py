@@ -141,7 +141,11 @@ class DockerMetricsCollector:
             self._states[job_id] = state
 
         lines: List[str] = []
-        node_labels = {"node": self._hostname}
+        node_labels = {
+            "node": self._hostname,
+            "scope": "container",
+            "coverage": "single_container",
+        }
 
         # CPU utilization (cgroup-based)
         usage_usec = _read_cpu_usage_usec(state.pid)
@@ -152,13 +156,17 @@ class DockerMetricsCollector:
                 cpus = state.alloc_cpus or float(os.cpu_count() or 1)
                 if d_wall_ms > 0 and cpus > 0 and d_usage >= 0:
                     cpu_pct = round((d_usage / (d_wall_ms * 1000.0) / cpus) * 100, 1)
-                    # Clamp to [0, 100] — quota under-counts can drift a hair past 100
-                    if cpu_pct > 100.0:
-                        cpu_pct = 100.0
+                    # Values above 100 expose quota/sampling discrepancies;
+                    # silently clipping them would corrupt the measurement.
+                    cpu_labels = dict(
+                        node_labels,
+                        normalization_cpus = str(cpus),
+                        normalized_by = "cgroup_quota" if state.alloc_cpus else "host_cpu_count",
+                    )
                     lines.append(json.dumps({
                         "name": "system.cpu.utilization", "kind": "gauge",
                         "value": cpu_pct, "time_unix_ms": now_ms,
-                        "unit": "percent", "labels": node_labels,
+                        "unit": "percent", "labels": cpu_labels,
                     }))
             state.prev_usage_usec = usage_usec
             state.prev_wall_ms = now_ms
@@ -183,7 +191,12 @@ class DockerMetricsCollector:
                     if idx not in gpu_snapshot:
                         continue
                     util, mem_used_bytes = gpu_snapshot[idx]
-                    gpu_labels = {"device": f"cuda:{idx}", "node": self._hostname}
+                    gpu_labels = {
+                        "device": f"cuda:{idx}",
+                        "node": self._hostname,
+                        "scope": "device",
+                        "coverage": "single_container",
+                    }
                     lines.append(json.dumps({
                         "name": "system.gpu.utilization", "kind": "gauge",
                         "value": float(util), "time_unix_ms": now_ms,

@@ -3,10 +3,10 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
-from sqlalchemy import func
 from ..database import SessionLocal
 from ..models import Job, JobStatus, ClusterSnapshot
 from .._magnus_config import magnus_config, is_local_mode
+from .._slurm_manager._resource_query import resource_partitions, validate_allocation_visibility
 from . import logger, magnus_workspace_path
 
 if TYPE_CHECKING:
@@ -31,37 +31,37 @@ class _SyncMixin(_SyncMixinBase):
         try:
             # Phase 1 — SLURM 调用（无 session）
             assert self.slurm_manager is not None
-            slurm_stats = self.slurm_manager.get_resource_snapshot()
+            partitions = resource_partitions(magnus_config)
+            capacity = self.slurm_manager.get_node_snapshot(
+                partitions = partitions or None,
+                _raise_on_error = True,
+            )
+            tasks = self.slurm_manager.get_all_running_tasks(
+                node_names = [node.name for node in capacity.nodes] if partitions else None,
+                _raise_on_error = True,
+            )
+            validate_allocation_visibility(capacity, tasks)
+            if any(not task.get("scope_is_subset", True) or task.get("gpu_count_source") == "per_node_fallback" for task in tasks):
+                logger.warning("Skipped cluster history sample: GPU allocations are inferred or cross the selected node scope")
+                return
+            allocations = {task["id"]: task["gpu_count"] for task in tasks}
 
             # Phase 2 — 写快照（短 session）
             with SessionLocal() as db:
-                # magnus_usage 包含 RUNNING 与 inflight release (TERMINATED/PAUSED
-                # 且 slurm_job_id 非空)：后者 SLURM 仍在 CG 持有 GPU，从历史趋势
-                # 视角属 magnus 而非 external，否则 epilog 期间会出现 30-60s 的
-                # "magnus 用量假凹"，且让 slurm_used_gpus - magnus_used_gpus 误
-                # 暗示 external 占用激增。跟 cluster endpoint used_gpus 派生口径
-                # 对齐（详见 routers/cluster.py 与 JobListItem.is_releasing）。
-                # Aggregate GPU usage DB-side: this runs every heartbeat and the jobs
-                # table can inline tens of MB per row, so materializing the rows just
-                # to sum a column would read those blobs off disk each tick.
-                # gpu_count is per node, while snapshots describe the whole job.
-                magnus_usage = db.query(
-                    func.coalesce(
-                        func.sum(Job.gpu_count * func.coalesce(Job.node_count, 1)),
-                        0,
-                    ),
-                ).filter(
-                    Job.slurm_job_id.isnot(None),
-                    Job.status.in_([
-                        JobStatus.RUNNING,
-                        JobStatus.TERMINATED,
-                        JobStatus.PAUSED,
-                    ]),
-                ).scalar()
+                # Ownership comes from Slurm IDs, usage from actual allocations.
+                # Queued/stale DB state and CG remain owned by Magnus. Select
+                # only IDs; historical command blobs are never loaded here.
+                owned_ids = {
+                    row[0]
+                    for row in db.query(Job.slurm_job_id).filter(
+                        Job.slurm_job_id.in_(list(allocations)),
+                    ).distinct().all()
+                } if allocations else set()
+                magnus_usage = sum(allocations[job_id] for job_id in owned_ids)
 
                 snapshot = ClusterSnapshot(
-                    total_gpus = slurm_stats["total_gpus"],
-                    slurm_used_gpus = slurm_stats["slurm_used_gpus"],
+                    total_gpus = capacity.total_gpus,
+                    slurm_used_gpus = sum(allocations.values()),
                     magnus_used_gpus = magnus_usage,
                     timestamp = now,
                 )
@@ -272,28 +272,29 @@ class _SyncMixin(_SyncMixinBase):
 
         # Phase 2 — SLURM 状态检查 + 远端产物回读（无 session）
         slurm_statuses = {}
-        for job_id, slurm_job_id in queued_info + running_info:
-            if slurm_job_id:
-                assert self.slurm_manager is not None
-                status = self.slurm_manager.check_job_status(slurm_job_id)
-                slurm_statuses[job_id] = status
-                # 远端执行：终态把 marker + 日志 + metrics 拉齐，供 Phase 3 的
-                # finalize / OOM 判定本机读取；运行中拉日志 / metrics 做 live 镜像。
-                # 本机执行下两者均 no-op（远端路径已收敛回本地，无需搬运）。
+        observations = queued_info + running_info + [(job_id, slurm_id) for job_id, slurm_id, _ in inflight_release_info]
+        for job_id, slurm_job_id in observations:
+            if not slurm_job_id:
+                continue
+            assert self.slurm_manager is not None
+            status = self.slurm_manager.check_job_status(slurm_job_id)
+            try:
                 if status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"):
                     self._stage_out_final(job_id)
                 elif status == "RUNNING":
                     self._stage_out_logs(job_id)
-        for job_id, slurm_job_id, _ in inflight_release_info:
-            assert self.slurm_manager is not None
-            slurm_statuses[job_id] = self.slurm_manager.check_job_status(slurm_job_id)
+            except Exception as error:
+                logger.warning(f"Job {job_id} artifact transfer failed; retaining workspace for retry: {error}")
+                if status != "RUNNING":
+                    continue
+            slurm_statuses[job_id] = status
 
         # Phase 3 — 批量更新（短 session）
         with SessionLocal() as db:
             for job_id, slurm_job_id in queued_info:
                 try:
                     job = db.query(Job).filter(Job.id == job_id).first()
-                    if not job or job.status != JobStatus.QUEUED:
+                    if not job or job.status != JobStatus.QUEUED or job.slurm_job_id != slurm_job_id:
                         continue
 
                     if not slurm_job_id:
@@ -325,7 +326,7 @@ class _SyncMixin(_SyncMixinBase):
             for job_id, slurm_job_id in running_info:
                 try:
                     job = db.query(Job).filter(Job.id == job_id).first()
-                    if not job or job.status != JobStatus.RUNNING:
+                    if not job or job.status != JobStatus.RUNNING or job.slurm_job_id != slurm_job_id:
                         continue
 
                     if not slurm_job_id:
@@ -377,6 +378,7 @@ class _SyncMixin(_SyncMixinBase):
                     if real_status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"):
                         # SLURM 已真正释放资源，可以清 slurm_job_id；status 保持
                         # 不变（TERMINATED 是终态、PAUSED 等待 Phase 2.5 resubmit）。
+                        self._clean_up_working_table(job.id)
                         job.slurm_job_id = None
                     # 其他情况（CG 仍在跑，check_job_status 把 CG 映射到 RUNNING）
                     # 保留 slurm_job_id 等下个 tick 再检查。

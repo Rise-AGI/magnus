@@ -29,7 +29,7 @@ export function presentJobResources(job: ResourceJob, t: Translate) {
   const scope = !summary
     ? t("jobResources.legacyValues")
     : isAllocation
-      ? t("jobResources.allocatedTotal")
+      ? t(summary.allocation_inferred ? "jobResources.estimatedAllocation" : "jobResources.allocatedTotal")
       : isLocal
         ? t("jobResources.requestValues")
         : t(summary.mode_inferred ? "jobResources.inferredTotal" : "jobResources.requestedTotal");
@@ -44,8 +44,19 @@ export function presentJobResources(job: ResourceJob, t: Translate) {
       }));
     }
   } else if (isAllocation) {
-    details.push(t("jobResources.allocationExplanation"));
+    details.push(t(summary.allocation_inferred ? "jobResources.estimatedAllocationExplanation" : "jobResources.allocationExplanation"));
     details.push(t("jobResources.allocatedNodes", { nodes: summary.node_count == null ? unknown : String(summary.node_count) }));
+    const state = summary.slurm_state?.toUpperCase();
+    if (state && state !== "RUNNING") {
+      const stateDescriptions = {
+        SUSPENDED: "jobResources.slurmSuspended",
+        STOPPED: "jobResources.slurmStopped",
+        CONFIGURING: "jobResources.slurmConfiguring",
+        COMPLETING: "jobResources.slurmCompleting",
+      } as const;
+      details.push(t("jobResources.slurmState", { state }));
+      if (state in stateDescriptions) details.push(t(stateDescriptions[state as keyof typeof stateDescriptions]));
+    }
     // Request fields can differ from scheduler allocation. Do not present them
     // as an observed CPU/task or memory/node distribution.
   } else if (isLocal) {

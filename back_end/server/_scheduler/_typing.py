@@ -55,8 +55,28 @@ class _SchedulerProtocol:
     def _clean_up_working_table(self, job_id: str) -> None: ...
 
     # === _decisions.py ===
-    def _compute_cluster_resources(self) -> Tuple["ResourceVector", "ResourceVector"]: ...
-    def _handle_preemption_for_job(self, db: "Session", job: "Job") -> None: ...
+    def _schedule_pending_jobs(self) -> None: ...
+    def _select_authoritative_jobs(
+        self,
+        db: "Session",
+        jobs: List["Job"],
+    ) -> List[str]: ...
+    def _compute_cluster_resources(
+        self,
+        snapshot: Any,
+        tasks: List[Dict[str, Any]],
+        gpu_types: Tuple[str, ...],
+    ) -> Tuple["ResourceVector", "ResourceVector | None"]: ...
+    def _handle_preemption_for_job(
+        self,
+        db: "Session",
+        job: "Job",
+        demand: "ResourceVector",
+        total: "ResourceVector",
+        free: "ResourceVector",
+        tasks: List[Dict[str, Any]],
+        gpu_types: Tuple[str, ...],
+    ) -> bool: ...
     def _kill_and_pause(self, db: "Session", job: "Job") -> None: ...
 
     # === _resources.py ===

@@ -1,12 +1,49 @@
-"""Pure resource display arithmetic; no configuration, database or runtime I/O."""
+"""Pure resource contracts and arithmetic; no database or runtime I/O."""
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
-from ._size_utils import _parse_size_string
+from ._size_utils import _parse_size_string, parse_memory_bytes
 
 
 ResourceMode = Literal["slurm_per_cpu", "slurm_per_node", "local"]
 RESOURCE_MODES = frozenset({"slurm_per_cpu", "slurm_per_node", "local"})
+
+
+@dataclass(frozen=True)
+class ResourceTarget:
+    partition: str | None
+    gpu_type: str | None
+
+
+def resolve_job_resource_target(
+    *,
+    gpu_count: int,
+    gpu_type: str | None,
+    config: Mapping[str, Any],
+) -> ResourceTarget:
+    """Resolve the same partition/GRES target for admission and sbatch.
+
+    Validated config defaults gres_type to the UI value; explicit None selects
+    untyped GRES. Preserve the old untyped fallback for raw, unvalidated entries
+    missing gres_type, and preserve spelling passed to SLURM.
+    """
+    partition = config["execution"]["slurm"].get("partition")
+    gres_type = None
+    if gpu_count > 0 and gpu_type and gpu_type != "cpu":
+        entry = next((
+            entry for entry in config["cluster"]["gpus"]
+            if str(entry.get("value", "")).lower() == gpu_type.lower()
+        ), None)
+        if entry is None:
+            gres_type = gpu_type
+        else:
+            partition = entry.get("partition") or partition
+            gres_type = entry.get("gres_type")
+    return ResourceTarget(
+        partition = partition,
+        gpu_type = gres_type,
+    )
 
 
 def resource_mode_for_execution(
@@ -33,18 +70,16 @@ def _memory_bytes(
 ) -> int | None:
     if not isinstance(value, str) or not value.strip():
         return None
-    raw = value.strip()
-    # sbatch --mem uses MiB for unsuffixed numbers. Local metadata follows the
-    # common size parser's byte convention and is not an enforced Docker limit.
-    if mode != "local" and raw[-1].isdigit():
-        raw += "M"
     try:
-        size = _parse_size_string(raw)
+        size = _parse_size_string(value) if mode == "local" else parse_memory_bytes(value)
     except (ValueError, TypeError, OverflowError):
         return None
     # Slurm --mem=0 requests all memory on a node, not zero bytes. The amount
     # cannot be known until allocation; missing/malformed old values are unknown.
-    return size if size > 0 else None
+    if size <= 0:
+        return None
+    # SLURM rounds each node/task memory request before nodes are combined.
+    return ((size + 1024**2 - 1) // 1024**2) * 1024**2 if mode != "local" else size
 
 
 def requested_job_resources(
@@ -81,15 +116,25 @@ def allocated_job_resources(
 ) -> dict[str, Any]:
     """squeue task fields already contain whole-job totals; never multiply them."""
     memory_mb = _positive_int(task.get("memory_mb"))
+    cpu_count = _positive_int(task.get("cpu_count"))
+    if task.get("memory_mb") == 0 and task.get("memory_source") == "allocated_tres":
+        memory_mb = 0
+    if task.get("cpu_count") == 0 and task.get("cpu_count_source") in {"allocated_tres", "allocated_cpus"}:
+        cpu_count = 0
     return {
         "basis": "allocation",
         "mode": mode,
         "mode_inferred": False,
-        "cpu_count": _positive_int(task.get("cpu_count")),
+        "cpu_count": cpu_count,
         "memory_bytes": memory_mb * 1024**2 if memory_mb is not None else None,
         "gpu_count": _positive_int(task.get("gpu_count")) or 0,
         "node_count": _positive_int(task.get("node_count")),
         # Total ranks do not prove an even layout across nodes. The cluster
         # projection does not currently collect a uniform per-node task count.
         "tasks_per_node": None,
+        "allocation_inferred": bool(task.get("allocation_inferred", False)),
+        "cpu_source": task.get("cpu_count_source"),
+        "memory_source": task.get("memory_source"),
+        "gpu_source": task.get("gpu_count_source"),
+        "slurm_state": task.get("job_state"),
     }

@@ -18,6 +18,7 @@ import os
 import re
 import json
 import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from .._magnus_config import magnus_config
@@ -146,6 +147,47 @@ _REMOTE_MARKERS = (
     ".magnus_action",
     ".magnus_oom",
 )
+
+_OPTIONAL_DIRECTORY_LIST = """import json, os, sys
+try:
+    entries = os.listdir(sys.argv[1])
+except FileNotFoundError:
+    entries = None
+print(json.dumps(entries))
+"""
+
+
+def _remote_optional_entries(
+    transport,
+    path: str,
+) -> list[str]:
+    # Shell test/ls exit codes conflate absence with permissions or SSH failure.
+    result = transport.run(["python3", "-c", _OPTIONAL_DIRECTORY_LIST, path], check=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError("Remote artifact directory query failed")
+    entries = json.loads(result.stdout)
+    if entries is None:
+        return []
+    if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
+        raise ValueError("Invalid remote artifact directory response")
+    return entries
+
+
+def _fetch_artifact_file(
+    transport,
+    remote_path: str,
+    local_path: str,
+) -> None:
+    parent = os.path.dirname(local_path)
+    os.makedirs(parent, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".stage-out-", dir=parent)
+    os.close(descriptor)
+    try:
+        transport.fetch(remote_path, temporary)
+        os.replace(temporary, local_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def _is_safe_leaf(name: str) -> bool:
@@ -348,130 +390,63 @@ class _StagingMixin(_StagingMixinBase):
                 file_custody_manager.release_file(token)
 
     def _stage_out_logs(self, job_id: str) -> None:
-        """把远端 SLURM stdout 与 metrics 拉回本机（live 镜像）。RUNNING 期间每 tick
-        best-effort 调用，让前端日志 / metrics 端点读到的本机副本保持新鲜。
-
-        逐 tick 全量重拷（scp 无增量）—— 远端为租户站、并发有限，正确优先；增量 /
-        节流 / 按需拉取留作后续优化。本机执行下 no-op。"""
         if not self._is_remote_execution():
             return
         assert self.slurm_manager is not None
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
         local_table = self._local_job_working_table(job_id)
-
-        # SLURM stdout：单文件，与 Docker 模式共用 slurm/output.txt 落点。
-        try:
-            transport.fetch(
-                f"{remote_table}/slurm/output.txt",
-                f"{local_table}/slurm/output.txt",
-            )
-        except RuntimeError:
-            # 任务尚未产出 / 文件未生成：本 tick 跳过，下个 tick 再拉。
-            pass
-
-        # metrics：文件名可变（sidecar 的 system.jsonl + SDK 写的用户指标文件），
-        # 先列远端目录再逐个拉，避免目录树搬运歧义。
-        listing = transport.run(["ls", "-1", f"{remote_table}/metrics"])
-        if listing.returncode == 0:
-            # 按行切（ls -1 一行一名），不按空白切 —— metrics 文件名可能含空格。
-            for name in listing.stdout.splitlines():
-                # metrics 文件名来自远端无网计算节点（信任边界）：拼 host 侧落点前必须
-                # 确认是安全单层名，否则 `../x` 之类会把文件写到 metrics 目录外。
-                if not _is_safe_leaf(name):
-                    continue
-                try:
-                    transport.fetch(
-                        f"{remote_table}/metrics/{name}",
-                        f"{local_table}/metrics/{name}",
-                    )
-                except RuntimeError:
-                    pass
+        if "output.txt" in _remote_optional_entries(transport, f"{remote_table}/slurm"):
+            _fetch_artifact_file(transport, f"{remote_table}/slurm/output.txt", f"{local_table}/slurm/output.txt")
+        for name in _remote_optional_entries(transport, f"{remote_table}/metrics"):
+            if not _is_safe_leaf(name):
+                raise ValueError("Invalid remote metric filename")
+            _fetch_artifact_file(transport, f"{remote_table}/metrics/{name}", f"{local_table}/metrics/{name}")
 
     def _stage_out_final(self, job_id: str) -> None:
-        """job 终态时的最后一次回读：marker + 日志 + metrics 全部拉齐，供 _sync 的
-        finalize / OOM 判定与前端读取。本机执行下 no-op。"""
         if not self._is_remote_execution():
             return
         assert self.slurm_manager is not None
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
         local_table = self._local_job_working_table(job_id)
+        entries = _remote_optional_entries(transport, remote_table)
         for marker in _REMOTE_MARKERS:
-            try:
-                transport.fetch(
-                    f"{remote_table}/{marker}",
-                    f"{local_table}/{marker}",
-                )
-            except RuntimeError:
-                # marker 是可选的（成功才有 .magnus_success，OOM 才有 .magnus_oom）：
-                # 缺失即"没发生"，与本机模式下文件不存在语义一致。
-                pass
-        # 末次日志 / metrics flush：补齐任务退出前最后一段、上一 tick 之后的输出。
+            if marker in entries:
+                _fetch_artifact_file(transport, f"{remote_table}/{marker}", f"{local_table}/{marker}")
         self._stage_out_logs(job_id)
-        # custody 产物回读：把 SDK 无网模式 drop 的文件拉回并注册进 custody，让 caller
-        # 凭 SDK 返回的 token 下载得到（终态拉一次即可，drop 在 job 退出前已落盘）。
         self._stage_out_custody(job_id)
 
     def _stage_out_custody(self, job_id: str) -> None:
-        """把远端 drop 目录里的 custody 产物拉回本机并注册进 custody。
-
-        远端无网执行时,容器内 SDK 的 `custody_file()` 不走 HTTP,而是把文件 + meta.json
-        按 `relay-<uuid>` token 落到 job 工作区的 drop 子目录(见 SDK Client._drop_file)。
-        这里逐 token 拉回 + 用 `explicit_token` 注册,于是蓝图当时同步拿到的 FileSecret
-        到这一刻就能被 caller 下载。重复注册幂等。本机执行下 no-op。"""
         if not self._is_remote_execution():
             return
         assert self.slurm_manager is not None
         transport = self.slurm_manager.transport
         remote_drop = f"{self._remote_job_working_table(job_id)}/{_CUSTODY_DROP_SUBDIR}"
         local_drop = f"{self._local_job_working_table(job_id)}/{_CUSTODY_DROP_SUBDIR}"
-
-        # drop 目录可能根本不存在(job 没产出 custody 文件):列不到就跳过。
-        listing = transport.run(["ls", "-1", remote_drop])
-        if listing.returncode != 0:
-            return
-        for token in listing.stdout.splitlines():
-            token = token.strip()
-            # token 是远端 drop 目录里的子目录名（job 端造，信任边界外）：拼 host 侧
-            # 落点前过安全单层名校验，与 metrics 拉取同防。真正按 token 注册进 custody
-            # 时 store_file 还会用 _RELAY_TOKEN_RE 严格校验形状。
+        for token in _remote_optional_entries(transport, remote_drop):
             if not _is_safe_leaf(token):
-                continue
-            try:
-                # 逐 token 拉整个条目目录(meta.json + 文件/.tar.gz),scp -r。
-                transport.fetch(f"{remote_drop}/{token}", f"{local_drop}/{token}")
-            except RuntimeError:
-                continue
-            meta_path = os.path.join(local_drop, token, "meta.json")
-            if not os.path.exists(meta_path):
-                continue
-            try:
-                with open(meta_path, encoding="utf-8") as meta_file:
-                    meta = json.load(meta_file)
-                # meta.json 是 job 端(无网计算节点 = 信任边界)写的,filename 不可信:
-                # 在 host 侧 join+open 前先 basename,杜绝 `../../etc/passwd` 这类穿越读
-                # 任意主机文件再注册成可下载 custody。token 已由 store_file 按 relay 形状校验。
-                safe_filename = os.path.basename(meta["filename"])
-                if not safe_filename or safe_filename in (".", ".."):
-                    continue
-                file_path = os.path.join(local_drop, token, safe_filename)
-                if not os.path.exists(file_path):
-                    continue
-                with open(file_path, "rb") as file_obj:
+                raise ValueError("Invalid remote custody entry name")
+            os.makedirs(local_drop, exist_ok=True)
+            # A fresh destination prevents scp -r nesting a retry inside a
+            # partially copied directory. Registration remains token-idempotent.
+            with tempfile.TemporaryDirectory(prefix=".stage-out-", dir=local_drop) as temporary:
+                local_entry = os.path.join(temporary, token)
+                transport.fetch(f"{remote_drop}/{token}", local_entry)
+                with open(os.path.join(local_entry, "meta.json"), encoding="utf-8") as metadata:
+                    meta = json.load(metadata)
+                filename = meta["filename"]
+                if not _is_safe_leaf(filename) or meta.get("token") != token:
+                    raise ValueError("Invalid remote custody metadata")
+                with open(os.path.join(local_entry, filename), "rb") as file_obj:
                     file_custody_manager.store_file(
-                        filename = safe_filename,
+                        filename = filename,
                         file_obj = file_obj,
                         expire_minutes = meta.get("expire_minutes"),
                         is_directory = meta.get("is_directory", False),
                         max_downloads = meta.get("max_downloads"),
-                        explicit_token = meta["token"],
+                        explicit_token = token,
                     )
-            except Exception as error:
-                # 单个产物注册失败不连累其余 / 不挂 job 终态收敛(marker 已回读)。
-                logger.warning(
-                    f"Failed to register staged custody entry {token} for job {job_id}: {error}"
-                )
 
     def _cleanup_remote_job(self, job_id: str) -> None:
         """删除远端 job 工作区（marker / 日志 / metrics 已在 _stage_out_final 拉回本机，

@@ -14,12 +14,11 @@ PREPARING ─── 异步资源准备（并行）
   │             ├── ensure_image: docker:// → .sif (LRU cache, 80G)
   │             └── ensure_repo:  git clone → copy → checkout → setfacl
   ▼
-PENDING ───── EASY backfill 调度 (Lifka 1995)
+PENDING ───── 资源准入
   │             ├── 按优先级排序: A1(4) > A2(3) > B1(2) > B2(1), 同级 FIFO
-  │             ├── A 类可抢占 RUNNING 的 B 类 (B2 优先, LIFO)
-  │             ├── 队头能跑 → 严格优先级贪心提交全部装得下的 job
-  │             └── 队头在等 → 后续候选满足 demand+head.demand ≤ cluster_total
-  │                          可旁路启动（数学保证不延迟队头）
+  │             ├── 完整可知的单节点 → 预留队头，仅以剩余资源旁路
+  │             ├── 只有实际分配构成完整回收方案，才抢占 B 类任务
+  │             └── 复杂布局 → 仅队头交 SLURM；tenant → 交 SLURM 排队
   ▼
 QUEUED ────── SLURM sbatch 已提交
   │             └── sbatch 脚本: python3 {workspace}/jobs/{id}/wrapper.py
@@ -106,10 +105,10 @@ Magnus 区分两种针对运行中 job 的外部干预：
 
 | 操作 | 入口 | 后端实现 | DB 状态变化 |
 |------|------|----------|-------------|
-| 终止 (terminate) | `POST /api/jobs/{id}/terminate`、`magnus job kill` | SLURM: `scancel --signal=KILL --full` + 裸 `scancel`；Docker: `docker stop -t 0 && docker rm -f` | 立即置为 `Terminated`，清理工作目录 |
+| 终止 (terminate) | `POST /api/jobs/{id}/terminate`、`magnus job kill` | SLURM: `scancel --signal=KILL --full` + 裸 `scancel`；Docker: `docker stop -t 0 && docker rm -f` | 取消获确认后置为 `Terminated`；SLURM 工作区等实际释放及最终回传完成后再清理 |
 | 发送信号 (signal) | `POST /api/jobs/{id}/signal`、`magnus job signal`（仅 Running） | SLURM: `scancel --signal=TERM --batch <jobid>`；Docker: `docker kill --signal=TERM` | 不修改任何状态 |
 
-**两个动作的分工**：终止是不可逆的硬取消，调度器立刻把 job 移出运行状态、释放占位、清理工作目录，应用层进程没有协调窗口；发送信号则是纯转发器，DB 不动，**用户进程会收到 SIGTERM**。**装了 handler 的用户进程**可以借这个窗口做自己的收尾（保存中间结果 / 检查点、释放 GPU 显存与 NCCL 资源、关闭外部连接、刷新输出缓冲等）；**没装 handler 的进程**对 SIGTERM 不响应 —— magnus 的 wrapper / user_script 层把用户 shell 渲染成 SIGTERM=SIG_IGN（机制见下方 SLURM / Docker 链路），协议契约是"发送信号给的是把优雅终止接进来的用户代码；强制杀走 terminate"。适用于 AI 训练、长跑数值仿真、流式数据处理等任何持有外部资源的场景。
+**两个动作的分工**：终止请求强制取消。取消未获确认时，保留 Job 状态和工作区；确认后标为终止，但资源占用仍以 SLURM 为准，实际释放并回传最终产物后才清理。回传失败时保留执行 ID 和工作区供重试，不阻塞其他任务收尾；保留的关联不等于物理资源仍被占用。发送信号只转发 SIGTERM，不改数据库状态。装有 handler 的用户进程可保存检查点、释放资源；未装 handler 的进程继承 user-script shell 的 `SIG_IGN`。需要强制取消时使用 terminate。
 
 handler 想让自己保存的 partial state 算 success，就在 handler 里写 `$MAGNUS_RESULT`（容器内挂载在 `$MAGNUS_HOME/workspace/.magnus_result`），再 `sys.exit(0)`。即便外层进程树被信号强行带走，magnus 也会把 job 收敛到 `Success` —— 详见下方"状态收敛"。
 
@@ -323,6 +322,20 @@ sbatch --parsable \
 `time_limit`（分钟）映射到 `--time`；为 null 时不下发，沿用分区默认墙钟。声明短墙钟的 job 在共享集群更易被 backfill 插队。
 
 环境变量 `MAGNUS_RUNNER` 和 `MAGNUS_TOKEN` 通过 sbatch 的进程环境传递。
+
+### 资源核算边界
+
+请求、分配和使用量采用不同证据源。提交上限校验与请求摘要共用内存单位约定（SLURM 无后缀内存值为 MiB）；按 CPU 折算时直接向上取整，不先丢掉不足一 MiB 的部分。显式内存先按每节点向上取整到 MiB，再乘节点数，sbatch 使用相同数值。磁盘容量保留独立的字节约定。通过旧版 SLURM 请求字段推算的分配带有 `allocation_inferred=true` 和来源字段，不冒称直接的分配证据。
+
+集群容量取所选节点的并集，不对重叠分区重复求和。租户视图也计入经其他分区提交、却占用这些节点的竞争任务。跨出节点池的 Job，其整条任务分配仍正确，但直接求和会高估池内分配量，因此响应标为分配上界、空闲下界。如果分配本身也是推算的，UI 标为估算，不宣称严格上下界。离线/draining 节点以及保留 CPU/内存不作为可调度余量。Local/Docker 未跟踪分配时，空闲量为未知。
+
+不完整核算或查询失败不能变成“空集群、全部空闲”。容量和分配的组合观察携带时间戳；缓存旧值有时间边界并标明陈旧。刷新失败返回 503，不生成看似新鲜的零快照。历史 GPU 采样按已观察 SLURM ID 匹配 Magnus 归属并累加实际分配，覆盖 CG 和数据库状态滞后；失败、GPU 分配仅为推算或跨出统计范围时，不写入伪造的精确历史。既有样本原样保留。
+
+Authoritative 调度使用全 Job 的 CPU/RAM/GPU 需求及实际 GPU 型号。已接受但尚未在分配快照中出现的任务阻止继续准入，避免重复承诺同一份空闲容量。布局完整可知的单节点场景中，backfill 仅消耗扣除队头预留后各维度当前剩余的资源。这是保守资源预留，**不是基于时间预测的 EASY**；原来的 `head + candidate <= total` 条件不能证明不会延迟队头。抢占必须以 B 类任务的已观察分配构成完整方案，同时补齐各项资源缺口；无关 GPU 型号、推算的分配或不完整方案不能成为终止任务的理由。取消后重新观察真实释放。
+
+复杂/多节点布局中，聚合总量不能证明节点放置可行。Magnus 只将优先队头交给 SLURM，并等待其排队/分配状态；不会根据未证明的放置假设抢占或旁路。未知默认值、请求全部节点内存等也交 SLURM 解析。Tenant 模式继续将排队和抢占交给 SLURM。这些规则调整准入判断，不改变请求的 SLURM 布局。
+
+系统指标标记实际采样范围。SLURM batch wrapper 的 CPU/RAM 样本带 `scope=batch_step`；使用 `srun` 时，MPI ranks 可能位于同级其他 cgroup，所以覆盖标为 `partial`，不是全 Job 使用量。Docker CPU/RAM 使用 `scope=container`。GPU 样本使用 `scope=device`：设备指标不是按进程归属统计的用量，node 0 也不能代表其他节点。CPU 样本携带归一化使用的 CPU 数，超过 100% 的值原样保留，不掩盖采样范围或配额差异。UI 对新样本和历史多 task 任务都说明覆盖边界。本次没有引入分布式指标采集器。
 
 ## scheduler 心跳与状态同步
 

@@ -83,6 +83,25 @@ test("unknown allocation quantities stay unknown, including node count", () => {
   assert.ok(!view.details.join(" ").includes("null"));
 });
 
+test("allocation reconstructed from request fields is explicitly estimated", () => {
+  const view = present(withSummary({ basis: "allocation", allocation_inferred: true, memory_source: "per_node_fallback", tasks_per_node: null }));
+  assert.equal(view.scope, "Allocated total (estimated)");
+  assert.match(view.details.join(" "), /inferred from SLURM request fields/);
+  assert.ok(!view.details.join(" ").includes("per_node_fallback"));
+  assert.match(present(withSummary({ basis: "allocation", allocation_inferred: true }), "zh").scope, /估算/);
+});
+
+test("held scheduler states are explained without pretending active execution", () => {
+  const suspended = present(withSummary({ basis: "allocation", slurm_state: "SUSPENDED", allocation_inferred: true }));
+  assert.ok(suspended.details.includes("SLURM state: SUSPENDED"));
+  assert.match(suspended.details.join(" "), /GPU \/ RAM remain held/);
+  assert.match(suspended.details.join(" "), /before suspension/);
+  for (const [state, explanation] of [["STOPPED", /Execution is stopped/], ["CONFIGURING", /execution has not started/], ["COMPLETING", /not been fully released/]]) {
+    assert.match(present(withSummary({ basis: "allocation", slurm_state: state })).details.join(" "), explanation);
+  }
+  assert.ok(!present(withSummary({ basis: "allocation", slurm_state: "RUNNING" })).details.join(" ").includes("SLURM state"));
+});
+
 test("historical inferred mode is visibly distinguished and explained in both languages", () => {
   const job = withSummary({ mode_inferred: true });
   assert.match(present(job).scope, /inferred/);

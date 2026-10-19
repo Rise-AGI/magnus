@@ -3,7 +3,7 @@ import sys
 import logging
 from typing import Set, Type
 from library import *
-from ._size_utils import _parse_size_string, effective_cpu_count_per_cpu
+from ._size_utils import _parse_size_string, effective_cpu_count_per_cpu, parse_memory_bytes
 
 
 __all__ = [
@@ -659,6 +659,8 @@ def normalize_per_cpu_resources(data: Dict[str, Any])-> Dict[str, Any]:
     —— 这两类部署字节级不变。在 apply_cluster_defaults 之后、validate_cluster_limits 之前
     调用，使上限校验落在归一化后的有效核数 / 内存上。
     """
+    if data.get("cpu_count") is not None and data["cpu_count"] < 0:
+        raise ValueError("cpu_count must not be negative")
     slurm_cfg = magnus_config["execution"].get("slurm")
     if slurm_cfg is None or slurm_cfg.get("mem_mode") != "per_cpu":
         return data
@@ -687,12 +689,21 @@ def validate_cluster_limits(data: Dict[str, Any])-> None:
     cluster = magnus_config["cluster"]
 
     max_cpu = cluster["max_cpu_count"]
+    if data["cpu_count"] < 0:
+        raise ValueError("cpu_count must not be negative")
+    if data.get("gpu_count", 0) < 0:
+        raise ValueError("gpu_count must not be negative")
     if data["cpu_count"] > max_cpu:
         raise ValueError(f"cpu_count={data['cpu_count']} exceeds cluster limit ({max_cpu})")
 
     max_mem_str = cluster["max_memory_demand"]
-    requested_mem = _parse_size_string(data["memory_demand"])
-    max_mem = _parse_size_string(max_mem_str)
+    parse_memory = _parse_size_string if is_local_mode else parse_memory_bytes
+    requested_mem = parse_memory(data["memory_demand"])
+    max_mem = parse_memory(max_mem_str)
+    if requested_mem < 0:
+        raise ValueError("memory_demand must not be negative")
+    if not is_local_mode:
+        requested_mem = ((requested_mem + 1024**2 - 1) // 1024**2) * 1024**2
     if requested_mem > max_mem:
         raise ValueError(f"memory_demand={data['memory_demand']} exceeds cluster limit ({max_mem_str})")
 

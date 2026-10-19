@@ -814,7 +814,7 @@ export default function JobDetailsPage() {
 
             {activeTab === "metrics" && (
               <div className="absolute inset-0 overflow-auto p-5 custom-scrollbar">
-                <MetricsChart jobId={jobId} jobStatus={job.status} />
+                <MetricsChart jobId={jobId} jobStatus={job.status} job={job} />
               </div>
             )}
 

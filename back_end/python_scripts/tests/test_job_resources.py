@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 from datetime import datetime, timezone
 import enum
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 import unittest
@@ -86,6 +87,10 @@ class JobResourceTests(unittest.TestCase):
     def test_unsuffixed_slurm_memory_is_mebibytes(self):
         summary = self.request(memory_demand="1024", mode="slurm_per_node")
         self.assertEqual(summary["memory_bytes"], 2 * 1024**3)
+
+    def test_memory_rounds_per_node_before_combining_nodes(self):
+        summary = self.request(memory_demand="1.1M", mode="slurm_per_node")
+        self.assertEqual(summary["memory_bytes"], 4 * 1024**2)
 
     def test_allocation_is_never_multiplied_again(self):
         summary = self.module["allocated_job_resources"](
@@ -198,7 +203,7 @@ class JobResourceIntegrationTests(unittest.TestCase):
             self.assertEqual(conn.execute(text("SELECT id, memory_demand, resource_mode FROM jobs")).all(), [("old", "4000M", None)])
 
     def test_cluster_native_and_external_rows_share_actual_allocation_totals(self):
-        from test_gpu_resource_query import Field
+        from test_gpu_resource_query import Field, load_queries
 
         path = SERVER / "routers" / "cluster.py"
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -218,7 +223,7 @@ class JobResourceIntegrationTests(unittest.TestCase):
         ]
         manager = SimpleNamespace(
             get_all_running_tasks=lambda **kwargs: tasks,
-            get_node_snapshot=lambda: SimpleNamespace(total_gpus=0, cpu_total=256, mem_total_mb=1024000),
+            get_node_snapshot=lambda **kwargs: load_queries().NodeSnapshot(0, 256, 1024000),
         )
         self.config.update(cluster={"scheduling": {"mode": "authoritative"}}, server={"scheduler": {"cluster_stats_cache_ttl": 0}})
         namespace = dict(self.namespace)
@@ -236,8 +241,12 @@ class JobResourceIntegrationTests(unittest.TestCase):
             get_current_user=None,
             or_=lambda *args: None,
             _scheduler_sort_key=lambda value: 0,
+            _tenant_partitions=lambda: [],
+            time=time,
+            validate_allocation_visibility=load_queries().validate_allocation_visibility,
         )
-        exec(compile(ast.Module(body=[route], type_ignores=[]), str(path), "exec"), namespace)
+        producer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_query_cluster_view")
+        exec(compile(ast.Module(body=[producer, route], type_ignores=[]), str(path), "exec"), namespace)
         response = namespace["get_cluster_stats"](db=SimpleNamespace(query=lambda *args: query))
         for row in response["running_jobs"]:
             self.assertEqual(row.resource_summary.cpu_count, 128)

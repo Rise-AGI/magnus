@@ -4,7 +4,8 @@ import json
 import re
 import subprocess
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -12,6 +13,12 @@ from .._magnus_config import magnus_config
 from .._size_utils import _parse_size_string
 from . import logger
 from ._transport import _Transport
+
+
+_HELD_RESOURCE_STATES = (
+    "SUSPENDED", "STOPPED", "RESIZING", "CONFIGURING", "POWER_UP_NODE",
+    "STAGE_OUT", "COMPLETING", "SIGNALING", "RUNNING",
+)
 
 
 def _resolve_default_gpu_model() -> str:
@@ -69,7 +76,9 @@ def _job_gpu_allocation(
     https://slurm.schedmd.com/squeue.html (tres-alloc / tres-per-node).
     """
     allocated = _parse_gpu_resources(job.get("tres_alloc_str"))
-    details = job.get("gres_detail") or []
+    details = job.get("gres_detail")
+    if details is None:
+        details = []
     if isinstance(details, str):
         details = [details]
     detail_entries = [
@@ -97,53 +106,276 @@ def _job_gpu_allocation(
     return gpu_count, gpu_type
 
 
-def _unwrap_slurm_int(value) -> int:
-    """SLURM 24+ JSON 把 int 字段包成 ``{"set": bool, "infinite": bool, "number": N}``，
-    21.x 还是直接 int。统一解包成 int 兼容两种 schema；解析失败或缺失返回 0。
-    """
+def _gpu_source_valid(
+    resources,
+) -> bool:
+    if resources is None:
+        return True
+    if not isinstance(resources, str):
+        return False
+    for token in re.sub(r"\([^)]*\)", "", resources).split(","):
+        if re.match(r"^(?:gres/)?gpu(?::|=|$)", token.strip()) and not _parse_gpu_resources(token):
+            return False
+    return True
+
+
+def _gpu_accounting_complete(
+    job: Dict,
+) -> bool:
+    allocated = job.get("tres_alloc_str")
+    per_node = job.get("tres_per_node")
+    details = job.get("gres_detail")
+    if details is None:
+        details = []
+    if isinstance(details, str):
+        details = [details]
+    if not isinstance(details, list) or not all(isinstance(detail, str) and _gpu_source_valid(detail) for detail in details):
+        return False
+    if not _gpu_source_valid(allocated) or not _gpu_source_valid(per_node):
+        return False
+    entries = _parse_gpu_resources(allocated)
+    aggregate = [count for model, count in entries if model is None]
+    typed = sum(count for model, count in entries if model is not None)
+    return not aggregate or (len(aggregate) == 1 and typed <= aggregate[0])
+
+
+def _slurm_int(
+    value,
+) -> Optional[int]:
+    """Respect Slurm's set/infinite flags; preserve a real zero separately."""
     if isinstance(value, dict):
-        return value.get("number") or 0
-    if isinstance(value, int):
-        return value
-    return 0
+        if value.get("set") is not True or value.get("infinite") is True:
+            return None
+        value = value.get("number")
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    if value in {2**32 - 1, 2**32 - 2} or value >= 2**63 - 1:
+        return None
+    return value
 
 
-def _parse_tres_mem_mb(tres_str: str) -> int:
-    """从 squeue ``tres_alloc_str``（形如 ``cpu=8,mem=32G,node=1,billing=8``）取
-    已分配内存并换算成 MB；找不到 ``mem=`` 或解析失败返回 0。
+def _unwrap_slurm_int(
+    value,
+) -> int:
+    return _slurm_int(value) or 0
 
-    内存占用刻意取**已分配** TRES 而非请求值 ``memory_per_node``：后者在用户用
-    ``--mem=0``（要走整机内存）时是哨兵 0，会让该 job 的内存在 cluster 视图和
-    scheduler 的 free-mem 派生里凭空消失——外部 job 只显示 CPU、free-mem 被高估、
-    scheduler 误判内存充足而过量提交（落到 SLURM 后卡 Resources）。
-    ``tres_alloc_str`` 的 ``mem=`` 是 SLURM 解析后的实际预留量，``--mem=0`` 下
-    给出整机真实数字。
+
+def _tres_value(
+    tres: Optional[str],
+    key: str,
+) -> Optional[str]:
+    if not isinstance(tres, str):
+        return None
+    for token in tres.split(","):
+        name, separator, value = token.strip().partition("=")
+        if separator and name == key:
+            return value
+    return None
+
+
+def _parse_tres_mem_mb(
+    tres_str: str,
+) -> Optional[int]:
+    """Allocated memory in MiB; bare TRES memory is MiB, zero is not missing.
+
+    Slurm squeue/sacct --noconvert uses native memory units (MiB). The suffixes
+    K/M/G/T/P scale by 1024; round upward at this MiB accounting boundary.
     """
-    for token in tres_str.split(","):
-        token = token.strip()
-        if token.startswith("mem="):
-            try:
-                return _parse_size_string(token[len("mem="):]) // (1024 ** 2)
-            except (ValueError, IndexError):
-                return 0
-    return 0
+    raw = _tres_value(tres_str, "mem")
+    if raw is None or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?[KMGTPE]?", raw, re.IGNORECASE):
+        return None
+    unit = raw[-1].upper() if raw[-1].isalpha() else "M"
+    number = raw[:-1] if raw[-1].isalpha() else raw
+    try:
+        amount = Decimal(number) * Decimal(1024) ** ({"K": -1, "M": 0, "G": 1, "T": 2, "P": 3, "E": 4}[unit])
+        return int(amount.to_integral_value(rounding=ROUND_CEILING))
+    except (InvalidOperation, ValueError, OverflowError):
+        return None
+
+
+def _parse_tres_int(
+    tres: Optional[str],
+    key: str,
+) -> Optional[int]:
+    raw = _tres_value(tres, key)
+    return _slurm_int(int(raw)) if raw is not None and raw.isdecimal() else None
+
+
+def resource_partitions(
+    config: Dict,
+) -> List[str]:
+    """The same tenant partition union is used by live views and history."""
+    if config["cluster"]["scheduling"]["mode"] != "tenant":
+        return []
+    candidates = [config["execution"]["slurm"].get("partition")]
+    candidates.extend(gpu.get("partition") for gpu in config["cluster"].get("gpus", []))
+    return list(dict.fromkeys(
+        name.strip()
+        for partitions in candidates if partitions
+        for name in partitions.split(",") if name.strip()
+    ))
+
+
+def _node_hardware_ready(
+    state: str,
+) -> bool:
+    parts = state.upper().split("+")
+    return parts[0] in {"IDLE", "MIXED", "ALLOCATED", "PLANNED", "RESERVED", "RESV", "BLOCKED", "COMPLETING"} and not any(
+        modifier in {"DRAIN", "DRAINING", "DRAINED", "DOWN", "DOWNED", "MAINT", "FAIL", "FAILING",
+                     "REBOOT_REQUESTED", "REBOOT_ISSUED", "NOT_RESPONDING", "NO_RESPOND", "POWER_DOWN",
+                     "POWERED_DOWN", "POWERING_DOWN", "POWERING_UP", "POWER_UP"}
+        for modifier in parts[1:]
+    )
+
+
+def _node_schedulable(
+    state: str,
+) -> bool:
+    # Reservations/backfill plans block immediate availability, but must not
+    # prevent submissions from entering Slurm's queue on healthy hardware.
+    return _node_hardware_ready(state) and not set(state.upper().split("+")).intersection(
+        {"PLANNED", "RESERVED", "RESV", "BLOCKED", "COMPLETING"},
+    )
+
+
+def _gpu_totals_by_type(
+    entries: List[Tuple[Optional[str], int]],
+    default_model: str,
+) -> Dict[str, int]:
+    totals: Dict[str, int] = {}
+    for model, count in entries:
+        key = model or default_model
+        totals[key] = totals.get(key, 0) + count
+    return totals
+
+
+def _job_gpu_breakdown(
+    job: Dict,
+    total: int,
+    default_model: str,
+) -> Dict[str, int]:
+    allocated = _parse_gpu_resources(job.get("tres_alloc_str"))
+    typed = [(model, count) for model, count in allocated if model is not None]
+    if not typed:
+        details = job.get("gres_detail") or []
+        if isinstance(details, str):
+            details = [details]
+        typed = [entry for detail in details for entry in _parse_gpu_resources(detail)]
+    if not typed:
+        nodes = _unwrap_slurm_int(job.get("node_count")) or 1
+        typed = [(model, count * nodes) for model, count in _parse_gpu_resources(job.get("tres_per_node"))]
+    # UI GPU values can be aliases or deliberately untyped GRES. They cannot
+    # establish the physical type used by scheduler placement/preemption.
+    counts = _gpu_totals_by_type(typed, "unknown")
+    known = sum(counts.values())
+    if known > total:
+        # Conflicting detail/request data cannot establish the allocation type.
+        return {"unknown": total} if total else {}
+    if known < total:
+        counts["unknown"] = counts.get("unknown", 0) + total - known
+    return {model: count for model, count in counts.items() if count}
+
+
+def _expand_node_names(
+    value,
+) -> Optional[List[str]]:
+    """Expand numeric Slurm hostlists without shell calls; unknown syntax stays unknown."""
+    if not isinstance(value, str) or not value or value in {"(null)", "None", "N/A"}:
+        return None
+    try:
+        groups = re.split(r",(?![^\[]*\])", value)
+        names = []
+        for group in groups:
+            pending = [group]
+            while any("[" in name for name in pending):
+                expanded = []
+                for name in pending:
+                    match = re.search(r"\[([^\[\]]+)\]", name)
+                    if match is None:
+                        if "[" in name or "]" in name:
+                            return None
+                        expanded.append(name)
+                        continue
+                    replacements = []
+                    for span in match.group(1).split(","):
+                        bounds = span.split("-")
+                        if not all(part.isdecimal() for part in bounds) or len(bounds) not in {1, 2}:
+                            return None
+                        lower, upper = int(bounds[0]), int(bounds[-1])
+                        if lower > upper or upper - lower > 10000:
+                            return None
+                        width = len(bounds[0]) if bounds[0].startswith("0") else 0
+                        replacements.extend(str(number).zfill(width) for number in range(lower, upper + 1))
+                        if len(replacements) > 10000:
+                            return None
+                    expanded.extend(name[:match.start()] + replacement + name[match.end():] for replacement in replacements)
+                    if len(expanded) > 10000:
+                        return None
+                pending = expanded
+            if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", name) for name in pending):
+                return None
+            names.extend(pending)
+            if len(names) > 10000:
+                return None
+        return list(dict.fromkeys(names))
+    except (ValueError, OverflowError):
+        return None
+
+
+@dataclass(frozen=True)
+class NodeCapacity:
+    name: str
+    partitions: Tuple[str, ...]
+    state: str
+    cpu_total: int
+    mem_total_mb: int
+    gpu_by_type: Dict[str, int]
+    schedulable: bool
+    configured_cpu_total: int = 0
+    configured_mem_total_mb: int = 0
+    allocated_gpus: Optional[int] = None
+    allocated_cpus: Optional[int] = None
+    allocated_mem_mb: Optional[int] = None
+    hardware_ready: bool = False
 
 
 @dataclass(frozen=True)
 class NodeSnapshot:
-    """一次 ``scontrol show node`` 解析得到的容量数字。
+    """Configured capacity and the portion unavailable for immediate placement.
 
-    只暴露静态容量 (total_gpus / cpu_total / mem_total_mb)。alloc 维度必须从
-    ``get_all_running_tasks`` 的 job-level squeue 数字派生 (见 cluster.py /
-    _decisions.py)，而非 scontrol 的 CPUAlloc / AllocMem 字段——后者在
-    SLURM job 进入 COMPLETING (CG) 状态时立即清零，但 squeue 视角下 job
-    仍持有 cpu / mem (跟 GPU 行为一致)。把 alloc 三维度统一从 squeue 派生
-    可消除 SLURM 自身两套数据源在 CG 期间的内部错位。
+    Usage comes from held job allocations: node CPUAlloc/AllocMem can clear
+    before completing jobs release their resources. Per-node capacities exclude
+    reserved CPU/memory; top-level totals retain configured inventory.
     """
 
     total_gpus: int
     cpu_total: int
     mem_total_mb: int
+    node_count: int = 0
+    gpu_by_type: Dict[str, int] = field(default_factory=dict)
+    unavailable_gpus: int = 0
+    unavailable_cpus: int = 0
+    unavailable_mem_mb: int = 0
+    unavailable_gpu_by_type: Dict[str, int] = field(default_factory=dict)
+    nodes: Tuple[NodeCapacity, ...] = ()
+    observed_allocated_gpus: Optional[int] = None
+    observed_allocated_cpus: Optional[int] = None
+    observed_allocated_mem_mb: Optional[int] = None
+
+
+def validate_allocation_visibility(
+    snapshot: NodeSnapshot,
+    tasks: List[Dict],
+) -> None:
+    # PrivateData can hide jobs even with --all. Node allocation is a lower
+    # bound (it may clear during CG); never advertise a visibility gap as free.
+    for observed, field in (
+        (snapshot.observed_allocated_gpus, "gpu_count"),
+        (snapshot.observed_allocated_cpus, "cpu_count"),
+        (snapshot.observed_allocated_mem_mb, "memory_mb"),
+    ):
+        if observed is not None and sum(task.get(field, 0) for task in tasks) < observed:
+            raise ValueError(f"Visible jobs do not explain node allocation for {field}")
 
 
 class _ResourceQueryMixin:
@@ -163,6 +395,7 @@ class _ResourceQueryMixin:
             capacity_result = self._transport.run(
                 capacity_command,
                 check = True,
+                timeout = 30,
             )
 
             total_capacity = 0
@@ -190,141 +423,138 @@ class _ResourceQueryMixin:
             logger.error(f"Error querying cluster resources: {error}")
             return 0, 0
 
-    def get_node_snapshot(self) -> NodeSnapshot:
-        """单次 ``scontrol show node`` 拉容量数字 (GPU / CPU / 内存 total)。
+    def get_node_snapshot(
+        self,
+        partitions: Optional[List[str]] = None,
+        *,
+        _raise_on_error: bool = False,
+    ) -> NodeSnapshot:
+        """Read a deduplicated node inventory for a union of partitions.
 
-        只承担 capacity 维度。alloc 维度（free / used）由调用方拿
-        ``get_all_running_tasks`` 派生 sum，全部走 squeue 的 job-level 数字以
-        跟 GPU 行为对齐——详见 ``NodeSnapshot`` 类 docstring。
+        Configured totals include offline nodes. Unavailable dimensions expose
+        that distinction; subtracting them as well as job usage gives a safe
+        lower bound when a draining node still has running allocations.
         """
+        partitions = list(dict.fromkeys(
+            name.strip()
+            for value in partitions or []
+            for name in value.split(",") if name.strip()
+        ))
         try:
             result = self._transport.run(
-                [
-                    "scontrol",
-                    "show",
-                    "node",
-                    "--future",
-                ],
+                ["scontrol", "show", "node", "--oneliner", "--future"],
                 check = True,
+                timeout = 30,
             )
-
-            total_gpus = 0
-            cpu_total = 0
-            mem_total = 0
-
-            # 故意只取容量 (CPUTot / RealMemory)；CPUAlloc / AllocMem 在 CG 期间
-            # 不可信，alloc 维度全部从 get_all_running_tasks 派生。详见 NodeSnapshot
-            # docstring。
-            for line in result.stdout.split('\n'):
-                line = line.strip()
-                for token in line.split():
-                    if token.startswith("Gres="):
-                        total_gpus += sum(
-                            count for _, count in _parse_gpu_resources(token[len("Gres="):])
-                        )
-                if "CPUTot=" in line:
-                    # 同行布局：CPUAlloc=34 CPUEfctv=192 CPUTot=192 CPULoad=...
-                    for part in line.split():
-                        if part.startswith("CPUTot="):
-                            cpu_total += int(part.split("=")[1])
-                elif line.startswith("RealMemory="):
-                    # 同行布局：RealMemory=515000 AllocMem=102400 ...
-                    for part in line.split():
-                        if part.startswith("RealMemory="):
-                            mem_total += int(part.split("=")[1])
-
-            return NodeSnapshot(
-                total_gpus = total_gpus,
-                cpu_total = cpu_total,
-                mem_total_mb = mem_total,
-            )
-        except Exception as error:
-            logger.error(f"Error querying node snapshot: {error}")
-            return NodeSnapshot(
-                total_gpus = 0,
-                cpu_total = 0,
-                mem_total_mb = 0,
-            )
-
-    def get_partition_snapshot(self, partition: str) -> NodeSnapshot:
-        """单次 ``scontrol show node --oneliner`` 拉**指定分区**节点的容量数字
-        (GPU / CPU / 内存 total)。
-
-        共享集群租户模式的 cluster 视图用：那里资源总量该是本租户所在分区的实际容量
-        （租户在此分区里和别人竞争），而不是整集群所有分区之和。和 ``get_node_snapshot``
-        一样只承担 capacity 维度，alloc（free / used）由调用方拿 ``get_all_running_tasks``
-        派生 sum（详见 ``NodeSnapshot`` docstring）。
-
-        用 ``--oneliner`` 让每个节点占一行，便于按 ``Partitions=`` 字段过滤；一个节点
-        可同属多个分区，只要其分区列表含目标分区就计入容量。
-        """
-        try:
-            result = self._transport.run(
-                [
-                    "scontrol",
-                    "show",
-                    "node",
-                    "--oneliner",
-                ],
-                check = True,
-            )
-
-            total_gpus = 0
-            cpu_total = 0
-            mem_total = 0
-
-            for line in result.stdout.split('\n'):
-                line = line.strip()
-                if not line:
+            if getattr(result, "returncode", 0) != 0:
+                raise RuntimeError("scontrol node query failed")
+            inventory = {}
+            # Accept multiline records too, so fixtures/older wrappers need not
+            # emulate formatting. NodeName is the record boundary, not a line.
+            for record in re.split(r"(?=\bNodeName=)", result.stdout):
+                fields = dict(token.split("=", 1) for token in record.split() if "=" in token)
+                name = fields.get("NodeName")
+                if not name:
                     continue
-
-                # --oneliner 一行一节点，字段是空格分隔的 key=value。逐 token 拆成字典，
-                # 只取关心的单 token 值（CPUTot / RealMemory / Gres / Partitions）——含空格
-                # 的值（如 Reason="..."）会被拆散，但不影响这几个字段的取值。
-                fields: Dict[str, str] = {}
-                for token in line.split():
-                    if "=" in token:
-                        key, value = token.split("=", 1)
-                        fields[key] = value
-
-                node_partitions = fields.get("Partitions", "").split(",")
-                if partition not in node_partitions:
+                node_parts = tuple(part for part in fields.get("Partitions", "").split(",") if part and part != "(null)")
+                if partitions and not set(partitions).intersection(node_parts):
                     continue
-
                 try:
-                    cpu_total += int(fields.get("CPUTot", "0"))
-                except ValueError:
-                    pass
+                    cpus = _slurm_int(int(fields["CPUTot"]))
+                    memory = _slurm_int(int(fields["RealMemory"]))
+                except (KeyError, ValueError):
+                    raise ValueError(f"Node {name} has incomplete capacity") from None
+                if cpus is None or memory is None:
+                    raise ValueError(f"Node {name} has invalid capacity")
                 try:
-                    mem_total += int(fields.get("RealMemory", "0"))
-                except ValueError:
-                    pass
-
+                    effective_cpus = _slurm_int(int(fields.get("CPUEfctv", cpus)))
+                    reserved_memory = _slurm_int(int(fields.get("MemSpecLimit", 0)))
+                except (ValueError, TypeError):
+                    raise ValueError(f"Node {name} has invalid reserved capacity") from None
+                if effective_cpus is None or reserved_memory is None:
+                    raise ValueError(f"Node {name} has unknown reserved capacity")
                 gres = fields.get("Gres", "")
-                total_gpus += sum(count for _, count in _parse_gpu_resources(gres))
-
+                parsed_gpus = _parse_gpu_resources(gres)
+                if not _gpu_source_valid(gres):
+                    raise ValueError(f"Node {name} has invalid GPU capacity")
+                gpus = _gpu_totals_by_type(parsed_gpus, "unknown")
+                state = fields.get("State", "UNKNOWN")
+                allocated = fields.get("AllocTRES")
+                if not _gpu_source_valid(allocated):
+                    raise ValueError(f"Node {name} has invalid allocated GPU data")
+                allocated_gpus = _job_gpu_allocation({"tres_alloc_str": allocated}, "unknown")[0] if allocated is not None else None
+                allocated_cpus = _parse_tres_int(allocated, "cpu")
+                allocated_memory = _parse_tres_mem_mb(allocated or "")
+                if allocated_cpus is None and fields.get("CPUAlloc", "").isdecimal():
+                    allocated_cpus = _slurm_int(int(fields["CPUAlloc"]))
+                if allocated_memory is None and fields.get("AllocMem", "").isdecimal():
+                    allocated_memory = _slurm_int(int(fields["AllocMem"]))
+                node = NodeCapacity(
+                    name = name,
+                    partitions = node_parts,
+                    state = state,
+                    cpu_total = min(cpus, effective_cpus),
+                    mem_total_mb = max(0, memory - reserved_memory),
+                    gpu_by_type = gpus,
+                    schedulable = _node_schedulable(state),
+                    configured_cpu_total = cpus,
+                    configured_mem_total_mb = memory,
+                    allocated_gpus = allocated_gpus,
+                    allocated_cpus = allocated_cpus,
+                    allocated_mem_mb = allocated_memory,
+                    hardware_ready = _node_hardware_ready(state),
+                )
+                if name in inventory and inventory[name] != node:
+                    raise ValueError(f"Conflicting capacity records for node {name}")
+                inventory[name] = node
+            if not inventory:
+                raise ValueError("Node query returned no usable nodes in the requested scope")
+            nodes = tuple(inventory.values())
+            gpu_by_type = {}
+            unavailable_gpu_by_type = {}
+            for node in nodes:
+                for model, count in node.gpu_by_type.items():
+                    gpu_by_type[model] = gpu_by_type.get(model, 0) + count
+                    if not node.schedulable:
+                        unavailable_gpu_by_type[model] = unavailable_gpu_by_type.get(model, 0) + count
             return NodeSnapshot(
-                total_gpus = total_gpus,
-                cpu_total = cpu_total,
-                mem_total_mb = mem_total,
+                total_gpus = sum(gpu_by_type.values()),
+                cpu_total = sum(node.configured_cpu_total for node in nodes),
+                mem_total_mb = sum(node.configured_mem_total_mb for node in nodes),
+                node_count = len(nodes),
+                gpu_by_type = gpu_by_type,
+                unavailable_gpus = sum(unavailable_gpu_by_type.values()),
+                unavailable_cpus = sum(node.configured_cpu_total - (node.cpu_total if node.schedulable else 0) for node in nodes),
+                unavailable_mem_mb = sum(node.configured_mem_total_mb - (node.mem_total_mb if node.schedulable else 0) for node in nodes),
+                unavailable_gpu_by_type = unavailable_gpu_by_type,
+                nodes = nodes,
+                observed_allocated_gpus = sum(node.allocated_gpus or 0 for node in nodes) if any(node.allocated_gpus is not None for node in nodes) else None,
+                observed_allocated_cpus = sum(node.allocated_cpus or 0 for node in nodes) if any(node.allocated_cpus is not None for node in nodes) else None,
+                observed_allocated_mem_mb = sum(node.allocated_mem_mb or 0 for node in nodes) if any(node.allocated_mem_mb is not None for node in nodes) else None,
             )
         except Exception as error:
-            logger.error(f"Error querying partition snapshot for '{partition}': {error}")
-            return NodeSnapshot(
-                total_gpus = 0,
-                cpu_total = 0,
-                mem_total_mb = 0,
-            )
+            if _raise_on_error:
+                raise
+            logger.error(f"Error querying node snapshot: {error}")
+            return NodeSnapshot(0, 0, 0)
+
+    def get_partition_snapshot(
+        self,
+        partition: str,
+        *,
+        _raise_on_error: bool = False,
+    ) -> NodeSnapshot:
+        return self.get_node_snapshot(
+            partitions = [partition],
+            _raise_on_error = _raise_on_error,
+        )
 
     def has_schedulable_node(self) -> bool:
-        """集群里是否至少有一个节点处于可调度状态。
+        """Submission readiness, not a promise of immediately available capacity.
 
-        可调度 = base state ∈ {IDLE, MIXED, ALLOCATED} 且无 DRAIN/DOWN/MAINT/FAIL/
-        REBOOT 修饰。给 submit 入口的 precheck 用：杜绝节点全部 drain/reboot 期间
-        用户提交"看似成功但永不开始"的 ghost job (前端反复点提交都返回 200，DB 堆
-        积一片 PENDING，cluster 视图被污染)。
-
-        失败时 fail-open 返回 True：让 SLURM 自己 PENDING 兜底，不引入新故障路径。
+        Healthy reserved/allocated nodes can accept queued work. Query failure
+        retains the submission path's fail-open policy; accounting uses strict
+        queries and must never interpret that uncertainty as free resources.
         """
         try:
             result = self._transport.run(
@@ -335,20 +565,11 @@ class _ResourceQueryMixin:
                     "--oneliner",
                 ],
                 check = True,
+                timeout = 30,
             )
         except (OSError, subprocess.SubprocessError) as error:
             logger.warning(f"has_schedulable_node fail-open: scontrol failed: {error}")
             return True
-
-        bad_modifiers = {
-            "DRAIN", "DRAINING", "DRAINED",
-            "DOWN", "DOWNED",
-            "MAINT",
-            "FAIL", "FAILING",
-            "REBOOT_REQUESTED", "REBOOT_ISSUED",
-            "NOT_RESPONDING",
-        }
-        ok_base = {"IDLE", "MIXED", "ALLOCATED"}
 
         for line in result.stdout.split('\n'):
             line = line.strip()
@@ -357,10 +578,7 @@ class _ResourceQueryMixin:
             for token in line.split():
                 if not token.startswith("State="):
                     continue
-                state = token.split('=', 1)[1].upper()
-                base = state.split('+')[0]
-                modifiers = set(state.split('+')[1:])
-                if base in ok_base and not (modifiers & bad_modifiers):
+                if _node_hardware_ready(token.split('=', 1)[1]):
                     return True
                 break
 
@@ -378,9 +596,10 @@ class _ResourceQueryMixin:
         }
 
     def check_job_status(self, slurm_job_id: str) -> str:
-        """查询 SLURM 任务状态。
+        """Map held allocations to the existing active lifecycle state.
 
-        注意：squeue 查不到时默认视为 COMPLETED，因为 FAILED 通常会残留记录。
+        Only a successful empty query retains the legacy completion inference;
+        transport failure/timeout is UNKNOWN and cannot release job ownership.
         """
         command = [
             "squeue",
@@ -392,18 +611,26 @@ class _ResourceQueryMixin:
         try:
             result = self._transport.run(
                 command,
+                timeout = 30,
             )
+            if getattr(result, "returncode", 0) != 0:
+                logger.warning(f"Failed to query Slurm job {slurm_job_id}: exit {result.returncode}")
+                return "UNKNOWN"
             state = result.stdout.strip()
 
             if not state:
                 return "COMPLETED"
 
-            # R=Running, PD=Pending, CG=Completing, CD=Completed, F=Failed,
-            # CA=Cancelled, TO=Timeout
             mapping = {
                 "R": "RUNNING",
                 "PD": "PENDING",
                 "CG": "RUNNING",
+                "S": "RUNNING",
+                "ST": "RUNNING",
+                "CF": "RUNNING",
+                "RS": "RUNNING",
+                "SO": "RUNNING",
+                "SI": "RUNNING",
                 "CD": "COMPLETED",
                 "F": "FAILED",
                 "CA": "FAILED",
@@ -419,52 +646,61 @@ class _ResourceQueryMixin:
         self,
         partition: Optional[str] = None,
         *,
+        node_names: Optional[List[str]] = None,
         _raise_on_error: bool = False,
     ) -> List[Dict]:
-        """获取所有正在运行 / 收尾中的 SLURM 任务详情。
+        """Read allocations still held by jobs, including suspension/cleanup.
 
-        包含 RUNNING 与 COMPLETING：CG 阶段 SLURM 物理上仍占 GPU 不释放，且本类
-        ``check_job_status`` 也把 CG 映射到 RUNNING；这里跟它对齐，避免 cluster
-        endpoint 跟 sync_reality 对同一个 job 给出 "已释放 vs 仍在跑" 的不一致快照。
-        epilog 较长（如做单卡 reset 兜底）时 CG 会停留数十秒，否则瞬时不可见。
-
-        ``partition`` 非空时只查该分区的任务（squeue ``--partition=<name>``）：共享集群
-        租户模式下 magnus 只在自己获授的分区里和别人竞争资源，整集群全分区的任务既不是
-        这个视图该呈现的、也会把列表淹没；限定到本分区既给出真实的同分区竞争态、又不越界。
-        独占集群（authoritative）传 None 看全量。
-
-        关键坑点：SLURM job-completion caching 让 ``squeue --json`` 可能返回内存中
-        残留的已结束任务（即便用了 ``--states`` 过滤）。代码层面必须再显式检查
-        ``job_state`` 是否真的命中 RUNNING / COMPLETING，不能信任 SLURM 自己的过滤。
-
-        内部容量/占用查询使用 ``_raise_on_error``，防止把查询失败的空列表解释成
-        全部GPU空闲；其他既有调用方保留原有失败返回空列表的行为。
+        Query all states: flags can hide their base state, while controller
+        caching can still return terminal jobs. Filter those records below.
+        Node filtering includes competitors submitted through other partitions.
+        Strict callers reject incomplete evidence instead of treating it as free.
         """
         default_gpu_model = _resolve_default_gpu_model()
+        if node_names == []:
+            return []
         command = [
             "squeue",
-            "--states=RUNNING,COMPLETING",
+            "--states=all",
+            "--all",
+            "--local",
             "--json",
         ]
         if partition:
             command.append(f"--partition={partition}")
+        if node_names:
+            command.append(f"--nodelist={','.join(node_names)}")
 
         try:
             result = self._transport.run(
                 command,
                 check = True,
+                timeout = 30,
             )
+            if getattr(result, "returncode", 0) != 0:
+                raise RuntimeError("squeue query failed")
             data = json.loads(result.stdout)
+            if not isinstance(data, dict) or not isinstance(data.get("jobs"), list) or data.get("errors"):
+                raise ValueError("squeue returned an incomplete response")
 
             tasks = []
+            seen_jobs = {}
+            query_time = datetime.now(timezone.utc).isoformat()
 
             for job in data.get("jobs", []):
                 try:
                     states = job.get("job_state", [])
-                    if "RUNNING" not in states and "COMPLETING" not in states:
+                    if isinstance(states, str):
+                        states = states.split("+")
+                    if not isinstance(states, list) or not states or not all(isinstance(state, str) for state in states):
+                        raise ValueError("Job query returned an unknown state representation")
+                    if not set(_HELD_RESOURCE_STATES).intersection(states):
                         continue
+                    job_state = next(state for state in _HELD_RESOURCE_STATES if state in states)
 
                     job_id = str(job.get("job_id"))
+                    if job_id in {"None", ""}:
+                        raise ValueError("Running job is missing its ID")
                     user = job.get("user_name")
                     name = job.get("name")
 
@@ -478,7 +714,7 @@ class _ResourceQueryMixin:
                     if start_ts:
                         start_time_str = datetime.fromtimestamp(start_ts, timezone.utc).isoformat()
                     else:
-                        start_time_str = datetime.now(timezone.utc).isoformat()
+                        start_time_str = query_time
 
                     gpu_count, gpu_type = _job_gpu_allocation(
                         job = job,
@@ -489,30 +725,76 @@ class _ResourceQueryMixin:
                     # docstring：CG 期间这两个字段仍报 alloc，跟 GPU 行为对齐。
                     # ``cpus`` 是 job 已分配的逻辑 CPU 总数 (跨节点之和，hyperthread
                     # 已 round-up)。
-                    cpu_count = _unwrap_slurm_int(job.get("cpus"))
+                    allocated_tres = job.get("tres_alloc_str") or ""
+                    cpu_count = _parse_tres_int(allocated_tres, "cpu")
+                    cpu_source = "allocated_tres"
+                    if cpu_count is None:
+                        cpu_count = _slurm_int(job.get("cpus"))
+                        cpu_source = "allocated_cpus" if cpu_count is not None else "unknown"
 
                     # 内存取已分配 TRES (tres_alloc_str 的 mem=)，而非请求值
                     # memory_per_node——后者在 --mem=0 (要走整机内存) 时为哨兵 0，
                     # 会让内存凭空消失、cluster/scheduler 的 free-mem 被高估，详见
                     # _parse_tres_mem_mb docstring。tres_alloc_str 缺失或无 mem=
                     # 时（旧版 SLURM）fallback 回 memory_per_node * node_count。
-                    memory_mb = _parse_tres_mem_mb(job.get("tres_alloc_str") or "")
-                    if memory_mb <= 0:
-                        mem_per_node = _unwrap_slurm_int(job.get("memory_per_node"))
-                        node_count = _unwrap_slurm_int(job.get("node_count")) or 1
-                        memory_mb = mem_per_node * node_count
+                    node_count = _parse_tres_int(allocated_tres, "node") or _slurm_int(job.get("node_count"))
+                    memory_mb = _parse_tres_mem_mb(allocated_tres)
+                    memory_source = "allocated_tres"
+                    if memory_mb is None:
+                        mem_per_cpu = _slurm_int(job.get("memory_per_cpu"))
+                        mem_per_node = _slurm_int(job.get("memory_per_node"))
+                        if mem_per_cpu and cpu_count:
+                            memory_mb = mem_per_cpu * cpu_count
+                            memory_source = "per_cpu_fallback"
+                        elif mem_per_node and node_count:
+                            memory_mb = mem_per_node * node_count
+                            memory_source = "per_node_fallback"
+                        else:
+                            memory_source = "unknown"
+                    gpu_entries = _parse_gpu_resources(allocated_tres)
+                    gpu_source = "allocated_tres" if gpu_entries else "node_details" if job.get("gres_detail") else "per_node_fallback" if _parse_gpu_resources(job.get("tres_per_node")) else "none"
+                    gpu_complete = _gpu_accounting_complete(job)
+                    if gpu_source == "per_node_fallback" and not node_count:
+                        gpu_complete = False
+                    complete = cpu_count is not None and memory_mb is not None and gpu_complete
+                    if _raise_on_error and not complete:
+                        raise ValueError(f"Incomplete allocation accounting for Slurm job {job_id}")
+                    allocated_nodes = _expand_node_names(job.get("nodes"))
+                    scope_is_subset = node_names is None or bool(
+                        allocated_nodes and set(allocated_nodes).issubset(node_names)
+                    ) or node_count == 1
 
-                    tasks.append({
+                    task = {
                         "id": job_id,
                         "user": user,
                         "name": name,
                         "start_time": start_time_str,
                         "gpu_count": gpu_count,
                         "gpu_type": gpu_type,
-                        "cpu_count": cpu_count,
-                        "memory_mb": memory_mb,
-                        "node_count": _unwrap_slurm_int(job.get("node_count")) or None,
-                    })
+                        "cpu_count": cpu_count or 0,
+                        "memory_mb": memory_mb or 0,
+                        "node_count": node_count or None,
+                        "partition": job.get("partition"),
+                        "node_names": allocated_nodes,
+                        "scope_is_subset": scope_is_subset,
+                        "gpu_by_type": _job_gpu_breakdown(job, gpu_count, default_gpu_model),
+                        "cpu_count_source": cpu_source,
+                        "memory_source": memory_source,
+                        "gpu_count_source": gpu_source,
+                        "accounting_complete": complete,
+                        "job_state": job_state,
+                        # Suspend releases CPUs, but retains GPU/RAM. Keep the
+                        # recorded CPU allocation as an explicit upper bound.
+                        # https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
+                        "usage_is_upper_bound": job_state == "SUSPENDED",
+                        "allocation_inferred": memory_source in {"per_cpu_fallback", "per_node_fallback"} or gpu_source == "per_node_fallback" or job_state == "SUSPENDED",
+                    }
+                    if job_id in seen_jobs:
+                        if seen_jobs[job_id] != task:
+                            raise ValueError(f"Conflicting allocation records for Slurm job {job_id}")
+                        continue
+                    seen_jobs[job_id] = task
+                    tasks.append(task)
 
                 except Exception as error:
                     if _raise_on_error:

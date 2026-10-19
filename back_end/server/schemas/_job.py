@@ -60,6 +60,11 @@ class JobResourceSummary(BaseModel):
     gpu_count: int
     node_count: Optional[int]
     tasks_per_node: Optional[int]
+    allocation_inferred: bool = False
+    cpu_source: Optional[str] = None
+    memory_source: Optional[str] = None
+    gpu_source: Optional[str] = None
+    slurm_state: Optional[str] = None
 
 
 class JobListItem(BaseModel):
@@ -132,8 +137,10 @@ class JobListItem(BaseModel):
     @computed_field
     @property
     def is_releasing(self) -> bool:
-        """``True`` ⇔ scancel 已发但 SLURM 还在 CG (COMPLETING) 阶段持有资源
-        （SLURM 模式 inflight 子态，详见 ``models/_job.py`` JobStatus docstring）。
+        """Cancellation/preemption is awaiting release or final artifact transfer.
+
+        A transfer retry may outlast Slurm allocation; this lifecycle flag must
+        not be used as evidence of resource occupancy.
 
         在后端这里集中派生避免前端 / SDK 各处重复 ``status × slurm_job_id`` 推断
         而漏掉某个 surface（review 里已经踩过 4 处遗漏）。前端直接读这个字段做

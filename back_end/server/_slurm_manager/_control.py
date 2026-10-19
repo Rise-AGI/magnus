@@ -4,7 +4,8 @@ import os
 from typing import Dict, Optional
 
 from .._magnus_config import magnus_config
-from .._size_utils import effective_cpu_count_per_cpu
+from .._job_resources import resolve_job_resource_target
+from .._size_utils import effective_cpu_count_per_cpu, parse_memory_bytes
 from . import logger
 from ._transport import _Transport
 
@@ -50,21 +51,11 @@ class _ControlMixin:
         传 `python3 {wrapper_path}`，满足约束。
         """
         slurm_config = magnus_config["execution"]["slurm"]
-        cluster_config = magnus_config["cluster"]
-
-        # GPU 类型路由：gpus>0 时按 gpu_type 查 cluster.gpus 条目，用它声明的 partition
-        # （缺省回退 execution.slurm.partition）+ gres_type（缺省 = 类型名 → 带型号 gres，
-        # 显式 null → 无型号 gres）。CPU job 或无匹配条目（防御性）时下面 partition/gres
-        # 的取值与历史字节级一致。支持 CPU 与各 GPU 类型分处不同 SLURM 分区。
-        gpu_entry = None
-        if gpus > 0 and gpu_type and gpu_type != "cpu":
-            for candidate in cluster_config["gpus"]:
-                if str(candidate.get("value", "")).lower() == gpu_type.lower():
-                    gpu_entry = candidate
-                    break
-        effective_partition = slurm_config["partition"]
-        if gpu_entry is not None and gpu_entry.get("partition"):
-            effective_partition = gpu_entry["partition"]
+        target = resolve_job_resource_target(
+            gpu_count = gpus,
+            gpu_type = gpu_type,
+            config = magnus_config,
+        )
 
         # module_loads：在 batch script 里、exec wrapper 之前注入 `module load` 行，
         # 让租户站点先把容器运行时（singularity）等放上 PATH。module_loads
@@ -86,7 +77,7 @@ class _ControlMixin:
         # partition / qos / account：租户站点的 SLURM 强制要求这三项；自有
         # 站点配为 None，不下发对应 flag，sbatch 行为与历史一致。
         for flag_name, flag_value in (
-            ("partition", effective_partition),
+            ("partition", target.partition),
             ("qos", slurm_config["qos"]),
             ("account", slurm_config["account"]),
         ):
@@ -100,14 +91,8 @@ class _ControlMixin:
             command.append("--open-mode=append")
 
         if gpus > 0:
-            # gres 型号：匹配到条目用其 gres_type（config 缺省 = value → 带型号；显式 null
-            # → 无型号）；无匹配条目（防御性）退回历史"按 gpu_type 带型号"行为。
-            if gpu_entry is not None:
-                gres_type = gpu_entry.get("gres_type")
-            else:
-                gres_type = gpu_type if (gpu_type and gpu_type != "cpu") else None
-            if gres_type:
-                command.append(f"--gres=gpu:{gres_type}:{gpus}")
+            if target.gpu_type:
+                command.append(f"--gres=gpu:{target.gpu_type}:{gpus}")
             else:
                 command.append(f"--gres=gpu:{gpus}")
 
@@ -127,7 +112,9 @@ class _ControlMixin:
         else:
             effective_cpu_count = cpu_count if (cpu_count is not None and cpu_count > 0) else 0
             if memory_demand is not None:
-                command.append(f"--mem={memory_demand}")
+                memory_bytes = parse_memory_bytes(memory_demand)
+                memory_mb = (memory_bytes + 1024**2 - 1) // 1024**2
+                command.append(f"--mem={memory_mb}M")
         if effective_cpu_count > 0:
             command.append(f"--cpus-per-task={effective_cpu_count}")
 
@@ -173,16 +160,10 @@ class _ControlMixin:
         runner: str,
         token: str,
     ) -> None:
-        """硬终止 SLURM job：SIGKILL 全员 + scancel 让 SLURM 把 job 移出运行。
+        """Request hard cancellation; acknowledgement does not mean release.
 
-        默认的裸 `scancel` 走 KillSignal=SIGTERM、KillWait 秒后才 SIGKILL。
-        signal_job 路径下 wrapper.py 装了 handler 收到 SIGTERM 不退、而是按
-        NSpid 筛选枚举 cgroup 内 user 容器进程逐个转发，handler-aware 的
-        user 代码也会 try graceful shutdown，前 KillWait 秒不一定立刻清场，
-        破坏 terminate / 抢占的"瞬时让出 GPU"承诺。直接
-        --signal=KILL --full 把 SIGKILL 投给整个 batch step（cgroup 全员）
-        立刻清场（SIGKILL 在内核侧不可被 ignore，proctrack 广播覆盖所有 pgrp），
-        再裸 scancel 让 SLURM 标记 job 取消。
+        The explicit KILL avoids the user wrapper's graceful TERM handling.
+        Only later state observation permits workspace cleanup or resource reuse.
         """
         env: Dict[str, str] = os.environ.copy()
         env["MAGNUS_RUNNER"] = runner
@@ -201,9 +182,10 @@ class _ControlMixin:
                     f"(rc={result.returncode}): {result.stderr.strip()}"
                 )
         except Exception as error:
-            logger.error(f"scancel --signal=KILL failed for job {slurm_job_id}: {error}")
+            logger.error("scancel signal failed for job %s (%s)", slurm_job_id, type(error).__name__)
 
-        # Step 2: 裸 scancel 让 SLURM 把 job state 转为 CANCELLED
+        # A signal acknowledgement alone does not confirm cancellation. Callers
+        # must retain state/workspace if the cancellation request is uncertain.
         try:
             result = self._transport.run(
                 ["scancel", slurm_job_id],
@@ -211,12 +193,11 @@ class _ControlMixin:
                 env = env,
             )
             if result.returncode != 0:
-                logger.error(
-                    f"scancel failed for job {slurm_job_id} "
-                    f"(rc={result.returncode}): {result.stderr.strip()}"
-                )
-        except Exception as error:
-            logger.error(f"scancel failed for job {slurm_job_id}: {error}")
+                raise RuntimeError(f"Slurm cancellation was not confirmed for job {slurm_job_id}")
+        except Exception:
+            # Transport exceptions may include an SSH command with injected
+            # credentials. Keep the public failure independent of its argv.
+            raise RuntimeError(f"Slurm cancellation was not confirmed for job {slurm_job_id}") from None
 
     def send_signal(
         self,
@@ -259,9 +240,6 @@ class _ControlMixin:
                 env = env,
             )
             if result.returncode != 0:
-                logger.error(
-                    f"scancel --signal={signal_name} failed for job {slurm_job_id} "
-                    f"(rc={result.returncode}): {result.stderr.strip()}"
-                )
-        except Exception as error:
-            logger.error(f"scancel --signal={signal_name} failed for job {slurm_job_id}: {error}")
+                raise RuntimeError("Slurm did not acknowledge the signal")
+        except Exception:
+            raise RuntimeError(f"Slurm signal was not confirmed for job {slurm_job_id}") from None

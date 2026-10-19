@@ -4,7 +4,7 @@ import threading
 from typing import Callable, List
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from .._job_resources import allocated_job_resources, resource_mode_for_executio
 from .auth import get_current_user
 from .._magnus_config import magnus_config, is_local_mode
 from .._slurm_manager import SlurmManager
+from .._slurm_manager._resource_query import resource_partitions, validate_allocation_visibility
 
 
 _node_name = magnus_config["cluster"]["name"]
@@ -61,10 +62,16 @@ def _cached_slurm_view(cache_key, ttl_seconds: int, producer: Callable):
         # 有陈旧值：抢到刷新锁就由我刷新，抢不到（已有刷新在飞）就立即返回陈旧值，
         # 绝不堆叠打 socket —— 这是防雪崩的关键。
         if not _slurm_view_refresh_lock.acquire(blocking=False):
-            return cached[1]
+            # A slow/stuck refresh must not keep advertising an arbitrarily old
+            # allocation. The client can distinguish brief stale reuse from a
+            # fresh sample; beyond this bound report unavailable instead.
+            if time.monotonic() - cached[0] <= ttl_seconds + 30:
+                return cached[1]
+            raise RuntimeError("Slurm resource cache exceeded its stale limit")
     else:
         # 冷启动无任何值：在锁上等那唯一的首刷，等到后下面 re-check 直接拿到结果。
-        _slurm_view_refresh_lock.acquire()
+        if not _slurm_view_refresh_lock.acquire(timeout=30):
+            raise TimeoutError("Slurm resource refresh is still in progress")
 
     try:
         # 拿到刷新锁后 re-check：别的线程可能刚刷新过，避免重复远端查询。
@@ -128,6 +135,10 @@ def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int,
             "cpu_free": cpu_total,
             "mem_total_mb": mem_total_mb,
             "mem_free_mb": mem_total_mb,
+            "allocation_tracked": False,
+            "accounting_scope": "local",
+            "observed_at": datetime.now(timezone.utc),
+            "node_count": 1,
         },
         "running_jobs": paginated_running,
         "total_running": total_running,
@@ -152,18 +163,25 @@ def _scheduler_sort_key(job):
 
 
 def _tenant_partitions() -> List[str]:
-    """本租户在共享集群上获授、需纳入 cluster 视图的 SLURM 分区集合：默认（CPU）分区
-    execution.slurm.partition 加上各 GPU 类型自带的 partition（cluster.gpus[]）。去重、
-    保序。GPU 与 CPU 同分区（gpus[].partition 未设）的站点回落成单分区，与历史一致。"""
-    parts: List[str] = []
-    default_partition = magnus_config["execution"]["slurm"]["partition"]
-    if default_partition:
-        parts.append(default_partition)
-    for gpu_entry in magnus_config["cluster"]["gpus"]:
-        gpu_partition = gpu_entry.get("partition")
-        if gpu_partition and gpu_partition not in parts:
-            parts.append(gpu_partition)
-    return parts
+    return resource_partitions(magnus_config)
+
+
+def _query_cluster_view(
+    slurm_manager: SlurmManager,
+    partitions: List[str],
+):
+    snapshot = slurm_manager.get_node_snapshot(
+        partitions = partitions or None,
+        _raise_on_error = True,
+    )
+    # A node shared by partitions can be occupied by a job submitted elsewhere.
+    # Filtering job partitions would miss that competing allocation.
+    tasks = slurm_manager.get_all_running_tasks(
+        node_names = [node.name for node in snapshot.nodes] if partitions else None,
+        _raise_on_error = True,
+    )
+    validate_allocation_visibility(snapshot, tasks)
+    return tasks, snapshot, datetime.now(timezone.utc), time.monotonic()
 
 
 @router.get(
@@ -184,32 +202,20 @@ def get_cluster_stats(
     # --- 1. 获取 Slurm 真实数据 ---
     # SlurmManager 涉及阻塞 Shell 命令，必须在线程池中运行 (def)
     slurm_manager = SlurmManager()
-    is_tenant = magnus_config["cluster"]["scheduling"]["mode"] == "tenant"
-    # 租户模式 scope 到本租户获授的分区：运行任务 + 资源容量都只看这些分区，呈现真实的
-    # 同分区竞争态，而不把整个共享集群当成"我们的"。CPU 与 GPU 分处不同 SLURM 分区的
-    # 站点（cluster.gpus[].partition）会有多个分区，逐个查询后聚合（按 job id 去重）。
-    # 独占集群（authoritative）分区列表为空，看全量、容量取整集群节点快照。
-    tenant_partitions = _tenant_partitions() if is_tenant else []
+    tenant_partitions = _tenant_partitions()
     cluster_stats_cache_ttl = magnus_config["server"]["scheduler"]["cluster_stats_cache_ttl"]
-    if tenant_partitions:
-        all_slurm_tasks = []
-        seen_task_ids = set()
-        for tenant_partition in tenant_partitions:
-            part_tasks = _cached_slurm_view(
-                ("running_tasks", tenant_partition),
-                cluster_stats_cache_ttl,
-                lambda tenant_partition=tenant_partition: slurm_manager.get_all_running_tasks(partition=tenant_partition),
-            )
-            for task in part_tasks:
-                if task["id"] not in seen_task_ids:
-                    seen_task_ids.add(task["id"])
-                    all_slurm_tasks.append(task)
-    else:
-        all_slurm_tasks = _cached_slurm_view(
-            ("running_tasks", None),
+    try:
+        all_slurm_tasks, node_snapshot, observed_at, observed_monotonic = _cached_slurm_view(
+            ("cluster_view", tuple(tenant_partitions)),
             cluster_stats_cache_ttl,
-            lambda: slurm_manager.get_all_running_tasks(partition=None),
+            lambda: _query_cluster_view(slurm_manager, tenant_partitions),
         )
+    except Exception as error:
+        raise HTTPException(
+            status_code = 503,
+            detail = "Slurm resource accounting is temporarily unavailable",
+        ) from error
+    is_stale = cluster_stats_cache_ttl > 0 and time.monotonic() - observed_monotonic > cluster_stats_cache_ttl
 
     running_slurm_ids = [task["id"] for task in all_slurm_tasks]
 
@@ -317,38 +323,16 @@ def get_cluster_stats(
     used_cpus = sum(task.get("cpu_count", 0) for task in all_slurm_tasks)
     used_mem_mb = sum(task.get("memory_mb", 0) for task in all_slurm_tasks)
 
-    # 总量（total）来源：分区限定时取本分区节点容量，否则整集群节点容量（单次 scontrol
-    # 快照，与 used 同时刻）。GPU 与 used 取大，保证 total >= used —— used 走 squeue
-    # job-level，CG 收尾期可能短暂超过快照容量（见 NodeSnapshot docstring）；cpu / mem
-    # 直接用快照容量（分区 / 整集群的容量恒 >= 其自身 job 的 used 之和）。
-    if tenant_partitions:
-        # 多分区（CPU + 各 GPU 分区）容量求和 = 本租户获授的总容量；单分区站点即单次迭代，
-        # 与历史一致。求和假定各分区节点不相交（本特性目标拓扑：CPU 与各 GPU 型号分处独立
-        # 节点池）；若某分区共享节点，其容量会被重复计入 total —— 仅影响展示，used 因按 job
-        # id 去重不受影响。
-        snap_total_gpus = snap_cpu_total = snap_mem_total_mb = 0
-        for tenant_partition in tenant_partitions:
-            part_snapshot = _cached_slurm_view(
-                ("partition_snapshot", tenant_partition),
-                cluster_stats_cache_ttl,
-                lambda tenant_partition=tenant_partition: slurm_manager.get_partition_snapshot(tenant_partition),
-            )
-            snap_total_gpus += part_snapshot.total_gpus
-            snap_cpu_total += part_snapshot.cpu_total
-            snap_mem_total_mb += part_snapshot.mem_total_mb
-    else:
-        node_snapshot = _cached_slurm_view(
-            ("node_snapshot", None),
-            cluster_stats_cache_ttl,
-            lambda: slurm_manager.get_node_snapshot(),
-        )
-        snap_total_gpus = node_snapshot.total_gpus
-        snap_cpu_total = node_snapshot.cpu_total
-        snap_mem_total_mb = node_snapshot.mem_total_mb
-    display_total = max(snap_total_gpus, used_gpus)
-    cpu_total = snap_cpu_total
-    mem_total_mb = snap_mem_total_mb
-    free_gpus = max(0, display_total - used_gpus)
+    # Configured totals include offline nodes. Free subtracts their capacity as
+    # well as job allocations: a conservative lower bound for draining nodes.
+    display_total = node_snapshot.total_gpus
+    cpu_total = node_snapshot.cpu_total
+    mem_total_mb = node_snapshot.mem_total_mb
+    unavailable_gpus = node_snapshot.unavailable_gpus
+    unavailable_cpus = node_snapshot.unavailable_cpus
+    unavailable_mem_mb = node_snapshot.unavailable_mem_mb
+    usage_is_upper_bound = any(not task.get("scope_is_subset", True) or task.get("usage_is_upper_bound", False) for task in all_slurm_tasks)
+    free_gpus = max(0, display_total - used_gpus - unavailable_gpus)
 
     # --- 5. Running 列表分页切片 ---
     total_running = len(sorted_all_running)
@@ -395,9 +379,20 @@ def get_cluster_stats(
             "free": free_gpus,
             "used": used_gpus,
             "cpu_total": cpu_total,
-            "cpu_free": max(0, cpu_total - used_cpus),
+            "cpu_free": max(0, cpu_total - used_cpus - unavailable_cpus),
             "mem_total_mb": mem_total_mb,
-            "mem_free_mb": max(0, mem_total_mb - used_mem_mb),
+            "mem_free_mb": max(0, mem_total_mb - used_mem_mb - unavailable_mem_mb),
+            "observed_at": observed_at,
+            "is_stale": is_stale,
+            "free_is_lower_bound": bool(unavailable_gpus or unavailable_cpus or unavailable_mem_mb or usage_is_upper_bound),
+            "usage_is_upper_bound": usage_is_upper_bound,
+            "allocation_tracked": True,
+            "allocation_inferred": any(task.get("allocation_inferred", False) for task in all_slurm_tasks),
+            "accounting_scope": "partition" if tenant_partitions else "cluster",
+            "unavailable_gpus": unavailable_gpus,
+            "unavailable_cpus": unavailable_cpus,
+            "unavailable_mem_mb": unavailable_mem_mb,
+            "node_count": node_snapshot.node_count,
         },
         "running_jobs": paginated_running,
         "total_running": total_running,

@@ -6,6 +6,7 @@ import __future__
 from datetime import datetime, timezone
 import json
 import logging
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -134,8 +135,8 @@ class SlurmGpuTests(unittest.TestCase):
    RealMemory=64000
 """
         jobs = [
-            {"job_id": 1, "job_state": ["RUNNING"], "tres_alloc_str": "gres/gpu=3,gres/gpu:a100=3"},
-            {"job_id": 2, "job_state": "COMPLETING", "gres_detail": ["gpu:rtx5090:1(IDX:3)"]},
+            {"job_id": 1, "job_state": ["RUNNING"], "tres_alloc_str": "cpu=4,mem=8G,gres/gpu=3,gres/gpu:a100=3"},
+            {"job_id": 2, "job_state": "COMPLETING", "tres_alloc_str": "cpu=2,mem=4G", "gres_detail": ["gpu:rtx5090:1(IDX:3)"]},
             {"job_id": 3, "job_state": ["COMPLETED"], "tres_alloc_str": "gres/gpu=6"},
         ]
         self.manager._transport = FakeTransport(nodes, jobs)
@@ -146,7 +147,7 @@ class SlurmGpuTests(unittest.TestCase):
         tasks = self.manager.get_all_running_tasks(partition="compute")
         self.assertEqual([task["gpu_count"] for task in tasks], [3, 1])
         self.assertIn("--partition=compute", self.manager._transport.commands[-1])
-        self.assertIn("--states=RUNNING,COMPLETING", self.manager._transport.commands[-1])
+        self.assertIn("--states=all", self.manager._transport.commands[-1])
 
     def test_partition_capacity_filters_nodes_and_keeps_all_gpu_types(self):
         nodes = "\n".join([
@@ -227,7 +228,7 @@ class ClusterGpuTests(unittest.TestCase):
         query.all = lambda: next(results)
         manager = SimpleNamespace(
             get_all_running_tasks=lambda **kwargs: [{"id": "123", "gpu_count": 6, "cpu_count": 3, "memory_mb": 3072}],
-            get_node_snapshot=lambda: SimpleNamespace(total_gpus=6, cpu_total=32, mem_total_mb=64000),
+            get_node_snapshot=lambda **kwargs: load_queries().NodeSnapshot(6, 32, 64000),
         )
         config = {"execution": {"backend": "slurm"}, "cluster": {"scheduling": {"mode": "authoritative"}, "gpus": [
             {"label": "RTX 5090"}, {"label": "A100"}, {"label": "A100"},
@@ -242,11 +243,15 @@ class ClusterGpuTests(unittest.TestCase):
             "Depends": lambda dependency: None, "database": SimpleNamespace(get_db=None), "get_current_user": None,
             "datetime": datetime, "timezone": timezone, "or_": lambda *args: None,
             "_scheduler_sort_key": lambda value: 0,
+            "_tenant_partitions": lambda: [],
+            "time": time,
+            "validate_allocation_visibility": load_queries().validate_allocation_visibility,
         }
         from test_job_resources import load_resources
         namespace.update(load_resources())
         namespace["JobResourceSummary"] = lambda **values: SimpleNamespace(**values)
-        isolated = ast.Module(body=[model_assignment, route], type_ignores=[])
+        producer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_query_cluster_view")
+        isolated = ast.Module(body=[model_assignment, producer, route], type_ignores=[])
         exec(compile(isolated, str(source), "exec", flags=__future__.annotations.compiler_flag), namespace)
         response = namespace["get_cluster_stats"](db=SimpleNamespace(query=lambda *args: query))
         self.assertEqual(response["resources"]["used"], 6)

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..models import Job, JobStatus
 from ..database import SessionLocal
 from .._resource_manager import resource_manager
+from .._resource_manager._helpers import _run_blocking_io
 from .._slurm_manager import SlurmManager
 from .._docker_manager import DockerManager
 from .._magnus_config import is_local_mode
@@ -34,7 +35,7 @@ class MagnusScheduler(
     职责按 mixin 拆分：
     - _SyncMixin: 把 SLURM/Docker 真实状态拉回数据库 + 集群快照
     - _SubmitMixin: 把 PENDING job 提交到后端
-    - _DecisionsMixin: EASY backfill + 抢占
+    - _DecisionsMixin: 保守资源准入与抢占
     - _ResourcesMixin: 环境（拉取或构建）与仓库并行准备，全部就绪后进入 Pending
     - _JobLifecycleMixin: success/OOM marker、working table 清理
     - _StagingMixin: 远端执行（transport=ssh）下 job 工作区的跨界搬运（本机执行 no-op）
@@ -79,16 +80,16 @@ class MagnusScheduler(
             self._loop = asyncio.get_running_loop()
         try:
             # subprocess 调用（docker logs / slurm queries）放线程池，避免阻塞 event loop
-            await asyncio.to_thread(self._sync_reality)
+            await _run_blocking_io(self._sync_reality)
             await self._make_decisions()
-            await asyncio.to_thread(self._release_finished_builds)
+            await _run_blocking_io(self._release_finished_builds)
             # _record_snapshot 也会跑 slurm 查询（远端 transport 下是骑 socket 的 squeue/
             # scontrol，秒级，且 auto_connect 时可能触发 socket 重建）——同样丢线程池，
             # 否则会周期性阻塞 event loop。tick 串行执行，线程内独占无并发。
-            await asyncio.to_thread(self._record_snapshot)
+            await _run_blocking_io(self._record_snapshot)
             # 低频容量回收：内部按 _WORKSPACE_GC_INTERVAL_SECONDS 自节流，遍历 workspace
             # 做 du 是阻塞 I/O，同 _sync/_record_snapshot 一样卸到线程池，不占 event loop。
-            await asyncio.to_thread(self._reclaim_workspace_over_cap)
+            await _run_blocking_io(self._reclaim_workspace_over_cap)
         except Exception as error:
             logger.error(f"Scheduler tick failed: {error}", exc_info=True)
 
@@ -155,7 +156,7 @@ class MagnusScheduler(
                 else:
                     preparing_task.cancel()
             self._loop.call_soon_threadsafe(cancel_preparation)
-        else:
+        elif is_local_mode or job.slurm_job_id is None:
             self._clean_up_working_table(job.id)
 
     def _release_finished_builds(self) -> None:

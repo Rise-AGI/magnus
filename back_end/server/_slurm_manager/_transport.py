@@ -16,9 +16,10 @@ import posixpath
 import shlex
 import subprocess
 import threading
+import time
 from typing import Dict, List, Optional
 
-from ._ssh_auto_connect import ensure_control_master
+from ._ssh_auto_connect import ensure_control_master, remaining_timeout
 
 
 def _stream_file_to_command(
@@ -123,6 +124,7 @@ class _Transport:
         input: Optional[str] = None,
         check: bool = False,
         env: Optional[Dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> subprocess.CompletedProcess:
         raise NotImplementedError
 
@@ -158,6 +160,7 @@ class _LocalTransport(_Transport):
         input: Optional[str] = None,
         check: bool = False,
         env: Optional[Dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> subprocess.CompletedProcess:
         return subprocess.run(
             command,
@@ -166,6 +169,7 @@ class _LocalTransport(_Transport):
             text = True,
             check = check,
             env = env,
+            timeout = timeout,
         )
 
     def push(self, local_path: str, remote_path: str) -> None:
@@ -231,7 +235,11 @@ class _SshControlMasterTransport(_Transport):
         # 确保 socket 活着、失效时用密码 + TOTP 无人值守重建。
         self._auto_connect = auto_connect
 
-    def _ensure_socket(self) -> None:
+    def _ensure_socket(
+        self,
+        *,
+        deadline: Optional[float] = None,
+    ) -> None:
         """配了 auto_connect 时，操作前确保 master socket 活着（失效则单飞重建）。"""
         if self._auto_connect is not None:
             ensure_control_master(
@@ -239,6 +247,7 @@ class _SshControlMasterTransport(_Transport):
                 self._host,
                 self._user,
                 self._auto_connect,
+                deadline = deadline,
             )
 
     def run(
@@ -248,8 +257,10 @@ class _SshControlMasterTransport(_Transport):
         input: Optional[str] = None,
         check: bool = False,
         env: Optional[Dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> subprocess.CompletedProcess:
-        self._ensure_socket()
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        self._ensure_socket(deadline=deadline)
         remote_tokens: List[str] = []
         if env is not None:
             injected = [
@@ -282,6 +293,7 @@ class _SshControlMasterTransport(_Transport):
             capture_output = True,
             text = True,
             check = check,
+            timeout = remaining_timeout(deadline),
         )
 
     def run_with_file_input(

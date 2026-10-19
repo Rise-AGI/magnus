@@ -1,6 +1,7 @@
 # back_end/server/schemas/_cluster.py
 """Cluster resources / stats schemas."""
-from typing import List
+from datetime import datetime
+from typing import List, Literal, Optional
 from pydantic import BaseModel
 
 from ._job import JobListItem
@@ -16,6 +17,17 @@ class ClusterResources(BaseModel):
     cpu_free: int
     mem_total_mb: int
     mem_free_mb: int
+    observed_at: Optional[datetime] = None
+    is_stale: bool = False
+    free_is_lower_bound: bool = False
+    usage_is_upper_bound: bool = False
+    allocation_tracked: bool = True
+    allocation_inferred: bool = False
+    accounting_scope: Literal["partition", "cluster", "local"] = "cluster"
+    unavailable_gpus: int = 0
+    unavailable_cpus: int = 0
+    unavailable_mem_mb: int = 0
+    node_count: Optional[int] = None
     class Config: from_attributes = True
 
 

@@ -1,7 +1,7 @@
 // front_end/src/app/(main)/cluster/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Zap, Plus, Activity, Cpu, Clock, Server } from "lucide-react";
 import { client } from "@/lib/api";
 import { Job } from "@/types/job";
@@ -15,18 +15,8 @@ import { usePolling } from "@/hooks/use-polling";
 import { JobTable } from "@/components/jobs/job-table";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useUrlPagination } from "@/hooks/use-url-pagination";
-
-interface ClusterResources {
-  node: string;
-  gpu_model: string;
-  total: number;
-  free: number;
-  used: number;
-  cpu_total: number;
-  cpu_free: number;
-  mem_total_mb: number;
-  mem_free_mb: number;
-}
+import { presentClusterResources, type ClusterResources } from "@/lib/cluster-resources";
+import { formatStationTime } from "@/lib/utils";
 
 interface ClusterStats {
   resources: ClusterResources;
@@ -44,6 +34,8 @@ export default function ClusterPage() {
   const [activeJobs, setActiveJobs] = useState<Job[]>([]);
   const [totalMyJobs, setTotalMyJobs] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [clusterRefreshFailed, setClusterRefreshFailed] = useState(false);
+  const fetchRequest = useRef<{ key: string; active: boolean } | null>(null);
 
   // Each panel keeps its page in the URL under its own prefix so the three
   // paginations survive a route round-trip independently without colliding.
@@ -55,6 +47,10 @@ export default function ClusterPage() {
     useUrlPagination({ prefix: "pending", defaultPageSize: 5 });
 
   const fetchData = useCallback(async (isBackground = false) => {
+    const key = [myPage, mySize, runningPage, runningSize, pendingPage, pendingSize].join("/");
+    if (fetchRequest.current?.key === key && fetchRequest.current.active) return;
+    const request = { key, active: true };
+    fetchRequest.current = request;
     if (!isBackground) setLoading(true);
     try {
       const myParams = new URLSearchParams({
@@ -68,13 +64,16 @@ export default function ClusterPage() {
         pending_limit: pendingSize.toString(),
       });
 
-      const [myJobsData, clusterData] = await Promise.all([
+      const [myJobsResult, clusterResult] = await Promise.allSettled([
         client(`/api/cluster/my-active-jobs?${myParams.toString()}`),
-        client(`/api/cluster/stats?${clusterParams.toString()}`).catch(e => {
-          console.warn("Failed to fetch cluster stats", e);
-          return null;
-        }),
+        client(`/api/cluster/stats?${clusterParams.toString()}`),
       ]);
+      if (request !== fetchRequest.current) return;
+      const myJobsData = myJobsResult.status === "fulfilled" ? myJobsResult.value : null;
+      const clusterData = clusterResult.status === "fulfilled" ? clusterResult.value : null;
+      setClusterRefreshFailed(!clusterData);
+      if (myJobsResult.status === "rejected") console.warn("Failed to fetch active jobs", myJobsResult.reason);
+      if (clusterResult.status === "rejected") console.warn("Failed to fetch cluster stats", clusterResult.reason);
 
       // 跨 panel 状态归一：cluster.running_jobs 走 SLURM 实时视图，my-active 走 DB；
       // scheduler 还没把 DB 推到 RUNNING 时，同一 job 会以 SLURM=Running、DB=Pending/Preparing
@@ -84,7 +83,7 @@ export default function ClusterPage() {
       // squeue 里只是 SLURM CG 收尾未释放，magnus DB 已经标 TERMINATED/PAUSED 是真相，
       // 强制改 Running 会让用户看到自己刚 cancel 的 job 又"复活"。
       const slurmRunningIds = new Set<string>(
-        ((clusterData?.running_jobs ?? []) as Job[])
+        ((clusterData?.resources?.is_stale ? [] : clusterData?.running_jobs ?? []) as Job[])
           .map(job => job.slurm_job_id)
           .filter((id): id is string => Boolean(id)),
       );
@@ -123,9 +122,12 @@ export default function ClusterPage() {
 
       if (clusterData) setCluster(clusterData);
     } catch (e) {
+      if (request !== fetchRequest.current) return;
       console.error("Failed to fetch cluster data", e);
+      setClusterRefreshFailed(true);
     } finally {
-      if (!isBackground) setLoading(false);
+      request.active = false;
+      if (request === fetchRequest.current) setLoading(false);
     }
   }, [myPage, mySize, runningPage, runningSize, pendingPage, pendingSize]);
 
@@ -141,7 +143,7 @@ export default function ClusterPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
   usePolling(() => fetchData(true), POLL_INTERVAL);
 
-  const formatMem = (mb: number) => mb >= 1024 ? `${(mb / 1024).toFixed(0)} GB` : `${mb} MB`;
+  const resourceInfo = cluster ? presentClusterResources(cluster.resources, t, clusterRefreshFailed) : null;
 
   return (
     <div className="pb-20 relative min-h-[calc(100vh-8rem)]">
@@ -164,7 +166,7 @@ export default function ClusterPage() {
       </div>
 
       {/* Cluster Resource Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
           <div className="flex items-center gap-2 text-cyan-400 mb-2">
             <Cpu className="w-4 h-4" />
@@ -173,12 +175,12 @@ export default function ClusterPage() {
           {cluster ? (
             <>
               <div className="flex items-baseline gap-1.5 mb-2">
-                <span className="text-3xl font-bold text-white">{cluster.resources.cpu_free}</span>
+                <span className="text-3xl font-bold text-white">{resourceInfo?.cpuFree}</span>
                 <span className="text-zinc-500 text-sm">/ {cluster.resources.cpu_total} {t("cluster.cores")}</span>
               </div>
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs">
                 <span className="font-mono">RAM:</span>
-                <span>{formatMem(cluster.resources.mem_free_mb)} / {formatMem(cluster.resources.mem_total_mb)}</span>
+                <span>{resourceInfo?.memoryFree} / {resourceInfo?.memoryTotal}</span>
               </div>
             </>
           ) : (
@@ -194,13 +196,14 @@ export default function ClusterPage() {
           {cluster ? (
             <>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-3xl font-bold text-white">{cluster.resources.free}</span>
+                <span className="text-3xl font-bold text-white">{resourceInfo?.gpuFree}</span>
                 <span className="text-zinc-500 text-sm">/ {cluster.resources.total}</span>
               </div>
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs font-mono">
                 <Server className="w-3 h-3" />
                 {cluster.resources.gpu_model}
               </div>
+              <p className="mt-1 text-xs text-zinc-500">{t("cluster.resourcesGpuAllocated", { count: resourceInfo?.gpuAllocated ?? t("jobResources.unknown") })}</p>
             </>
           ) : (
             <div className="h-12 bg-zinc-800 animate-pulse rounded my-1" />
@@ -236,6 +239,19 @@ export default function ClusterPage() {
             <div className="h-12 bg-zinc-800 animate-pulse rounded my-1" />
           )}
         </div>
+      </div>
+
+      <div className="mb-8 text-xs space-y-1 text-zinc-500" role="status">
+        {resourceInfo ? (
+          <>
+            <p className={resourceInfo.stale ? "text-amber-400" : "text-zinc-400"}>
+              {resourceInfo.scope} · {resourceInfo.observedAt
+                ? t("cluster.resourcesObserved", { time: formatStationTime(resourceInfo.observedAt) })
+                : t("cluster.resourcesTimeUnknown")}
+            </p>
+            {resourceInfo.notes.map(note => <p key={note}>{note}</p>)}
+          </>
+        ) : clusterRefreshFailed ? <p className="text-amber-400">{t("cluster.resourcesFetchFailed")}</p> : null}
       </div>
 
       <div className="flex flex-col gap-10">

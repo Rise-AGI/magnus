@@ -11,6 +11,8 @@ import { useLanguage } from "@/context/language-context";
 import { BarChart3, Clock, Hash } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatStationClockSeconds } from "@/lib/utils";
+import { metricScopeNotes } from "@/lib/metric-scope";
+import type { Job } from "@/types/job";
 
 
 interface MetricStream {
@@ -75,7 +77,7 @@ function metricDisplayName(name: string): string {
 }
 
 
-export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
+export function MetricsChart({ jobId, jobStatus, job }: { jobId: string; jobStatus: string; job?: Pick<Job, "node_count" | "tasks_per_node"> }) {
   const { t } = useLanguage();
   const [streams, setStreams] = useState<MetricStream[]>([]);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
@@ -164,6 +166,7 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
   selectedStreamsRef.current = selectedStreams;
 
   const selectedUnit = selectedStreams[0]?.unit ?? null;
+  const scopeNotes = metricScopeNotes(selectedMetric, selectedStreams, job, t);
 
   const dataHasStep = useMemo(() => {
     for (const result of Array.from(data.values())) {
@@ -313,6 +316,11 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
                 {key}
               </span>
             ))}
+          </div>
+        )}
+        {scopeNotes.length > 0 && (
+          <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 space-y-1 text-xs text-zinc-400">
+            {scopeNotes.map(note => <p key={note}>{note}</p>)}
           </div>
         )}
       </div>

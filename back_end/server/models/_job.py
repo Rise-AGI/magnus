@@ -24,15 +24,16 @@ class JobStatus(str, enum.Enum):
     """Job 生命周期状态。与 ``Job.slurm_job_id`` 字段联合表达 magnus 与外部
     资源（SLURM step / Docker container）的关联状态。
 
-    `slurm_job_id` 非 NULL ⇔ 外部资源仍占用中（详见 `_job.py` 字段注释）。
+    `slurm_job_id` 非 NULL 表示当前执行关联尚未收尾；可能仍占资源，也可能正在重试产物回传。
+    资源占用以 SLURM 观测为准，不能由这个关联字段推断。
     `PAUSED` / `TERMINATED` 在不同的 `slurm_job_id` 取值下表达 4 个子态：
 
       status     | slurm_job_id | 含义
       -----------|--------------|---------------------------------------------
       TERMINATED | NULL         | 用户 cancel + 资源已释放（终态）
-      TERMINATED | NOT NULL     | 用户 cancel + SLURM CG 收尾中（inflight）
+      TERMINATED | NOT NULL     | 用户 cancel + 等待释放或产物回传（inflight）
       PAUSED     | NULL         | 被抢占 + 资源已释放（等待 Phase 2.5 resubmit）
-      PAUSED     | NOT NULL     | 被抢占 + SLURM CG 收尾中（inflight）
+      PAUSED     | NOT NULL     | 被抢占 + 等待释放或产物回传（inflight）
 
     新加查询 / UI 渲染时务必区分子态：cluster endpoint 反查 magnus_job_map 会
     命中 inflight 子态的 job；前端要据此把"释放中"的视觉/操作语义跟"已终态"
@@ -99,6 +100,8 @@ class Job(Base):
     ephemeral_storage: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[JobStatus] = mapped_column(SQLEnum(JobStatus), default=JobStatus.PREPARING, index=True)
     job_type: Mapped[JobType] = mapped_column(SQLEnum(JobType), default=JobType.A2)
+    # Non-NULL also retains ownership while final artifact transfer is retried;
+    # it does not prove resources remain allocated. Accounting queries Slurm.
     # SLURM 模式存 sbatch 返回的 SLURM job id；Docker (local) 模式复用此列存
     # container_name。语义为 "magnus 与外部资源的当前/last-known 关联"：在
     # TERMINATED / PAUSED 状态下也可能非 NULL —— SLURM 模式 scancel 后 job 进
