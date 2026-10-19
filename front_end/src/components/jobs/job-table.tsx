@@ -10,6 +10,7 @@ import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
+import { JobResources } from "@/components/jobs/job-resources";
 import { UserAvatar } from "@/components/ui/user-avatar";
 import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import { formatStationTime } from "@/lib/utils";
@@ -85,6 +86,9 @@ export function JobTable({
                 </div>
               </div>
 
+              <div className="mt-3">
+                <JobResources job={job} />
+              </div>
               <div className="flex items-center justify-between mt-3">
                 <div className="flex items-center gap-2 min-w-0">
                   {job.user ? (
@@ -212,26 +216,7 @@ export function JobTable({
                   </td>
 
                   <td className="px-6 py-4 align-top text-center">
-                    <div className="flex flex-col items-center gap-1">
-                      {job.cpu_count != null && (
-                        <span className="text-zinc-300 text-xs font-medium">
-                          CPU × {job.cpu_count}
-                        </span>
-                      )}
-                      {job.memory_demand != null && (
-                        <span className="text-zinc-300 text-xs font-medium">
-                          RAM {job.memory_demand}
-                        </span>
-                      )}
-                      {job.gpu_count > 0 && job.gpu_type !== "cpu" && (
-                        <span className="text-zinc-300 text-xs font-medium">
-                          {job.gpu_type.replace(/_/g, " ")} × {job.gpu_count}
-                        </span>
-                      )}
-                      {!(job.gpu_count > 0 && job.gpu_type !== "cpu") && job.cpu_count == null && job.memory_demand == null && (
-                        <span className="text-zinc-300 text-xs font-medium">{t("jobs.cpuOnly")}</span>
-                      )}
-                    </div>
+                    <JobResources job={job} />
                   </td>
 
                   <td className="px-6 py-4 align-top whitespace-normal break-words">

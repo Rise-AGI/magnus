@@ -304,8 +304,21 @@ sbatch --parsable \
 **Per-GPU-type partition + gres routing** (`cluster.gpus[]`): each GPU type may declare its own optional `partition` and `gres_type`. When a job requests that GPU type it is submitted to the type's `partition` (falling back to `execution.slurm.partition` when unset), and `--gres` uses its `gres_type` — the type name by default (`--gres=gpu:{value}:N`), or an untyped `--gres=gpu:N` when `gres_type` is null. CPU jobs, and GPU types without a `partition`, use the default partition. This lets one station drive a shared cluster that splits CPU and each GPU model into separate SLURM partitions (e.g. CPU jobs on the default partition, A100-80G jobs on a dedicated `gpu-a100` partition with untyped gres), or host multiple GPU models in one partition distinguished by typed gres (e.g. `--gres=gpu:rtx5090:N` vs `--gres=gpu:a100:N`). Single-partition sites set neither field and the command is byte-identical to before. In tenant mode the cluster view aggregates capacity and running tasks across the default partition plus every distinct GPU partition.
 
 **Memory mode** (`execution.slurm.mem_mode`):
-- `explicit` (default, self-owned sites): `--mem={memory_demand}` is passed verbatim — the request equals the allocation.
-- `per_cpu` (clusters that disable `--mem`): no `--mem` is passed. SLURM allocates memory implicitly as `effective_cpu_count × mem_per_cpu_mb` via `DefMemPerCPU`, and `memory_demand` is folded into the core count: `effective_cpu_count = max(cpu_count, ceil(memory_demand_mb / mem_per_cpu_mb))`, so requesting more memory raises the core count. On these sites the submission path **normalizes** the stored `cpu_count` / `memory_demand` to this effective allocation (`normalize_per_cpu_resources`, after default-fill and before limit validation), so the DB, UI, and SDK report what the job actually receives instead of the raw request. The fold is shared with the sbatch builder (`effective_cpu_count_per_cpu`) and is idempotent.
+- `explicit` (default, self-owned sites): `--mem={memory_demand}` requests memory **per node**, independently of tasks per node. `--mem=0` requests all available memory; its total cannot be calculated from the request alone.
+- `per_cpu` (clusters that disable `--mem`): no `--mem` is passed. SLURM assigns memory through `DefMemPerCPU`, and `memory_demand` is folded into the core count: `effective_cpu_count = max(cpu_count, ceil(memory_demand_mb / mem_per_cpu_mb))`, so requesting more memory raises the core count. The submission path **normalizes** stored `cpu_count` / `memory_demand` to the effective **per-task** request (`normalize_per_cpu_resources`, after default-fill and before limit validation). The fold is shared with the sbatch builder (`effective_cpu_count_per_cpu`) and is idempotent. These fields are not whole-job allocations or measurements of memory use.
+
+**Multi-node resource display**: `node_count` and `tasks_per_node` default to one. CPU is requested per task (`--cpus-per-task`), while GPUs are requested per node (`--gres`). Job list/detail responses retain these input fields and add `resource_summary` for display:
+
+| Whole-job request | Calculation |
+|---|---|
+| CPU | `cpu_count × node_count × tasks_per_node` |
+| RAM, `per_cpu` | normalized `memory_demand × node_count × tasks_per_node` |
+| RAM, `explicit` | `memory_demand × node_count` |
+| GPU | `gpu_count × node_count` |
+
+For example, two nodes with 64 tasks per node, one CPU per task and 4000 MiB per CPU request **128 CPUs and 500 GiB** in total. The table and detail view show totals with a topology breakdown. `resource_summary.memory_bytes` is in bytes; null means the total is unknown, not zero. New jobs store a server-owned `resource_mode` snapshot (`slurm_per_cpu`, `slurm_per_node`, or `local`). Existing jobs retain null snapshots: their request summaries use current site settings and set `mode_inferred=true`, which the UI labels as an estimate. No historical rows are rewritten to assert an unrecorded mode.
+
+The cluster running list instead uses SLURM's whole-job allocation for both Magnus and external jobs (`resource_summary.basis="allocation"`), without multiplying it again. Ordinary job lists/details use `basis="request"`; neither is a live utilization metric. Local/Docker summaries show the submitted values without multiplying unsupported node/task topology, and do not claim resource limits are enforced. Raw API fields and SDK submission semantics remain unchanged.
 
 `time_limit` (minutes) maps to `--time`; when null no `--time` is emitted and the job runs under the partition's default walltime. Declaring a short walltime makes a job more eligible for backfill on shared clusters.
 

@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from .. import database
 from .. import models
 from ..models import JobStatus, JobType
-from ..schemas import ClusterStatsResponse, JobListItem, PagedJobResponse, UserInfo
+from ..schemas import ClusterStatsResponse, JobListItem, JobResourceSummary, PagedJobResponse, UserInfo
+from .._job_resources import allocated_job_resources, resource_mode_for_execution
 from .auth import get_current_user
 from .._magnus_config import magnus_config, is_local_mode
 from .._slurm_manager import SlurmManager
@@ -237,6 +238,10 @@ def get_cluster_stats(
             # 据此呈现 "Terminated (releasing)" 等复合语义。
             job_orm = magnus_job_map[slurm_id]
             job_resp = JobListItem.model_validate(job_orm)
+            job_resp.resource_summary = JobResourceSummary(**allocated_job_resources(
+                task,
+                mode = resource_mode_for_execution(magnus_config["execution"]),
+            ))
             all_running_jobs.append(job_resp)
 
         else:
@@ -254,8 +259,8 @@ def get_cluster_stats(
                 start_dt = datetime.now(timezone.utc)
 
             # external job 的 cpu / mem 已由 get_all_running_tasks 从 squeue 采到，
-            # 一并填入让 cluster 页面与 magnus 原生 job 的资源展示对齐：前端按
-            # cpu_count / memory_demand 渲染，三者皆缺时才回落到 "仅 CPU"。
+            # 保留这些旧字段供旧客户端使用，新客户端统一读 resource_summary；
+            # 外部任务已是全 Job 分配，不能再按本站每节点/每 task 约定乘一次。
             external_cpu_count = task.get("cpu_count") or None
             external_memory_mb = task.get("memory_mb") or 0
             if external_memory_mb <= 0:
@@ -277,6 +282,10 @@ def get_cluster_stats(
                 gpu_count = task["gpu_count"],
                 cpu_count = external_cpu_count,
                 memory_demand = external_memory_demand,
+                resource_summary = JobResourceSummary(**allocated_job_resources(
+                    task,
+                    mode = resource_mode_for_execution(magnus_config["execution"]),
+                )),
                 job_type = JobType.EXTERNAL,
                 id = f"{slurm_id} (slurm)",
                 user_id = mock_user.id,

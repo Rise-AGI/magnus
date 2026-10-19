@@ -645,16 +645,17 @@ def apply_cluster_defaults(data: Dict[str, Any])-> Dict[str, Any]:
 
 
 def normalize_per_cpu_resources(data: Dict[str, Any])-> Dict[str, Any]:
-    """per_cpu 内存模式下，把 cpu_count / memory_demand 归一化为真实分配值。In-place + return self。
+    """per_cpu 模式下，归一化每 task 的有效 CPU / 内存请求。In-place + return self。
 
     共享集群（execution.slurm.mem_mode='per_cpu'）禁用 --mem，SLURM 按 DefMemPerCPU 给每核
-    固定 mem_per_cpu_mb 内存，job 实际内存 = 有效核数 × mem_per_cpu_mb。用户提交的
+    固定 mem_per_cpu_mb 内存，每 task 内存请求 = 有效核数 × mem_per_cpu_mb。用户提交的
     memory_demand 只在内存需求超过 cpu_count 隐含内存时上调核数（见 _size_utils
     effective_cpu_count_per_cpu）。若不归一化，DB / UI / SDK 会原样存用户填的 memory_demand
-    （多为默认值，如 1600M），与真实分配（动辄数十～数百 GB）差几十倍，严重误导。这里把两者
-    对齐到真实有效值，使存储与展示诚实；提交时 submit_job_simple 对归一化结果再折算是幂等的。
+    （多为默认值，如 1600M），与有效请求差几十倍。这里对齐每 task 的请求口径；提交时
+    submit_job_simple 对归一化结果再折算是幂等的。全 Job 请求需再乘节点数与每节点 task 数，
+    由 resource_summary 统一展示；实际 SLURM 分配由 cluster 的运行任务查询单独提供。
 
-    explicit 模式（自有站点现状）下 --mem 即真实分配、local 模式无 SLURM 概念，均直接返回
+    explicit 模式的 --mem 是每节点内存请求、local 模式无 SLURM 概念，均直接返回
     —— 这两类部署字节级不变。在 apply_cluster_defaults 之后、validate_cluster_limits 之前
     调用，使上限校验落在归一化后的有效核数 / 内存上。
     """

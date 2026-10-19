@@ -511,6 +511,7 @@ class _ResourceQueryMixin:
                         "gpu_type": gpu_type,
                         "cpu_count": cpu_count,
                         "memory_mb": memory_mb,
+                        "node_count": _unwrap_slurm_int(job.get("node_count")) or None,
                     })
 
                 except Exception as error:

@@ -181,18 +181,22 @@ print(job_id)
 | `branch` | str \| None | No | None | Branch name (None = server-side detects default branch) |
 | `commit_sha` | str \| None | No | None | Commit SHA (None = HEAD) |
 | `gpu_type` | str | No | "cpu" | GPU model ("cpu" means no GPU used) |
-| `gpu_count` | int | No | 0 | Number of GPUs |
+| `gpu_count` | int | No | 0 | GPUs per node (SLURM) |
 | `namespace` | str | No | "Rise-AGI" | Namespace |
 | `job_type` | str | No | "A2" | Priority (A1/A2/B1/B2) |
 | `description` | str \| None | No | None | Task description (Markdown) |
 | `container_image` | str \| None | No | None | Container image (None = cluster default) |
 | `dockerfile` | str \| None | No | None | Keyword-only Dockerfile text; replaces `container_image`, builds with an empty context |
-| `cpu_count` | int \| None | No | None | CPU count (None = cluster default) |
-| `memory_demand` | str \| None | No | None | Memory demand (None = cluster default; ignored as an independent knob on `per_cpu` clusters, where it folds into the core count) |
+| `cpu_count` | int \| None | No | None | CPUs per task (None = cluster default) |
+| `memory_demand` | str \| None | No | None | Memory per node in `explicit` mode; folds into per-task CPUs in `per_cpu` mode (None = cluster default) |
+| `node_count` | int \| None | No | None | SLURM nodes; None = 1, ignored in local mode |
+| `tasks_per_node` | int \| None | No | None | SLURM tasks per node; None = 1, ignored in local mode |
 | `time_limit` | int \| None | No | None | Max walltime in minutes (SLURM `--time`; None = partition default) |
 | `runner` | str \| None | No | None | Runner (None = cluster default) |
 
 **Returns**: Job ID (str)
+
+Job list/detail responses also include `resource_summary`, with whole-job request totals and an explicit resource mode. Cluster running rows report actual SLURM allocations instead. The original request fields retain the per-task/per-node semantics above; use the summary for display, not as submission input. See [resource display semantics](../internals/job-runtime.md#slurm-submission-parameters) for formulas and historical-record handling.
 
 #### execute_job - Submit and Wait for Completion
 

@@ -16,6 +16,7 @@ import { Job, JobBuildProgress } from "@/types/job";
 import { formatStationTime } from "@/lib/utils";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
+import { JobResources } from "@/components/jobs/job-resources";
 import { CodeEditor } from "@/components/ui/code-editor";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { PersonHoverCard } from "@/components/ui/person-hover-card";
@@ -602,37 +603,8 @@ export default function JobDetailsPage() {
               <Cpu className="w-4 h-4 text-zinc-400" />
               <h3 className="text-sm font-semibold text-zinc-200">{t("jobDetail.resources")}</h3>
             </div>
-            <div className="p-4 grid grid-cols-2 gap-x-4 gap-y-3">
-              <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.cpuCores")}</label>
-                <span className="text-sm text-white font-medium block">
-                  {job.cpu_count ? job.cpu_count : <span className="text-zinc-500 text-xs">{t("jobDetail.stationDefault")}</span>}
-                </span>
-              </div>
-              <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.memory")}</label>
-                <span className="text-sm text-white font-medium block">
-                  {job.memory_demand ? job.memory_demand : <span className="text-zinc-500 text-xs">{t("jobDetail.stationDefault")}</span>}
-                </span>
-              </div>
-              {((job.node_count ?? 1) > 1 || (job.tasks_per_node ?? 1) > 1) ? (
-                <div>
-                  <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.nodes")}</label>
-                  <span className="text-sm text-white font-medium block">
-                    {job.node_count ?? 1} × {job.tasks_per_node ?? 1}
-                  </span>
-                </div>
-              ) : null}
-              <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.accelerator")}</label>
-                <span className="text-sm text-white font-medium block">
-                  {job.gpu_type === "CPU" ? t("jobDetail.cpuOnly") : job.gpu_type}
-                </span>
-              </div>
-              <div>
-                <label className="text-xs text-zinc-500 font-medium uppercase tracking-wider block mb-1">{t("jobDetail.gpuCount")}</label>
-                <span className="text-sm text-white font-medium block">{job.gpu_count} {job.gpu_count === 1 ? "GPU" : "GPUs"}</span>
-              </div>
+            <div className="p-4">
+              <JobResources job={job} expanded />
             </div>
           </div>
 

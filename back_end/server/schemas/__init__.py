@@ -32,6 +32,7 @@ from ._auth import (
 from ._job import (
     JobSubmission,
     JobListItem,
+    JobResourceSummary,
     JobResponse,
     PagedJobResponse,
 )
@@ -94,6 +95,7 @@ from ._chat import (
 __all__ = [
     "JobSubmission",
     "JobListItem",
+    "JobResourceSummary",
     "JobResponse",
     "PagedJobResponse",
     "FeishuLoginRequest",

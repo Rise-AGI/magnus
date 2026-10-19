@@ -1,6 +1,17 @@
 // front_end/src/types/job.ts
 import { User } from "@/types/auth";
 
+export interface JobResourceSummary {
+  basis: "request" | "allocation";
+  mode: "slurm_per_cpu" | "slurm_per_node" | "local";
+  mode_inferred: boolean;
+  cpu_count: number | null;
+  memory_bytes: number | null;
+  gpu_count: number;
+  node_count: number | null;
+  tasks_per_node: number | null;
+}
+
 export interface Job {
   id: string;
   task_name: string;
@@ -23,6 +34,7 @@ export interface Job {
   memory_demand?: string | null;
   node_count?: number | null;
   tasks_per_node?: number | null;
+  resource_summary?: JobResourceSummary | null;
   time_limit?: number | null;
   ephemeral_storage?: string | null;
   runner?: string | null;

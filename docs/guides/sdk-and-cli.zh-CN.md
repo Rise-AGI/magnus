@@ -181,18 +181,22 @@ print(job_id)
 | `branch` | str \| None | 否 | None | 分支名（None = 服务端检测默认分支） |
 | `commit_sha` | str \| None | 否 | None | Commit SHA（None = HEAD） |
 | `gpu_type` | str | 否 | "cpu" | GPU 型号（"cpu" 表示不使用 GPU） |
-| `gpu_count` | int | 否 | 0 | GPU 数量 |
+| `gpu_count` | int | 否 | 0 | 每节点 GPU 数量（SLURM） |
 | `namespace` | str | 否 | "Rise-AGI" | 命名空间 |
 | `job_type` | str | 否 | "A2" | 优先级（A1/A2/B1/B2） |
 | `description` | str \| None | 否 | None | 任务描述（Markdown） |
 | `container_image` | str \| None | 否 | None | 容器镜像（None = 集群默认） |
 | `dockerfile` | str \| None | 否 | None | Keyword-only Dockerfile 文本，替代 `container_image`，使用空 context 构建 |
-| `cpu_count` | int \| None | 否 | None | CPU 数量（None = 集群默认） |
-| `memory_demand` | str \| None | 否 | None | 内存需求（None = 集群默认；在 `per_cpu` 集群上不是独立旋钮，会折算进核数） |
+| `cpu_count` | int \| None | 否 | None | 每 task 的 CPU 数（None = 集群默认） |
+| `memory_demand` | str \| None | 否 | None | `explicit` 模式为每节点内存；`per_cpu` 模式折算进每 task 的 CPU 数（None = 集群默认） |
+| `node_count` | int \| None | 否 | None | SLURM 节点数；None = 1，local 模式忽略 |
+| `tasks_per_node` | int \| None | 否 | None | SLURM 每节点 task 数；None = 1，local 模式忽略 |
 | `time_limit` | int \| None | 否 | None | 最大墙钟（分钟，SLURM `--time`；None = 分区默认） |
 | `runner` | str \| None | 否 | None | 运行人（None = 集群默认） |
 
 **返回值**：Job ID (str)
+
+Job 列表与详情响应还包含 `resource_summary`，提供全 Job 请求总量及明确的资源口径。集群运行列表则报告 SLURM 实际分配。原请求字段仍保留上表的每 task/每节点语义；摘要用于展示，不用于提交。公式与历史记录处理见[资源展示语义](../internals/job-runtime.zh-CN.md#slurm-提交参数)。
 
 #### execute_job - 提交并等待完成
 

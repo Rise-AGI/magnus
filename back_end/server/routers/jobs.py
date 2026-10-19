@@ -26,6 +26,7 @@ from .._magnus_config import magnus_config, is_admin_user, is_local_mode, apply_
 from .._scheduler import scheduler
 from .._resource_manager import resource_manager
 from .._resource_manager._build_progress import BuildProgress
+from .._job_resources import resource_mode_for_execution
 from .auth import get_current_user
 from library import escape_like
 
@@ -110,6 +111,7 @@ def create_job(
 
     db_job = models.Job(
         **job_dict,
+        resource_mode = resource_mode_for_execution(magnus_config["execution"]),
         user_id = user_id,
         status = JobStatus.PREPARING,
     )

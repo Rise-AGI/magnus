@@ -229,7 +229,7 @@ class ClusterGpuTests(unittest.TestCase):
             get_all_running_tasks=lambda **kwargs: [{"id": "123", "gpu_count": 6, "cpu_count": 3, "memory_mb": 3072}],
             get_node_snapshot=lambda: SimpleNamespace(total_gpus=6, cpu_total=32, mem_total_mb=64000),
         )
-        config = {"cluster": {"scheduling": {"mode": "authoritative"}, "gpus": [
+        config = {"execution": {"backend": "slurm"}, "cluster": {"scheduling": {"mode": "authoritative"}, "gpus": [
             {"label": "RTX 5090"}, {"label": "A100"}, {"label": "A100"},
         ]}, "server": {"scheduler": {"cluster_stats_cache_ttl": 0}}}
         namespace = {
@@ -243,6 +243,9 @@ class ClusterGpuTests(unittest.TestCase):
             "datetime": datetime, "timezone": timezone, "or_": lambda *args: None,
             "_scheduler_sort_key": lambda value: 0,
         }
+        from test_job_resources import load_resources
+        namespace.update(load_resources())
+        namespace["JobResourceSummary"] = lambda **values: SimpleNamespace(**values)
         isolated = ast.Module(body=[model_assignment, route], type_ignores=[])
         exec(compile(isolated, str(source), "exec", flags=__future__.annotations.compiler_flag), namespace)
         response = namespace["get_cluster_stats"](db=SimpleNamespace(query=lambda *args: query))
@@ -250,6 +253,8 @@ class ClusterGpuTests(unittest.TestCase):
         self.assertEqual(response["resources"]["free"], 0)
         self.assertEqual(response["resources"]["gpu_model"], "RTX 5090 / A100")
         self.assertEqual(response["running_jobs"][0].gpu_count, 2)
+        self.assertEqual(response["running_jobs"][0].resource_summary.gpu_count, 6)
+        self.assertEqual(response["running_jobs"][0].resource_summary.basis, "allocation")
 
 
 if __name__ == "__main__":

@@ -304,8 +304,21 @@ sbatch --parsable \
 **按 GPU 类型路由 partition + gres**（`cluster.gpus[]`）：每个 GPU 类型可声明可选的 `partition` 与 `gres_type`。job 请求某 GPU 类型时提交到该类型的 `partition`（未设则回退 `execution.slurm.partition`），`--gres` 用其 `gres_type` —— 缺省 = 类型名（`--gres=gpu:{value}:N`），显式 null 时为无型号 `--gres=gpu:N`。CPU job 以及没配 `partition` 的 GPU 类型都走默认分区。这让单个站点能驱动"CPU 与各 GPU 型号分处不同 SLURM 分区"的共享集群（如 CPU 走默认分区、A100-80G 走独立的 `gpu-a100` 分区且 gres 无型号），或在同一分区靠带型号 gres 承载多种 GPU（`--gres=gpu:rtx5090:N` vs `--gres=gpu:a100:N`）。单分区站点两个字段都不设、命令字节级不变。tenant 模式下 cluster 视图会把默认分区 + 每个不同 GPU 分区的容量与在跑任务聚合展示。
 
 **内存模式**（`execution.slurm.mem_mode`）：
-- `explicit`（默认，自有站点）：原样下发 `--mem={memory_demand}`，请求即分配。
-- `per_cpu`（禁用 `--mem` 的集群）：不发 `--mem`。SLURM 按 `DefMemPerCPU` 隐式分配内存 = `有效核数 × mem_per_cpu_mb`，`memory_demand` 折算进核数：`effective_cpu_count = max(cpu_count, ceil(memory_demand_mb / mem_per_cpu_mb))`，所以请求更多内存会顶高核数。这类站点的提交链路会把存储的 `cpu_count` / `memory_demand` **归一化**为真实有效分配（`normalize_per_cpu_resources`，在填默认值之后、上限校验之前），使 DB、UI、SDK 显示 job 真实拿到的资源而非原始请求。该折算与 sbatch 构建共用同一 helper（`effective_cpu_count_per_cpu`），且幂等。
+- `explicit`（默认，自有站点）：`--mem={memory_demand}` 请求的是**每节点内存**，与每节点 task 数无关。`--mem=0` 表示请求全部可用内存，不能仅凭请求计算总量。
+- `per_cpu`（禁用 `--mem` 的集群）：不发 `--mem`。SLURM 按 `DefMemPerCPU` 分配内存，`memory_demand` 折算进核数：`effective_cpu_count = max(cpu_count, ceil(memory_demand_mb / mem_per_cpu_mb))`，所以请求更多内存会顶高核数。提交链路将存储的 `cpu_count` / `memory_demand` **归一化**为有效的**每 task 请求值**（`normalize_per_cpu_resources`，在填默认值之后、上限校验之前）。该折算与 sbatch 构建共用同一 helper（`effective_cpu_count_per_cpu`），且幂等。这两个字段不是全 Job 分配量，也不是实测内存使用量。
+
+**多节点资源展示**：`node_count` 和 `tasks_per_node` 默认均为一。CPU 按 task 请求（`--cpus-per-task`），GPU 按节点请求（`--gres`）。Job 列表和详情响应保留原请求字段，并新增供展示的 `resource_summary`：
+
+| 全 Job 请求量 | 计算方法 |
+|---|---|
+| CPU | `cpu_count × node_count × tasks_per_node` |
+| RAM，`per_cpu` | 归一化后的 `memory_demand × node_count × tasks_per_node` |
+| RAM，`explicit` | `memory_demand × node_count` |
+| GPU | `gpu_count × node_count` |
+
+例如两节点、每节点 64 tasks、每 task 1 CPU、每 CPU 4000 MiB，合计请求 **128 CPU、500 GiB**。表格和详情展示总量并提供拓扑明细。`resource_summary.memory_bytes` 单位为字节；null 表示总量未知，而非零。新 Job 保存服务端生成的 `resource_mode` 快照（`slurm_per_cpu`、`slurm_per_node` 或 `local`）。旧 Job 的快照保持 null，其请求摘要按当前站点配置推算并设置 `mode_inferred=true`，UI 标为估算；不回填历史记录来断言未保存过的口径。
+
+集群运行列表对 Magnus 和外部 Job 统一采用 SLURM 的全 Job 分配量（`resource_summary.basis="allocation"`），不重复乘节点/task。普通列表与详情使用 `basis="request"`；两者都不是实时使用率。Local/Docker 摘要展示提交值，不乘未支持的节点/task 拓扑，也不宣称资源限额被强制执行。原 API 字段与 SDK 提交语义保持不变。
 
 `time_limit`（分钟）映射到 `--time`；为 null 时不下发，沿用分区默认墙钟。声明短墙钟的 job 在共享集群更易被 backfill 插队。
 

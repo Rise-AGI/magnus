@@ -1,10 +1,11 @@
 # back_end/server/schemas/_job.py
 """Job submission / response schemas."""
 from datetime import datetime
-from typing import Any, List, Optional
-from pydantic import BaseModel, computed_field, field_validator, model_validator
+from typing import Any, List, Literal, Optional
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from ..models import JobType, JobStatus
+from .._job_resources import RESOURCE_MODES, ResourceMode, requested_job_resources, resource_mode_for_execution
 from ._user import UserInfo
 
 
@@ -49,6 +50,18 @@ class JobSubmission(BaseModel):
         return self
 
 
+class JobResourceSummary(BaseModel):
+    """Whole-job display values; raw submission fields keep their original units."""
+    basis: Literal["request", "allocation"]
+    mode: ResourceMode
+    mode_inferred: bool
+    cpu_count: Optional[int]
+    memory_bytes: Optional[int]
+    gpu_count: int
+    node_count: Optional[int]
+    tasks_per_node: Optional[int]
+
+
 class JobListItem(BaseModel):
     """列表 / 看板 / 内嵌视图里的轻量 job 投影。
 
@@ -74,6 +87,8 @@ class JobListItem(BaseModel):
     memory_demand: Optional[str] = None
     node_count: Optional[int] = None
     tasks_per_node: Optional[int] = None
+    resource_mode: Optional[str] = Field(default=None, exclude=True, repr=False)
+    resource_summary: Optional[JobResourceSummary] = None
     time_limit: Optional[int] = None
     ephemeral_storage: Optional[str] = None
     runner: Optional[str] = None
@@ -84,6 +99,27 @@ class JobListItem(BaseModel):
     created_at: datetime
     user: Optional[UserInfo] = None
     class Config: from_attributes = True
+
+    @model_validator(mode="after")
+    def _summarize_resources(self):
+        if self.resource_summary is None:
+            mode = self.resource_mode
+            inferred = mode not in RESOURCE_MODES
+            if inferred:
+                # A legacy row has no historical snapshot. Expose this inference
+                # explicitly instead of silently rewriting its stored request.
+                from .._magnus_config import magnus_config
+                mode = resource_mode_for_execution(magnus_config["execution"])
+            self.resource_summary = JobResourceSummary(**requested_job_resources(
+                cpu_count = self.cpu_count,
+                memory_demand = self.memory_demand,
+                gpu_count = self.gpu_count,
+                node_count = self.node_count,
+                tasks_per_node = self.tasks_per_node,
+                mode = mode,
+                mode_inferred = inferred,
+            ))
+        return self
 
     @field_validator("status", mode="before")
     @classmethod

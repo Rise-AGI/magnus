@@ -23,6 +23,7 @@ from ..schemas import ServiceResponse, ServiceListItem, ServiceCreate, PagedServ
 from .._service_manager import service_manager
 from .._id_registry import assert_id_available
 from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, normalize_per_cpu_resources, validate_cluster_limits
+from .._job_resources import resource_mode_for_execution
 from .._scheduler import scheduler
 from .auth import get_current_user
 from .users import _get_all_subordinate_ids
@@ -197,6 +198,7 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 gpu_type = service.gpu_type,
                 cpu_count = resolved_resources["cpu_count"],
                 memory_demand = resolved_resources["memory_demand"],
+                resource_mode = resource_mode_for_execution(magnus_config["execution"]),
                 ephemeral_storage = service.ephemeral_storage,
                 runner = service.runner,
                 entry_command = env_cmd,

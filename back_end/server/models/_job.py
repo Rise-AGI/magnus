@@ -83,6 +83,9 @@ class Job(Base):
     gpu_type: Mapped[str] = mapped_column(String)
     cpu_count: Mapped[int | None] = mapped_column(Integer, default=None)
     memory_demand: Mapped[str | None] = mapped_column(String, default=None)
+    # Server-owned snapshot of request units. NULL marks legacy rows whose
+    # execution/memory mode is not recorded; never backfill historical claims.
+    resource_mode: Mapped[str | None] = mapped_column(String, nullable=True)
     # 多节点（SLURM）：node_count = 申请的节点数，tasks_per_node = 每节点 MPI rank 数。
     # 总 rank = node_count × tasks_per_node，每 rank 分 cpu_count 核（--cpus-per-task）。
     # None 视作 1 —— 单节点单 task，即历史行为（sbatch 不发 --nodes/--ntasks、wrapper

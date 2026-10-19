@@ -367,7 +367,7 @@ def run_migrations()-> None:
                 conn.commit()
             logger.info("✅ Migration completed.")
 
-    for column in ("dockerfile", "build_result"):
+    for column in ("dockerfile", "build_result", "resource_mode"):
         if column not in job_columns:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {column} TEXT"))
