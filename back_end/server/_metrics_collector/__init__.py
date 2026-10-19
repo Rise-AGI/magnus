@@ -1,9 +1,10 @@
 # back_end/server/_metrics_collector/__init__.py
 """Host-side system metrics collector for Docker (local) mode.
 
-In SLURM mode, system metrics are sampled by the in-container `_metrics_sidecar`
-embedded in wrapper.py (see `_build_wrapper_content` in
-`_scheduler/_wrapper_template.py`). In Docker mode there is no wrapper — we
+In SLURM mode, the wrapper's `_metrics_sidecar` uses owner-authorized Slurm job
+accounting for whole-job CPU and memory. The standard-library `_job_accounting`
+module is embedded in the generated wrapper without importing this package.
+In Docker mode there is no wrapper — we
 cannot inject a sidecar inside the container. So this collector samples cgroup
 data + nvidia-smi from the host and writes the same JSONL format (Magnus
 Metrics Protocol v1) to `{work_dir}/metrics/system.jsonl`, keeping dual-mode
@@ -19,16 +20,15 @@ Fail-open is total: cgroup unreadable, container vanished, nvidia-smi missing �
 silently skip that sample/job/metric and continue. Nothing here may raise into
 the scheduler heartbeat.
 
-Cgroup parsing here is intentionally duplicated from the equivalent logic in
-wrapper.py (`_metrics_sidecar` / `_check_oom`), because wrapper.py is built by
-f-string templating and cannot import from this module. Keep the two impls
-behaviorally equivalent; if you change one, change the other.
+Wrapper OOM detection still reads its own cgroup; it is independent of the
+whole-job accounting used for SLURM CPU/memory metrics.
 
 Layout:
 - _cgroup.py:           host-side cgroup parsing helpers
 - _docker_inspect.py:   docker inspect wrappers (PID + NVIDIA_VISIBLE_DEVICES)
 - _nvidia_smi.py:       node-wide GPU sampler
 - _collector.py:        DockerMetricsCollector + per-job state
+- _job_accounting.py:   standalone Slurm step accounting and whole-job sampler
 
 公共面：`DockerMetricsCollector`。
 """

@@ -805,26 +805,56 @@ The following describes Magnus's first production implementation of this protoco
 
 ### 17.2 System Metrics Collection
 
-In SLURM mode, wrapper.py has a built-in daemon thread (`_metrics_sidecar`) that samples every 5 seconds:
+In SLURM mode, the existing wrapper sidecar runs as the Job owner and queries
+`sstat --allsteps --noconvert --format=JobID,NTasks,TRESUsageInTot` for its own Job.
+One query covers the accounted steps on every node; the implementation does not
+assume MPI or inspect the user's program. Queries are at least 30 seconds apart
+and have a 10-second timeout. A working Slurm `jobacct_gather` plugin is required.
 
-- `system.gpu.utilization`: via `nvidia-smi --query-gpu=utilization.gpu`, filtered by `CUDA_VISIBLE_DEVICES`
-- `system.gpu.memory.used_bytes`: via `nvidia-smi --query-gpu=memory.used`, converting MiB to bytes
-- `system.cpu.utilization`: cgroup CPU usage delta (`cpu.stat usage_usec` on v2, `cpuacct.usage` on v1) divided by allocated cores. **100% means the task is fully using its allocated cores**, not the whole node. Allocated cores are taken from `SLURM_CPUS_PER_TASK` / `SLURM_CPUS_ON_NODE` / `os.cpu_count()` in that priority order.
-- `system.memory.used_bytes`: cgroup memory (`memory.current` on v2, `memory.usage_in_bytes` on v1)
+- `system.cpu.utilization`: the sum of per-step CPU-time increments, divided by
+  monotonic elapsed time and the Job's actual allocated CPUs, multiplied by 100.
+  Allocation comes from `SLURM_JOB_CPUS_PER_NODE` (for example, `64(x2)` means 128).
+  A batch step's `SLURM_CPUS_ON_NODE`, one task's CPU count, or the host CPU count
+  cannot replace the Job allocation. Without that allocation, CPU is not emitted.
+- `system.memory.used_bytes`: the sum of current `TRESUsageInTot.mem` values over
+  the Job's accounted steps. These are already whole-step memory-accounting bytes;
+  they are not multiplied by task count and are not `MaxRSS` peaks or percentages.
+- CPU and memory points have `scope=job`, `coverage=all_steps` and
+  `source=slurm_jobacct`. Memory records `memory_basis=slurm_tres_mem`; CPU records
+  its normalization CPU count. Whole-job points have no individual node label.
 
-Writes to `$MAGNUS_METRICS_DIR/system.jsonl`, strictly following this protocol.
+New or finished steps, changing task counts, counter resets and failed queries
+invalidate the current CPU delta window. Incomplete data produces a gap, never
+a fabricated zero. Empty `extern` records containing only node energy are not
+process-accounting samples. Memory can still be reported when its fields are
+complete but CPU accounting is not. Slurm's configured accounting cadence limits
+the freshness of these observations.
 
-The sidecar is fail-open end-to-end: if nvidia-smi does not exist (CPU-only tasks) or any cgroup file is not readable, it silently skips that metric. The sidecar starts before the container starts and stops after the container exits (`threading.Event` + `join(timeout=5)`).
+The memory accounting basis follows the site's Slurm plugin and parameters.
+For example, cgroup v2 reports `memory.current`, including file cache unless
+the site configures `JobAcctGatherParams=no_file_cache`; it is not procfs RSS.
 
-In Docker local mode there is no wrapper.py inside the container, so a host-side collector (`back_end/server/_metrics_collector/`, a single asyncio task started in the FastAPI lifespan) samples the same four metrics for every RUNNING container. It resolves the container's host PID via `docker inspect` and reads the same cgroup files the SLURM sidecar reads, then parses `NVIDIA_VISIBLE_DEVICES` from the container env to filter `nvidia-smi` output. The output schema (file path, stream names, units, labels) is identical to SLURM mode; the API and frontend treat both modes the same.
+GPU sampling remains every 5 seconds through `nvidia-smi`, filtered by the batch
+node's `CUDA_VISIBLE_DEVICES`. GPU memory is converted from MiB to bytes; these
+device/node streams do not claim cross-node GPU coverage.
 
-**Caveat — when CPU% degrades to node-wide semantics.** The "100% = task fully using its allocated cores" guarantee assumes the runtime can locate a per-task CPU quota signal. When that signal is absent, the collector fails open and falls back to `os.cpu_count()` (whole-node cores) as the denominator, so the curve effectively reports node-level CPU% — the same shape as the pre-fix behavior. This is a known limitation, not a bug:
+The sidecar writes the same `system.jsonl` point protocol and never gates user
+execution on metrics availability. It stops after the command exits, allowing
+up to 25 seconds for bounded accounting/GPU queries to finish. The standard-library
+accounting implementation is embedded when a wrapper is generated; compute nodes
+do not need the Magnus backend package. Already running wrappers and historical
+metric files are not rewritten or backfilled.
 
-- **SLURM sites using `proctrack/linuxproc`** (rather than `task/cgroup`): the job's cgroup is the host root, so `cpu.stat usage_usec` reflects host-wide activity and no quota is exposed. If `SLURM_CPUS_PER_TASK` / `SLURM_CPUS_ON_NODE` are also unset, the denominator collapses to `os.cpu_count()`.
-- **Cgroup files unreadable** (permissions, unusual host configs): the per-task quota cannot be determined; the collector skips that signal and falls back.
-- **Docker containers started without a CPU quota** (no `--cpus` / `--cpu-quota`, the default): `cpu.max` reads `max`, so `_read_allocated_cpus` returns `None` and the denominator falls back to `os.cpu_count()`.
+Docker local mode keeps its host-side collector and 5-second cadence. CPU usage
+is the container cgroup's time increment relative to its CPU quota; an unlimited
+container uses the host CPU count as its denominator. Memory is the whole
+container's cgroup usage minus inactive file cache. GPU access is filtered by
+`NVIDIA_VISIBLE_DEVICES`. The units and JSONL protocol are shared, while labels
+retain the accounting scope and source; host activity is not added to a Job.
 
-If task-relative CPU% matters at your site, configure `task/cgroup` on SLURM or pass an explicit `--cpus` to Docker.
+References: [Slurm sstat](https://slurm.schedmd.com/sstat.html),
+[Slurm allocation variables](https://slurm.schedmd.com/sbatch.html), and
+[current versus maximum accounting values](https://github.com/SchedMD/slurm/blob/slurm-25-05-0-1/src/plugins/jobacct_gather/common/common_jag.c).
 
 ### 17.3 Environment Variables
 

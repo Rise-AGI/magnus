@@ -9,6 +9,7 @@ wrapper.py 在每个 SLURM job 启动时由 sbatch 调起，负责：
 
 这里是一个巨大的 f-string 模板，纯输入→字符串转换，不依赖 scheduler 实例状态。
 """
+from pathlib import Path
 from typing import List, Optional
 
 
@@ -44,8 +45,6 @@ def _build_wrapper_content(
     # 语义解释为**每节点**卡数，全任务总卡数 = node_count × gpu_count。
     #
     # 已知局限（v1，留待真集群迭代，仅多节点路径受影响、单节点不涉及）：
-    # - CPU/RAM metrics sample the batch-step cgroup on node 0. srun ranks can
-    #   live in sibling step cgroups, so these are not aggregate MPI metrics;
     # - SIGTERM 的 cgroup fan-out 也只覆盖 node 0，跨节点优雅信号依赖 srun 原生转发
     #   （硬杀走 scancel --signal=KILL --full 覆盖全节点，不受影响）；
     # - MAGNUS_NET_MODE=bridge 与多节点不兼容（会变成 rootlesskit 套 srun，语义不通），
@@ -140,7 +139,14 @@ MAGNUS_RANK_LAUNCH_EOF
         else ''
     )
 
-    return f'''import os
+    # Compute nodes need only the standard library, not the backend package.
+    accounting_source = (
+        Path(__file__).resolve().parents[1] / "_metrics_collector" / "_job_accounting.py"
+    ).read_text(encoding="utf-8")
+
+    return f'''{accounting_source}
+
+import os
 import signal
 import sys
 import traceback
@@ -149,10 +155,8 @@ import threading
 import time
 import json
 
-# NOTE: cgroup parsing here is duplicated from
-# back_end/server/_metrics_collector/_cgroup.py (host-side Docker collector).
-# Wrapper.py is built by f-string templating and cannot import that module
-# at runtime on the compute node. Keep both impls behaviorally equivalent.
+# These paths serve OOM detection and signal forwarding. Resource metrics use
+# Slurm's job accounting so sibling steps and other nodes are included.
 def _is_pure_v2():
     """True when /sys/fs/cgroup is the cgroup v2 mount AND no v1 cgroup is mounted.
 
@@ -206,85 +210,6 @@ def _cg_paths():
         return None, None, None
     return v2_rel, v1_mem, v1_cpu
 
-def _read_cpu_usage_usec():
-    """Cumulative cpu usage in microseconds for our cgroup. None on failure."""
-    v2_rel, _, v1_cpu = _cg_paths()
-    if _is_pure_v2():
-        if v2_rel is None:
-            return None
-        path = "/sys/fs/cgroup" + v2_rel.rstrip("/") + "/cpu.stat"
-        try:
-            with open(path) as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) >= 2 and parts[0] == "usage_usec":
-                        return int(parts[1])
-        except Exception:
-            return None
-        return None
-    if v1_cpu is None:
-        return None
-    # cpuacct.usage is in nanoseconds; convert to microseconds for parity with v2.
-    path = "/sys/fs/cgroup/cpuacct" + v1_cpu.rstrip("/") + "/cpuacct.usage"
-    try:
-        with open(path) as f:
-            return int(f.read().strip()) // 1000
-    except Exception:
-        return None
-
-def _read_memory_used_bytes():
-    """Memory usage in bytes for our cgroup, minus reclaimable file-backed page
-    cache (mirrors `docker stats`). Without this, IO-heavy tasks look like
-    they're near their memory limit just from cache."""
-    v2_rel, v1_mem, _ = _cg_paths()
-    if _is_pure_v2():
-        if v2_rel is None:
-            return None
-        cgroup_dir = "/sys/fs/cgroup" + v2_rel.rstrip("/")
-        usage_file = "memory.current"
-    else:
-        if v1_mem is None:
-            return None
-        cgroup_dir = "/sys/fs/cgroup/memory" + v1_mem.rstrip("/")
-        usage_file = "memory.usage_in_bytes"
-
-    try:
-        with open(cgroup_dir + "/" + usage_file) as f:
-            usage = int(f.read().strip())
-    except Exception:
-        return None
-
-    inactive_file = 0
-    try:
-        with open(cgroup_dir + "/memory.stat") as f:
-            for line in f:
-                if line.startswith("inactive_file "):
-                    inactive_file = int(line.split()[1])
-                    break
-    except Exception:
-        pass
-    return max(0, usage - inactive_file)
-
-def _allocated_cpus():
-    """Return CPU count this task is entitled to. Falls back conservatively."""
-    for var in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE"):
-        v = os.environ.get(var)
-        if v and v.isdigit() and int(v) > 0:
-            return int(v)
-    return os.cpu_count() or 1
-
-def _metric_cgroup_scope(controller):
-    v2_rel, v1_mem, v1_cpu = _cg_paths()
-    path = v2_rel if _is_pure_v2() else (v1_cpu if controller == "cpu" else v1_mem)
-    parts = (path or "").split("/")
-    job_id = os.environ.get("SLURM_JOB_ID")
-    # Without a job-owned cgroup, the sample may cover slurmd or the whole host.
-    if not job_id or "job_" + job_id not in parts:
-        return "unverified_cgroup"
-    if "step_batch" in parts:
-        return "batch_step"
-    return "slurm_step" if any(part.startswith("step_") for part in parts) else "job_node"
-
 def _metrics_sidecar(metrics_dir, stop_event):
     try:
         import socket
@@ -295,28 +220,20 @@ def _metrics_sidecar(metrics_dir, stop_event):
         # every visible GPU to a CPU-only job.
         _cvd = os.environ.get("CUDA_VISIBLE_DEVICES") or ""
         allowed_gpus = set(s.strip() for s in _cvd.split(",") if s.strip().isdigit())
-        # CPU utilization is now task-quota relative (cgroup) rather than node-wide
-        # (/proc/stat). 100% = task fully using its allocated cores.
-        alloc_cpus = float(_allocated_cpus())
-        cpu_basis = next((name.lower().removeprefix("slurm_") for name in
-                          ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE")
-                          if os.environ.get(name, "").isdigit() and int(os.environ[name]) > 0),
-                         "host_cpu_count")
-        prev_usage_usec = _read_cpu_usage_usec()
-        prev_wall_ms = int(time.time() * 1000)
+        job_id = os.environ.get("SLURM_JOB_ID", "")
+        reader = SlurmJobMetricsReader()
+        sampler = SlurmJobMetricsSampler(allocation_cpus(os.environ))
+        next_accounting = 0.0
         while not stop_event.wait(5.0):
             now_ms = int(time.time() * 1000)
             lines = []
-            # srun ranks can be in sibling cgroups. Record the actual scope,
-            # rather than presenting the launcher's usage as a whole MPI job.
             coverage = {repr("partial" if _is_multinode else "single_task")}
-            node_labels = {{"node": hostname, "coverage": coverage}}
             if allowed_gpus:
                 try:
                     out = subprocess.check_output(
                         ["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used",
                          "--format=csv,noheader,nounits"],
-                        timeout=10, text=True, stderr=subprocess.DEVNULL,
+                        timeout=10, universal_newlines=True, stderr=subprocess.DEVNULL,
                     )
                     for row in out.strip().split("\\n"):
                         parts = [p.strip() for p in row.split(",")]
@@ -339,46 +256,20 @@ def _metrics_sidecar(metrics_dir, stop_event):
                         }}))
                 except Exception:
                     pass
-            # CPU metrics (cgroup-based, task-quota relative)
-            try:
-                cur_usage_usec = _read_cpu_usage_usec()
-                if cur_usage_usec is not None and prev_usage_usec is not None:
-                    d_usage = cur_usage_usec - prev_usage_usec
-                    d_wall_ms = now_ms - prev_wall_ms
-                    if d_wall_ms > 0 and alloc_cpus > 0 and d_usage >= 0:
-                        cpu_pct = round((d_usage / (d_wall_ms * 1000.0) / alloc_cpus) * 100, 1)
-                        # Keep values above 100: clipping would hide a quota /
-                        # cgroup-scope mismatch rather than explain it.
-                        cpu_scope = _metric_cgroup_scope("cpu")
-                        cpu_labels = dict(node_labels, scope=cpu_scope,
-                                          normalization_cpus=str(alloc_cpus), normalized_by=cpu_basis)
-                        if cpu_scope == "unverified_cgroup":
-                            cpu_labels["coverage"] = "unverified"
-                        lines.append(json.dumps({{
-                            "name": "system.cpu.utilization", "kind": "gauge",
-                            "value": cpu_pct, "time_unix_ms": now_ms,
-                            "unit": "percent", "labels": cpu_labels,
-                        }}))
-                if cur_usage_usec is not None:
-                    prev_usage_usec = cur_usage_usec
-                    prev_wall_ms = now_ms
-            except Exception:
-                pass
-            # Memory metrics
-            try:
-                mem_bytes = _read_memory_used_bytes()
-                if mem_bytes is not None:
-                    memory_scope = _metric_cgroup_scope("memory")
-                    memory_labels = dict(node_labels, scope=memory_scope)
-                    if memory_scope == "unverified_cgroup":
-                        memory_labels["coverage"] = "unverified"
-                    lines.append(json.dumps({{
-                        "name": "system.memory.used_bytes", "kind": "gauge",
-                        "value": float(mem_bytes), "time_unix_ms": now_ms,
-                        "unit": "bytes", "labels": memory_labels,
-                    }}))
-            except Exception:
-                pass
+            # One owner-authorized query includes every accounted step/node.
+            # Slurm normally gathers task accounting every 30 seconds.
+            if not stop_event.is_set() and time.monotonic() >= next_accounting:
+                try:
+                    snapshot = reader.read(job_id, timeout=10.0)
+                    records = sampler.sample(
+                        snapshot,
+                        monotonic_seconds=time.monotonic(),
+                        time_unix_ms=int(time.time() * 1000),
+                    )
+                    lines.extend(json.dumps(record) for record in records)
+                except Exception:
+                    sampler.reset()
+                next_accounting = time.monotonic() + 30.0
             if lines:
                 try:
                     with open(path, "a") as f:
@@ -743,7 +634,7 @@ fi
         # Stop metrics sidecar
         _stop_metrics.set()
         if _metrics_thread is not None:
-            _metrics_thread.join(timeout=5)
+            _metrics_thread.join(timeout=25)
 
         # OOM 探测：被 SIGTERM 转发后用户 handler 自行 exit non-zero 不是 OOM，
         # _signaled[0] 为 True 时跳过避免误写 .magnus_oom（误写会让 sync 端把

@@ -3,78 +3,200 @@ import ast
 import importlib.util
 import json
 from pathlib import Path
-from types import SimpleNamespace
+import subprocess
+import sys
+import tempfile
+from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import mock_open
+from unittest.mock import mock_open, patch
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
 
 
 class MetricCoverageTests(unittest.TestCase):
-    def test_generated_sidecar_labels_scope_and_does_not_clip_overquota(self):
+    def generated_wrapper(
+        self,
+        nodes,
+        tasks,
+    ):
         source = SERVER / "_scheduler" / "_wrapper_template.py"
         spec = importlib.util.spec_from_file_location("metric_test_wrapper", source)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        for nodes, tasks, coverage in ((1, 1, "single_task"), (2, 64, "partial")):
+        return module._build_wrapper_content(
+            job_working_table="/work",
+            job_ephemeral_table="/tmp/work",
+            repo_dir="/repo",
+            sif_path="/image.sif",
+            system_entry_command="",
+            user_token="test-token",
+            magnus_address="https://example.invalid",
+            job_id="example",
+            ephemeral_storage="1G",
+            allow_root=False,
+            entry_command="exit 99",
+            effective_runner="example",
+            container_runtime="apptainer",
+            node_count=nodes,
+            tasks_per_node=tasks,
+        )
+
+    def run_sidecar(
+        self,
+        generated,
+        environment,
+        samples,
+        ticks,
+    ):
+        module = ModuleType("isolated_generated_metrics_wrapper")
+        with patch.dict(sys.modules, {module.__name__: module}):
+            exec(compile(generated, "generated_wrapper.py", "exec"), vars(module))
+        clock = SimpleNamespace(now=0.0, ticks=0)
+        accounting_calls = []
+        gpu_calls = []
+        outputs = iter(samples)
+        writer = mock_open()
+
+        def wait(
+            interval,
+        ):
+            self.assertEqual(interval, 5.0)
+            if clock.ticks >= ticks:
+                return True
+            clock.now += interval
+            clock.ticks += 1
+            return False
+
+        def read_accounting(
+            command,
+            **kwargs,
+        ):
+            accounting_calls.append((clock.now, command, kwargs))
+            result = next(outputs)
+            if isinstance(result, Exception):
+                raise result
+            return subprocess.CompletedProcess(command, 0, result, "")
+
+        def read_gpu(
+            command,
+            **kwargs,
+        ):
+            gpu_calls.append((clock.now, command, kwargs))
+            return "0, 25, 30\n1, 99, 40"
+
+        module.os = SimpleNamespace(
+            path=SimpleNamespace(join=lambda *parts: "/".join(parts)),
+            environ=environment,
+        )
+        module.time = SimpleNamespace(
+            time=lambda: 1000.0 + clock.now,
+            monotonic=lambda: clock.now,
+        )
+        module.subprocess = SimpleNamespace(
+            run=read_accounting,
+            check_output=read_gpu,
+            DEVNULL=subprocess.DEVNULL,
+            PIPE=subprocess.PIPE,
+        )
+        module.open = writer
+        module._metrics_sidecar("/metrics", SimpleNamespace(wait=wait, is_set=lambda: False))
+        records = [
+            json.loads(line)
+            for call in writer().write.call_args_list
+            for line in call.args[0].splitlines()
+        ]
+        return records, accounting_calls, gpu_calls
+
+    def test_generated_sidecar_uses_whole_job_accounting_for_every_topology(self):
+        for nodes, tasks, cpus, coverage in ((1, 1, 2, "single_task"), (2, 64, 128, "partial")):
             with self.subTest(nodes=nodes, tasks=tasks):
-                generated = module._build_wrapper_content(
-                    job_working_table = "/work",
-                    job_ephemeral_table = "/tmp/work",
-                    repo_dir = "/repo",
-                    sif_path = "/image.sif",
-                    system_entry_command = "",
-                    user_token = "test-token",
-                    magnus_address = "https://example.invalid",
-                    job_id = "example",
-                    ephemeral_storage = "1G",
-                    allow_root = False,
-                    entry_command = "true",
-                    effective_runner = "example",
-                    container_runtime = "apptainer",
-                    node_count = nodes,
-                    tasks_per_node = tasks,
+                samples = ["123.batch|1|cpu=0,mem=100", f"123.batch|1|cpu={cpus * 30},mem=200"]
+                if nodes > 1:
+                    samples = [
+                        "123.extern|2|energy=0\n123.batch|1|cpu=0,mem=100\n123.0|128|cpu=0,mem=1000",
+                        "123.extern|2|energy=0\n123.batch|1|cpu=1,mem=200\n123.0|128|cpu=3839,mem=2000",
+                    ]
+                records, accounting, gpu = self.run_sidecar(
+                    generated=self.generated_wrapper(nodes, tasks),
+                    environment={
+                        "CUDA_VISIBLE_DEVICES": "0",
+                        "SLURM_JOB_ID": "123",
+                        "SLURM_JOB_CPUS_PER_NODE": "64(x2)" if nodes > 1 else "2",
+                        "SLURM_JOB_NUM_NODES": str(nodes),
+                        "SLURM_CPUS_PER_TASK": "1",
+                    },
+                    samples=samples,
+                    ticks=7,
                 )
-                tree = ast.parse(generated)
-                function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_metrics_sidecar")
-                clocks, counters, waits = iter((1.0, 6.0)), iter((0, 15000000)), iter((False, True))
-                writer = mock_open()
-                namespace = {
-                    "json": json,
-                    "os": SimpleNamespace(path=SimpleNamespace(join=lambda *parts: "/".join(parts)), environ={"CUDA_VISIBLE_DEVICES": "0"}),
-                    "time": SimpleNamespace(time=lambda: next(clocks)),
-                    "subprocess": SimpleNamespace(check_output=lambda *args, **kwargs: "0, 25, 30", DEVNULL=None),
-                    "_allocated_cpus": lambda: 2,
-                    "_metric_cgroup_scope": lambda controller: "batch_step",
-                    "_read_cpu_usage_usec": lambda: next(counters),
-                    "_read_memory_used_bytes": lambda: 4096,
-                    "open": writer,
-                }
-                exec(compile(ast.Module(body=[function], type_ignores=[]), "sidecar", "exec"), namespace)
-                namespace["_metrics_sidecar"]("/metrics", SimpleNamespace(wait=lambda interval: next(waits)))
-                records = [json.loads(line) for call in writer().write.call_args_list for line in call.args[0].splitlines()]
-                self.assertEqual(len(records), 4)
-                by_name = {record["name"]: record for record in records}
-                cpu = by_name["system.cpu.utilization"]
-                self.assertEqual(cpu["value"], 150.0)
-                self.assertEqual(cpu["labels"]["scope"], "batch_step")
-                self.assertEqual(cpu["labels"]["normalization_cpus"], "2.0")
-                self.assertTrue(all(record["labels"]["coverage"] == coverage for record in records))
-                self.assertEqual(by_name["system.gpu.utilization"]["labels"]["scope"], "device")
-                scope_function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_metric_cgroup_scope")
-                namespace["os"].environ["SLURM_JOB_ID"] = "123"
-                namespace["_is_pure_v2"] = lambda: True
-                exec(compile(ast.Module(body=[scope_function], type_ignores=[]), "scope", "exec"), namespace)
-                for path, expected in (
-                    ("/system.slice/slurmd.service", "unverified_cgroup"),
-                    ("/slurm/uid_1/job_123/step_batch", "batch_step"),
-                    ("/slurm/uid_1/job_999/step_batch", "unverified_cgroup"),
-                    ("/slurm/uid_1/job_123", "job_node"),
-                    ("/slurm/uid_1/job_123/step_0", "slurm_step"),
-                ):
-                    namespace["_cg_paths"] = lambda: (path, None, None)
-                    self.assertEqual(namespace["_metric_cgroup_scope"]("cpu"), expected)
+                self.assertEqual([call[0] for call in accounting], [5.0, 35.0])
+                self.assertEqual([call[0] for call in gpu], list(range(5, 36, 5)))
+                for _, command, kwargs in accounting:
+                    self.assertEqual(command[0], "sstat")
+                    self.assertIn("--allsteps", command)
+                    self.assertIn("--jobs=123", command)
+                    self.assertIn("--noconvert", command)
+                    self.assertEqual(kwargs["timeout"], 10.0)
+                cpu = [point for point in records if point["name"] == "system.cpu.utilization"]
+                memory = [point for point in records if point["name"] == "system.memory.used_bytes"]
+                self.assertEqual(len(cpu), 1)
+                self.assertEqual(cpu[0]["value"], 100.0)
+                self.assertEqual(cpu[0]["labels"]["normalization_cpus"], str(cpus))
+                self.assertEqual([point["value"] for point in memory], [1100, 2200] if nodes > 1 else [100, 200])
+                for point in cpu + memory:
+                    self.assertEqual(point["labels"]["scope"], "job")
+                    self.assertEqual(point["labels"]["coverage"], "all_steps")
+                    self.assertEqual(point["labels"]["source"], "slurm_jobacct")
+                    self.assertNotIn("node", point["labels"])
+                gpu_points = [point for point in records if point["name"].startswith("system.gpu.")]
+                self.assertEqual(len(gpu_points), 14)
+                for point in gpu_points:
+                    self.assertEqual(point["labels"]["scope"], "device")
+                    self.assertEqual(point["labels"]["coverage"], coverage)
+                    self.assertEqual(point["labels"]["device"], "cuda:0")
+
+    def test_generated_sidecar_resets_after_query_failure_without_zero_filling(self):
+        records, accounting, gpu = self.run_sidecar(
+            generated=self.generated_wrapper(1, 1),
+            environment={"SLURM_JOB_ID": "123", "SLURM_JOB_CPUS_PER_NODE": "2"},
+            samples=[
+                "123.batch|1|cpu=0,mem=100",
+                subprocess.TimeoutExpired("sstat", 10.0),
+                "123.batch|1|cpu=120,mem=300",
+                "123.batch|1|cpu=180,mem=400",
+            ],
+            ticks=19,
+        )
+        self.assertEqual([call[0] for call in accounting], [5.0, 35.0, 65.0, 95.0])
+        self.assertEqual(gpu, [])
+        cpu = [point for point in records if point["name"] == "system.cpu.utilization"]
+        memory = [point for point in records if point["name"] == "system.memory.used_bytes"]
+        self.assertEqual([(point["time_unix_ms"], point["value"]) for point in cpu], [(1095000, 100.0)])
+        self.assertEqual([point["value"] for point in memory], [100, 300, 400])
+
+    def test_generated_wrapper_loads_without_backend_or_site_packages(self):
+        generated = self.generated_wrapper(2, 64)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "wrapper.py"
+            source.write_text(generated, encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    "-c",
+                    "import runpy,sys; values=runpy.run_path(sys.argv[1], run_name='isolated_wrapper'); "
+                    "print(values['allocation_cpus']({'SLURM_JOB_CPUS_PER_NODE':'64(x2)'})); "
+                    "print(values['SlurmJobMetricsReader'].__name__)",
+                    str(source),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=15,
+                cwd=directory,
+            )
+        self.assertEqual(result.stdout.splitlines(), ["128", "SlurmJobMetricsReader"])
 
     def test_docker_metrics_have_container_scope_and_device_gpu_scope(self):
         source = SERVER / "_metrics_collector" / "_collector.py"

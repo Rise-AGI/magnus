@@ -1,10 +1,9 @@
 # back_end/server/_metrics_collector/_cgroup.py
 """Host-side cgroup parsing helpers.
 
-Mirror of the parsing logic embedded in wrapper.py's _metrics_sidecar / _check_oom
-(see `_build_wrapper_content` in `_scheduler/_wrapper_template.py`). Wrapper.py is
-built by f-string templating and cannot import from this module — keep the two
-impls behaviorally equivalent.
+Docker metrics use the container's cgroup. SLURM CPU and memory metrics instead
+use job accounting; the generated wrapper retains separate cgroup parsing for
+OOM detection and signal forwarding.
 
 Layout:
 - _is_pure_v2:                pure-v2 vs hybrid detection

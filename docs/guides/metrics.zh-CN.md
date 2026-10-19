@@ -805,26 +805,43 @@ v1 不允许在一个点的 `value` 中放入聚合对象。
 
 ### 17.2 系统指标采集
 
-SLURM 模式下，wrapper.py 内置一个 daemon thread（`_metrics_sidecar`），每 5 秒采集一次：
+SLURM 模式下，原有 wrapper 采集线程以作业所属用户身份，对本 Job 执行
+`sstat --allsteps --noconvert --format=JobID,NTasks,TRESUsageInTot`。
+一次查询覆盖所有节点上的已统计步骤，不假定使用 MPI，也不检查用户程序。
+查询间隔至少30秒，单次超时10秒；站点需要正常运行 Slurm `jobacct_gather` 插件。
 
-- `system.gpu.utilization`：通过 `nvidia-smi --query-gpu=utilization.gpu`，按 `CUDA_VISIBLE_DEVICES` 过滤
-- `system.gpu.memory.used_bytes`：通过 `nvidia-smi --query-gpu=memory.used`，MiB 换算为 bytes
-- `system.cpu.utilization`：cgroup CPU 用时 delta（v2 读 `cpu.stat usage_usec`，v1 读 `cpuacct.usage`）除以申请到的核数。**100% 表示任务完全用满它申请的核数**，而不是整个节点。申请核数按 `SLURM_CPUS_PER_TASK` / `SLURM_CPUS_ON_NODE` / `os.cpu_count()` 优先级取。
-- `system.memory.used_bytes`：cgroup 内存（v2 `memory.current`，v1 `memory.usage_in_bytes`）
+- `system.cpu.utilization`：各步骤 CPU 累计时间的增量之和，除以单调时钟经过时间
+  和整个 Job 实际获配 CPU 数，再乘100。分母取 `SLURM_JOB_CPUS_PER_NODE`
+  （例如 `64(x2)` 表示128核）。batch步骤的 `SLURM_CPUS_ON_NODE`、单个task核数
+  或宿主机核数都不能替代作业分配；缺失该分配信息时不发CPU点。
+- `system.memory.used_bytes`：整个 Job 已统计步骤的当前 `TRESUsageInTot.mem` 之和。
+  该字段已经是全步骤内存统计字节数，不再乘 task 数，也不是 `MaxRSS` 峰值或百分比。
+- CPU/内存点带 `scope=job`、`coverage=all_steps`、`source=slurm_jobacct`。
+  内存另记 `memory_basis=slurm_tres_mem`，CPU记录归一化核数；全作业点不带单个节点标签。
 
-写入 `$MAGNUS_METRICS_DIR/system.jsonl`，格式严格遵循本协议。
+步骤新增或结束、task 数变化、计数器回退、查询失败时，当前 CPU 差分窗口作废。
+数据不完整时留空，不制造0值。只有节点能耗的空 `extern` 记录不计入进程统计。
+若内存字段完整而 CPU 不完整，仍可报告内存。观测的新鲜度受站点实际 accounting
+采集周期约束。
 
-sidecar 全链路 fail-open：nvidia-smi 不存在（CPU-only 任务）或某个 cgroup 文件不可读时静默跳过该项指标。sidecar 在容器启动前开始，容器退出后停止（`threading.Event` + `join(timeout=5)`）。
+内存统计口径遵循站点的 Slurm 插件与参数。例如 cgroup v2 使用 `memory.current`，
+除非站点配置 `JobAcctGatherParams=no_file_cache`，否则含文件缓存，并不等同于procfs RSS。
 
-Docker 本地模式容器内无 wrapper.py，由宿主机侧采集器（`back_end/server/_metrics_collector/`，FastAPI lifespan 启动的单个 asyncio task）为每个 RUNNING 容器采集同样的四个指标。它通过 `docker inspect` 拿到容器的宿主机 PID，读与 SLURM sidecar 相同的 cgroup 文件；GPU 通过解析容器环境中的 `NVIDIA_VISIBLE_DEVICES` 过滤 `nvidia-smi` 输出。产出的文件路径、stream 名、单位、labels 与 SLURM 模式完全一致；API 与前端对两种模式无感。
+GPU仍每5秒通过 `nvidia-smi` 采样，按 batch 节点的 `CUDA_VISIBLE_DEVICES` 过滤，
+显存从MiB换算为字节；这些设备/节点序列不宣称覆盖其它节点的GPU。
 
-**Caveat — CPU% 何时退化为节点级语义。** "100% = 任务跑满申请的核数" 这一语义依赖运行时能定位到任务级的 CPU quota 信号。当该信号缺失时，采集器 fail-open，分母回退到 `os.cpu_count()`（节点全核），曲线实际上就成了节点级 CPU%——与 bug 修复前的行为同形。这是已知限制，而非 bug：
+采集线程写入同一 `system.jsonl` 协议，不因指标不可用阻断用户执行。命令结束后停止，
+最多等待25秒让有界的 accounting/GPU 查询收尾。纯标准库采集实现随 wrapper 生成时嵌入，
+计算节点无需安装 Magnus 后端包。已经运行的 wrapper 和历史指标文件不重写、不回填。
 
-- **SLURM 站点使用 `proctrack/linuxproc`**（而非 `task/cgroup`）：任务的 cgroup 即宿主机 root，`cpu.stat usage_usec` 反映的是整机活动且没有暴露 quota；若 `SLURM_CPUS_PER_TASK` / `SLURM_CPUS_ON_NODE` 也未设置，分母会塌陷到 `os.cpu_count()`。
-- **cgroup 文件不可读**（权限或异常的宿主机配置）：无法确定任务级 quota，采集器跳过该信号并回退。
-- **Docker 容器启动时未设置 CPU quota**（默认情况下没传 `--cpus` / `--cpu-quota`）：`cpu.max` 读出 `max`，`_read_allocated_cpus` 返回 `None`，分母回退到 `os.cpu_count()`。
+Docker local模式保留宿主侧采集器与5秒周期。CPU取容器 cgroup 用时增量相对于CPU quota
+的比例，无quota时以宿主机核数作分母；内存取整个容器的 cgroup 使用量扣除 inactive
+文件缓存，GPU按 `NVIDIA_VISIBLE_DEVICES` 过滤。两种后端共用单位与JSONL协议，
+labels保留统计范围与来源，不把其它宿主任务的使用量加进本Job。
 
-如果你的站点需要 task-relative 的 CPU%，请在 SLURM 上配 `task/cgroup`，或在 Docker 启动时显式传 `--cpus`。
+依据：[Slurm sstat](https://slurm.schedmd.com/sstat.html)、
+[Slurm分配环境变量](https://slurm.schedmd.com/sbatch.html)、
+[当前值与峰值的采集实现](https://github.com/SchedMD/slurm/blob/slurm-25-05-0-1/src/plugins/jobacct_gather/common/common_jag.c)。
 
 ### 17.3 环境变量
 
