@@ -3,6 +3,7 @@
 import json
 import re
 import subprocess
+import time
 import traceback
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
@@ -19,6 +20,80 @@ _HELD_RESOURCE_STATES = (
     "SUSPENDED", "STOPPED", "RESIZING", "CONFIGURING", "POWER_UP_NODE",
     "STAGE_OUT", "COMPLETING", "SIGNALING", "RUNNING",
 )
+
+
+def _slurm_lifecycle_state(
+    state: str,
+) -> str:
+    state = state.strip().upper()
+    if re.fullmatch(r"CANCELLED(?: BY [0-9]+|\+)?", state):
+        return "FAILED"
+    if state in {
+        "R", "RUNNING", "CG", "COMPLETING", "S", "SUSPENDED", "ST", "STOPPED",
+        "CF", "CONFIGURING", "RS", "RESIZING", "SO", "STAGE_OUT", "SI", "SIGNALING",
+        "POWER_UP_NODE", "LAUNCH_FAILED", "RECONFIG_FAIL", "UPDATE_DB",
+    }:
+        return "RUNNING"
+    if state in {
+        "PD", "PENDING", "RQ", "REQUEUED", "RF", "REQUEUE_FED", "RH", "REQUEUE_HOLD",
+        "RD", "RESV_DEL_HOLD", "SE", "SPECIAL_EXIT", "EXPEDITING",
+    }:
+        return "PENDING"
+    if state in {"CD", "COMPLETED"}:
+        return "COMPLETED"
+    if state in {
+        "F", "FAILED", "CA", "TO", "TIMEOUT", "BF", "BOOT_FAIL", "NF", "NODE_FAIL",
+        "OOM", "OUT_OF_MEMORY", "DL", "DEADLINE", "PR", "PREEMPTED",
+    }:
+        return "FAILED"
+    return "UNKNOWN"
+
+
+def _accounting_job_status(
+    output: str,
+    slurm_job_id: str,
+) -> Optional[str]:
+    """Select an allocation incarnation, never a successful/failed child step.
+
+    Submit changes on requeue; --duplicates also includes reused numeric IDs.
+    https://slurm.schedmd.com/sacct.html documents both behaviors. Equal-time
+    conflicting records cannot establish which incarnation owns the allocation.
+    """
+    if not output.strip():
+        return None
+    records = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        fields = [field.strip() for field in line.split("|")]
+        if len(fields) != 5:
+            return "UNKNOWN"
+        job_id, state, submitted, ended, exit_code = fields
+        if job_id != slurm_job_id:
+            continue
+        try:
+            submit_time = datetime.strptime(submitted, "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return "UNKNOWN"
+        records.append((submit_time, state, ended, exit_code))
+    if not records:
+        return "UNKNOWN"
+    latest_submit = max(record[0] for record in records)
+    latest = {record for record in records if record[0] == latest_submit}
+    if len(latest) != 1:
+        return "UNKNOWN"
+    submitted, state, ended, exit_code = latest.pop()
+    status = _slurm_lifecycle_state(state)
+    if status in {"COMPLETED", "FAILED"}:
+        try:
+            end_time = datetime.strptime(ended, "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return "UNKNOWN"
+        if end_time < submitted or not re.fullmatch(r"[0-9]+:[0-9]+", exit_code):
+            return "UNKNOWN"
+        if status == "COMPLETED" and exit_code != "0:0":
+            return "FAILED"
+    return status
 
 
 def _resolve_default_gpu_model() -> str:
@@ -595,48 +670,88 @@ class _ResourceQueryMixin:
             "slurm_used_gpus": alloc,
         }
 
-    def check_job_status(self, slurm_job_id: str) -> str:
-        """Map held allocations to the existing active lifecycle state.
-
-        Only a successful empty query retains the legacy completion inference;
-        transport failure/timeout is UNKNOWN and cannot release job ownership.
-        """
+    def check_job_status(
+        self,
+        slurm_job_id: str,
+    ) -> str:
+        """Prefer controller state, consulting accounting only after eviction."""
+        if not isinstance(slurm_job_id, str) or not re.fullmatch(r"[0-9]+", slurm_job_id):
+            return "UNKNOWN"
+        deadline = time.monotonic() + 30
         command = [
+            "env",
+            "LC_ALL=C",
             "squeue",
             "-h",
-            "-j", slurm_job_id,
-            "-o", "%t",
+            "--all",
+            "--local",
+            "--states=all",
+            "-j",
+            slurm_job_id,
+            "-o",
+            "%T",
         ]
 
         try:
             result = self._transport.run(
                 command,
-                timeout = 30,
+                timeout = max(0, deadline - time.monotonic()),
             )
-            if getattr(result, "returncode", 0) != 0:
-                logger.warning(f"Failed to query Slurm job {slurm_job_id}: exit {result.returncode}")
-                return "UNKNOWN"
+            returncode = getattr(result, "returncode", 0)
             state = result.stdout.strip()
+            error = getattr(result, "stderr", "").strip()
+            evicted = (
+                returncode == 1
+                and not state
+                and error == "slurm_load_jobs error: Invalid job id specified"
+            )
+            if (returncode != 0 or error) and not evicted:
+                logger.warning(f"Failed to query Slurm job {slurm_job_id}: exit {returncode}")
+                return "UNKNOWN"
+            if state:
+                states = set(state.splitlines())
+                if len(states) != 1:
+                    return "UNKNOWN"
+                visible_state = states.pop()
+                # PREEMPTED may still transition back to PENDING under REQUEUE.
+                if visible_state in {"PREEMPTED", "PR"}:
+                    return "UNKNOWN"
+                return _slurm_lifecycle_state(visible_state)
 
-            if not state:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return "UNKNOWN"
+            result = self._transport.run(
+                [
+                    "env",
+                    "LC_ALL=C",
+                    "SLURM_TIME_FORMAT=standard",
+                    "sacct",
+                    "--allocations",
+                    "--allusers",
+                    "--local",
+                    "--duplicates",
+                    "--noheader",
+                    "--parsable2",
+                    "--jobs",
+                    slurm_job_id,
+                    "--format=JobIDRaw,State%64,Submit,End,ExitCode",
+                ],
+                timeout = remaining,
+            )
+            returncode = getattr(result, "returncode", 0)
+            error = getattr(result, "stderr", "").strip()
+            if returncode == 1 and not result.stdout.strip() and error.lower() == "slurm accounting storage is disabled":
                 return "COMPLETED"
-
-            mapping = {
-                "R": "RUNNING",
-                "PD": "PENDING",
-                "CG": "RUNNING",
-                "S": "RUNNING",
-                "ST": "RUNNING",
-                "CF": "RUNNING",
-                "RS": "RUNNING",
-                "SO": "RUNNING",
-                "SI": "RUNNING",
-                "CD": "COMPLETED",
-                "F": "FAILED",
-                "CA": "FAILED",
-                "TO": "FAILED",
-            }
-            return mapping.get(state, "UNKNOWN")
+            if returncode != 0 or error:
+                logger.warning(f"Failed to query Slurm accounting for job {slurm_job_id}: exit {returncode}")
+                return "UNKNOWN"
+            status = _accounting_job_status(result.stdout, slurm_job_id)
+            if status is not None:
+                return status
+            # Retain the successful-empty controller contract on legacy sites.
+            # An invalid-ID error plus empty accounting can instead be DB lag.
+            return "UNKNOWN" if evicted else "COMPLETED"
 
         except Exception as error:
             logger.error(f"Failed to check job status {slurm_job_id}: {error}")
