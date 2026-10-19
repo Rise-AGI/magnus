@@ -24,7 +24,7 @@ function loadSource(path, overrides = {}, suffix = "") {
 
 const jobResources = loadSource("../src/lib/job-resources.ts");
 const { presentClusterResources } = loadSource("../src/lib/cluster-resources.ts", { "@/lib/job-resources": jobResources });
-const { metricScopeNotes } = loadSource("../src/lib/metric-scope.ts");
+const { metricLabelsKey, metricSeriesName } = loadSource("../src/lib/metric-series.ts");
 const { translations } = loadSource("../src/context/language-context.tsx", {}, "\nexport { translations };\n");
 const translate = language => (key, params = {}) => {
   assert.ok(translations[key]?.[language], `Missing ${language} translation: ${key}`);
@@ -112,72 +112,20 @@ test("old API values remain readable with unknown freshness and accounting scope
   assert.match(view.notes.join(" "), /does not provide complete observation/);
 });
 
-test("batch-step CPU telemetry identifies omitted MPI ranks and per-task normalization", () => {
-  const notes = metricScopeNotes("system.cpu.utilization", [{ labels: { node: "compute01", scope: "batch_step", coverage: "partial", normalized_by: "cpus_per_task", normalization_cpus: "1.0" } }], { node_count: 2, tasks_per_node: 64 }, t);
-  assert.match(notes.join(" "), /batch-step cgroup on the first node/);
-  assert.match(notes.join(" "), /not whole-job resource usage/);
-  assert.match(notes.join(" "), /denominator: 1 CPUs \(per-task allocation\)/);
-  assert.match(notes.join(" "), /Sampled nodes: compute01/);
-});
-
-test("CPU denominator follows sampled node, host fallback, or container quota labels", () => {
-  for (const [basis, count, expected] of [
-    ["cpus_on_node", "64.0", /64 CPUs \(allocation on the sampled node\)/],
-    ["host_cpu_count", "128.0", /128 CPUs \(fallback to all CPUs on the sampled host\)/],
-    ["cgroup_quota", "0.5", /0.5 CPUs \(container cgroup quota\)/],
-  ]) {
-    const notes = metricScopeNotes("system.cpu.utilization", [{ labels: { scope: "container", normalized_by: basis, normalization_cpus: count } }], undefined, t);
-    assert.match(notes.join(" "), expected);
-  }
-  const mixed = metricScopeNotes("system.cpu.utilization", [
-    { labels: { scope: "batch_step", normalized_by: "cpus_per_task", normalization_cpus: "1.0" } },
-    { labels: { scope: "batch_step", normalized_by: "cpus_per_task", normalization_cpus: "4.0" } },
-  ], undefined, t);
-  assert.match(mixed.join(" "), /denominator: 1 CPUs/);
-  assert.match(mixed.join(" "), /denominator: 4 CPUs/);
-  const legacy = metricScopeNotes("system.cpu.utilization", [{ labels: { normalized_by: "cpus_per_task" } }], undefined, t);
-  assert.match(legacy.join(" "), /CPUs per task, not the whole-job CPU allocation/);
-  assert.ok(!legacy.join(" ").includes("NaN"));
-});
-
-test("GPU telemetry remains device-level even on a single node and single stream", () => {
-  const notes = metricScopeNotes("system.gpu.memory.used_bytes", [{ labels: { node: "compute01", scope: "device", coverage: "single_task" } }], { node_count: 1, tasks_per_node: 1 }, t);
-  assert.match(notes.join(" "), /may include other processes/);
-  assert.match(notes.join(" "), /Sampled nodes: compute01/);
-  assert.ok(!notes.join(" ").includes("multi-node"));
-});
-
-test("historical unlabelled multi-node telemetry carries partial and unknown-scope warnings", () => {
-  const job = { node_count: 2, tasks_per_node: 64 };
-  const cpu = metricScopeNotes("system.memory.used_bytes", [{ labels: { node: "compute01" } }], job, t);
-  assert.match(cpu.join(" "), /not whole-job resource usage/);
-  assert.match(cpu.join(" "), /whole-job coverage cannot be confirmed/);
-  const gpu = metricScopeNotes("system.gpu.utilization", [{ labels: { node: "compute01" } }], job, t);
-  assert.match(gpu.join(" "), /only the first node/);
-});
-
-test("single-container telemetry is identified without an MPI warning", () => {
-  const notes = metricScopeNotes("system.cpu.utilization", [{ labels: { scope: "container", coverage: "single_container" } }], undefined, t);
-  assert.match(notes.join(" "), /individual runner container/);
-  assert.ok(!notes.join(" ").includes("MPI"));
-});
-
-test("unverified cgroup telemetry is not presented as batch-step or container usage", () => {
-  const notes = metricScopeNotes("system.cpu.utilization", [{ labels: { scope: "unverified_cgroup", coverage: "unverified" } }], { node_count: 1, tasks_per_node: 1 }, t);
-  assert.match(notes.join(" "), /may cover the host or a service group/);
-  assert.match(notes.join(" "), /cannot be attributed to this job/);
-  assert.ok(!notes.join(" ").includes("batch-step cgroup"));
-  assert.ok(!notes.join(" ").includes("runner container"));
-  assert.match(metricScopeNotes("system.memory.used_bytes", [{ labels: { scope: "job_node" } }], undefined, t).join(" "), /excluding other nodes/);
-  assert.match(metricScopeNotes("system.memory.used_bytes", [{ labels: { scope: "slurm_step" } }], undefined, t).join(" "), /one SLURM execution step/);
-});
-
-test("user metrics are not assigned a fabricated system scope", () => {
-  assert.deepEqual(metricScopeNotes("train.loss", [{ labels: { node: "compute01" } }], { node_count: 2 }, t), []);
-});
-
-test("resource and telemetry explanations have Chinese translations", () => {
+test("cluster resource explanations have Chinese translations", () => {
   const zh = translate("zh");
   assert.match(presentClusterResources({ ...snapshot, is_stale: true, free_is_lower_bound: true }, zh).notes.join(" "), /保守余量下界/);
-  assert.match(metricScopeNotes("system.cpu.utilization", [{ labels: { scope: "batch_step", coverage: "partial" } }], { node_count: 2 }, zh).join(" "), /不是整个 Job/);
+});
+
+test("system series names identify devices and ranks without exposing telemetry metadata", () => {
+  const labels = { node: "compute01", device: "cuda:0", rank: "3", scope: "device", coverage: "partial", normalized_by: "allocated_cpus", normalization_cpus: "128", source: "jobacct" };
+  assert.equal(metricSeriesName("system.gpu.utilization", labels), "compute01 · cuda:0 · rank 3");
+  assert.equal(metricSeriesName("system.cpu.utilization", { scope: "job", source: "jobacct", normalization_cpus: "128" }), "");
+  assert.equal(metricSeriesName("train.loss", { source: "validation", rank: "0" }), "rank=0, source=validation");
+});
+
+test("series storage keeps full labels and cannot collide on label punctuation", () => {
+  assert.equal(metricLabelsKey({ node: "compute01", device: "cuda:0" }), metricLabelsKey({ device: "cuda:0", node: "compute01" }));
+  assert.notEqual(metricLabelsKey({ a: "1,b=2" }), metricLabelsKey({ a: "1", b: "2" }));
+  assert.notEqual(metricLabelsKey({ scope: "job" }), metricLabelsKey({ scope: "batch_step" }));
 });

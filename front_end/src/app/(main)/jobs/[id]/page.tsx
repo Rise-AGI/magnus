@@ -17,7 +17,6 @@ import { formatStationTime } from "@/lib/utils";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { JobResources } from "@/components/jobs/job-resources";
-import { CodeEditor } from "@/components/ui/code-editor";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { PersonHoverCard } from "@/components/ui/person-hover-card";
 import RenderMarkdown from "@/components/ui/render-markdown";
@@ -32,9 +31,6 @@ import { useBackNavigation } from "@/hooks/use-back-navigation";
 import { MetricsChart } from "@/components/jobs/metrics-chart";
 
 const ansiUp = new AnsiUp();
-const ReadOnlyDockerfile = React.memo(function ReadOnlyDockerfile({ value }: { value: string }) {
-  return <CodeEditor filename="Dockerfile" value={value} readOnly minHeight="100px" />;
-});
 
 function processCarriageReturns(text: string): string {
   return text.replaceAll("\r", "\n");
@@ -146,7 +142,6 @@ export default function JobDetailsPage() {
   const lastClickTimeRef = useRef(0);
 
   const [copiedCommand, setCopiedCommand] = useState(false);
-  const [copiedEnvironment, setCopiedEnvironment] = useState(false);
   const copyToClipboard = async (text: string, setCopied: (v: boolean) => void) => {
     try {
         await navigator.clipboard.writeText(text);
@@ -503,7 +498,7 @@ export default function JobDetailsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* Left Column: Configuration */}
-        <div className="lg:col-span-1 flex flex-col gap-3 h-full">
+        <div className="lg:col-span-1 min-w-0 flex flex-col gap-3 lg:h-[700px]">
 
           {/* Repository Info */}
           <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
@@ -608,28 +603,8 @@ export default function JobDetailsPage() {
             </div>
           </div>
 
-          <div className="shrink-0 bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Box className="w-4 h-4 text-zinc-400" />
-                <h3 className="text-sm font-semibold text-zinc-200">{job.dockerfile ? "Dockerfile" : t("jobForm.containerImage")}</h3>
-              </div>
-              <button
-                onClick={() => copyToClipboard(job.dockerfile ?? job.container_image ?? "", setCopiedEnvironment)}
-                className="text-zinc-500 hover:text-zinc-200 transition-colors" title={t("action.copy")}
-              >
-                {copiedEnvironment ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-            {job.dockerfile ? (
-              <div className="max-h-72 overflow-auto bg-zinc-950">
-                <ReadOnlyDockerfile value={job.dockerfile} />
-              </div>
-            ) : <div className="p-4 text-xs text-zinc-300 font-mono break-all">{job.container_image || t("jobDetail.stationDefault")}</div>}
-          </div>
-
           {/* Entry Command */}
-          <div className="flex-1 min-h-[180px] flex flex-col bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
+          <div className="flex-1 min-h-[180px] lg:min-h-0 flex flex-col bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
             <div className="shrink-0 px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-zinc-400" />
@@ -656,7 +631,7 @@ export default function JobDetailsPage() {
         </div>
 
         {/* Right Column: Console / Description / Metrics */}
-        <div className="lg:col-span-2 flex flex-col min-h-[400px] lg:h-[700px] bg-[#0c0c0e] border border-zinc-800 rounded-xl overflow-hidden shadow-2xl">
+        <div className="lg:col-span-2 min-w-0 flex flex-col min-h-[400px] lg:h-[700px] bg-[#0c0c0e] border border-zinc-800 rounded-xl overflow-hidden shadow-2xl">
 
           {/* Tab Navigation */}
           <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between select-none">
@@ -814,7 +789,7 @@ export default function JobDetailsPage() {
 
             {activeTab === "metrics" && (
               <div className="absolute inset-0 overflow-auto p-5 custom-scrollbar">
-                <MetricsChart jobId={jobId} jobStatus={job.status} job={job} />
+                <MetricsChart jobId={jobId} jobStatus={job.status} />
               </div>
             )}
 

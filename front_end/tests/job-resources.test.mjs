@@ -47,99 +47,61 @@ const base = {
 const withSummary = summary => ({ ...base, resource_summary: { ...base.resource_summary, ...summary } });
 const present = (job, language = "en") => resources.presentJobResources(job, translate(language));
 
-test("multi-task request shows whole-job CPU and binary RAM with matching breakdown", () => {
+test("multi-task request shows whole-job CPU and binary RAM", () => {
   const view = present(base);
   assert.deepEqual(view.values, ["CPU × 128", "RAM 500 GiB"]);
-  assert.equal(view.scope, "Requested total");
-  assert.ok(view.details.includes("Requested topology: 2 nodes × 64 tasks/node"));
-  assert.ok(view.details.includes("CPU/task: 1"));
-  assert.ok(view.details.includes("RAM/task: 4000 MiB (per-CPU allocation)"));
 });
 
-test("per-node memory and GPU breakdown use nodes, not task count", () => {
+test("per-node memory and GPU totals are not multiplied by task count", () => {
   const view = present({
     ...withSummary({ mode: "slurm_per_node", memory_bytes: 100 * GiB, gpu_count: 4 }),
     gpu_type: "a100_80g", gpu_count: 2, memory_demand: "50G",
   });
   assert.deepEqual(view.values, ["CPU × 128", "RAM 100 GiB", "a100 80g × 4"]);
-  assert.ok(view.details.includes("RAM/node: 50 GiB"));
-  assert.ok(view.details.includes("GPU/node: 2"));
 });
 
-test("SLURM allocation totals are never multiplied or explained with raw request fields", () => {
+test("SLURM allocation totals are never multiplied by raw request fields", () => {
   const view = present(withSummary({ basis: "allocation", cpu_count: 256, memory_bytes: 1024 * GiB, tasks_per_node: null }));
   assert.deepEqual(view.values, ["CPU × 256", "RAM 1 TiB"]);
-  assert.equal(view.scope, "Allocated total");
-  assert.ok(view.details.includes("Allocated nodes: 2"));
-  assert.ok(!view.details.join(" ").includes("CPU/task"));
-  assert.ok(!view.details.join(" ").includes("4000"));
-  assert.ok(!view.details.join(" ").includes("Requested topology"));
 });
 
-test("unknown allocation quantities stay unknown, including node count", () => {
+test("unknown allocation quantities stay unknown", () => {
   const view = present(withSummary({ basis: "allocation", cpu_count: null, memory_bytes: null, node_count: null, tasks_per_node: null }));
   assert.deepEqual(view.values, ["CPU × Unknown", "RAM Unknown"]);
-  assert.ok(view.details.includes("Allocated nodes: Unknown"));
-  assert.ok(!view.details.join(" ").includes("null"));
 });
 
-test("allocation reconstructed from request fields is explicitly estimated", () => {
-  const view = present(withSummary({ basis: "allocation", allocation_inferred: true, memory_source: "per_node_fallback", tasks_per_node: null }));
-  assert.equal(view.scope, "Allocated total (estimated)");
-  assert.match(view.details.join(" "), /inferred from SLURM request fields/);
-  assert.ok(!view.details.join(" ").includes("per_node_fallback"));
-  assert.match(present(withSummary({ basis: "allocation", allocation_inferred: true }), "zh").scope, /估算/);
-});
-
-test("held scheduler states are explained without pretending active execution", () => {
-  const suspended = present(withSummary({ basis: "allocation", slurm_state: "SUSPENDED", allocation_inferred: true }));
-  assert.ok(suspended.details.includes("SLURM state: SUSPENDED"));
-  assert.match(suspended.details.join(" "), /GPU \/ RAM remain held/);
-  assert.match(suspended.details.join(" "), /before suspension/);
-  for (const [state, explanation] of [["STOPPED", /Execution is stopped/], ["CONFIGURING", /execution has not started/], ["COMPLETING", /not been fully released/]]) {
-    assert.match(present(withSummary({ basis: "allocation", slurm_state: state })).details.join(" "), explanation);
+test("historical summaries retain their resource totals", () => {
+  for (const summary of [
+    { mode_inferred: true },
+    { basis: "allocation", allocation_inferred: true, memory_source: "per_node_fallback", tasks_per_node: null },
+  ]) {
+    assert.deepEqual(present(withSummary(summary)).values, ["CPU × 128", "RAM 500 GiB"]);
   }
-  assert.ok(!present(withSummary({ basis: "allocation", slurm_state: "RUNNING" })).details.join(" ").includes("SLURM state"));
 });
 
-test("historical inferred mode is visibly distinguished and explained in both languages", () => {
-  const job = withSummary({ mode_inferred: true });
-  assert.match(present(job).scope, /inferred/);
-  assert.match(present(job).details.join(" "), /inferred from current station settings/);
-  assert.match(present(job, "zh").scope, /估算/);
-  assert.match(present(job, "zh").details.join(" "), /按当前站点配置推算/);
-});
-
-test("older APIs preserve raw values and explicitly withhold whole-job scope", () => {
+test("older APIs preserve raw values without guessing a memory mode", () => {
   const view = present({ ...base, resource_summary: undefined });
   assert.deepEqual(view.values, ["CPU × 1", "RAM 4000M"]);
-  assert.equal(view.scope, "Raw values (scope unavailable)");
-  assert.match(view.details.join(" "), /do not interpret them as whole-job totals/);
 });
 
 test("local requests do not manufacture multi-node allocation", () => {
   const view = present(withSummary({ mode: "local", cpu_count: 1, memory_bytes: 4000 * 1024 ** 2, node_count: 1, tasks_per_node: null }));
   assert.deepEqual(view.values, ["CPU × 1", "RAM 4000 MiB"]);
-  assert.equal(view.scope, "Requested values");
-  assert.match(view.details.join(" "), /not enforced allocation limits/);
-  assert.ok(!view.details.join(" ").includes("64"));
-  assert.match(present(withSummary({ mode: "local", mode_inferred: true })).details.join(" "), /inferred from current station settings/);
 });
 
 test("unspecified resources and all-node-memory requests do not become zero-byte allocations", () => {
   const job = { ...withSummary({ mode: "slurm_per_node", cpu_count: null, memory_bytes: null }), cpu_count: null, memory_demand: "0M" };
-  assert.deepEqual(present(job).values, ["CPU × Unspecified / default unknown", "RAM All node memory (total unknown)"]);
-  assert.deepEqual(present({ ...job, memory_demand: null }).values, ["CPU × Unspecified / default unknown", "RAM Unspecified / default unknown"]);
+  assert.deepEqual(present(job).values, ["CPU × Default", "RAM All node memory"]);
+  assert.deepEqual(present({ ...job, memory_demand: null }).values, ["CPU × Default", "RAM Default"]);
   assert.equal(resources.formatResourceMemory(0), "0 B");
 });
 
-test("summary-derived breakdown remains consistent when raw request differs", () => {
+test("summary-derived totals take precedence when raw request differs", () => {
   const view = present(withSummary({ cpu_count: 256, memory_bytes: 1000 * GiB }));
-  assert.ok(view.details.includes("CPU/task: 2"));
-  assert.ok(view.details.includes("RAM/task: 8000 MiB (per-CPU allocation)"));
+  assert.deepEqual(view.values, ["CPU × 256", "RAM 1000 GiB"]);
 });
 
-test("shared table and detail component render totals and expose their explanations", () => {
+test("table and detail show resource values without annotations or hidden tooltips", () => {
   const { JobResources } = loadSource("../src/components/jobs/job-resources.tsx", {
     "@/lib/job-resources": resources,
     "@/context/language-context": { useLanguage: () => ({ t: translate("zh") }) },
@@ -149,10 +111,7 @@ test("shared table and detail component render totals and expose their explanati
   for (const html of [table, detail]) {
     assert.match(html, /CPU × 128/);
     assert.match(html, /RAM 500 GiB/);
-    assert.match(html, /请求总量/);
-    assert.match(html, /2 节点 × 64 tasks \/ 节点/);
+    assert.equal(html.replace(/<[^>]+>/g, ""), "CPU × 128RAM 500 GiB");
+    assert.doesNotMatch(html, /title=|aria-label=/);
   }
-  assert.match(table, /title=/);
-  assert.match(table, /aria-label=/);
-  assert.match(detail, /<p>CPU \/ task：1<\/p>/);
 });

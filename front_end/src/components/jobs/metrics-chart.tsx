@@ -11,8 +11,7 @@ import { useLanguage } from "@/context/language-context";
 import { BarChart3, Clock, Hash } from "lucide-react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatStationClockSeconds } from "@/lib/utils";
-import { metricScopeNotes } from "@/lib/metric-scope";
-import type { Job } from "@/types/job";
+import { metricLabelsKey, metricSeriesName } from "@/lib/metric-series";
 
 
 interface MetricStream {
@@ -41,10 +40,6 @@ const STREAM_COLORS = [
   "#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa",
   "#2dd4bf", "#fb923c", "#e879f9", "#38bdf8", "#4ade80",
 ];
-
-function labelsKey(labels: Record<string, string>): string {
-  return Object.entries(labels).sort().map(([k, v]) => `${k}=${v}`).join(",");
-}
 
 function formatTime(ms: number): string {
   return formatStationClockSeconds(ms);
@@ -77,7 +72,7 @@ function metricDisplayName(name: string): string {
 }
 
 
-export function MetricsChart({ jobId, jobStatus, job }: { jobId: string; jobStatus: string; job?: Pick<Job, "node_count" | "tasks_per_node"> }) {
+export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
   const { t } = useLanguage();
   const [streams, setStreams] = useState<MetricStream[]>([]);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
@@ -102,7 +97,7 @@ export function MetricsChart({ jobId, jobStatus, job }: { jobId: string; jobStat
         setSelectedMetric(metricName);
         const dataMap = new Map<string, QueryResult>();
         for (const entry of result.default_data) {
-          dataMap.set(labelsKey(entry.labels), {
+          dataMap.set(metricLabelsKey(entry.labels), {
             name: metricName,
             points: entry.points,
           });
@@ -137,7 +132,7 @@ export function MetricsChart({ jobId, jobStatus, job }: { jobId: string; jobStat
           const result: QueryResult = await client(
             `/api/jobs/${jobId}/metrics/query?name=${encodeURIComponent(metricName)}${labelsParam}${stepParam}`
           );
-          return [labelsKey(stream.labels), result];
+          return [metricLabelsKey(stream.labels), result];
         } catch {
           return null;
         }
@@ -166,7 +161,9 @@ export function MetricsChart({ jobId, jobStatus, job }: { jobId: string; jobStat
   selectedStreamsRef.current = selectedStreams;
 
   const selectedUnit = selectedStreams[0]?.unit ?? null;
-  const scopeNotes = metricScopeNotes(selectedMetric, selectedStreams, job, t);
+  const seriesNames = useMemo(() => new Map(selectedStreams.map(stream => [
+    metricLabelsKey(stream.labels), metricSeriesName(stream.name, stream.labels),
+  ])), [selectedStreams]);
 
   const dataHasStep = useMemo(() => {
     for (const result of Array.from(data.values())) {
@@ -308,19 +305,14 @@ export function MetricsChart({ jobId, jobStatus, job }: { jobId: string; jobStat
             </div>
           )}
         </div>
-        {selectedMetric && chartData.seriesKeys.length > 1 && (
+        {selectedMetric && chartData.seriesKeys.length > 1 && chartData.seriesKeys.some(key => seriesNames.get(key)) && (
           <div className="flex gap-3 mt-2 flex-wrap">
-            {chartData.seriesKeys.map((key, i) => (
+            {chartData.seriesKeys.map((key, i) => seriesNames.get(key) ? (
               <span key={key} className="text-xs text-zinc-500 flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STREAM_COLORS[i % STREAM_COLORS.length] }} />
-                {key}
+                {seriesNames.get(key)}
               </span>
-            ))}
-          </div>
-        )}
-        {scopeNotes.length > 0 && (
-          <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 space-y-1 text-xs text-zinc-400">
-            {scopeNotes.map(note => <p key={note}>{note}</p>)}
+            ) : null)}
           </div>
         )}
       </div>
@@ -354,7 +346,7 @@ export function MetricsChart({ jobId, jobStatus, job }: { jobId: string; jobStat
                   fontSize: "12px",
                 }}
                 labelFormatter={(label) => xAxis === "time" ? formatTime(Number(label)) : `Step ${label}`}
-                formatter={(value) => [formatValue(Number(value), selectedUnit), ""]}
+                formatter={(value, name) => [formatValue(Number(value), selectedUnit), seriesNames.get(String(name)) ?? ""]}
               />
               {chartData.seriesKeys.map((key, i) => (
                 <Line
