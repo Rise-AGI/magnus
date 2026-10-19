@@ -371,9 +371,10 @@ class MagnusClient:
         under its token, so the returned FileSecret resolves once the job's
         outputs are staged back. One directory per entry:
 
-            <drop_dir>/<token>/meta.json   {token, filename, is_directory,
-                                            expire_minutes, max_downloads}
-            <drop_dir>/<token>/<filename>  the file (a .tar.gz for directories)
+            <drop_dir>/<token>/meta.json   {token, filename, storage_filename,
+                                            is_directory, expire_minutes,
+                                            max_downloads, size_bytes}
+            <drop_dir>/<token>/payload     the file (a .tar.gz for directories)
 
         Directories are tar.gz'd exactly as the HTTP path does, so the host-side
         registration and the eventual download behave identically. The token is
@@ -381,27 +382,46 @@ class MagnusClient:
         `<prime>-<word>-<word>-<word>` tokens.
         """
         token = f"relay-{uuid.uuid4().hex}"
-        entry_dir = Path(drop_dir) / token
-        entry_dir.mkdir(parents=True, exist_ok=True)
+        drop_path = Path(drop_dir)
+        drop_path.mkdir(parents=True, exist_ok=True)
+        # A killed compressor must not publish a token-shaped, half-written entry.
+        # Keep the temporary directory on the same filesystem for atomic rename.
+        with _tempfile.TemporaryDirectory(
+            prefix = ".partial-",
+            dir = str(drop_path),
+        ) as temporary:
+            entry_dir = Path(temporary)
+            payload = entry_dir / "payload"
+            is_dir = p.is_dir()
+            if is_dir:
+                filename = f"{p.name}.tar.gz"
+                with _tarfile.open(
+                    str(payload),
+                    "w:gz",
+                    format = _tarfile.PAX_FORMAT,
+                    dereference = True,
+                ) as tar:
+                    tar.add(str(p), arcname=p.name)
+            else:
+                filename = p.name
+                shutil.copyfile(str(p), str(payload))
 
-        is_dir = p.is_dir()
-        if is_dir:
-            filename = f"{p.name}.tar.gz"
-            with _tarfile.open(str(entry_dir / filename), "w:gz", format=_tarfile.PAX_FORMAT, dereference=True) as tar:
-                tar.add(str(p), arcname=p.name)
-        else:
-            filename = p.name
-            shutil.copy2(str(p), str(entry_dir / filename))
-
-        meta = {
-            "token": token,
-            "filename": filename,
-            "is_directory": is_dir,
-            "expire_minutes": expire_minutes,
-            "max_downloads": max_downloads,
-        }
-        with open(entry_dir / "meta.json", "w", encoding="utf-8") as f:
-            json.dump(meta, f)
+            with payload.open("r+b") as data_file:
+                os.fsync(data_file.fileno())
+            meta = {
+                "token": token,
+                "filename": filename,
+                "storage_filename": "payload",
+                "is_directory": is_dir,
+                "expire_minutes": expire_minutes,
+                "max_downloads": max_downloads,
+                "size_bytes": payload.stat().st_size,
+            }
+            with open(entry_dir / "meta.json", "w", encoding="utf-8") as metadata:
+                json.dump(meta, metadata)
+                metadata.flush()
+                os.fsync(metadata.fileno())
+            os.rename(entry_dir, drop_path / token)
 
         return f"{FILE_SECRET_PREFIX}{token}"
 

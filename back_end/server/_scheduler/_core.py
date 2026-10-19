@@ -70,6 +70,7 @@ class MagnusScheduler(
         self._image_pull_tasks: Dict[str, asyncio.Task] = {}  # image_uri -> shared pull Task
         self._build_pinned_jobs: set[str] = set()
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
+        self._finalization_retry_after: Dict[str, float] = {}
 
     async def tick(self):
         if not self.enabled:
@@ -99,7 +100,7 @@ class MagnusScheduler(
             logger.warning("Scheduler disabled, skipping termination logic.")
             return
 
-        if job.slurm_job_id:
+        if job.slurm_job_id and not job.finalization_status:
             if is_local_mode:
                 assert self.docker_manager is not None
                 container_name = f"magnus-job-{job.id}"
@@ -156,7 +157,7 @@ class MagnusScheduler(
                 else:
                     preparing_task.cancel()
             self._loop.call_soon_threadsafe(cancel_preparation)
-        elif is_local_mode or job.slurm_job_id is None:
+        elif not job.finalization_status and (is_local_mode or job.slurm_job_id is None):
             self._clean_up_working_table(job.id)
 
     def _release_finished_builds(self) -> None:
@@ -170,6 +171,7 @@ class MagnusScheduler(
                 Job.id.in_(candidates),
                 Job.status.in_([JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED]),
                 Job.slurm_job_id.is_(None),
+                Job.finalization_status.is_(None),
             ).all()
         for (job_id,) in finished:
             resource_manager.builds.release(job_id)

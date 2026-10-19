@@ -2,6 +2,7 @@
 import os
 import subprocess
 from datetime import datetime, timezone
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from ..database import SessionLocal
 from ..models import Job, JobStatus, ClusterSnapshot
@@ -244,145 +245,158 @@ class _SyncMixin(_SyncMixinBase):
 
             db.commit()
 
-    def _sync_reality_slurm(self):
-        """同步 SLURM 真实状态到数据库"""
-        # Phase 1 — 收集 job 信息（短 session）
+    def _sync_reality_slurm(
+        self,
+    ) -> None:
         with SessionLocal() as db:
-            queued_info = [
-                (job.id, job.slurm_job_id)
-                for job in db.query(Job).filter(Job.status == JobStatus.QUEUED).all()
-            ]
-            running_info = [
-                (job.id, job.slurm_job_id)
-                for job in db.query(Job).filter(Job.status == JobStatus.RUNNING).all()
-            ]
-            # ``TERMINATED`` / ``PAUSED`` 且 slurm_job_id 仍在的 job 处于 inflight
-            # release 阶段：terminate_job / _kill_and_pause 已经发了 scancel 但
-            # SLURM 还在 CG (COMPLETING) 跑 epilog。这里 poll 直到 SLURM 报终态
-            # 才清 slurm_job_id，让 cluster endpoint 在 CG 期间仍能匹配 magnus
-            # 关联（不显示成 external），并让 PAUSED 走到 Phase 2.5 resubmit 时
-            # 旧 SLURM 资源已确实释放。
-            inflight_release_info = [
-                (job.id, job.slurm_job_id, job.status)
-                for job in db.query(Job).filter(
-                    Job.status.in_([JobStatus.TERMINATED, JobStatus.PAUSED]),
-                    Job.slurm_job_id.isnot(None),
-                ).all()
-            ]
+            observations = db.query(
+                Job.id,
+                Job.status,
+                Job.slurm_job_id,
+                Job.finalization_status,
+            ).filter(
+                Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])
+                | (
+                    Job.status.in_([JobStatus.TERMINATED, JobStatus.PAUSED])
+                    & Job.slurm_job_id.isnot(None)
+                )
+                | Job.finalization_status.isnot(None),
+            ).all()
 
-        # Phase 2 — SLURM 状态检查 + 远端产物回读（无 session）
-        slurm_statuses = {}
-        observations = queued_info + running_info + [(job_id, slurm_id) for job_id, slurm_id, _ in inflight_release_info]
-        for job_id, slurm_job_id in observations:
-            if not slurm_job_id:
-                continue
-            assert self.slurm_manager is not None
-            status = self.slurm_manager.check_job_status(slurm_job_id)
+        observed_ids = {row[0] for row in observations}
+        self._finalization_retry_after = {
+            job_id: deadline
+            for job_id, deadline in self._finalization_retry_after.items()
+            if job_id in observed_ids
+        }
+        for job_id, original_status, slurm_job_id, finalization_status in observations:
             try:
-                if status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"):
-                    self._stage_out_final(job_id)
-                elif status == "RUNNING":
-                    self._stage_out_logs(job_id)
-            except Exception as error:
-                logger.warning(f"Job {job_id} artifact transfer failed; retaining workspace for retry: {error}")
-                if status != "RUNNING":
+                if finalization_status and monotonic() < self._finalization_retry_after.get(job_id, 0):
                     continue
-            slurm_statuses[job_id] = status
+                if finalization_status == "CLEANUP":
+                    self._finalization_retry_after[job_id] = monotonic() + 60
+                    self._finish_slurm_cleanup(job_id, slurm_job_id)
+                    continue
+                if not slurm_job_id:
+                    with SessionLocal() as db:
+                        db.query(Job).filter(
+                            Job.id == job_id,
+                            Job.status == original_status,
+                            Job.slurm_job_id.is_(None),
+                            Job.finalization_status.is_(None),
+                        ).update({
+                            Job.status: JobStatus.FAILED,
+                            Job.result: "Internal error: active job has no scheduler job ID",
+                        }, synchronize_session=False)
+                        db.commit()
+                    continue
 
-        # Phase 3 — 批量更新（短 session）
+                assert self.slurm_manager is not None
+                real_status = finalization_status or self.slurm_manager.check_job_status(slurm_job_id)
+                if real_status == "RUNNING":
+                    with SessionLocal() as db:
+                        db.query(Job).filter(
+                            Job.id == job_id,
+                            Job.status == JobStatus.QUEUED,
+                            Job.slurm_job_id == slurm_job_id,
+                        ).update({
+                            Job.status: JobStatus.RUNNING,
+                            Job.start_time: datetime.now(timezone.utc),
+                        }, synchronize_session=False)
+                        db.commit()
+                    self._stage_out_logs(job_id)
+                elif real_status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"):
+                    self._finalization_retry_after[job_id] = monotonic() + 60
+                    self._finalize_slurm_job(job_id, slurm_job_id, real_status)
+            except Exception as error:
+                logger.warning(f"Job {job_id} synchronization incomplete; retaining workspace for retry: {error}")
+
+    def _finalize_slurm_job(
+        self,
+        job_id: str,
+        slurm_job_id: str,
+        real_status: str,
+    ) -> None:
         with SessionLocal() as db:
-            for job_id, slurm_job_id in queued_info:
-                try:
-                    job = db.query(Job).filter(Job.id == job_id).first()
-                    if not job or job.status != JobStatus.QUEUED or job.slurm_job_id != slurm_job_id:
-                        continue
-
-                    if not slurm_job_id:
-                        logger.warning(f"Job {job.id} is QUEUED but has no slurm_id. Marking FAILED.")
-                        job.status = JobStatus.FAILED
-                        job.result = "Internal error: job entered QUEUED state without a scheduler job ID"
-                        continue
-
-                    real_status = slurm_statuses.get(job_id)
-                    if real_status == "RUNNING":
-                        job.status = JobStatus.RUNNING
-                        job.start_time = datetime.now(timezone.utc)
-                        logger.info(f"Job {job.id} started running in SLURM (ID: {slurm_job_id})")
-                    elif real_status == "COMPLETED":
-                        self._finalize_completed_job(job)
-                    elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
-                        logger.warning(f"Job {job.id} failed in SLURM queue (Status: {real_status}).")
-                        job.status = JobStatus.FAILED
-                        if self._has_oom_marker(job.id):
-                            job.result = self._format_oom_message(job.memory_demand)
-                        else:
-                            job.result = f"Scheduler reported {real_status} while job was queued"
-                        job.slurm_job_id = None
-                        self._clean_up_working_table(job.id)
-                    # else: SLURM 仍在排队（PD）或状态未知，保持 QUEUED
-                except Exception as error:
-                    logger.error(f"Failed to sync QUEUED job {job_id}: {error}")
-
-            for job_id, slurm_job_id in running_info:
-                try:
-                    job = db.query(Job).filter(Job.id == job_id).first()
-                    if not job or job.status != JobStatus.RUNNING or job.slurm_job_id != slurm_job_id:
-                        continue
-
-                    if not slurm_job_id:
-                        logger.warning(f"Job {job.id} is RUNNING but has no slurm_id. Marking FAILED.")
-                        job.status = JobStatus.FAILED
-                        job.result = "Internal error: job entered RUNNING state without a scheduler job ID"
-                        continue
-
-                    real_status = slurm_statuses.get(job_id)
-                    if real_status == "COMPLETED":
-                        self._finalize_completed_job(job)
-                    elif real_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
-                        # Marker 优先于 SLURM state：signal_job 路径下用户 handler
-                        # 处理后写了 .magnus_result，wrapper 写 success marker 并
-                        # `sys.exit(0)` 让 SLURM 优先报 COMPLETED；但实测某些 SLURM
-                        # 版本 / 配置下 batch step 收过 SIGTERM 仍会被标 FAILED /
-                        # CANCELLED。这里先看 marker 兜底：marker 存在 → finalize
-                        # 走 SUCCESS；不存在 → SLURM state 是真 failure（含 OOM
-                        # 检测，保留 SLURM state info 进 result）。这一层与
-                        # _wrapper_template.py Phase 3 的 sys.exit(0) 形成 defense
-                        # -in-depth。
-                        marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
-                        if os.path.exists(marker_path):
-                            self._finalize_completed_job(job)
-                        else:
-                            logger.warning(f"Job {job.id} failed in SLURM (Status: {real_status}).")
-                            job.status = JobStatus.FAILED
-                            if self._has_oom_marker(job.id):
-                                job.result = self._format_oom_message(job.memory_demand)
-                            else:
-                                job.result = f"Scheduler reported {real_status} during execution"
-                            job.slurm_job_id = None
-                            self._clean_up_working_table(job.id)
-                except Exception as error:
-                    logger.error(f"Failed to sync RUNNING job {job_id}: {error}")
-
-            for job_id, slurm_job_id, original_status in inflight_release_info:
-                try:
-                    job = db.query(Job).filter(Job.id == job_id).first()
-                    if job is None:
-                        continue
-                    # 中途 status 已被改写（如 PAUSED → PREPARING by Phase 2.5）
-                    # 或 slurm_job_id 已被覆盖（如 _submit_to_slurm 写新 id），
-                    # 跳过——本批 inflight 快照的前提条件不再成立。
-                    if job.status != original_status or job.slurm_job_id != slurm_job_id:
-                        continue
-
-                    real_status = slurm_statuses.get(job_id)
-                    if real_status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"):
-                        # SLURM 已真正释放资源，可以清 slurm_job_id；status 保持
-                        # 不变（TERMINATED 是终态、PAUSED 等待 Phase 2.5 resubmit）。
-                        self._clean_up_working_table(job.id)
-                        job.slurm_job_id = None
-                    # 其他情况（CG 仍在跑，check_job_status 把 CG 映射到 RUNNING）
-                    # 保留 slurm_job_id 等下个 tick 再检查。
-                except Exception as error:
-                    logger.error(f"Failed to sync inflight-release job {job_id}: {error}")
-
+            changed = db.query(Job).filter(
+                Job.id == job_id,
+                Job.slurm_job_id == slurm_job_id,
+                Job.finalization_status.is_(None) | (Job.finalization_status == real_status),
+            ).update({Job.finalization_status: real_status}, synchronize_session=False)
             db.commit()
+        if not changed:
+            return
+
+        # Classify only after the small marker read. A failed connection is not
+        # evidence of a missing success marker; custody transfer is independent.
+        self._stage_out_markers(job_id)
+        with SessionLocal() as db:
+            job = db.query(Job).filter(
+                Job.id == job_id,
+                Job.slurm_job_id == slurm_job_id,
+                Job.finalization_status == real_status,
+            ).first()
+            if job is None:
+                return
+            if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
+                original_status = job.status
+                marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
+                if real_status == "COMPLETED" or os.path.exists(marker_path):
+                    self._finalize_completed_job(job, cleanup=False)
+                else:
+                    job.status = JobStatus.FAILED
+                    if self._has_oom_marker(job.id):
+                        job.result = self._format_oom_message(job.memory_demand)
+                    else:
+                        job.result = f"Scheduler reported {real_status} during execution"
+                values = {Job.status: job.status, Job.result: job.result, Job.action: job.action}
+                db.expunge(job)
+                db.query(Job).filter(
+                    Job.id == job_id,
+                    Job.status == original_status,
+                    Job.slurm_job_id == slurm_job_id,
+                    Job.finalization_status == real_status,
+                ).update(values, synchronize_session=False)
+            db.commit()
+
+        if self._stage_out_final(job_id) is not True:
+            return
+        with SessionLocal() as db:
+            changed = db.query(Job).filter(
+                Job.id == job_id,
+                Job.slurm_job_id == slurm_job_id,
+                Job.finalization_status == real_status,
+            ).update({Job.finalization_status: "CLEANUP"}, synchronize_session=False)
+            db.commit()
+        if changed:
+            self._finish_slurm_cleanup(job_id, slurm_job_id)
+
+    def _finish_slurm_cleanup(
+        self,
+        job_id: str,
+        slurm_job_id: Optional[str],
+    ) -> None:
+        # Commit the cleanup phase before removing markers. A restart must not
+        # classify the same completed execution again using its deleted marker.
+        with SessionLocal() as db:
+            current = db.query(Job.id).filter(
+                Job.id == job_id,
+                Job.slurm_job_id == slurm_job_id,
+                Job.finalization_status == "CLEANUP",
+            ).first()
+        if current is None:
+            return
+        if self._clean_up_working_table(job_id) is not True:
+            return
+        with SessionLocal() as db:
+            changed = db.query(Job).filter(
+                Job.id == job_id,
+                Job.slurm_job_id == slurm_job_id,
+                Job.finalization_status == "CLEANUP",
+            ).update({
+                Job.slurm_job_id: None,
+                Job.finalization_status: None,
+            }, synchronize_session=False)
+            db.commit()
+        if changed:
+            self._finalization_retry_after.pop(job_id, None)

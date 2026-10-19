@@ -3,6 +3,7 @@ import os
 import traceback
 from typing import TYPE_CHECKING, Optional
 from pywheels.file_tools import delete_file
+from ..database import SessionLocal
 from ..models import Job, JobStatus
 from . import logger, magnus_workspace_path, magnus_ephemeral_workspace_path
 
@@ -21,7 +22,7 @@ else:
 #   .magnus_action  — MAGNUS_ACTION, client action instruction
 # Everything else (repository, wrapper.py, transient markers, ephemeral overlay,
 # and anything the user wrote into the workspace bind mount) is removed on cleanup.
-_WORKING_TABLE_KEEP = frozenset({"slurm", "metrics", ".magnus_result", ".magnus_action"})
+_WORKING_TABLE_KEEP = frozenset({"slurm", "metrics", ".magnus_result", ".magnus_action", ".magnus_custody_receipts.json"})
 
 
 class _JobLifecycleMixin(_JobLifecycleMixinBase):
@@ -33,7 +34,12 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
         with open(marker_path, "w") as f:
             f.write("success")
 
-    def _finalize_completed_job(self, job: Job) -> None:
+    def _finalize_completed_job(
+        self,
+        job: Job,
+        *,
+        cleanup: bool = True,
+    ) -> None:
         marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
         if os.path.exists(marker_path):
             logger.info(f"Job {job.id} completed successfully (Marker Verified).")
@@ -49,8 +55,9 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
                 job.result = self._format_oom_message(job.memory_demand)
             else:
                 job.result = "Job process exited but did not report success (no success marker found)"
-        job.slurm_job_id = None
-        self._clean_up_working_table(job.id)
+        if cleanup:
+            job.slurm_job_id = None
+            self._clean_up_working_table(job.id)
 
     @staticmethod
     def _format_oom_message(memory_demand: Optional[str]) -> str:
@@ -63,10 +70,17 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
         marker_path = f"{magnus_workspace_path}/jobs/{job_id}/.magnus_oom"
         return os.path.exists(marker_path)
 
-    def _clean_up_working_table(self, job_id: str) -> None:
+    def _clean_up_working_table(
+        self,
+        job_id: str,
+    ) -> bool:
         job_working_table = f"{magnus_workspace_path}/jobs/{job_id}"
         job_ephemeral_table = f"{magnus_ephemeral_workspace_path}/jobs/{job_id}"
         try:
+            with SessionLocal() as db:
+                pending = db.query(Job.finalization_status).filter(Job.id == job_id).first()
+            if pending and pending[0] not in (None, "CLEANUP"):
+                return False
             # Keep-whitelist: remove everything under the working table except the
             # protocol artifacts. This also reclaims anything the user wrote into the
             # workspace bind mount (e.g. checkpoints / outputs dumped straight into
@@ -75,16 +89,29 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
             if os.path.isdir(job_working_table):
                 for entry in os.listdir(job_working_table):
                     if entry not in _WORKING_TABLE_KEEP:
-                        delete_file(os.path.join(job_working_table, entry))
+                        path = os.path.join(job_working_table, entry)
+                        if os.path.islink(path):
+                            os.unlink(path)
+                        else:
+                            delete_file(path)
+                        if os.path.lexists(path):
+                            raise OSError(f"Could not remove {path}")
             # When ephemeral_root is split onto a separate disk, the overlay +
             # apptainer tmp/cache live outside the working table; drop that dir
             # wholesale (it holds only transient artifacts). When it coincides with
             # the working table, the keep-whitelist sweep above already removed them.
             if job_ephemeral_table != job_working_table:
-                delete_file(job_ephemeral_table)
+                if os.path.islink(job_ephemeral_table):
+                    os.unlink(job_ephemeral_table)
+                else:
+                    delete_file(job_ephemeral_table)
+                if os.path.lexists(job_ephemeral_table):
+                    raise OSError(f"Could not remove {job_ephemeral_table}")
             # 远端执行：删掉远端 job 工作区（持久产物已在终态 _stage_out_final 拉回本机，
             # 上面的 keep-whitelist 在本机侧保留）。本机执行下 no-op；远端不存在时 rm -rf
             # 亦无害（覆盖 terminate / preparing 失败等尚未在远端建目录的清理路径）。
             self._cleanup_remote_job(job_id)
+            return True
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")
+            return False

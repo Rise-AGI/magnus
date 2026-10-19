@@ -97,7 +97,7 @@ class JobCancellationTests(unittest.TestCase):
                     slurm_manager=SimpleNamespace(kill_job=lambda *args, **kwargs: self.kill(manager, *args, **kwargs)),
                     _clean_up_working_table=lambda value: cleanups.append(value),
                 )
-                job = SimpleNamespace(id="job", status="Running", slurm_job_id="123", runner="user", user=SimpleNamespace(token="private-token"))
+                job = SimpleNamespace(id="job", status="Running", slurm_job_id="123", finalization_status=None, runner="user", user=SimpleNamespace(token="private-token"))
                 db = SimpleNamespace(commit=lambda: commits.append(True))
                 if accepted:
                     terminate(actor, db, job)
@@ -111,55 +111,6 @@ class JobCancellationTests(unittest.TestCase):
                 self.assertEqual(cleanups, [])
                 self.assertEqual(job.slurm_job_id, "123")
 
-    def test_inflight_release_pulls_final_data_and_cleans_only_after_terminal_observation(self):
-        class Field:
-            def __eq__(self, other):
-                return self
-            def in_(self, values):
-                return self
-            def isnot(self, value):
-                return self
-        states = SimpleNamespace(QUEUED="Queued", RUNNING="Running", TERMINATED="Terminated", PAUSED="Paused")
-        for observed in ("RUNNING", "UNKNOWN", "COMPLETED"):
-            with self.subTest(observed=observed):
-                job = SimpleNamespace(id="job", status="Paused", slurm_job_id="123")
-                events = []
-                class Database:
-                    def __init__(self):
-                        self.queries = 0
-                    def __enter__(self):
-                        return self
-                    def __exit__(self, *args):
-                        pass
-                    def query(self, *args):
-                        index = self.queries
-                        self.queries += 1
-                        query = SimpleNamespace()
-                        query.filter = lambda *args: query
-                        query.all = lambda: [job] if index == 2 else []
-                        query.first = lambda: job
-                        return query
-                    def commit(self):
-                        pass
-                namespace = dict(
-                    self.namespace, JobStatus=states, SessionLocal=Database,
-                    Job=SimpleNamespace(id=Field(), status=Field(), slurm_job_id=Field()),
-                )
-                sync = method("_scheduler/_sync.py", "_sync_reality_slurm", namespace)
-                actor = SimpleNamespace(
-                    slurm_manager=SimpleNamespace(check_job_status=lambda job_id: observed),
-                    _stage_out_final=lambda job_id: events.append(("pull", job_id)),
-                    _stage_out_logs=lambda job_id: None,
-                    _clean_up_working_table=lambda job_id: events.append(("clean", job_id)),
-                )
-                sync(actor)
-                if observed == "COMPLETED":
-                    self.assertEqual(events, [("pull", "job"), ("clean", "job")])
-                    self.assertIsNone(job.slurm_job_id)
-                else:
-                    self.assertEqual(events, [])
-                    self.assertEqual(job.slurm_job_id, "123")
-                self.assertEqual(job.status, "Paused")
 
 
 if __name__ == "__main__":

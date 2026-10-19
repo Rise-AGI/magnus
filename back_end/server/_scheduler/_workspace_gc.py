@@ -85,7 +85,7 @@ class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
             active_job_ids = {
                 row[0]
                 for row in db.query(Job.id).filter(
-                    Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None),
+                    Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None) | Job.finalization_status.isnot(None),
                 ).all()
             }
         with self._preparing_jobs_lock:
@@ -117,7 +117,7 @@ class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
             with SessionLocal() as db:
                 active = db.query(Job.id).filter(
                     Job.id == artifacts.job_id,
-                    Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None),
+                    Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None) | Job.finalization_status.isnot(None),
                 ).first() is not None
             with self._preparing_jobs_lock:
                 active = active or artifacts.job_id in self.preparing_jobs

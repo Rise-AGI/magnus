@@ -97,12 +97,14 @@ class _DecisionsMixin(_DecisionsMixinBase):
             paused_jobs = db.query(Job.id).filter(
                 Job.status == JobStatus.PAUSED,
                 Job.slurm_job_id.is_(None),
+                Job.finalization_status.is_(None),
             ).all()
             for job in paused_jobs:
                 changed = db.query(Job).filter(
                     Job.id == job.id,
                     Job.status == JobStatus.PAUSED,
                     Job.slurm_job_id.is_(None),
+                    Job.finalization_status.is_(None),
                 ).update({Job.status: JobStatus.PREPARING}, synchronize_session=False)
                 if changed:
                     logger.info(f"Job {job.id} re-entering preparation after preemption")

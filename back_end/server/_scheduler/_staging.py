@@ -19,6 +19,7 @@ import re
 import json
 import shutil
 import tempfile
+import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 from .._magnus_config import magnus_config
@@ -37,6 +38,8 @@ from ._relay_build_cache import stage_built_sif
 # pulls them back and registers each in custody under its token. Must match the path
 # the wrapper exports into the container.
 _CUSTODY_DROP_SUBDIR = ".magnus_custody_drop"
+_CUSTODY_RECEIPTS_FILE = ".magnus_custody_receipts.json"
+_RELAY_TOKEN_RE = re.compile(r"relay-[0-9a-f]{32}\Z")
 
 # Inbound counterpart of _CUSTODY_DROP_SUBDIR: before sbatch, the host stages the custody
 # files a job's entry_command references into <remote_table>/<this>/<token>/ (file +
@@ -194,7 +197,78 @@ def _is_safe_leaf(name: str) -> bool:
     """name 是否为安全的单层路径名。远端无网计算节点（信任边界外）经 `ls` 列出的
     文件 / 目录名，在 host 侧拼进 fetch 落点前必须过这关 —— 否则 `../x` 之类会把
     文件写到目标目录之外（与 custody filename 的 basename 防护同类）。"""
-    return bool(name) and name not in (".", "..") and os.path.basename(name) == name
+    return (
+        isinstance(name, str)
+        and bool(name)
+        and name not in (".", "..")
+        and not any(character in name for character in ("/", "\\", "\0"))
+        and os.path.basename(name) == name
+    )
+
+
+def _read_custody_receipts(
+    local_table: str,
+) -> dict:
+    path = Path(local_table) / _CUSTODY_RECEIPTS_FILE
+    try:
+        with path.open(encoding="utf-8") as source:
+            receipts = json.load(source)
+    except FileNotFoundError:
+        return {"entries": {}, "logs_complete": False}
+    if (
+        not isinstance(receipts, dict)
+        or not isinstance(receipts.get("entries"), dict)
+        or not isinstance(receipts.get("logs_complete"), bool)
+        or not all(
+            isinstance(token, str)
+            and _RELAY_TOKEN_RE.fullmatch(token)
+            and isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest)
+            for token, digest in receipts["entries"].items()
+        )
+    ):
+        raise ValueError("Invalid custody registration receipts")
+    return receipts
+
+
+def _write_custody_receipts(
+    local_table: str,
+    receipts: dict,
+) -> None:
+    os.makedirs(local_table, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".custody-receipts-", dir=local_table)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
+            json.dump(receipts, destination, sort_keys=True)
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(temporary, os.path.join(local_table, _CUSTODY_RECEIPTS_FILE))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _validate_custody_metadata(
+    meta: object,
+    token: str,
+) -> tuple[str, str]:
+    if not isinstance(meta, dict) or meta.get("token") != token:
+        raise ValueError("Invalid remote custody metadata")
+    filename = meta.get("filename")
+    stored_name = meta.get("storage_filename", filename)
+    if not _is_safe_leaf(filename) or not _is_safe_leaf(stored_name) or stored_name == "meta.json":
+        raise ValueError("Invalid remote custody filename")
+    if not isinstance(meta.get("is_directory", False), bool):
+        raise ValueError("Invalid remote custody directory flag")
+    for name in ("expire_minutes", "max_downloads", "size_bytes"):
+        value = meta.get(name)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise ValueError(f"Invalid remote custody {name}")
+    if meta.get("max_downloads") is not None and meta["max_downloads"] < 1:
+        raise ValueError("Invalid remote custody download limit")
+    if meta.get("size_bytes") is not None and meta["size_bytes"] < 0:
+        raise ValueError("Invalid remote custody size")
+    return filename, stored_name
 
 
 class _StagingMixin(_StagingMixinBase):
@@ -251,6 +325,11 @@ class _StagingMixin(_StagingMixinBase):
         if not self._is_remote_execution():
             return
         assert self.slurm_manager is not None
+        local_table = self._local_job_working_table(job_id)
+        receipts = _read_custody_receipts(local_table)
+        if receipts["logs_complete"]:
+            receipts["logs_complete"] = False
+            _write_custody_receipts(local_table, receipts)
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
         for subdir in ("slurm", "metrics"):
@@ -371,7 +450,7 @@ class _StagingMixin(_StagingMixinBase):
                         f"failed to create remote dropin dir {remote_entry} "
                         f"(rc={made.returncode}): {made.stderr.strip()}"
                     )
-                transport.push(str(file_path), f"{remote_entry}/{filename}")
+                transport.push(str(file_path), f"{remote_entry}/payload")
                 # meta.json follows the SDK's offline drop-dir format.
                 local_entry = os.path.join(local_dropin, token)
                 os.makedirs(local_entry, exist_ok=True)
@@ -381,6 +460,7 @@ class _StagingMixin(_StagingMixinBase):
                         {
                             "token": token,
                             "filename": filename,
+                            "storage_filename": "payload",
                             "is_directory": is_directory,
                         },
                         meta_file,
@@ -403,7 +483,10 @@ class _StagingMixin(_StagingMixinBase):
                 raise ValueError("Invalid remote metric filename")
             _fetch_artifact_file(transport, f"{remote_table}/metrics/{name}", f"{local_table}/metrics/{name}")
 
-    def _stage_out_final(self, job_id: str) -> None:
+    def _stage_out_markers(
+        self,
+        job_id: str,
+    ) -> None:
         if not self._is_remote_execution():
             return
         assert self.slurm_manager is not None
@@ -414,39 +497,92 @@ class _StagingMixin(_StagingMixinBase):
         for marker in _REMOTE_MARKERS:
             if marker in entries:
                 _fetch_artifact_file(transport, f"{remote_table}/{marker}", f"{local_table}/{marker}")
-        self._stage_out_logs(job_id)
-        self._stage_out_custody(job_id)
 
-    def _stage_out_custody(self, job_id: str) -> None:
+    def _stage_out_final(
+        self,
+        job_id: str,
+    ) -> bool:
         if not self._is_remote_execution():
-            return
+            return True
+        complete = True
+        local_table = self._local_job_working_table(job_id)
+        try:
+            receipts = _read_custody_receipts(local_table)
+            if not receipts["logs_complete"]:
+                self._stage_out_logs(job_id)
+                receipts["logs_complete"] = True
+                _write_custody_receipts(local_table, receipts)
+        except Exception:
+            logger.warning("Job %s final log transfer is pending", job_id, exc_info=True)
+            complete = False
+        try:
+            if not self._stage_out_custody(job_id):
+                complete = False
+        except Exception:
+            logger.warning("Job %s custody transfer is pending", job_id, exc_info=True)
+            complete = False
+        return complete
+
+    def _stage_out_custody(
+        self,
+        job_id: str,
+    ) -> bool:
+        if not self._is_remote_execution():
+            return True
         assert self.slurm_manager is not None
         transport = self.slurm_manager.transport
         remote_drop = f"{self._remote_job_working_table(job_id)}/{_CUSTODY_DROP_SUBDIR}"
-        local_drop = f"{self._local_job_working_table(job_id)}/{_CUSTODY_DROP_SUBDIR}"
+        local_table = self._local_job_working_table(job_id)
+        local_drop = os.path.join(local_table, _CUSTODY_DROP_SUBDIR)
+        receipts = _read_custody_receipts(local_table)
+        complete = True
         for token in _remote_optional_entries(transport, remote_drop):
-            if not _is_safe_leaf(token):
-                raise ValueError("Invalid remote custody entry name")
-            os.makedirs(local_drop, exist_ok=True)
-            # A fresh destination prevents scp -r nesting a retry inside a
-            # partially copied directory. Registration remains token-idempotent.
-            with tempfile.TemporaryDirectory(prefix=".stage-out-", dir=local_drop) as temporary:
-                local_entry = os.path.join(temporary, token)
-                transport.fetch(f"{remote_drop}/{token}", local_entry)
-                with open(os.path.join(local_entry, "meta.json"), encoding="utf-8") as metadata:
-                    meta = json.load(metadata)
-                filename = meta["filename"]
-                if not _is_safe_leaf(filename) or meta.get("token") != token:
-                    raise ValueError("Invalid remote custody metadata")
-                with open(os.path.join(local_entry, filename), "rb") as file_obj:
-                    file_custody_manager.store_file(
-                        filename = filename,
-                        file_obj = file_obj,
-                        expire_minutes = meta.get("expire_minutes"),
-                        is_directory = meta.get("is_directory", False),
-                        max_downloads = meta.get("max_downloads"),
-                        explicit_token = token,
-                    )
+            if not _RELAY_TOKEN_RE.fullmatch(token):
+                # An interrupted writer's hidden directory is evidence, not a
+                # publishable receipt. Do not let it erase other completed drops.
+                complete = False
+                logger.warning("Job %s has an unpublished custody entry %r", job_id, token)
+                continue
+            try:
+                os.makedirs(local_drop, exist_ok=True)
+                with tempfile.TemporaryDirectory(prefix=".stage-out-", dir=local_drop) as temporary:
+                    metadata_path = os.path.join(temporary, "meta.json")
+                    transport.fetch(f"{remote_drop}/{token}/meta.json", metadata_path)
+                    with open(metadata_path, encoding="utf-8") as metadata:
+                        meta = json.load(metadata)
+                    filename, stored_name = _validate_custody_metadata(meta, token)
+                    digest = hashlib.sha256(
+                        json.dumps(meta, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                    ).hexdigest()
+                    previous = receipts["entries"].get(token)
+                    if previous is not None:
+                        if previous != digest:
+                            raise ValueError("Custody token metadata changed after registration")
+                        continue
+                    payload_path = os.path.join(temporary, "payload")
+                    transport.fetch(f"{remote_drop}/{token}/{stored_name}", payload_path)
+                    expected_size = meta.get("size_bytes")
+                    if expected_size is not None and os.path.getsize(payload_path) != expected_size:
+                        raise ValueError("Remote custody payload size does not match metadata")
+                    if meta.get("is_directory", False) and os.path.getsize(payload_path) == 0:
+                        raise ValueError("Remote custody archive is empty")
+                    with open(payload_path, "rb") as file_obj:
+                        file_custody_manager.store_file(
+                            filename = filename,
+                            file_obj = file_obj,
+                            expire_minutes = meta.get("expire_minutes"),
+                            is_directory = meta.get("is_directory", False),
+                            max_downloads = meta.get("max_downloads"),
+                            explicit_token = token,
+                        )
+                    # A consumed or expired token must never gain a fresh TTL or
+                    # download budget just because another drop still needs retry.
+                    receipts["entries"][token] = digest
+                    _write_custody_receipts(local_table, receipts)
+            except Exception:
+                complete = False
+                logger.warning("Job %s custody entry %s remains pending", job_id, token, exc_info=True)
+        return complete
 
     def _cleanup_remote_job(self, job_id: str) -> None:
         """删除远端 job 工作区（marker / 日志 / metrics 已在 _stage_out_final 拉回本机，
@@ -458,7 +594,7 @@ class _StagingMixin(_StagingMixinBase):
         remote_table = self._remote_job_working_table(job_id)
         removed = transport.run(["rm", "-rf", remote_table])
         if removed.returncode != 0:
-            logger.warning(
+            raise RuntimeError(
                 f"Failed to clean up remote working table {remote_table} "
                 f"(rc={removed.returncode}): {removed.stderr.strip()}"
             )

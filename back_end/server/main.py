@@ -367,7 +367,7 @@ def run_migrations()-> None:
                 conn.commit()
             logger.info("✅ Migration completed.")
 
-    for column in ("dockerfile", "build_result", "resource_mode"):
+    for column in ("dockerfile", "build_result", "resource_mode", "finalization_status"):
         if column not in job_columns:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {column} TEXT"))
@@ -382,6 +382,7 @@ def run_migrations()-> None:
         "ix_jobs_user_id_created_at": "CREATE INDEX IF NOT EXISTS ix_jobs_user_id_created_at ON jobs (user_id, created_at)",
         "ix_jobs_status": "CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs (status)",
         "ix_jobs_slurm_job_id": "CREATE INDEX IF NOT EXISTS ix_jobs_slurm_job_id ON jobs (slurm_job_id)",
+        "ix_jobs_finalization_status": "CREATE INDEX IF NOT EXISTS ix_jobs_finalization_status ON jobs (finalization_status)",
     }
     existing_job_indexes = {idx["name"] for idx in inspector.get_indexes("jobs")}
     missing_job_indexes = {

@@ -205,8 +205,8 @@ def _read_staged_dropin(
     entry_command references into ENV_CUSTODY_DROPIN_DIR before the job runs (see
     _StagingMixin._stage_in_custody), mirroring the upload drop dir. Per entry:
 
-        <dropin>/<token>/meta.json   {token, filename, is_directory}
-        <dropin>/<token>/<filename>  the file (a .tar.gz for directories)
+        <dropin>/<token>/meta.json   {token, filename, storage_filename, is_directory}
+        <dropin>/<token>/payload     the file (a .tar.gz for directories)
 
     Returns the materialized target Path when the token is staged here, or None to
     fall through to the HTTP path (env unset on local/owned sites, or token not staged).
@@ -230,8 +230,15 @@ def _read_staged_dropin(
     filename = _safe_filename(str(meta.get("filename", "")))
     if not filename:
         return None
+    stored_name = meta.get("storage_filename", filename)
+    if (
+        not isinstance(stored_name, str)
+        or _safe_filename(stored_name) != stored_name
+        or stored_name == "meta.json"
+    ):
+        return None
     is_directory = bool(meta.get("is_directory", False))
-    src = entry_dir / filename
+    src = entry_dir / stored_name
     if not src.exists():
         return None
 

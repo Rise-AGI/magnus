@@ -110,6 +110,9 @@ class Job(Base):
     # 查 magnus_job_map）必须考虑该字段在非 RUNNING 状态下也可能命中，否则
     # 会把仍在 SLURM CG 的 magnus job 误判为 external SLURM job。
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # A terminal allocation can outlive its accounting record while artifacts
+    # are being recovered. CLEANUP means staging is durable and must not repeat.
+    finalization_status: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     runner: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc), index=True)
     start_time: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)

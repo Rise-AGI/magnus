@@ -454,8 +454,7 @@ class _SubmitMixin(_SubmitMixinBase):
 
         for marker_name in [".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom"]:
             marker_path = f"{job_working_table}/{marker_name}"
-            if os.path.exists(marker_path):
-                try:
-                    os.remove(marker_path)
-                except OSError:
-                    pass
+            try:
+                os.remove(marker_path)
+            except FileNotFoundError:
+                pass
