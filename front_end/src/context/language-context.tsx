@@ -542,25 +542,10 @@ const translations = {
   "jobStatus.releasing": { zh: "释放中", en: "Releasing" },
 
   // ===== Job Image Build =====
-  "jobBuild.title": { zh: "环境构建", en: "Environment Build" },
-  "jobBuild.loading": { zh: "加载构建进度", en: "Loading build progress" },
-  "jobBuild.loadFailed": { zh: "加载失败，请重试。", en: "Could not load. Please retry." },
   "jobBuild.retryLogs": { zh: "日志加载失败，点击重试", en: "Logs unavailable. Click to retry" },
-  "jobBuild.elapsed": { zh: "已用 {seconds} 秒", en: "{seconds}s elapsed" },
-  "jobBuild.steps": { zh: "已完成 {completed}/{total} 步，{cached} 步使用缓存", en: "{completed}/{total} steps complete, {cached} cached" },
-  "jobBuild.cached": { zh: "缓存命中", en: "Cached" },
-  "jobBuild.viewLogs": { zh: "查看构建日志", en: "View build logs" },
   "jobBuild.logSource": { zh: "日志来源", en: "Log source" },
   "jobBuild.buildLogs": { zh: "构建日志", en: "Build logs" },
   "jobBuild.runLogs": { zh: "运行日志", en: "Run logs" },
-  "jobBuild.phase.waiting": { zh: "等待构建", en: "Waiting for a build slot" },
-  "jobBuild.phase.building": { zh: "构建镜像", en: "Building image" },
-  "jobBuild.phase.exporting": { zh: "导出镜像", en: "Exporting image" },
-  "jobBuild.phase.loading": { zh: "加载镜像", en: "Loading image" },
-  "jobBuild.phase.converting": { zh: "转换运行格式", en: "Converting runtime image" },
-  "jobBuild.phase.ready": { zh: "环境就绪", en: "Environment ready" },
-  "jobBuild.phase.failed": { zh: "构建失败", en: "Build failed" },
-  "jobBuild.phase.cancelled": { zh: "构建已取消", en: "Build cancelled" },
 
   // ===== Job Detail - Header =====
   "jobDetail.status": { zh: "状态", en: "Status" },

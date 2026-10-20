@@ -44,7 +44,7 @@ Docker/local loads the built image. HPC converts a Docker archive to SIF and use
 
 An uncached runtime enters `Building`: waiting for a build slot, executing steps, exporting, and loading/converting are progress phases. `Pending` requires both repository and runtime to be ready. A ready cache hit can skip Building.
 
-The table and detail status badges expose build progress on hover, keyboard focus, or touch. Only open popovers poll; job lists do not carry Dockerfile text or build logs. Build logs retain roughly the most recent 4 MiB, with a truncation marker when earlier output is discarded. They remain available after failure, separately from execution logs, until the Job workspace is reclaimed. The progress endpoint returns HTTP 410 when historical diagnostics are unavailable, rather than reporting a new waiting build.
+Build logs are available in the Job detail page's log panel, with Run logs / Build logs controls at the top right. Status badges in tables and detail pages only display status; they do not open a log viewer. Job lists do not carry Dockerfile text or build logs. Build logs retain roughly the most recent 4 MiB, with a truncation marker when earlier output is discarded. They remain available after failure, separately from execution logs, until the Job workspace is reclaimed. The progress endpoint returns HTTP 410 when historical diagnostics are unavailable, rather than reporting a new waiting build.
 
 ```python
 from magnus import get_job_build, get_job_build_logs

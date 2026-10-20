@@ -422,11 +422,9 @@ export default function JobDetailsPage() {
           {/* Status Card */}
           <div className="flex flex-col md:flex-row md:items-center gap-4 bg-zinc-900/50 border border-zinc-800 px-4 md:px-6 py-4 rounded-xl backdrop-blur-sm flex-shrink-0 shadow-lg shadow-black/20">
             <JobStatusBadge
-              jobId={job.id}
               status={job.status}
               isReleasing={job.is_releasing}
               size="md"
-              onViewBuildLogs={() => { setLogSelection("build"); setActiveTab("console"); }}
             >
               <span className="flex flex-col ml-2">
                 <span className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-0.5">{t("jobDetail.status")}</span>
@@ -690,21 +688,23 @@ export default function JobDetailsPage() {
           </div>
 
           {activeTab === "console" && hasDockerfile && (
-            <div className="flex gap-2 px-4 py-2 border-b border-zinc-800" role="group" aria-label={t("jobBuild.logSource")}>
-              {(["run", "build"] as const).map(source => (
-                <button
-                  key={source} type="button" aria-pressed={source === logSource}
-                  onClick={() => setLogSelection(source)}
-                  className={`px-3 py-1 rounded text-xs transition-colors ${source === logSource ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
-                >
-                  {t(source === "build" ? "jobBuild.buildLogs" : "jobBuild.runLogs")}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-2 border-b border-zinc-800">
               {logError && (
-                <button onClick={() => fetchLogs(logPage)} className="text-xs text-red-400 self-center hover:underline" role="status">
+                <button onClick={() => fetchLogs(logPage)} className="mr-auto text-xs text-red-400 hover:underline" role="status">
                   {t("jobBuild.retryLogs")}
                 </button>
               )}
+              <div className="flex shrink-0 items-center gap-2" role="group" aria-label={t("jobBuild.logSource")}>
+                {(["run", "build"] as const).map(source => (
+                  <button
+                    key={source} type="button" aria-pressed={source === logSource}
+                    onClick={() => setLogSelection(source)}
+                    className={`px-3 py-1 rounded text-xs transition-colors ${source === logSource ? "bg-zinc-800 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+                  >
+                    {t(source === "build" ? "jobBuild.buildLogs" : "jobBuild.runLogs")}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

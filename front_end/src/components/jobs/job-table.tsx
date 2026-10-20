@@ -82,7 +82,7 @@ export function JobTable({
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <JobPriorityBadge type={job.job_type} />
-                  <JobStatusBadge jobId={job.id} status={job.status} isReleasing={job.is_releasing} />
+                  <JobStatusBadge status={job.status} isReleasing={job.is_releasing} />
                 </div>
               </div>
 
@@ -190,7 +190,7 @@ export function JobTable({
                   </td>
 
                   <td className="px-6 py-4 align-top text-center">
-                    <JobStatusBadge jobId={job.id} status={job.status} isReleasing={job.is_releasing} />
+                    <JobStatusBadge status={job.status} isReleasing={job.is_releasing} />
                   </td>
 
                   <td className="px-6 py-4 align-top">

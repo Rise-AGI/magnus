@@ -1,7 +1,6 @@
 // front_end/src/components/jobs/job-status-badge.tsx
 import { Play, CheckCircle2, AlertCircle, PauseCircle, Clock, Ban, Loader2 } from "lucide-react";
 import { useLanguage } from "@/context/language-context";
-import { JobBuildProgressPopover } from "@/components/jobs/job-build-progress";
 
 interface JobStatusBadgeProps {
   status: string;
@@ -12,12 +11,10 @@ interface JobStatusBadgeProps {
   isReleasing?: boolean;
   size?: "sm" | "md";
   animate?: boolean;
-  jobId?: string;
-  onViewBuildLogs?: () => void;
   children?: React.ReactNode;
 }
 
-export function JobStatusBadge({ status, isReleasing = false, size = "sm", animate = true, jobId, onViewBuildLogs, children }: JobStatusBadgeProps) {
+export function JobStatusBadge({ status, isReleasing = false, size = "sm", animate = true, children }: JobStatusBadgeProps) {
   const { t } = useLanguage();
 
   const config = {
@@ -38,7 +35,7 @@ export function JobStatusBadge({ status, isReleasing = false, size = "sm", anima
   const releasingText = t("jobStatus.releasing");
 
   const isAnimated = animate && (["Running", "Preparing", "Building"].includes(status) || isReleasing);
-  const badge = size === "md" ? (
+  return size === "md" ? (
       <span className="inline-flex items-center gap-2">
         <Icon className={`w-5 h-5 ${config.color} ${isAnimated ? 'animate-pulse' : ''}`} />
         {isReleasing && (
@@ -60,8 +57,4 @@ export function JobStatusBadge({ status, isReleasing = false, size = "sm", anima
       )}
     </span>
   );
-
-  return jobId && status === "Building" ? (
-    <JobBuildProgressPopover jobId={jobId} status={status} onViewBuildLogs={onViewBuildLogs}>{badge}</JobBuildProgressPopover>
-  ) : badge;
 }
