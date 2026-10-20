@@ -16,7 +16,7 @@ import { JobTable } from "@/components/jobs/job-table";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useUrlPagination } from "@/hooks/use-url-pagination";
 import { presentClusterResources, type ClusterResources } from "@/lib/cluster-resources";
-import { formatStationTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 interface ClusterStats {
   resources: ClusterResources;
@@ -166,7 +166,7 @@ export default function ClusterPage() {
       </div>
 
       {/* Cluster Resource Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
+      <div className={cn("grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 transition-opacity", resourceInfo?.stale && "opacity-60")}>
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
           <div className="flex items-center gap-2 text-cyan-400 mb-2">
             <Cpu className="w-4 h-4" />
@@ -183,6 +183,8 @@ export default function ClusterPage() {
                 <span>{resourceInfo?.memoryFree} / {resourceInfo?.memoryTotal}</span>
               </div>
             </>
+          ) : clusterRefreshFailed ? (
+            <div className="text-3xl font-bold text-zinc-500">{t("jobResources.unknown")}</div>
           ) : (
             <div className="h-12 bg-zinc-800 animate-pulse rounded my-1" />
           )}
@@ -205,6 +207,8 @@ export default function ClusterPage() {
               </div>
               <p className="mt-1 text-xs text-zinc-500">{t("cluster.resourcesGpuAllocated", { count: resourceInfo?.gpuAllocated ?? t("jobResources.unknown") })}</p>
             </>
+          ) : clusterRefreshFailed ? (
+            <div className="text-3xl font-bold text-zinc-500">{t("jobResources.unknown")}</div>
           ) : (
             <div className="h-12 bg-zinc-800 animate-pulse rounded my-1" />
           )}
@@ -220,6 +224,8 @@ export default function ClusterPage() {
               <div className="text-3xl font-bold text-white mb-2">{cluster.total_running}</div>
               <div className="text-zinc-400 text-xs">{t("cluster.activeJobsDesc")}</div>
             </>
+          ) : clusterRefreshFailed ? (
+            <div className="text-3xl font-bold text-zinc-500">{t("jobResources.unknown")}</div>
           ) : (
             <div className="h-12 bg-zinc-800 animate-pulse rounded my-1" />
           )}
@@ -235,23 +241,12 @@ export default function ClusterPage() {
               <div className="text-3xl font-bold text-white mb-2">{cluster.total_pending}</div>
               <div className="text-zinc-400 text-xs">{t("cluster.queueDepthDesc")}</div>
             </>
+          ) : clusterRefreshFailed ? (
+            <div className="text-3xl font-bold text-zinc-500">{t("jobResources.unknown")}</div>
           ) : (
             <div className="h-12 bg-zinc-800 animate-pulse rounded my-1" />
           )}
         </div>
-      </div>
-
-      <div className="mb-8 text-xs space-y-1 text-zinc-500" role="status">
-        {resourceInfo ? (
-          <>
-            <p className={resourceInfo.stale ? "text-amber-400" : "text-zinc-400"}>
-              {resourceInfo.scope} · {resourceInfo.observedAt
-                ? t("cluster.resourcesObserved", { time: formatStationTime(resourceInfo.observedAt) })
-                : t("cluster.resourcesTimeUnknown")}
-            </p>
-            {resourceInfo.notes.map(note => <p key={note}>{note}</p>)}
-          </>
-        ) : clusterRefreshFailed ? <p className="text-amber-400">{t("cluster.resourcesFetchFailed")}</p> : null}
       </div>
 
       <div className="flex flex-col gap-10">
@@ -299,7 +294,7 @@ export default function ClusterPage() {
               loading={loading && !cluster}
               onClone={handleCloneJob}
               onTerminate={onClickTerminate}
-              emptyMessage={t("cluster.noRunningJobs")}
+              emptyMessage={clusterRefreshFailed && !cluster ? t("jobResources.unknown") : t("cluster.noRunningJobs")}
               className="border-none min-h-[175px]"
             />
             {(cluster?.total_running || 0) > 0 && (
@@ -330,7 +325,7 @@ export default function ClusterPage() {
               loading={loading && !cluster}
               onClone={handleCloneJob}
               onTerminate={onClickTerminate}
-              emptyMessage={t("cluster.queueEmpty")}
+              emptyMessage={clusterRefreshFailed && !cluster ? t("jobResources.unknown") : t("cluster.queueEmpty")}
               className="border-none min-h-[175px]"
             />
             {(cluster?.total_pending || 0) > 0 && (

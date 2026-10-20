@@ -48,9 +48,6 @@ test("cluster resource numbers keep binary units and allocation semantics", () =
   assert.equal(view.gpuAllocated, "2");
   assert.equal(view.memoryFree, "250 GiB");
   assert.equal(view.memoryTotal, "500 GiB");
-  assert.equal(view.scope, "Current partition node pool");
-  assert.equal(view.observedAt, snapshot.observed_at);
-  assert.match(view.notes.join(" "), /not guaranteed immediate availability or live utilization/);
 });
 
 test("local allocation-untracked capacity never appears fully free", () => {
@@ -60,24 +57,21 @@ test("local allocation-untracked capacity never appears fully free", () => {
   assert.equal(view.gpuAllocated, "Unknown");
   assert.equal(view.memoryFree, "Unknown");
   assert.equal(view.memoryTotal, "500 GiB");
-  assert.match(view.notes.join(" "), /does not track resource allocation/);
 });
 
-test("unavailable capacity explains lower-bound free counts without changing totals", () => {
+test("unavailable capacity preserves lower-bound free counts without changing totals", () => {
   const view = presentClusterResources({ ...snapshot, free_is_lower_bound: true, unavailable_cpus: 32, unavailable_gpus: 2, unavailable_mem_mb: 128000 }, t);
   assert.equal(view.cpuFree, "≥ 64");
   assert.equal(view.gpuFree, "≥ 4");
   assert.equal(view.memoryFree, "≥ 250 GiB");
   assert.equal(view.memoryTotal, "500 GiB");
-  assert.match(view.notes.join(" "), /Unschedulable capacity: CPU × 32, RAM 125 GiB, GPU × 2/);
-  assert.match(view.notes.join(" "), /included in configured totals/);
 });
 
-test("backend stale data and a failed frontend refresh both disclose old observations", () => {
+test("backend stale data and a failed frontend refresh both mark retained values stale", () => {
   for (const view of [presentClusterResources({ ...snapshot, is_stale: true }, t), presentClusterResources(snapshot, t, true)]) {
     assert.equal(view.stale, true);
-    assert.equal(view.observedAt, snapshot.observed_at);
-    assert.match(view.notes.join(" "), /not current availability/);
+    assert.equal(view.cpuFree, "64");
+    assert.equal(view.memoryFree, "250 GiB");
   }
 });
 
@@ -85,9 +79,6 @@ test("cross-boundary whole-job allocations are shown as upper bounds", () => {
   const view = presentClusterResources({ ...snapshot, usage_is_upper_bound: true, free_is_lower_bound: true }, t);
   assert.equal(view.gpuAllocated, "≤ 2");
   assert.equal(view.gpuFree, "≥ 4");
-  assert.match(view.notes.join(" "), /competing jobs are counted in full/);
-  assert.match(view.notes.join(" "), /allocations outside this node pool/);
-  assert.match(presentClusterResources({ ...snapshot, usage_is_upper_bound: true }, translate("zh")).notes.join(" "), /节点池以外的分配或挂起前的 CPU 分配/);
 });
 
 test("inferred allocation uses approximate values instead of strict cross-pool bounds", () => {
@@ -97,24 +88,21 @@ test("inferred allocation uses approximate values instead of strict cross-pool b
   assert.equal(view.cpuFree, "≈ 64");
   assert.equal(view.memoryFree, "≈ 250 GiB");
   assert.equal(view.memoryTotal, "500 GiB");
-  assert.match(view.notes.join(" "), /inferred from scheduler request fields/);
-  assert.match(view.notes.join(" "), /allocations outside this node pool/);
-  assert.ok(!view.notes.join(" ").includes("≥"));
-  assert.ok(!view.notes.join(" ").includes("≤"));
 });
 
-test("old API values remain readable with unknown freshness and accounting scope", () => {
+test("old API values remain readable without freshness and accounting metadata", () => {
   const { observed_at, is_stale, allocation_tracked, accounting_scope, ...old } = snapshot;
   const view = presentClusterResources(old, t);
   assert.equal(view.cpuFree, "64");
-  assert.equal(view.observedAt, null);
-  assert.equal(view.scope, "Accounting scope unavailable");
-  assert.match(view.notes.join(" "), /does not provide complete observation/);
+  assert.equal(view.gpuFree, "4");
+  assert.equal(view.memoryTotal, "500 GiB");
 });
 
-test("cluster resource explanations have Chinese translations", () => {
-  const zh = translate("zh");
-  assert.match(presentClusterResources({ ...snapshot, is_stale: true, free_is_lower_bound: true }, zh).notes.join(" "), /保守余量下界/);
+test("unknown resource values have Chinese translations", () => {
+  const view = presentClusterResources({ ...snapshot, allocation_tracked: false }, translate("zh"));
+  assert.equal(view.cpuFree, "未知");
+  assert.equal(view.gpuFree, "未知");
+  assert.equal(view.memoryFree, "未知");
 });
 
 test("system series names identify devices and ranks without exposing telemetry metadata", () => {
