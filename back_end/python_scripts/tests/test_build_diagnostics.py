@@ -49,6 +49,53 @@ def log_event(
 
 
 class ProgressTests(unittest.TestCase):
+    def test_cached_vertex_can_resume_execution(self):
+        for cached in ({}, {"cached": False}):
+            with self.subTest(cached=cached):
+                progress = progress_module.BuildProgress()
+                progress.consume(json.dumps({"vertexes": [
+                    {
+                        "digest": "compile",
+                        "name": "RUN compile",
+                        "cached": True,
+                        "started": "2026-01-01T00:00:00Z",
+                        "completed": "2026-01-01T00:00:00Z",
+                    },
+                    {
+                        "digest": "compile",
+                        "name": "RUN compile",
+                        "started": "2026-01-01T00:00:01Z",
+                        **cached,
+                    },
+                ]}))
+                snapshot = progress.snapshot()
+                self.assertEqual(snapshot["cached_steps"], 0)
+                self.assertEqual(snapshot["completed_steps"], 0)
+                self.assertEqual(snapshot["current_step"], "RUN compile")
+                progress.consume(json.dumps({"vertexes": [{
+                    "digest": "compile",
+                    "name": "RUN compile",
+                    "started": "2026-01-01T00:00:01Z",
+                    "completed": "2026-01-01T00:00:10Z",
+                }]}))
+                self.assertEqual(progress.snapshot()["cached_steps"], 0)
+                self.assertEqual(progress.snapshot()["completed_steps"], 1)
+
+    def test_log_events_do_not_change_vertex_cache_state(self):
+        progress = progress_module.BuildProgress()
+        progress.consume(json.dumps({"vertexes": [{
+            "digest": "one",
+            "name": "RUN compile",
+            "cached": True,
+            "completed": "2026-01-01T00:00:00Z",
+        }]}))
+        progress.consume(log_event(b"retained output"))
+        progress.consume(json.dumps({"statuses": [{"vertex": "one", "current": 1}]}))
+        snapshot = progress.snapshot()
+        self.assertEqual(snapshot["cached_steps"], 1)
+        self.assertEqual(snapshot["completed_steps"], 1)
+        self.assertIn("retained output", snapshot["log_tail"])
+
     def test_independent_subscribers_across_partial_blocks(self):
         progress = progress_module.BuildProgress()
         with tempfile.TemporaryDirectory() as temporary:

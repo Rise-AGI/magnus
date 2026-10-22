@@ -137,7 +137,8 @@ class BuildProgress:
                 step = {
                     "id": identifier,
                     "name": str(vertex.get("name", previous.get("name", "")))[:1024],
-                    "cached": bool(vertex.get("cached", previous.get("cached", False))),
+                    # Vertex updates are complete; BuildKit omits false booleans.
+                    "cached": bool(vertex.get("cached", False)),
                     "completed": bool(vertex.get("completed")),
                     "error": str(vertex["error"])[:2048] if vertex.get("error") else None,
                 }
