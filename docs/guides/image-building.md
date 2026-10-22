@@ -77,6 +77,8 @@ Loading, conversion, hashing and copying do not hold the cache publication lock.
 
 The budget includes build cache, managed runtime copies and export/conversion scratch. Relay applies the same configured capacity and free-space floor independently to its remote built-image cache, reserving space before transfer and protecting active Jobs. Cleanup targets only Magnus-owned files/images, never user-wide Docker pruning or the existing pulled-image cache. BuildKit's periodic GC is not an instantaneous disk quota: a strict physical limit requires a limited filesystem/volume including scratch, alongside free-space headroom and bounded concurrency. Docker's shared image store also needs capacity planning. If pinned data prevents reclamation, preparation must fail clearly rather than delete an active runtime.
 
+Configure the worker's native GC policy for the retained step cache, including its maximum usage, reserved space and free-space target. Size it for the base image and installed dependencies as well as cache mounts; a large base image can consume nearly the whole allowance. Magnus reclaims worker data only for an actual aggregate-budget excess, retaining the amount that fits alongside local data. A scratch-limit or local-free-space failure does not by itself purge the worker cache. Capacity failures include the observed byte counts and limits; the backend log records cache reclamation before and after. Samples do not reconstruct an unrecorded historical peak.
+
 ## Compatibility and acceptance
 
 The upgrade preserves old Job rows and source semantics, adds Building and defers Dockerfile text from list queries. Existing Service submissions retain their image path; their active-Job handling recognizes Building. No special Blueprint is installed.

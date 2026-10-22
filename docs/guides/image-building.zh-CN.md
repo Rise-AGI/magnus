@@ -77,6 +77,8 @@ SIF 转换可用 `conversion_cpus`（默认 `2`）和 `conversion_memory`（默�
 
 预算覆盖构建缓存、受管运行副本和导出/转换 scratch。relay 对远端构建镜像缓存独立应用同样的容量和剩余空间配置，在传输前预留空间并保护活跃 Job。只清理 Magnus 管理的文件/镜像，不执行用户级全局 Docker prune，也不回收原有拉取镜像缓存。BuildKit 周期 GC 不是瞬时磁盘配额：严格物理上限需要受限文件系统/卷，包括 scratch，并配合剩余空间和并发限制。Docker 共享 image store 也要规划容量。使用保护导致无法回收时应明确失败，不能删除活跃运行环境。
 
+步骤缓存的保留策略使用 worker 原生 GC，配置最大占用、保留空间和剩余空间目标。预算应容纳基础镜像、已安装依赖和 cache mount；大底座可能占掉几乎全部额度。Magnus 仅在实际总预算超限时回收 worker 数据，保留本地数据之外仍可容纳的部分；仅 scratch 超限或本地剩余空间不足不会清空 worker 缓存。容量错误包含观测到的字节数和阈值，后端日志记录回收前后占用；采样不能重建未记录的历史峰值。
+
 ## 兼容与验收
 
 升级保留旧 Job 和镜像来源语义，增加 Building，并在列表查询中延迟加载 Dockerfile。Service 仍走原有镜像输入，其活跃 Job 判断识别 Building。不安装专属构建 Blueprint。

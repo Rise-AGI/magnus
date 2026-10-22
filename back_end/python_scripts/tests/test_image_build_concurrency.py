@@ -19,7 +19,7 @@ import threading
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
@@ -355,6 +355,112 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             await self.import_image()
         self.assertTrue((self.directory / "image.sif").exists())
         self.assertEqual(self.manager.results, {})
+
+    async def test_scratch_overflow_does_not_prune_worker_cache(self):
+        self.manager.scratch_budget = 1
+        self.manager.client.prune = AsyncMock()
+        self.manager.client.disk_usage = AsyncMock(side_effect=AssertionError("unnecessary worker query"))
+        with self.assertRaises(self.module._CacheBudgetError) as raised:
+            await self.manager._ensure_budget()
+        error = raised.exception
+        self.assertEqual(error.reason, "scratch")
+        self.assertGreater(error.usage["scratch"], error.usage["scratch_limit"])
+        self.assertIsNone(error.usage["worker"])
+        self.assertIn("storage_bytes=", str(error))
+        await self.manager._collect_cache()
+        self.manager.client.prune.assert_not_awaited()
+
+    async def test_aggregate_pressure_prunes_only_the_required_worker_excess(self):
+        with self.archive.open("wb") as stream:
+            stream.truncate(17 * 1024 ** 2)
+        local_size, _, scratch_size = await self.manager._usage()
+        self.manager.budget = local_size + 3 * 1024 ** 2
+        self.manager.scratch_budget = scratch_size + 1
+        self.manager.client.size = 4 * 1024 ** 2
+        prune = AsyncMock(wraps=self.manager.client.prune)
+        self.manager.client.prune = prune
+        with self.assertLogs(self.module.logger, level="INFO") as logs:
+            await self.manager._ensure_budget()
+        prune.assert_awaited_once()
+        keep_bytes = prune.await_args.args[0]
+        self.assertGreater(keep_bytes, 0)
+        self.assertLess(keep_bytes, 4 * 1024 ** 2)
+        local_size, _, _ = await self.manager._usage()
+        self.assertLessEqual(local_size + self.manager.client.size, self.manager.budget)
+        self.assertTrue(any("reclamation" in line and "worker_keep_bytes=" in line for line in logs.output))
+
+    async def test_unreclaimable_local_overflow_preserves_worker_cache(self):
+        local_size, _, scratch_size = await self.manager._usage()
+        self.manager.budget = local_size - 1
+        self.manager.scratch_budget = scratch_size + 100
+        self.manager.client.size = 128
+        self.manager.client.prune = AsyncMock()
+        with self.assertRaises(self.module._CacheBudgetError) as raised:
+            await self.manager._ensure_budget()
+        error = raised.exception
+        self.assertEqual(error.reason, "cache")
+        self.assertGreater(error.usage["total"], error.usage["cache_limit"])
+        self.assertEqual(error.usage["worker"], 128)
+        self.manager.client.prune.assert_not_awaited()
+
+    async def test_collection_observes_worker_growth_during_index_write(self):
+        saving = asyncio.Event()
+        release_save = asyncio.Event()
+        real_save = self.manager._save_index
+
+        async def held_save():
+            await real_save()
+            saving.set()
+            await release_save.wait()
+
+        self.manager._save_index = held_save
+        self.manager.client.size = self.manager.budget // 2
+        self.manager.client.prune = AsyncMock(wraps=self.manager.client.prune)
+        collecting = asyncio.create_task(self.manager._collect_cache())
+        try:
+            await asyncio.wait_for(saving.wait(), 2)
+            self.manager.client.size = self.manager.budget * 2
+        finally:
+            release_save.set()
+            await collecting
+        self.manager.client.prune.assert_awaited_once()
+        await self.manager._check_budget()
+
+    async def test_orphan_only_reclamation_records_before_and_after_usage(self):
+        orphan = self.manager.root / ("e" * 64 + ".sif")
+        with orphan.open("wb") as stream:
+            stream.truncate(self.manager.budget * 2)
+        self.manager.client.prune = AsyncMock()
+        with self.assertLogs(self.module.logger, level="INFO") as logs:
+            await self.manager._ensure_budget()
+        self.assertFalse(orphan.exists())
+        self.manager.client.prune.assert_not_awaited()
+        record = next(record for record in logs.records if "reclamation" in record.msg)
+        _, before, after, _, removed_copies, removed_orphans = record.args
+        self.assertGreater(before["total"], self.manager.budget)
+        self.assertLessEqual(after["total"], self.manager.budget)
+        self.assertEqual(removed_copies, 0)
+        self.assertEqual(removed_orphans, 1)
+
+    async def test_local_free_space_pressure_does_not_prune_a_remote_worker(self):
+        self.manager.budget = 100
+        self.manager.free_floor = 10
+        self.manager._usage = AsyncMock(return_value=(10, 0, 0))
+        self.manager.client.size = 20
+        self.manager.client.prune = AsyncMock()
+        with self.assertRaises(self.module._CacheBudgetError) as raised:
+            await self.manager._ensure_budget()
+        self.assertEqual(raised.exception.reason, "free")
+        self.assertEqual(raised.exception.usage["free"], 0)
+        self.assertEqual(raised.exception.usage["free_floor"], 10)
+        self.manager.client.prune.assert_not_awaited()
+
+    async def test_worker_cache_within_budget_uses_the_worker_gc_policy(self):
+        self.manager.budget = 1000
+        self.manager.client.size = 810
+        self.manager.client.prune = AsyncMock()
+        await self.manager._collect_cache()
+        self.manager.client.prune.assert_not_awaited()
 
     async def test_cancelled_index_write_restores_previous_result(self):
         previous = {"digest": "sha256:" + "d" * 64}

@@ -34,6 +34,17 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 class _CacheBudgetError(ImageBuildError):
     """Capacity pressure that may be resolved by evicting unused cache."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        usage: dict[str, int | None],
+    ) -> None:
+        self.reason = reason
+        self.usage = usage
+        super().__init__(f"{message}; storage_bytes={json.dumps(usage, sort_keys=True)}")
+
 
 def _directory_size(
     directory: Path,
@@ -1092,8 +1103,9 @@ class ImageBuildManager:
     async def _remove_orphans(
         self,
         protected: frozenset[str] = frozenset(),
-    ) -> None:
+    ) -> int:
         # Called under maintenance_lock, excluding cache hits and publication.
+        removed_count = 0
         with self.lock:
             live = protected | set(self.pins.values()) | {value["digest"] for value in self.results.values()}
         if is_local_mode:
@@ -1105,6 +1117,7 @@ class ImageBuildManager:
                         continue
                     try:
                         await self._remove_docker_tag(tag)
+                        removed_count += 1
                     except ImageBuildError:
                         logger.warning("Cannot remove orphaned build image %s", tag)
         else:
@@ -1112,21 +1125,66 @@ class ImageBuildManager:
                 digest = f"sha256:{path.stem}"
                 if _DIGEST.fullmatch(digest) and digest not in live:
                     await blocking_io(self._remove_sif, digest)
+                    removed_count += 1
             for path in await asyncio.to_thread(lambda: list(self.root.glob(".*.tmp"))):
                 if path not in self.incoming_paths:
                     await blocking_io(path.unlink, missing_ok=True)
+                    removed_count += 1
+        return removed_count
+
+    def _storage_usage(
+        self,
+        *,
+        local_size: int,
+        free: int,
+        scratch_size: int,
+        worker_size: int | None,
+    ) -> dict[str, int | None]:
+        return {
+            "local_cache": max(0, local_size - scratch_size),
+            "scratch": scratch_size,
+            "worker": worker_size,
+            "total": local_size + worker_size if worker_size is not None else None,
+            "cache_limit": self.budget,
+            "scratch_limit": self.scratch_budget,
+            "free": free,
+            "free_floor": self.free_floor,
+        }
 
     async def _check_budget(
         self,
     ) -> None:
         local_size, free, scratch_size = await self._usage()
         if scratch_size > self.scratch_budget:
-            raise _CacheBudgetError("Image build scratch budget exceeded; reduce the image or increase the scratch budget")
+            raise _CacheBudgetError(
+                "Image build scratch budget exceeded; reduce the image or increase the scratch budget",
+                reason="scratch",
+                usage=self._storage_usage(
+                    local_size=local_size,
+                    free=free,
+                    scratch_size=scratch_size,
+                    worker_size=None,
+                ),
+            )
         worker_size = await self.client.disk_usage()
+        usage = self._storage_usage(
+            local_size=local_size,
+            free=free,
+            scratch_size=scratch_size,
+            worker_size=worker_size,
+        )
         if local_size + worker_size > self.budget:
-            raise _CacheBudgetError("Image build cache budget exceeded; reduce the image or increase the station budget")
+            raise _CacheBudgetError(
+                "Image build cache budget exceeded; reduce the image or increase the station budget",
+                reason="cache",
+                usage=usage,
+            )
         if free < self.free_floor:
-            raise _CacheBudgetError("Insufficient disk space for image preparation")
+            raise _CacheBudgetError(
+                "Insufficient disk space for image preparation",
+                reason="free",
+                usage=usage,
+            )
 
     async def _collect_cache(
         self,
@@ -1141,7 +1199,9 @@ class ImageBuildManager:
     ) -> None:
         try:
             await self._check_budget()
-        except _CacheBudgetError:
+        except _CacheBudgetError as error:
+            if error.reason == "scratch":
+                raise
             async with self.maintenance_lock:
                 await self._ensure_budget_locked()
 
@@ -1153,7 +1213,9 @@ class ImageBuildManager:
         # so another collector can resolve pressure without duplicate pruning.
         try:
             await self._check_budget()
-        except _CacheBudgetError:
+        except _CacheBudgetError as error:
+            if error.reason == "scratch":
+                raise
             await self._collect_cache_locked(protected)
             await self._check_budget()
 
@@ -1161,10 +1223,20 @@ class ImageBuildManager:
         self,
         protected: frozenset[str] = frozenset(),
     ) -> None:
-        await self._remove_orphans(protected)
+        local_size, free, scratch_size = await self._usage()
+        if scratch_size > self.scratch_budget:
+            return
         worker_size = await self.client.disk_usage()
-        local_size, free, _ = await self._usage()
+        before = self._storage_usage(
+            local_size=local_size,
+            free=free,
+            scratch_size=scratch_size,
+            worker_size=worker_size,
+        )
+        removed_orphans = await self._remove_orphans(protected)
+        local_size, free, scratch_size = await self._usage()
         target = int(self.budget * 0.8)
+        removed_count = 0
         with self.lock:
             products = {value["digest"]: dict(value) for value in self.results.values()}
         for digest, result in sorted(products.items(), key=lambda item: item[1].get("accessed_at", 0)):
@@ -1187,8 +1259,47 @@ class ImageBuildManager:
                 with self.lock:
                     if removed:
                         self.results = {key: value for key, value in self.results.items() if value["digest"] != digest}
+                        removed_count += 1
                     self.evicting.discard(digest)
-            local_size, free, _ = await self._usage()
+            local_size, free, scratch_size = await self._usage()
         await self._save_index()
-        if local_size + worker_size > target or free < self.free_floor:
-            await self.client.prune(max(0, target - local_size))
+        local_size, free, scratch_size = await self._usage()
+        worker_size = await self.client.disk_usage()
+        keep_bytes = None
+        # The worker owns its GC policy. Reclaim only the aggregate excess,
+        # not a scratch-driven 80% target that can turn into prune(0).
+        # Worker data may be remote or on a different filesystem, so pruning
+        # it is not a remedy for a local free-space-only failure.
+        if scratch_size <= self.scratch_budget and local_size < self.budget < local_size + worker_size:
+            keep_bytes = self.budget - local_size
+            logger.info(
+                "Pruning dedicated BuildKit cache: before=%s worker_keep_bytes=%s",
+                self._storage_usage(
+                    local_size=local_size,
+                    free=free,
+                    scratch_size=scratch_size,
+                    worker_size=worker_size,
+                ),
+                keep_bytes,
+            )
+            await self.client.prune(keep_bytes)
+        if removed_count or removed_orphans or keep_bytes is not None:
+            local_size, free, scratch_size = await self._usage()
+            worker_size = await self.client.disk_usage()
+            with self.lock:
+                jobs = sorted(self.jobs)
+            logger.info(
+                "Image build cache reclamation: jobs=%s before=%s after=%s "
+                "worker_keep_bytes=%s removed_runtime_copies=%s removed_orphan_entries=%s",
+                jobs,
+                before,
+                self._storage_usage(
+                    local_size=local_size,
+                    free=free,
+                    scratch_size=scratch_size,
+                    worker_size=worker_size,
+                ),
+                keep_bytes,
+                removed_count,
+                removed_orphans,
+            )
