@@ -92,6 +92,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.namespace = {
             "__name__": __name__,
             "SessionLocal": self.sessions,
+            "Session": object,
             "Job": Job,
             "JobStatus": JobStatus,
             "ClusterSnapshot": object,
@@ -116,6 +117,8 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor = self.scheduler_class()
         actor._finalization_retry_after = {}
         actor._test_artifact_retry = {}
+        actor._preparing_jobs_lock = threading.Lock()
+        actor._submitting_jobs = set()
         def status(identifier):
             self.events.append(("query", identifier))
             result = self.statuses[identifier]
@@ -155,7 +158,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         for identifier, external in candidates.items():
             if now < actor._test_artifact_retry.get(identifier, 0):
                 continue
-            delay = actor._recover_slurm_artifacts(identifier, external)
+            delay = actor._recover_job_artifacts(identifier, external)
             actor._test_artifact_retry[identifier] = now + delay
 
     def add_job(self, identifier="job", status=JobStatus.RUNNING, observed="FAILED"):
@@ -309,6 +312,31 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
 
+    def test_termination_during_staging_waits_for_submission_worker_cleanup(self):
+        table = self.add_job(status=JobStatus.PENDING)
+        with self.sessions() as db:
+            db.get(Job, "job").slurm_job_id = None
+            db.commit()
+        terminate = load_method("_scheduler/_core.py", "terminate_job", self.namespace)
+        submit = load_method("_scheduler/_decisions.py", "_submit_jobs", self.namespace)
+        actor = self.scheduler
+        actor.enabled = True
+        actor.preparing_jobs = {}
+        actor._loop = None
+        def staging(db, job):
+            self.assertEqual(actor._submitting_jobs, {"job"})
+            with self.sessions() as other:
+                terminate(actor, other, other.get(Job, "job"))
+            self.assertTrue((table / "repository" / "checkpoint").exists())
+            self.assertFalse(actor._clean_up_working_table("job"))
+        actor._submit_to_slurm = staging
+        submit(actor, ["job"])
+        self.assertEqual(actor._submitting_jobs, set())
+        self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, "CLEANUP"))
+        self.sync()
+        self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
+        self.assertFalse((table / "repository").exists())
+
     def test_cleanup_refuses_pending_transfer_from_other_callers(self):
         table = self.add_job()
         with self.sessions() as db:
@@ -407,6 +435,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         gc = namespace["_WorkspaceGCMixin"]()
         gc.last_workspace_gc_time = datetime.min.replace(tzinfo=timezone.utc)
         gc.preparing_jobs = {}
+        gc._submitting_jobs = set()
         gc._preparing_jobs_lock = threading.Lock()
         gc._reclaim_workspace_over_cap()
         self.assertTrue((table / "repository" / "checkpoint").exists())
@@ -427,7 +456,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor = SimpleNamespace(
             preparing_jobs={},
             _preparing_jobs_lock=threading.Lock(),
-            _schedule_pending_jobs=lambda: None,
+            _queue_pending_submission=lambda: None,
         )
         asyncio.run(decisions(actor))
         self.assertEqual(self.state()[0], JobStatus.PAUSED)
@@ -436,6 +465,104 @@ class SlurmFinalizationTests(unittest.TestCase):
             db.commit()
         asyncio.run(decisions(actor))
         self.assertEqual(self.state()[0], JobStatus.PREPARING)
+
+    def test_build_pin_release_rechecks_submission_ownership_after_candidate_snapshot(self):
+        self.add_job(status=JobStatus.PENDING)
+        with self.sessions() as db:
+            db.get(Job, "job").slurm_job_id = None
+            db.commit()
+        actor = self.scheduler
+        actor.preparing_jobs = {}
+        actor._build_pinned_jobs = {"job"}
+        released = []
+        def begin_submission_before_terminal_query():
+            actor._submitting_jobs.add("job")
+            with self.sessions() as db:
+                db.get(Job, "job").status = JobStatus.TERMINATED
+                db.commit()
+            return self.sessions()
+        namespace = dict(self.namespace)
+        namespace["SessionLocal"] = begin_submission_before_terminal_query
+        namespace["resource_manager"] = SimpleNamespace(builds=SimpleNamespace(release=released.append))
+        release = load_method("_scheduler/_core.py", "_release_finished_builds", namespace)
+        release(actor)
+        self.assertEqual(released, [])
+        self.assertEqual(actor._build_pinned_jobs, {"job"})
+        actor._submitting_jobs.clear()
+        namespace["SessionLocal"] = self.sessions
+        release(actor)
+        self.assertEqual(released, ["job"])
+        self.assertEqual(actor._build_pinned_jobs, set())
+
+    def test_staging_failure_is_committed_before_cleanup_and_retried_without_slurm_id(self):
+        table = self.add_job(status=JobStatus.PENDING)
+        with self.sessions() as db:
+            db.get(Job, "job").slurm_job_id = None
+            db.commit()
+        fail = load_method("_scheduler/_submit.py", "_fail_job_before_submission", self.namespace)
+        with self.sessions() as db:
+            fail(self.scheduler, db, "job", "staging timeout")
+        self.assertEqual(self.state()[:3], (JobStatus.FAILED, None, "CLEANUP"))
+        self.assertTrue((table / "repository").exists())
+        self.cleanup_failure.add("job")
+        self.sync()
+        self.assertEqual(self.state()[2], "CLEANUP")
+        self.cleanup_failure.clear()
+        self.sync(self.new_scheduler())
+        self.assertEqual(self.state()[:3], (JobStatus.FAILED, None, None))
+
+    def test_setup_error_after_user_termination_keeps_termination_and_schedules_cleanup(self):
+        for local in (False, True):
+            with self.subTest(local=local):
+                identifier = "docker" if local else "slurm"
+                self.add_job(identifier, status=JobStatus.PENDING)
+                with self.sessions() as db:
+                    db.get(Job, identifier).slurm_job_id = None
+                    db.commit()
+                namespace = dict(self.namespace, is_local_mode=local)
+                namespace["traceback"] = __import__("traceback")
+                actor = self.new_scheduler()
+                fail = load_method("_scheduler/_submit.py", "_fail_job_before_submission", namespace)
+                actor._fail_job_before_submission = lambda db, job_id, message: fail(actor, db, job_id, message)
+                def setup(db, job):
+                    with self.sessions() as other:
+                        other.get(Job, identifier).status = JobStatus.TERMINATED
+                        other.commit()
+                    raise OSError("setup failed after cancellation")
+                actor._built_environment_ready = setup
+                actor.docker_manager = object()
+                name = "_submit_to_docker" if local else "_submit_to_slurm"
+                operation = load_method("_scheduler/_submit.py", name, namespace)
+                setattr(actor, name, lambda db, job: operation(actor, db, job))
+                submit = load_method("_scheduler/_decisions.py", "_submit_jobs", namespace)
+                with self.assertLogs("finalization-test", level="ERROR"):
+                    submit(actor, [identifier])
+                self.assertEqual(self.state(identifier)[:3], (JobStatus.TERMINATED, None, "CLEANUP"))
+                self.assertEqual(actor._submitting_jobs, set())
+
+    def test_staging_failure_cannot_overwrite_concurrent_termination(self):
+        self.add_job(status=JobStatus.TERMINATED)
+        with self.sessions() as db:
+            db.get(Job, "job").slurm_job_id = None
+            db.commit()
+        fail = load_method("_scheduler/_submit.py", "_fail_job_before_submission", self.namespace)
+        with self.sessions() as db:
+            fail(self.scheduler, db, "job", "staging timeout")
+        self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
+
+    def test_local_mode_dispatches_deferred_submission_cleanup(self):
+        table = self.add_job(status=JobStatus.TERMINATED)
+        with self.sessions() as db:
+            current = db.get(Job, "job")
+            current.slurm_job_id = None
+            current.finalization_status = "CLEANUP"
+            db.commit()
+        self.namespace["is_local_mode"] = True
+        self.scheduler._sync_reality_docker = lambda: None
+        self.assertEqual(self.scheduler._sync_reality(), {"job": None})
+        self.scheduler._recover_job_artifacts("job", None)
+        self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
+        self.assertFalse((table / "repository").exists())
 
     def test_docker_completion_keeps_existing_local_cleanup_behavior(self):
         table = self.add_job(status=JobStatus.QUEUED)

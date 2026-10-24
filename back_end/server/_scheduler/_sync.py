@@ -109,11 +109,14 @@ class _SyncMixin(_SyncMixinBase):
             logger.warning(f"Failed to dump Docker logs for {job_id}: {error}")
             return since
 
-    def _sync_reality(self) -> dict[str, str]:
+    def _sync_reality(self) -> dict[str, str | None]:
         """同步真实状态到数据库（SLURM 或 Docker）"""
         if is_local_mode:
             self._sync_reality_docker()
-            return {}
+            with SessionLocal() as db:
+                return dict(db.query(Job.id, Job.slurm_job_id).filter(
+                    Job.finalization_status == "CLEANUP",
+                ).all())
         return self._sync_reality_slurm()
 
     def _docker_job_timed_out(self, job: Job) -> bool:
@@ -247,7 +250,7 @@ class _SyncMixin(_SyncMixinBase):
 
     def _sync_reality_slurm(
         self,
-    ) -> dict[str, str]:
+    ) -> dict[str, str | None]:
         with SessionLocal() as db:
             observations = db.query(
                 Job.id,
@@ -374,10 +377,10 @@ class _SyncMixin(_SyncMixinBase):
             db.commit()
         return True
 
-    def _recover_slurm_artifacts(
+    def _recover_job_artifacts(
         self,
         job_id: str,
-        slurm_job_id: str,
+        slurm_job_id: str | None,
     ) -> int:
         with SessionLocal() as db:
             current = db.query(Job.status, Job.finalization_status).filter(
@@ -388,7 +391,7 @@ class _SyncMixin(_SyncMixinBase):
             return 0
         status, finalization_status = current
         if finalization_status == "CLEANUP":
-            self._finish_slurm_cleanup(job_id, slurm_job_id)
+            self._finish_job_cleanup(job_id, slurm_job_id)
             return 60
         if finalization_status:
             # Classification owns marker reads. Bulk recovery must not race it.
@@ -416,9 +419,9 @@ class _SyncMixin(_SyncMixinBase):
             ).update({Job.finalization_status: "CLEANUP"}, synchronize_session=False)
             db.commit()
         if changed:
-            self._finish_slurm_cleanup(job_id, slurm_job_id)
+            self._finish_job_cleanup(job_id, slurm_job_id)
 
-    def _finish_slurm_cleanup(
+    def _finish_job_cleanup(
         self,
         job_id: str,
         slurm_job_id: Optional[str],

@@ -16,7 +16,7 @@ else:
 class _ArtifactRecoveryMixin(_ArtifactRecoveryMixinBase):
     def _schedule_artifact_recovery(
         self,
-        candidates: dict[str, str],
+        candidates: dict[str, str | None],
     ) -> None:
         for job_id, task in list(self._artifact_recovery_tasks.items()):
             if not task.done():
@@ -49,11 +49,11 @@ class _ArtifactRecoveryMixin(_ArtifactRecoveryMixinBase):
     async def _recover_artifacts_in_slot(
         self,
         job_id: str,
-        slurm_job_id: str,
+        slurm_job_id: str | None,
     ) -> int:
         async with self._artifact_recovery_slots:
             return await _run_blocking_io(
-                self._recover_slurm_artifacts,
+                self._recover_job_artifacts,
                 job_id,
                 slurm_job_id,
             )

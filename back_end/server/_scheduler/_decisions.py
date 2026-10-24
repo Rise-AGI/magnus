@@ -111,9 +111,33 @@ class _DecisionsMixin(_DecisionsMixinBase):
             if paused_jobs:
                 db.commit()
 
-        # Resource queries, preemption and submission are blocking operations.
-        # This worker owns its session; ORM objects never cross thread boundaries.
-        await _run_blocking_io(self._schedule_pending_jobs)
+        self._queue_pending_submission()
+
+    def _queue_pending_submission(
+        self,
+    ) -> None:
+        if self._submission_task is not None:
+            if not self._submission_task.done():
+                return
+            try:
+                self._submission_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as error:
+                logger.error("Submission pass failed (%s)", type(error).__name__)
+        # Admission remains single-flight: overlapping snapshots could promise
+        # the same capacity twice. Slow staging must not hold reconciliation.
+        self._submission_task = asyncio.create_task(
+            _run_blocking_io(self._schedule_pending_jobs),
+        )
+
+    async def shutdown_submission(
+        self,
+    ) -> None:
+        if self._submission_task is not None:
+            self._submission_task.cancel()
+            await asyncio.gather(self._submission_task, return_exceptions=True)
+            self._submission_task = None
 
     def _schedule_pending_jobs(self):
         with SessionLocal(expire_on_commit=False) as db:
@@ -242,13 +266,29 @@ class _DecisionsMixin(_DecisionsMixinBase):
         共享 ORM 对象。"""
         with SessionLocal() as db:
             for job_id in job_ids:
-                job = db.query(Job).filter(Job.id == job_id).first()
-                if job is None:
-                    continue
-                if is_local_mode:
-                    self._submit_to_docker(db, job)
-                else:
-                    self._submit_to_slurm(db, job)
+                with self._preparing_jobs_lock:
+                    self._submitting_jobs.add(job_id)
+                try:
+                    job = db.query(Job).filter(Job.id == job_id).first()
+                    if job is None:
+                        continue
+                    if is_local_mode:
+                        self._submit_to_docker(db, job)
+                    else:
+                        self._submit_to_slurm(db, job)
+                finally:
+                    try:
+                        db.rollback()
+                        db.query(Job).filter(
+                            Job.id == job_id,
+                            Job.status == JobStatus.TERMINATED,
+                            Job.slurm_job_id.is_(None),
+                            Job.finalization_status.is_(None),
+                        ).update({Job.finalization_status: "CLEANUP"}, synchronize_session=False)
+                        db.commit()
+                    finally:
+                        with self._preparing_jobs_lock:
+                            self._submitting_jobs.discard(job_id)
 
     def _compute_cluster_resources(
         self,

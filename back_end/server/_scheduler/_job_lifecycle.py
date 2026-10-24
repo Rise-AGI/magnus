@@ -74,6 +74,9 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
         self,
         job_id: str,
     ) -> bool:
+        with self._preparing_jobs_lock:
+            if job_id in self._submitting_jobs:
+                return False
         job_working_table = f"{magnus_workspace_path}/jobs/{job_id}"
         job_ephemeral_table = f"{magnus_ephemeral_workspace_path}/jobs/{job_id}"
         try:

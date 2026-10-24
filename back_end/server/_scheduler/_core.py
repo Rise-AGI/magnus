@@ -76,6 +76,8 @@ class MagnusScheduler(
         self._artifact_recovery_tasks: Dict[str, asyncio.Task[int]] = {}
         self._artifact_recovery_slots = asyncio.Semaphore(4)
         self._artifact_retry_after: Dict[str, float] = {}
+        self._submission_task: Optional[asyncio.Task] = None
+        self._submitting_jobs: set[str] = set()
 
     async def tick(self):
         if not self.enabled:
@@ -151,6 +153,9 @@ class MagnusScheduler(
         # its task until filesystem workers drain; workspace GC also checks it.
         with self._preparing_jobs_lock:
             preparing_task = self.preparing_jobs.get(job.id)
+            submitting = job.id in self._submitting_jobs
+        if submitting:
+            return
         if preparing_task is not None and not preparing_task.done() and self._loop is not None:
             job_id = job.id
             def cancel_preparation():
@@ -169,7 +174,7 @@ class MagnusScheduler(
     def _release_finished_builds(self) -> None:
         """Release artifacts only after submit/staging and external resources drain."""
         with self._preparing_jobs_lock:
-            candidates = self._build_pinned_jobs - set(self.preparing_jobs)
+            candidates = self._build_pinned_jobs - set(self.preparing_jobs) - self._submitting_jobs
         if not candidates:
             return
         with SessionLocal() as db:
@@ -179,10 +184,15 @@ class MagnusScheduler(
                 Job.slurm_job_id.is_(None),
                 Job.finalization_status.is_(None),
             ).all()
+        released = set()
         for (job_id,) in finished:
+            with self._preparing_jobs_lock:
+                if job_id in self.preparing_jobs or job_id in self._submitting_jobs:
+                    continue
             resource_manager.builds.release(job_id)
+            released.add(job_id)
         with self._preparing_jobs_lock:
-            self._build_pinned_jobs.difference_update(job_id for (job_id,) in finished)
+            self._build_pinned_jobs.difference_update(released)
 
     def signal_job(self, job: Job) -> None:
         """向运行中的 job 进程发送 SIGTERM。

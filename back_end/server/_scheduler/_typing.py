@@ -48,20 +48,25 @@ class _SchedulerProtocol:
     _artifact_recovery_tasks: Dict[str, asyncio.Task[int]]
     _artifact_recovery_slots: asyncio.Semaphore
     _artifact_retry_after: Dict[str, float]
+    _submission_task: Optional[asyncio.Task]
+    _submitting_jobs: set[str]
+
+    def _queue_pending_submission(self) -> None: ...
+    async def shutdown_submission(self) -> None: ...
 
     def _schedule_artifact_recovery(
         self,
-        candidates: dict[str, str],
+        candidates: dict[str, str | None],
     ) -> None: ...
     async def _recover_artifacts_in_slot(
         self,
         job_id: str,
-        slurm_job_id: str,
+        slurm_job_id: str | None,
     ) -> int: ...
-    def _recover_slurm_artifacts(
+    def _recover_job_artifacts(
         self,
         job_id: str,
-        slurm_job_id: str,
+        slurm_job_id: str | None,
     ) -> int: ...
 
     # === _job_lifecycle.py ===
@@ -117,6 +122,12 @@ class _SchedulerProtocol:
     async def _prepare_job_resources(self, job_id: str) -> None: ...
 
     # === _submit.py ===
+    def _fail_job_before_submission(
+        self,
+        db: "Session",
+        job_id: str,
+        message: str,
+    ) -> None: ...
     def _built_environment_ready(self, db: "Session", job: "Job") -> bool: ...
     def _submit_to_slurm(self, db: "Session", job: "Job") -> bool: ...
     def _submit_to_docker(self, db: "Session", job: "Job") -> bool: ...
@@ -169,9 +180,9 @@ class _SchedulerProtocol:
         container_name: str,
         since: Optional[str] = None,
     ) -> Optional[str]: ...
-    def _sync_reality(self) -> dict[str, str]: ...
+    def _sync_reality(self) -> dict[str, str | None]: ...
     def _sync_reality_docker(self) -> None: ...
-    def _sync_reality_slurm(self) -> dict[str, str]: ...
+    def _sync_reality_slurm(self) -> dict[str, str | None]: ...
     def _classify_slurm_job(
         self,
         job_id: str,
@@ -184,7 +195,7 @@ class _SchedulerProtocol:
         slurm_job_id: str,
         real_status: str,
     ) -> None: ...
-    def _finish_slurm_cleanup(
+    def _finish_job_cleanup(
         self,
         job_id: str,
         slurm_job_id: Optional[str],

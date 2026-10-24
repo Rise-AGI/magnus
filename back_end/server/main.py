@@ -613,6 +613,7 @@ async def lifespan(
     except asyncio.CancelledError:
         logger.info("Scheduler loop stopped.")
 
+    await scheduler.shutdown_submission()
     await scheduler.shutdown_artifact_recovery()
     file_custody_manager.shutdown()
     with scheduler._preparing_jobs_lock:

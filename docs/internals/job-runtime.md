@@ -34,6 +34,8 @@ SUCCESS / FAILED
 
 SSH artifact recovery runs separately from status reconciliation and admission, with at most four transfers active and one worker per Job. Transfer failures retain the workspace and receipts and retry after 60 seconds. Markers and live logs use a shared 30-second budget per pass. `transport.ssh.transfer_timeout_seconds` (default 900, a positive integer) bounds each staging transfer and each final recovery pass, including SSH authentication. Increase it for large artifacts or slow links. Timeout stops the local transfer process tree without closing the shared SSH master; terminal state still requires a successful marker read.
 
+Admission and submission also run as a single background pass, so a stalled upload cannot suspend status reconciliation or start overlapping resource decisions. Failures before submission persist a terminal result before cleanup; cleanup retries independently, including Jobs that never received a SLURM ID.
+
 ## wrapper.py: three-layer structure
 
 `_build_wrapper_content()` in `_scheduler/_wrapper_template.py` generates `wrapper.py`, which is the actual entry point executed by SLURM. The wrapper contains three nested layers:

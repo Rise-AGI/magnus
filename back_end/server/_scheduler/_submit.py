@@ -95,6 +95,24 @@ def _render_docker_user_script(entry_command: str) -> str:
 class _SubmitMixin(_SubmitMixinBase):
     """提交决策已经做完的 PENDING job 到 SLURM 或 Docker 后端。"""
 
+    def _fail_job_before_submission(
+        self,
+        db: Session,
+        job_id: str,
+        message: str,
+    ) -> None:
+        db.rollback()
+        db.query(Job).filter(
+            Job.id == job_id,
+            Job.status == JobStatus.PENDING,
+            Job.slurm_job_id.is_(None),
+        ).update({
+            Job.status: JobStatus.FAILED,
+            Job.result: message,
+            Job.finalization_status: "CLEANUP",
+        }, synchronize_session=False)
+        db.commit()
+
     def _built_environment_ready(
         self,
         db: Session,
@@ -172,9 +190,11 @@ class _SubmitMixin(_SubmitMixinBase):
 
         except Exception as error:
             logger.error(f"Job {job.id} submission error: {error}\nTraceback:\n{traceback.format_exc()}")
-            job.status = JobStatus.FAILED
-            job.result = f"Job submission setup failed: {error}"
-            db.commit()
+            self._fail_job_before_submission(
+                db,
+                str(job.id),
+                f"Job submission setup failed: {error}",
+            )
             return False
 
         build_digest = None
@@ -227,9 +247,11 @@ class _SubmitMixin(_SubmitMixinBase):
                 f.write(wrapper_content)
         except IOError as error:
             logger.error(f"Failed to write wrapper script for Job {job.id}: {error}")
-            job.status = JobStatus.FAILED
-            job.result = f"Failed to write wrapper script: {error}"
-            db.commit()
+            self._fail_job_before_submission(
+                db,
+                str(job.id),
+                f"Failed to write wrapper script: {error}",
+            )
             return False
 
         # 远端执行（transport=ssh）：在远端建好工作区骨架并把本机生成的 wrapper 推过去；
@@ -248,10 +270,11 @@ class _SubmitMixin(_SubmitMixinBase):
             self._stage_in_custody(job_id, job.entry_command, system_entry_command)
         except Exception as error:
             logger.error(f"Failed to stage Job {job.id} to remote site: {error}")
-            self._cleanup_remote_job(job_id)
-            job.status = JobStatus.FAILED
-            job.result = f"Failed to stage job to remote execution site: {error}"
-            db.commit()
+            self._fail_job_before_submission(
+                db,
+                job_id,
+                f"Failed to stage job to remote execution site: {error}",
+            )
             return False
 
         # 暂存（远端站点 scp SIF/repo 可达数秒）期间 job 可能被 terminate：sbatch 前重读
@@ -398,8 +421,14 @@ class _SubmitMixin(_SubmitMixinBase):
 
         except Exception as error:
             logger.error(f"Job {job.id} Docker submission error: {error}\n{traceback.format_exc()}")
-            job.status = JobStatus.FAILED
-            job.result = f"Docker container launch failed: {error}"
+            db.rollback()
+            db.query(Job).filter(
+                Job.id == job.id,
+                Job.status == JobStatus.PENDING,
+            ).update({
+                Job.status: JobStatus.FAILED,
+                Job.result: f"Docker container launch failed: {error}",
+            }, synchronize_session=False)
             db.commit()
             return False
 

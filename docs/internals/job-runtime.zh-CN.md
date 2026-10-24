@@ -34,6 +34,8 @@ SUCCESS / FAILED
 
 SSH 产物回传独立于状态同步与任务准入，最多同时执行四项，每个 Job 只保留一个回传 worker。传输失败保留现场与回执，60 秒后重试。每轮 marker 读取与运行日志采样各共享 30 秒预算。`transport.ssh.transfer_timeout_seconds` 为正整数，默认 900 秒，限制每次准备阶段传输及每轮最终回传，预算包含 SSH 认证；大产物或慢链路可调大。超时终止本次本地传输进程树，保留共享 SSH master；任务终态仍需成功读取 marker 后判定。
 
+准入与提交同样由单个后台任务执行，上传阻塞不会暂停状态同步，也不会并发重复执行资源准入。提交前的准备失败先保存终态，再独立重试清理；没有取得 SLURM ID 的 Job 也能恢复清理。
+
 ## wrapper.py: 三层结构
 
 `_scheduler/_wrapper_template.py` 的 `_build_wrapper_content()` 生成 `wrapper.py`，它是 SLURM 实际执行的入口。wrapper 内含三个嵌套层次：

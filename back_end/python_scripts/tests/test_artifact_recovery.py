@@ -31,7 +31,7 @@ class ArtifactRecoveryTests(unittest.IsolatedAsyncioTestCase):
         actor._artifact_recovery_tasks = {}
         actor._artifact_retry_after = {}
         actor._artifact_recovery_slots = asyncio.Semaphore(slots)
-        actor._recover_slurm_artifacts = work
+        actor._recover_job_artifacts = work
         return actor
 
     async def test_stalled_job_does_not_hold_tick_or_duplicate_its_worker(self):
@@ -70,6 +70,35 @@ class ArtifactRecoveryTests(unittest.IsolatedAsyncioTestCase):
         finally:
             release.set()
             await actor.shutdown_artifact_recovery()
+
+    async def test_slow_submission_is_single_flight_and_shutdown_joins_it(self):
+        namespace = load_recovery()
+        path = SERVER / "_scheduler/_decisions.py"
+        tree = ast.parse(path.read_text())
+        methods = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in ("_queue_pending_submission", "shutdown_submission")]
+        exec(compile(ast.Module(body=methods, type_ignores=[]), str(path), "exec"), namespace)
+        started, release = threading.Event(), threading.Event()
+        calls = []
+        def submit():
+            calls.append("submit")
+            started.set()
+            release.wait(5)
+        actor = SimpleNamespace(_submission_task=None, _schedule_pending_jobs=submit)
+        try:
+            namespace["_queue_pending_submission"](actor)
+            self.assertTrue(await asyncio.to_thread(started.wait, 1))
+            namespace["_queue_pending_submission"](actor)
+            self.assertEqual(calls, ["submit"])
+            shutdown = asyncio.create_task(namespace["shutdown_submission"](actor))
+            await asyncio.sleep(0.02)
+            self.assertFalse(shutdown.done())
+            release.set()
+            await asyncio.wait_for(shutdown, 1)
+            self.assertIsNone(actor._submission_task)
+        finally:
+            release.set()
+            if actor._submission_task is not None:
+                await namespace["shutdown_submission"](actor)
 
     async def test_shutdown_drains_active_worker_and_cancels_waiting_jobs(self):
         namespace = load_recovery()
