@@ -18,6 +18,22 @@ class ImageBuildError(RuntimeError):
     pass
 
 
+def _usage_filter(
+    path: tuple[bool, ...],
+) -> str:
+    expression = ""
+    accepts_end = True
+    for lower in reversed(path):
+        if lower:
+            expression = "[0-9a-m]" + expression
+            accepts_end = False
+        else:
+            expression = "[^0-9a-m]" + expression
+            if accepts_end:
+                expression = "(" + expression + "|$)"
+    return "id~=^" + expression
+
+
 def _build_error_detail(
     stderr: str,
 ) -> str:
@@ -251,6 +267,7 @@ class BuildKitClient:
         config: dict,
     ) -> None:
         self.config = config
+        self._usage_partitions: tuple[tuple[bool, ...], ...] = ((),)
 
     def arguments(
         self,
@@ -310,16 +327,48 @@ class BuildKitClient:
     async def disk_usage(
         self,
     ) -> int:
-        # Format one integer per record, keeping parsing independent of the
-        # version-specific UsageInfo JSON schema and human-readable units.
-        output = await run_command(
-            self.arguments("du", "--format", '{{range .}}{{.Size}}{{"\\n"}}{{end}}'),
-            timeout=30,
-        )
-        try:
-            return sum(max(0, int(value)) for value in output.split())
-        except ValueError as error:
-            raise ImageBuildError("Cannot determine BuildKit cache usage") from error
+        pending = list(self._usage_partitions)
+        completed = []
+        total = 0
+        queries = 0
+        # --format runs after the full unary RPC, including descriptions. Split
+        # at the worker when metadata exceeds gRPC's limit; never prune to read.
+        # Complementary ID filters include short and non-base36 IDs as well.
+        async with asyncio.timeout(30):
+            while pending:
+                path = pending.pop()
+                command = ["du", "--format", '{{range .}}{{.Size}}{{"\\n"}}{{end}}']
+                if path:
+                    command.extend(["--filter", _usage_filter(path)])
+                queries += 1
+                try:
+                    output = await run_command(
+                        self.arguments(*command),
+                        timeout=30,
+                    )
+                except ImageBuildError as error:
+                    detail = str(error)
+                    oversized = (
+                        "ResourceExhausted" in detail
+                        and "message larger than max" in detail
+                    ) or "returned too much data to inspect safely" in detail
+                    if not oversized:
+                        raise
+                    if len(path) >= 16 or queries + len(pending) + 2 > 64:
+                        raise ImageBuildError(
+                            "BuildKit cache metadata is too large to inspect within bounded queries"
+                        ) from error
+                    pending.extend([(*path, False), (*path, True)])
+                    continue
+                try:
+                    total += sum(max(0, int(value)) for value in output.split())
+                except ValueError as error:
+                    raise ImageBuildError("Cannot determine BuildKit cache usage") from error
+                completed.append(path)
+        # Publish only a complete partition, so concurrent readers can reuse
+        # successful filters without ever observing a partially counted cache.
+        self._usage_partitions = tuple(completed)
+        return total
 
     async def prune(
         self,

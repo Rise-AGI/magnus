@@ -79,6 +79,8 @@ The budget includes build cache, managed runtime copies and export/conversion sc
 
 Configure the worker's native GC policy for the retained step cache, including its maximum usage, reserved space and free-space target. Size it for the base image and installed dependencies as well as cache mounts; a large base image can consume nearly the whole allowance. Magnus reclaims worker data only for an actual aggregate-budget excess, retaining the amount that fits alongside local data. A scratch-limit or local-free-space failure does not by itself purge the worker cache. Capacity failures include the observed byte counts and limits; the backend log records cache reclamation before and after. Samples do not reconstruct an unrecorded historical peak.
 
+If cache metadata exceeds BuildKit's RPC message limit, Magnus splits the usage query with disjoint server-side ID filters and reuses successful partitions. This does not remove cache records or change the budget. Queries remain bounded; if usage cannot be read completely, preparation fails instead of treating an unreadable cache as empty.
+
 ## Compatibility and acceptance
 
 The upgrade preserves old Job rows and source semantics, adds Building and defers Dockerfile text from list queries. Existing Service submissions retain their image path; their active-Job handling recognizes Building. No special Blueprint is installed.

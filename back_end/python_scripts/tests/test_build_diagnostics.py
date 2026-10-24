@@ -7,6 +7,7 @@ import concurrent.futures
 import importlib.util
 import json
 import pathlib
+import re
 import sys
 import tempfile
 import threading
@@ -14,6 +15,7 @@ import time
 import tracemalloc
 import types
 import unittest
+from unittest.mock import patch
 
 
 SOURCE = pathlib.Path(__file__).resolve().parents[2] / "server" / "_resource_manager"
@@ -207,6 +209,110 @@ class ProgressTests(unittest.TestCase):
         self.assertIn("Dockerfile:1", detail)
         self.assertIn('"keep this"', detail)
         self.assertNotIn('"statuses"', detail)
+
+
+class UsageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_usage_partitions_preserve_every_record_and_are_reused(self):
+        records = dict(zip(("a", "aa", "an", "n", "na", "nn", "中"), range(1, 8)))
+        calls = []
+
+        async def query(arguments, **kwargs):
+            calls.append(arguments)
+            selected = records
+            if "--filter" in arguments:
+                expression = arguments[arguments.index("--filter") + 1].removeprefix("id~=")
+                selected = {key: value for key, value in records.items() if re.search(expression, key)}
+            if len(selected) > 3:
+                raise buildkit.ImageBuildError(
+                    "buildctl: ResourceExhausted: trying to send message larger than max (16925343 vs. 16777216)"
+                )
+            return "\n".join(str(value) for value in selected.values())
+
+        client = buildkit.BuildKitClient({})
+        with patch.object(buildkit, "run_command", query):
+            self.assertEqual(await client.disk_usage(), sum(records.values()))
+            calls.clear()
+            records["a中"] = 11
+            self.assertEqual(await client.disk_usage(), sum(records.values()))
+        self.assertTrue(all("--filter" in arguments for arguments in calls))
+        for identifier in records:
+            self.assertEqual(
+                sum(bool(re.search(buildkit._usage_filter(path).removeprefix("id~="), identifier))
+                    for path in client._usage_partitions),
+                1,
+            )
+
+    async def test_usage_fast_path_preserves_size_parsing(self):
+        calls = []
+
+        async def query(arguments, **kwargs):
+            calls.append(arguments)
+            return "12\n-1\n7\n"
+
+        with patch.object(buildkit, "run_command", query):
+            self.assertEqual(await buildkit.BuildKitClient({}).disk_usage(), 19)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("--filter", calls[0])
+
+    async def test_usage_does_not_retry_other_worker_errors(self):
+        calls = []
+
+        async def query(arguments, **kwargs):
+            calls.append(arguments)
+            raise buildkit.ImageBuildError("ResourceExhausted: disk quota exceeded")
+
+        with patch.object(buildkit, "run_command", query):
+            with self.assertRaisesRegex(buildkit.ImageBuildError, "disk quota"):
+                await buildkit.BuildKitClient({}).disk_usage()
+        self.assertEqual(len(calls), 1)
+
+    async def test_usage_failure_never_publishes_partial_partitions(self):
+        async def query(arguments, **kwargs):
+            if "--filter" not in arguments:
+                raise buildkit.ImageBuildError("buildctl returned too much data to inspect safely")
+            expression = arguments[arguments.index("--filter") + 1]
+            return "12" if "[^" not in expression else "invalid size"
+
+        client = buildkit.BuildKitClient({})
+        with patch.object(buildkit, "run_command", query):
+            with self.assertRaisesRegex(buildkit.ImageBuildError, "Cannot determine"):
+                await client.disk_usage()
+        self.assertEqual(client._usage_partitions, ((),))
+
+    async def test_single_oversized_record_has_bounded_retries(self):
+        calls = []
+
+        async def query(arguments, **kwargs):
+            calls.append(arguments)
+            raise buildkit.ImageBuildError("ResourceExhausted: received message larger than max")
+
+        client = buildkit.BuildKitClient({})
+        with patch.object(buildkit, "run_command", query):
+            with self.assertRaisesRegex(buildkit.ImageBuildError, "bounded queries"):
+                await client.disk_usage()
+        self.assertLessEqual(len(calls), 64)
+        self.assertEqual(client._usage_partitions, ((),))
+
+    async def test_usage_cancellation_keeps_previous_complete_partition(self):
+        started = asyncio.Event()
+        stopped = asyncio.Event()
+
+        async def query(arguments, **kwargs):
+            started.set()
+            try:
+                await asyncio.sleep(60)
+            finally:
+                stopped.set()
+
+        client = buildkit.BuildKitClient({})
+        with patch.object(buildkit, "run_command", query):
+            task = asyncio.create_task(client.disk_usage())
+            await asyncio.wait_for(started.wait(), 2)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertTrue(stopped.is_set())
+        self.assertEqual(client._usage_partitions, ((),))
 
 
 class PipeTests(unittest.IsolatedAsyncioTestCase):
