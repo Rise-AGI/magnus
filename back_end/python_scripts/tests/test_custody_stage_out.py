@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from types import SimpleNamespace
 import unittest
+from test_transport_timeouts import load_transport
 from unittest.mock import patch
 
 
@@ -16,7 +17,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 def load_staging():
     path = SERVER / "_scheduler" / "_staging.py"
-    namespace = {"__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
+    namespace = {"remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
     tree = ast.parse(path.read_text(encoding="utf-8"))
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
     exec(compile(tree, str(path), "exec"), namespace)
@@ -41,7 +42,7 @@ class FileTransport:
         entries = sorted(os.listdir(path)) if path.exists() else None
         return SimpleNamespace(returncode=0, stdout=json.dumps(entries))
 
-    def fetch(self, remote, local):
+    def fetch(self, remote, local, *, timeout=None):
         self.fetches.append(Path(remote))
         if Path(remote) == self.failed_path:
             Path(local).write_bytes(b"partial transfer")
@@ -94,6 +95,26 @@ class CustodyStageOutTests(unittest.TestCase):
         if metadata:
             (path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
         return token, path, meta
+
+    def test_final_pass_budget_is_shared_and_keeps_receipts_for_completed_entries(self):
+        first, _, _ = self.entry("a")
+        second, _, _ = self.entry("b")
+        now = [100.0]
+        self.namespace["monotonic"] = lambda: now[0]
+        self.namespace["remaining_timeout"].__globals__["time"] = SimpleNamespace(monotonic=lambda: now[0])
+        original = self.transport.fetch
+        budgets = []
+        def fetch(remote, local, *, timeout=None):
+            budgets.append(timeout)
+            original(remote, local, timeout=timeout)
+            now[0] += 2
+        self.transport.fetch = fetch
+        with self.assertLogs("custody-stage-test", level="WARNING"):
+            self.assertFalse(self.scheduler._stage_out_custody("job", deadline=105))
+        self.assertEqual(budgets, [5, 3, 1])
+        self.assertIn(first, self.stored)
+        self.assertNotIn(second, self.stored)
+        self.assertTrue(self.remote.is_dir())
 
     def test_incomplete_legacy_entry_does_not_starve_complete_entries(self):
         broken, broken_path, _ = self.entry("a", legacy=True, content=b"", metadata=False)

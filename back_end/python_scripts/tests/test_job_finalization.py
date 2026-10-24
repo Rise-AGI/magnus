@@ -47,7 +47,7 @@ def load_mixin(
 ):
     path = SERVER / relative_path
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
+    tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or (not node.level and node.module != "pywheels.file_tools")]
     exec(compile(tree, str(path), "exec"), namespace)
 
 
@@ -115,6 +115,7 @@ class SlurmFinalizationTests(unittest.TestCase):
     def new_scheduler(self):
         actor = self.scheduler_class()
         actor._finalization_retry_after = {}
+        actor._test_artifact_retry = {}
         def status(identifier):
             self.events.append(("query", identifier))
             result = self.statuses[identifier]
@@ -147,6 +148,16 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor._cleanup_remote_job = remote_cleanup
         return actor
 
+    def sync(self, actor=None):
+        actor = actor or self.scheduler
+        candidates = actor._sync_reality_slurm()
+        now = self.namespace["monotonic"]()
+        for identifier, external in candidates.items():
+            if now < actor._test_artifact_retry.get(identifier, 0):
+                continue
+            delay = actor._recover_slurm_artifacts(identifier, external)
+            actor._test_artifact_retry[identifier] = now + delay
+
     def add_job(self, identifier="job", status=JobStatus.RUNNING, observed="FAILED"):
         external = f"slurm-{identifier}"
         self.statuses[external] = observed
@@ -173,11 +184,27 @@ class SlurmFinalizationTests(unittest.TestCase):
                 self.skipTest("Windows account does not have symbolic-link creation privileges")
             raise
 
+    def test_observation_commits_terminal_status_without_entering_bulk_recovery(self):
+        table = self.add_job(observed="TIMEOUT")
+        self.scheduler._stage_out_final = lambda identifier: self.fail("bulk recovery blocked observations")
+        candidates = self.scheduler._sync_reality_slurm()
+        self.assertEqual(candidates, {"job": "slurm-job"})
+        self.assertEqual(self.state()[:3], (JobStatus.FAILED, "slurm-job", "TIMEOUT"))
+        self.assertTrue((table / "repository" / "checkpoint").exists())
+
+    def test_classified_job_does_not_refetch_markers_during_recovery(self):
+        self.add_job(observed="TIMEOUT")
+        self.scheduler._sync_reality_slurm()
+        self.marker_failure.add("job")
+        self.scheduler._classify_slurm_job = lambda *args: self.fail("classified row was rewritten")
+        self.sync()
+        self.assertEqual(self.state()[:3], (JobStatus.FAILED, None, None))
+
     def test_terminal_status_precedes_transfer_and_another_job_keeps_progressing(self):
         table = self.add_job()
         other = self.add_job("other")
         self.transfer_failure.add("job")
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.FAILED, "slurm-job", "FAILED"))
         self.assertIn(("transfer", "job", JobStatus.FAILED), self.events)
         self.assertTrue((table / "repository" / "checkpoint").exists())
@@ -187,11 +214,11 @@ class SlurmFinalizationTests(unittest.TestCase):
     def test_restart_retries_without_requerying_expired_slurm_accounting(self):
         table = self.add_job()
         self.transfer_failure.add("job")
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.transfer_failure.clear()
         self.statuses.clear()
         self.events.clear()
-        self.new_scheduler()._sync_reality_slurm()
+        self.sync(self.new_scheduler())
         self.assertFalse(any(event[0] == "query" for event in self.events))
         self.assertEqual(self.state()[:3], (JobStatus.FAILED, None, None))
         self.assertFalse((table / "repository").exists())
@@ -202,16 +229,16 @@ class SlurmFinalizationTests(unittest.TestCase):
         now = [100.0]
         self.namespace["monotonic"] = lambda: now[0]
         self.transfer_failure.add("job")
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[0], JobStatus.FAILED)
         self.transfer_failure.clear()
         self.events.clear()
         now[0] = 159.0
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.events, [])
         self.assertEqual(self.state()[2], "FAILED")
         now[0] = 160.0
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.FAILED, None, None))
         self.assertEqual(self.scheduler._finalization_retry_after, {})
 
@@ -219,7 +246,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         table = self.add_job(observed="UNKNOWN")
         for observed in ("UNKNOWN", "RUNNING"):
             self.statuses["slurm-job"] = observed
-            self.scheduler._sync_reality_slurm()
+            self.sync()
             self.assertEqual(self.state()[:3], (JobStatus.RUNNING, "slurm-job", None))
             self.assertTrue((table / "repository").exists())
         self.assertFalse(any(event[0] == "cleanup" for event in self.events))
@@ -228,7 +255,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.add_job("success", observed="CANCELLED")
         self.add_job("missing", status=JobStatus.QUEUED, observed="COMPLETED")
         self.success.add("success")
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state("success")[:3], (JobStatus.SUCCESS, None, None))
         self.assertEqual(self.state("missing")[0], JobStatus.FAILED)
         self.assertIn("no success marker", self.state("missing")[3])
@@ -236,26 +263,26 @@ class SlurmFinalizationTests(unittest.TestCase):
     def test_marker_transport_failure_is_not_a_missing_marker_and_is_durable(self):
         table = self.add_job(observed="COMPLETED")
         self.marker_failure.add("job")
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.RUNNING, "slurm-job", "COMPLETED"))
         self.assertFalse(any(event[0] == "transfer" for event in self.events))
         self.assertTrue((table / "repository").exists())
         self.marker_failure.clear()
         self.statuses.clear()
         self.success.add("job")
-        self.new_scheduler()._sync_reality_slurm()
+        self.sync(self.new_scheduler())
         self.assertEqual(self.state()[:3], (JobStatus.SUCCESS, None, None))
 
     def test_cleanup_retry_does_not_reinterpret_deleted_success_marker(self):
         table = self.add_job(observed="COMPLETED")
         self.success.add("job")
         self.cleanup_failure.add("job")
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.SUCCESS, "slurm-job", "CLEANUP"))
         self.assertFalse((table / ".magnus_success").exists())
         self.cleanup_failure.clear()
         self.events.clear()
-        self.new_scheduler()._sync_reality_slurm()
+        self.sync(self.new_scheduler())
         self.assertEqual(self.state()[:3], (JobStatus.SUCCESS, None, None))
         self.assertEqual(self.events, [("cleanup", "job")])
 
@@ -264,11 +291,11 @@ class SlurmFinalizationTests(unittest.TestCase):
             identifier = status.value
             table = self.add_job(identifier, status=status, observed="CANCELLED")
             self.transfer_failure.add(identifier)
-            self.scheduler._sync_reality_slurm()
+            self.sync()
             self.assertEqual(self.state(identifier)[:3], (status, f"slurm-{identifier}", "CANCELLED"))
             self.assertTrue((table / "repository").exists())
             self.transfer_failure.remove(identifier)
-            self.new_scheduler()._sync_reality_slurm()
+            self.sync(self.new_scheduler())
             self.assertEqual(self.state(identifier)[:3], (status, None, None))
 
     def test_cancel_during_marker_read_does_not_resurrect_success(self):
@@ -279,7 +306,7 @@ class SlurmFinalizationTests(unittest.TestCase):
                 db.get(Job, identifier).status = JobStatus.TERMINATED
                 db.commit()
         self.marker_hook = cancel
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
 
     def test_cleanup_refuses_pending_transfer_from_other_callers(self):
@@ -294,11 +321,11 @@ class SlurmFinalizationTests(unittest.TestCase):
     def test_failed_local_delete_keeps_cleanup_pending(self):
         self.add_job()
         self.namespace["delete_file"] = lambda path: None
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.FAILED, "slurm-job", "CLEANUP"))
         self.assertFalse(any(event[0] == "cleanup" for event in self.events))
         self.namespace["delete_file"] = remove
-        self.new_scheduler()._sync_reality_slurm()
+        self.sync(self.new_scheduler())
         self.assertIsNone(self.state()[2])
 
     def test_cleanup_unlinks_directory_and_broken_symlinks_without_following_them(self):
@@ -310,7 +337,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         broken_link = table / "missing"
         self.directory_symlink(external, directory_link)
         self.directory_symlink(self.root / "missing-target", broken_link)
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.FAILED, None, None))
         self.assertFalse(os.path.lexists(directory_link))
         self.assertFalse(os.path.lexists(broken_link))
@@ -331,7 +358,7 @@ class SlurmFinalizationTests(unittest.TestCase):
                     (target / "checkpoint").write_bytes(b"must remain")
                 link = ephemeral / "jobs" / identifier
                 self.directory_symlink(target, link)
-                self.scheduler._sync_reality_slurm()
+                self.sync()
                 self.assertEqual(self.state(identifier)[:3], (JobStatus.FAILED, None, None))
                 self.assertFalse(os.path.lexists(link))
                 if broken:
@@ -343,14 +370,14 @@ class SlurmFinalizationTests(unittest.TestCase):
         table = self.add_job()
         (table / ".magnus_oom").write_text("OOM")
         self.transfer_failure.add("job")
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         self.assertEqual(self.state()[0], JobStatus.FAILED)
         self.assertIn("Out of memory", self.state()[3])
 
     def test_terminate_pending_recovery_does_not_cancel_or_clean_it(self):
         table = self.add_job()
         self.transfer_failure.add("job")
-        self.scheduler._sync_reality_slurm()
+        self.sync()
         terminate = load_method("_scheduler/_core.py", "terminate_job", self.namespace)
         self.scheduler.enabled = True
         self.scheduler.preparing_jobs = {}

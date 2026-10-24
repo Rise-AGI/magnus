@@ -14,12 +14,68 @@ transport 由 build_transport() 按传入的 transport 配置块决定，配置�
 import os
 import posixpath
 import shlex
+import select
+import signal
 import subprocess
+import tempfile
 import threading
 import time
 from typing import Dict, List, Optional
 
 from ._ssh_auto_connect import ensure_control_master, remaining_timeout
+
+
+def _stop_transfer_process(
+    process: subprocess.Popen,
+) -> None:
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                stdout = subprocess.DEVNULL,
+                stderr = subprocess.DEVNULL,
+                timeout = 5,
+            )
+        finally:
+            if process.poll() is None:
+                process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait()
+
+
+def _run_scp(
+    command: List[str],
+    *,
+    timeout: float,
+) -> subprocess.CompletedProcess:
+    # A multiplexing master can retain stderr after its client is killed. Do
+    # not drain a pipe to EOF on timeout, and reap scp's local SSH child too.
+    with tempfile.TemporaryFile() as errors:
+        with subprocess.Popen(
+            command,
+            stdin = subprocess.DEVNULL,
+            stdout = subprocess.DEVNULL,
+            stderr = errors,
+            start_new_session = os.name != "nt",
+        ) as process:
+            try:
+                process.wait(timeout=timeout)
+            except BaseException:
+                _stop_transfer_process(process)
+                raise
+        errors.seek(0, os.SEEK_END)
+        size = errors.tell()
+        errors.seek(max(0, size - 65536))
+        return subprocess.CompletedProcess(
+            command,
+            process.returncode,
+            "",
+            errors.read().decode("utf-8", errors="replace"),
+        )
 
 
 def _stream_file_to_command(
@@ -40,36 +96,54 @@ def _stream_file_to_command(
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            start_new_session = os.name != "nt",
         )
         assert process.stdin is not None
         assert process.stdout is not None
         assert process.stderr is not None
         write_errors = []
+        stop = threading.Event()
         stdout_tail = bytearray()
         stderr_tail = bytearray()
 
         def write_input():
             try:
-                process.stdin.write(prefix)
-                while block := source.read(1024 * 1024):
-                    process.stdin.write(block)
+                block = prefix
+                while not stop.is_set() and process.poll() is None:
+                    pending = memoryview(block)
+                    while pending and not stop.is_set() and process.poll() is None:
+                        try:
+                            pending = pending[os.write(process.stdin.fileno(), pending):]
+                        except BlockingIOError:
+                            if os.name == "nt":
+                                stop.wait(0.001)
+                            else:
+                                select.select([], [process.stdin], [], 0.1)
+                    block = source.read(1024 * 1024)
+                    if not block:
+                        break
             except BrokenPipeError:
-                # A validated cache hit exits before consuming the image.
                 pass
             except OSError as error:
                 write_errors.append(error)
             finally:
-                try:
-                    process.stdin.close()
-                except OSError:
-                    pass
+                process.stdin.close()
 
         def drain(
             stream,
             tail,
         ):
             with stream:
-                while block := stream.read(8192):
+                while not stop.is_set():
+                    try:
+                        block = os.read(stream.fileno(), 8192)
+                    except BlockingIOError:
+                        if process.poll() is not None:
+                            break
+                        stop.wait(0.02)
+                        continue
+                    if not block:
+                        break
                     tail.extend(block)
                     del tail[:-65536]
 
@@ -79,17 +153,21 @@ def _stream_file_to_command(
             threading.Thread(target=drain, args=(process.stderr, stderr_tail)),
         ]
         try:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                os.set_blocking(stream.fileno(), False)
             for thread in threads:
                 thread.start()
             process.wait(timeout=timeout)
         except BaseException:
-            process.kill()
-            process.wait()
+            stop.set()
+            _stop_transfer_process(process)
             raise
         finally:
             for thread in threads:
                 if thread.ident is not None:
                     thread.join()
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
         if write_errors and process.returncode == 0:
             # Windows may report a closed receiver pipe as EINVAL, not EPIPE.
             error = write_errors[0]
@@ -128,7 +206,13 @@ class _Transport:
     ) -> subprocess.CompletedProcess:
         raise NotImplementedError
 
-    def push(self, local_path: str, remote_path: str) -> None:
+    def push(
+        self,
+        local_path: str,
+        remote_path: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
         """把本机 local_path（文件或目录树）搬到执行端的 remote_path。"""
         raise NotImplementedError
 
@@ -143,7 +227,13 @@ class _Transport:
         """Run a command receiving a binary file after an optional stdin header."""
         raise NotImplementedError
 
-    def fetch(self, remote_path: str, local_path: str) -> None:
+    def fetch(
+        self,
+        remote_path: str,
+        local_path: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
         """把执行端 remote_path（文件或目录树）搬回本机 local_path。"""
         raise NotImplementedError
 
@@ -172,7 +262,13 @@ class _LocalTransport(_Transport):
             timeout = timeout,
         )
 
-    def push(self, local_path: str, remote_path: str) -> None:
+    def push(
+        self,
+        local_path: str,
+        remote_path: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
         # 本机执行：调用方把远端路径映射回同一个本地路径，工作区本就在原地，无需搬运。
         return
 
@@ -191,7 +287,13 @@ class _LocalTransport(_Transport):
             timeout=timeout,
         )
 
-    def fetch(self, remote_path: str, local_path: str) -> None:
+    def fetch(
+        self,
+        remote_path: str,
+        local_path: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
         # 同 push：本机执行端与 magnus 同机同盘，没有要搬回的东西。
         return
 
@@ -226,6 +328,7 @@ class _SshControlMasterTransport(_Transport):
         host: str,
         user: str,
         auto_connect: Optional[Dict] = None,
+        transfer_timeout_seconds: float = 900,
     ) -> None:
         self._control_path = control_path
         self._host = host
@@ -234,6 +337,7 @@ class _SshControlMasterTransport(_Transport):
         # BatchMode=yes 在 socket 失效时快失败、不自建。配了 auto_connect 才在每次操作前
         # 确保 socket 活着、失效时用密码 + TOTP 无人值守重建。
         self._auto_connect = auto_connect
+        self.transfer_timeout_seconds = transfer_timeout_seconds
 
     def _ensure_socket(
         self,
@@ -304,7 +408,8 @@ class _SshControlMasterTransport(_Transport):
         prefix: bytes = b"",
         timeout: float,
     ) -> subprocess.CompletedProcess:
-        self._ensure_socket()
+        deadline = time.monotonic() + timeout
+        self._ensure_socket(deadline=deadline)
         ssh_command = [
             "ssh",
             "-T",
@@ -319,27 +424,51 @@ class _SshControlMasterTransport(_Transport):
             ssh_command,
             local_path,
             prefix=prefix,
-            timeout=timeout,
+            timeout=remaining_timeout(deadline),
         )
 
-    def push(self, local_path: str, remote_path: str) -> None:
+    def push(
+        self,
+        local_path: str,
+        remote_path: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
         # 先在远端建好 remote_path 的父目录，scp 才能把条目落在 remote_path 本身
         # （scp 不会替你建中间目录）。父目录经 run() 骑同一条 socket 创建。
         remote_parent = posixpath.dirname(remote_path)
+        deadline = time.monotonic() + (self.transfer_timeout_seconds if timeout is None else timeout)
         if remote_parent:
-            made = self.run(["mkdir", "-p", remote_parent])
+            made = self.run(
+                ["mkdir", "-p", remote_parent],
+                timeout = remaining_timeout(deadline, 30),
+            )
             if made.returncode != 0:
                 raise RuntimeError(
                     f"failed to create remote dir {remote_parent} "
                     f"(rc={made.returncode}): {made.stderr.strip()}"
                 )
-        self._scp(local_path, self._remote_endpoint(remote_path))
+        self._scp(
+            local_path,
+            self._remote_endpoint(remote_path),
+            timeout = remaining_timeout(deadline),
+        )
 
-    def fetch(self, remote_path: str, local_path: str) -> None:
+    def fetch(
+        self,
+        remote_path: str,
+        local_path: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
         local_parent = os.path.dirname(local_path)
         if local_parent:
             os.makedirs(local_parent, exist_ok=True)
-        self._scp(self._remote_endpoint(remote_path), local_path)
+        self._scp(
+            self._remote_endpoint(remote_path),
+            local_path,
+            timeout = timeout,
+        )
 
     def _remote_endpoint(self, remote_path: str) -> str:
         """拼 scp 的 `user@host:path` 远端端点；path 段按字面传、不做 shell 引用。
@@ -351,10 +480,17 @@ class _SshControlMasterTransport(_Transport):
         要，本实现不用 -O。"""
         return f"{self._user}@{self._host}:{remote_path}"
 
-    def _scp(self, source: str, destination: str) -> None:
+    def _scp(
+        self,
+        source: str,
+        destination: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
         """骑 ControlMaster socket 跑一次 scp。-r 兼容文件与目录树；socket 已建好，
         BatchMode=yes 让 socket 失效时快失败而非挂起等密码（与 run() 一致）。"""
-        self._ensure_socket()
+        deadline = time.monotonic() + (self.transfer_timeout_seconds if timeout is None else timeout)
+        self._ensure_socket(deadline=deadline)
         scp_command = [
             "scp",
             "-r",
@@ -366,16 +502,16 @@ class _SshControlMasterTransport(_Transport):
             source,
             destination,
         ]
-        result = subprocess.run(
-            scp_command,
-            capture_output = True,
-            text = True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"scp {source} -> {destination} failed "
-                f"(rc={result.returncode}): {result.stderr.strip()}"
+        try:
+            result = _run_scp(
+                scp_command,
+                timeout = remaining_timeout(deadline),
             )
+        except subprocess.TimeoutExpired:
+            raise TimeoutError("SCP transfer exceeded its time budget") from None
+        if result.returncode != 0:
+            # Paths and server errors can contain custody capability tokens.
+            raise RuntimeError(f"SCP transfer failed (exit {result.returncode})")
 
 
 def build_transport(transport_config: Dict) -> _Transport:
@@ -392,5 +528,6 @@ def build_transport(transport_config: Dict) -> _Transport:
             host = ssh["host"],
             user = ssh["user"],
             auto_connect = ssh.get("auto_connect"),
+            transfer_timeout_seconds = ssh.get("transfer_timeout_seconds", 900),
         )
     return _LocalTransport()

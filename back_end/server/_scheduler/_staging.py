@@ -21,6 +21,7 @@ import shutil
 import tempfile
 import hashlib
 from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING
 from .._magnus_config import magnus_config
 from .._file_custody_manager import file_custody_manager
@@ -31,6 +32,7 @@ from . import (
     magnus_remote_container_cache_path,
 )
 from ._relay_build_cache import stage_built_sif
+from .._slurm_manager._ssh_auto_connect import remaining_timeout
 
 # Directory (inside the job working tree) where the in-container SDK drops custody
 # uploads on no-network remote execution, paired with the SDK's MAGNUS_CUSTODY_DROP_DIR.
@@ -163,9 +165,15 @@ print(json.dumps(entries))
 def _remote_optional_entries(
     transport,
     path: str,
+    *,
+    timeout: float = 30,
 ) -> list[str]:
     # Shell test/ls exit codes conflate absence with permissions or SSH failure.
-    result = transport.run(["python3", "-c", _OPTIONAL_DIRECTORY_LIST, path], check=True, timeout=30)
+    result = transport.run(
+        ["python3", "-c", _OPTIONAL_DIRECTORY_LIST, path],
+        check = True,
+        timeout = timeout,
+    )
     if result.returncode != 0:
         raise RuntimeError("Remote artifact directory query failed")
     entries = json.loads(result.stdout)
@@ -180,13 +188,19 @@ def _fetch_artifact_file(
     transport,
     remote_path: str,
     local_path: str,
+    *,
+    timeout: float = 30,
 ) -> None:
     parent = os.path.dirname(local_path)
     os.makedirs(parent, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=".stage-out-", dir=parent)
     os.close(descriptor)
     try:
-        transport.fetch(remote_path, temporary)
+        transport.fetch(
+            remote_path,
+            temporary,
+            timeout = timeout,
+        )
         os.replace(temporary, local_path)
     finally:
         if os.path.exists(temporary):
@@ -333,7 +347,10 @@ class _StagingMixin(_StagingMixinBase):
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
         for subdir in ("slurm", "metrics"):
-            made = transport.run(["mkdir", "-p", f"{remote_table}/{subdir}"])
+            made = transport.run(
+                ["mkdir", "-p", f"{remote_table}/{subdir}"],
+                timeout = 30,
+            )
             if made.returncode != 0:
                 raise RuntimeError(
                     f"failed to create remote job dir {remote_table}/{subdir} "
@@ -444,7 +461,10 @@ class _StagingMixin(_StagingMixinBase):
             file_path, filename, is_directory, _ = acquired
             try:
                 remote_entry = f"{remote_dropin}/{token}"
-                made = transport.run(["mkdir", "-p", remote_entry])
+                made = transport.run(
+                    ["mkdir", "-p", remote_entry],
+                    timeout = 30,
+                )
                 if made.returncode != 0:
                     raise RuntimeError(
                         f"failed to create remote dropin dir {remote_entry} "
@@ -469,19 +489,43 @@ class _StagingMixin(_StagingMixinBase):
             finally:
                 file_custody_manager.release_file(token)
 
-    def _stage_out_logs(self, job_id: str) -> None:
+    def _stage_out_logs(
+        self,
+        job_id: str,
+        *,
+        timeout: float = 30,
+    ) -> None:
         if not self._is_remote_execution():
             return
         assert self.slurm_manager is not None
+        deadline = monotonic() + timeout
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
         local_table = self._local_job_working_table(job_id)
-        if "output.txt" in _remote_optional_entries(transport, f"{remote_table}/slurm"):
-            _fetch_artifact_file(transport, f"{remote_table}/slurm/output.txt", f"{local_table}/slurm/output.txt")
-        for name in _remote_optional_entries(transport, f"{remote_table}/metrics"):
+        if "output.txt" in _remote_optional_entries(
+            transport,
+            f"{remote_table}/slurm",
+            timeout = remaining_timeout(deadline),
+        ):
+            _fetch_artifact_file(
+                transport,
+                f"{remote_table}/slurm/output.txt",
+                f"{local_table}/slurm/output.txt",
+                timeout = remaining_timeout(deadline),
+            )
+        for name in _remote_optional_entries(
+            transport,
+            f"{remote_table}/metrics",
+            timeout = remaining_timeout(deadline),
+        ):
             if not _is_safe_leaf(name):
                 raise ValueError("Invalid remote metric filename")
-            _fetch_artifact_file(transport, f"{remote_table}/metrics/{name}", f"{local_table}/metrics/{name}")
+            _fetch_artifact_file(
+                transport,
+                f"{remote_table}/metrics/{name}",
+                f"{local_table}/metrics/{name}",
+                timeout = remaining_timeout(deadline),
+            )
 
     def _stage_out_markers(
         self,
@@ -490,13 +534,23 @@ class _StagingMixin(_StagingMixinBase):
         if not self._is_remote_execution():
             return
         assert self.slurm_manager is not None
+        deadline = monotonic() + 30
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
         local_table = self._local_job_working_table(job_id)
-        entries = _remote_optional_entries(transport, remote_table)
+        entries = _remote_optional_entries(
+            transport,
+            remote_table,
+            timeout = remaining_timeout(deadline),
+        )
         for marker in _REMOTE_MARKERS:
             if marker in entries:
-                _fetch_artifact_file(transport, f"{remote_table}/{marker}", f"{local_table}/{marker}")
+                _fetch_artifact_file(
+                    transport,
+                    f"{remote_table}/{marker}",
+                    f"{local_table}/{marker}",
+                    timeout = remaining_timeout(deadline),
+                )
 
     def _stage_out_final(
         self,
@@ -504,19 +558,20 @@ class _StagingMixin(_StagingMixinBase):
     ) -> bool:
         if not self._is_remote_execution():
             return True
+        deadline = monotonic() + magnus_config["transport"]["ssh"].get("transfer_timeout_seconds", 900)
         complete = True
         local_table = self._local_job_working_table(job_id)
         try:
             receipts = _read_custody_receipts(local_table)
             if not receipts["logs_complete"]:
-                self._stage_out_logs(job_id)
+                self._stage_out_logs(job_id, timeout=remaining_timeout(deadline))
                 receipts["logs_complete"] = True
                 _write_custody_receipts(local_table, receipts)
         except Exception:
             logger.warning("Job %s final log transfer is pending", job_id, exc_info=True)
             complete = False
         try:
-            if not self._stage_out_custody(job_id):
+            if not self._stage_out_custody(job_id, deadline=deadline):
                 complete = False
         except Exception:
             logger.warning("Job %s custody transfer is pending", job_id, exc_info=True)
@@ -526,28 +581,42 @@ class _StagingMixin(_StagingMixinBase):
     def _stage_out_custody(
         self,
         job_id: str,
+        *,
+        deadline: float | None = None,
     ) -> bool:
         if not self._is_remote_execution():
             return True
         assert self.slurm_manager is not None
+        if deadline is None:
+            deadline = monotonic() + magnus_config["transport"]["ssh"].get("transfer_timeout_seconds", 900)
         transport = self.slurm_manager.transport
         remote_drop = f"{self._remote_job_working_table(job_id)}/{_CUSTODY_DROP_SUBDIR}"
         local_table = self._local_job_working_table(job_id)
         local_drop = os.path.join(local_table, _CUSTODY_DROP_SUBDIR)
         receipts = _read_custody_receipts(local_table)
         complete = True
-        for token in _remote_optional_entries(transport, remote_drop):
+        for token in _remote_optional_entries(
+            transport,
+            remote_drop,
+            timeout = remaining_timeout(deadline, 30),
+        ):
             if not _RELAY_TOKEN_RE.fullmatch(token):
                 # An interrupted writer's hidden directory is evidence, not a
                 # publishable receipt. Do not let it erase other completed drops.
                 complete = False
-                logger.warning("Job %s has an unpublished custody entry %r", job_id, token)
+                logger.warning("Job %s has an unpublished custody entry", job_id)
                 continue
+            if monotonic() >= deadline:
+                return False
             try:
                 os.makedirs(local_drop, exist_ok=True)
                 with tempfile.TemporaryDirectory(prefix=".stage-out-", dir=local_drop) as temporary:
                     metadata_path = os.path.join(temporary, "meta.json")
-                    transport.fetch(f"{remote_drop}/{token}/meta.json", metadata_path)
+                    transport.fetch(
+                        f"{remote_drop}/{token}/meta.json",
+                        metadata_path,
+                        timeout = remaining_timeout(deadline, 30),
+                    )
                     with open(metadata_path, encoding="utf-8") as metadata:
                         meta = json.load(metadata)
                     filename, stored_name = _validate_custody_metadata(meta, token)
@@ -560,7 +629,11 @@ class _StagingMixin(_StagingMixinBase):
                             raise ValueError("Custody token metadata changed after registration")
                         continue
                     payload_path = os.path.join(temporary, "payload")
-                    transport.fetch(f"{remote_drop}/{token}/{stored_name}", payload_path)
+                    transport.fetch(
+                        f"{remote_drop}/{token}/{stored_name}",
+                        payload_path,
+                        timeout = remaining_timeout(deadline),
+                    )
                     expected_size = meta.get("size_bytes")
                     if expected_size is not None and os.path.getsize(payload_path) != expected_size:
                         raise ValueError("Remote custody payload size does not match metadata")
@@ -579,9 +652,9 @@ class _StagingMixin(_StagingMixinBase):
                     # download budget just because another drop still needs retry.
                     receipts["entries"][token] = digest
                     _write_custody_receipts(local_table, receipts)
-            except Exception:
+            except Exception as error:
                 complete = False
-                logger.warning("Job %s custody entry %s remains pending", job_id, token, exc_info=True)
+                logger.warning("Job %s custody entry remains pending (%s)", job_id, type(error).__name__)
         return complete
 
     def _cleanup_remote_job(self, job_id: str) -> None:
@@ -592,7 +665,10 @@ class _StagingMixin(_StagingMixinBase):
         assert self.slurm_manager is not None
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
-        removed = transport.run(["rm", "-rf", remote_table])
+        removed = transport.run(
+            ["rm", "-rf", remote_table],
+            timeout = 30,
+        )
         if removed.returncode != 0:
             raise RuntimeError(
                 f"Failed to clean up remote working table {remote_table} "

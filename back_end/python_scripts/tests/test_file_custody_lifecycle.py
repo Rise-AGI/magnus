@@ -238,7 +238,7 @@ class CustodyLifecycleTests(unittest.TestCase):
             _remote_job_working_table=lambda job_id: "/remote/job",
             _local_job_working_table=lambda job_id: self.temp.name,
             slurm_manager=SimpleNamespace(transport=SimpleNamespace(
-                run=lambda command: SimpleNamespace(returncode=0),
+                run=lambda command, **kwargs: SimpleNamespace(returncode=0),
                 push=failed_push,
             )),
         )

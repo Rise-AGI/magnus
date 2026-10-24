@@ -19,6 +19,7 @@ from ._resources import _ResourcesMixin
 from ._job_lifecycle import _JobLifecycleMixin
 from ._staging import _StagingMixin
 from ._workspace_gc import _WorkspaceGCMixin
+from ._artifact_recovery import _ArtifactRecoveryMixin
 
 
 class MagnusScheduler(
@@ -29,6 +30,7 @@ class MagnusScheduler(
     _JobLifecycleMixin,
     _StagingMixin,
     _WorkspaceGCMixin,
+    _ArtifactRecoveryMixin,
 ):
     """Job 调度器主类。
 
@@ -71,6 +73,9 @@ class MagnusScheduler(
         self._build_pinned_jobs: set[str] = set()
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
         self._finalization_retry_after: Dict[str, float] = {}
+        self._artifact_recovery_tasks: Dict[str, asyncio.Task[int]] = {}
+        self._artifact_recovery_slots = asyncio.Semaphore(4)
+        self._artifact_retry_after: Dict[str, float] = {}
 
     async def tick(self):
         if not self.enabled:
@@ -81,7 +86,8 @@ class MagnusScheduler(
             self._loop = asyncio.get_running_loop()
         try:
             # subprocess 调用（docker logs / slurm queries）放线程池，避免阻塞 event loop
-            await _run_blocking_io(self._sync_reality)
+            artifact_candidates = await _run_blocking_io(self._sync_reality)
+            self._schedule_artifact_recovery(artifact_candidates)
             await self._make_decisions()
             await _run_blocking_io(self._release_finished_builds)
             # _record_snapshot 也会跑 slurm 查询（远端 transport 下是骑 socket 的 squeue/

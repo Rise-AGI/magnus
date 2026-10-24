@@ -10,6 +10,7 @@ import shutil
 import tempfile
 from types import SimpleNamespace
 import unittest
+from test_transport_timeouts import load_transport
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
@@ -17,7 +18,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 def load_staging():
     path = SERVER / "_scheduler" / "_staging.py"
-    namespace = {"__name__": __name__, "__file__": str(path), "logger": logging.getLogger("stage-test")}
+    namespace = {"remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("stage-test")}
     tree = ast.parse(path.read_text(encoding="utf-8"))
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
     exec(compile(tree, str(path), "exec"), namespace)
@@ -37,7 +38,7 @@ class ArtifactTransport:
         path = Path(command[-1])
         return SimpleNamespace(returncode=0, stdout=json.dumps(os.listdir(path) if path.exists() else None))
 
-    def fetch(self, remote, local):
+    def fetch(self, remote, local, *, timeout=None):
         if Path(remote).name == self.failed_leaf:
             Path(local).write_bytes(b"partial")
             raise RuntimeError("connection lost mid-transfer")

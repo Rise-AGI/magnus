@@ -4,6 +4,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 import subprocess
+import os
+import tempfile
+import hashlib
 import sys
 import time
 from types import SimpleNamespace
@@ -42,6 +45,79 @@ class TransportDeadlineTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 3)
         self.assertEqual(len(children), 1)
         self.assertIsNotNone(children[0].poll())
+
+    def test_scp_timeout_reaps_actual_process_without_waiting_for_pipe_eof(self):
+        namespace = load_transport()
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            namespace["_run_scp"](
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                timeout=0.1,
+            )
+        self.assertLess(time.monotonic() - started, 3)
+
+    def test_scp_auth_and_transfer_share_a_deadline_and_do_not_expose_paths(self):
+        namespace = load_transport()
+        clock = SimpleNamespace(now=10)
+        namespace["time"] = SimpleNamespace(monotonic=lambda: clock.now)
+        def ensure(*args, deadline=None):
+            self.assertEqual(deadline, 15)
+            clock.now += 2
+        def transfer(command, *, timeout):
+            self.assertEqual(timeout, 3)
+            raise subprocess.TimeoutExpired(command, timeout)
+        namespace["ensure_control_master"] = ensure
+        namespace["_run_scp"] = transfer
+        actor = namespace["_SshControlMasterTransport"]("socket", "host", "user", auto_connect={})
+        with self.assertRaisesRegex(TimeoutError, "^SCP transfer exceeded its time budget$"):
+            actor.fetch("/capability-token/file", "local", timeout=5)
+
+    def test_binary_stream_delivers_header_and_content_and_bounded_output(self):
+        namespace = load_transport()
+        payload = bytes(range(256)) * 8192
+        prefix = b"header\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "source"
+            path.write_bytes(payload)
+            result = namespace["_stream_file_to_command"](
+                [sys.executable, "-c", "import sys,hashlib; data=sys.stdin.buffer.read(); print(hashlib.sha256(data).hexdigest()); sys.stderr.write('x'*100000)"],
+                str(path),
+                prefix=prefix,
+                timeout=5,
+            )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), hashlib.sha256(prefix + payload).hexdigest())
+        self.assertEqual(len(result.stderr), 65536)
+
+    @unittest.skipIf(os.name == "nt", "separate POSIX session models a persistent SSH master")
+    def test_stream_timeout_does_not_join_pipes_retained_by_existing_master(self):
+        namespace = load_transport()
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            source.write_bytes(b"x" * 1048576)
+            pid_file = Path(temporary) / "master.pid"
+            script = (
+                "import subprocess,sys,time; "
+                "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],start_new_session=True); "
+                "open(sys.argv[1],'w').write(str(p.pid)); time.sleep(30)"
+            )
+            started = time.monotonic()
+            try:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    namespace["_stream_file_to_command"](
+                        [sys.executable, "-c", script, str(pid_file)],
+                        str(source),
+                        prefix=b"",
+                        timeout=0.3,
+                    )
+                self.assertLess(time.monotonic() - started, 3)
+                self.assertTrue(pid_file.exists())
+            finally:
+                if pid_file.exists():
+                    try:
+                        os.kill(int(pid_file.read_text()), 9)
+                    except ProcessLookupError:
+                        pass
 
     def test_ssh_command_gets_only_budget_left_after_master_check(self):
         namespace = load_transport()

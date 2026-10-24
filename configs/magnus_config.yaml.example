@@ -109,6 +109,7 @@ server:
 #                                          # pushes them over; the remote site needs no outbound proxy
 #                                          # access. remote: the remote site pulls them itself (requires
 #                                          # its egress IP on the proxy allowlist) -- not yet wired.
+#     transfer_timeout_seconds: 900       # positive; staging transfer / final recovery pass, including SSH auth
 #     auto_connect:                        # OPTIONAL. Omit -> the ControlMaster socket must be built by
 #                                          # hand and a dead socket fast-fails. Set it to (re)build the
 #                                          # socket unattended when it dies (ControlPersist expiry / host

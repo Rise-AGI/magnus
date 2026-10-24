@@ -202,6 +202,10 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         # 密码 + TOTP 种子（标准 RFC 6238）无人值守重建 —— 把人肉一次的 2FA 登录自动化。
         # 缺省 None：保持现状（socket 需人肉建、失效即快失败）。通用能力，任何"密码 +
         # TOTP"两段 keyboard-interactive 认证的 SSH 主机皆可用。
+        ssh.setdefault("transfer_timeout_seconds", 900)
+        _check_key(ssh, "transfer_timeout_seconds", int)
+        if isinstance(ssh["transfer_timeout_seconds"], bool) or ssh["transfer_timeout_seconds"] <= 0:
+            raise ValueError("transport.ssh.transfer_timeout_seconds must be a positive integer")
         ssh.setdefault("auto_connect", None)
         if ssh["auto_connect"] is not None:
             _check_key(ssh, "auto_connect", dict)
@@ -232,7 +236,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
             )
         _warn_extra_keys(
             ssh,
-            {"control_path", "host", "user", "remote_root", "resource_staging", "auto_connect"},
+            {"control_path", "host", "user", "remote_root", "resource_staging", "auto_connect", "transfer_timeout_seconds"},
             "transport.ssh",
         )
     _warn_extra_keys(transport, {"mode", "ssh"}, "transport")

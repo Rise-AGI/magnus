@@ -109,12 +109,12 @@ class _SyncMixin(_SyncMixinBase):
             logger.warning(f"Failed to dump Docker logs for {job_id}: {error}")
             return since
 
-    def _sync_reality(self):
+    def _sync_reality(self) -> dict[str, str]:
         """同步真实状态到数据库（SLURM 或 Docker）"""
         if is_local_mode:
             self._sync_reality_docker()
-        else:
-            self._sync_reality_slurm()
+            return {}
+        return self._sync_reality_slurm()
 
     def _docker_job_timed_out(self, job: Job) -> bool:
         """job 是否已超出其 time_limit（分钟）。time_limit 或 start_time 为 None 则不限。
@@ -247,7 +247,7 @@ class _SyncMixin(_SyncMixinBase):
 
     def _sync_reality_slurm(
         self,
-    ) -> None:
+    ) -> dict[str, str]:
         with SessionLocal() as db:
             observations = db.query(
                 Job.id,
@@ -269,13 +269,13 @@ class _SyncMixin(_SyncMixinBase):
             for job_id, deadline in self._finalization_retry_after.items()
             if job_id in observed_ids
         }
+        artifact_candidates = {}
         for job_id, original_status, slurm_job_id, finalization_status in observations:
             try:
                 if finalization_status and monotonic() < self._finalization_retry_after.get(job_id, 0):
                     continue
                 if finalization_status == "CLEANUP":
-                    self._finalization_retry_after[job_id] = monotonic() + 60
-                    self._finish_slurm_cleanup(job_id, slurm_job_id)
+                    artifact_candidates[job_id] = slurm_job_id
                     continue
                 if not slurm_job_id:
                     with SessionLocal() as db:
@@ -291,6 +291,10 @@ class _SyncMixin(_SyncMixinBase):
                         db.commit()
                     continue
 
+                if finalization_status and original_status not in (JobStatus.QUEUED, JobStatus.RUNNING):
+                    artifact_candidates[job_id] = slurm_job_id
+                    continue
+
                 assert self.slurm_manager is not None
                 real_status = finalization_status or self.slurm_manager.check_job_status(slurm_job_id)
                 if real_status == "RUNNING":
@@ -304,19 +308,22 @@ class _SyncMixin(_SyncMixinBase):
                             Job.start_time: datetime.now(timezone.utc),
                         }, synchronize_session=False)
                         db.commit()
-                    self._stage_out_logs(job_id)
+                    artifact_candidates[job_id] = slurm_job_id
                 elif real_status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"):
-                    self._finalization_retry_after[job_id] = monotonic() + 60
-                    self._finalize_slurm_job(job_id, slurm_job_id, real_status)
+                    if self._classify_slurm_job(job_id, slurm_job_id, real_status):
+                        artifact_candidates[job_id] = slurm_job_id
+                        self._finalization_retry_after.pop(job_id, None)
             except Exception as error:
-                logger.warning(f"Job {job_id} synchronization incomplete; retaining workspace for retry: {error}")
+                self._finalization_retry_after[job_id] = monotonic() + 60
+                logger.warning("Job %s synchronization incomplete; retaining workspace (%s)", job_id, type(error).__name__)
+        return artifact_candidates
 
-    def _finalize_slurm_job(
+    def _classify_slurm_job(
         self,
         job_id: str,
         slurm_job_id: str,
         real_status: str,
-    ) -> None:
+    ) -> bool:
         with SessionLocal() as db:
             changed = db.query(Job).filter(
                 Job.id == job_id,
@@ -324,8 +331,15 @@ class _SyncMixin(_SyncMixinBase):
                 Job.finalization_status.is_(None) | (Job.finalization_status == real_status),
             ).update({Job.finalization_status: real_status}, synchronize_session=False)
             db.commit()
-        if not changed:
-            return
+            current = db.query(Job.status).filter(
+                Job.id == job_id,
+                Job.slurm_job_id == slurm_job_id,
+                Job.finalization_status == real_status,
+            ).first()
+        if not changed or current is None:
+            return False
+        if current[0] not in (JobStatus.QUEUED, JobStatus.RUNNING):
+            return True
 
         # Classify only after the small marker read. A failed connection is not
         # evidence of a missing success marker; custody transfer is independent.
@@ -337,7 +351,7 @@ class _SyncMixin(_SyncMixinBase):
                 Job.finalization_status == real_status,
             ).first()
             if job is None:
-                return
+                return False
             if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
                 original_status = job.status
                 marker_path = f"{magnus_workspace_path}/jobs/{job.id}/.magnus_success"
@@ -358,7 +372,40 @@ class _SyncMixin(_SyncMixinBase):
                     Job.finalization_status == real_status,
                 ).update(values, synchronize_session=False)
             db.commit()
+        return True
 
+    def _recover_slurm_artifacts(
+        self,
+        job_id: str,
+        slurm_job_id: str,
+    ) -> int:
+        with SessionLocal() as db:
+            current = db.query(Job.status, Job.finalization_status).filter(
+                Job.id == job_id,
+                Job.slurm_job_id == slurm_job_id,
+            ).first()
+        if current is None:
+            return 0
+        status, finalization_status = current
+        if finalization_status == "CLEANUP":
+            self._finish_slurm_cleanup(job_id, slurm_job_id)
+            return 60
+        if finalization_status:
+            # Classification owns marker reads. Bulk recovery must not race it.
+            if status in (JobStatus.QUEUED, JobStatus.RUNNING):
+                return 0
+            self._finalize_slurm_job(job_id, slurm_job_id, finalization_status)
+            return 60
+        if status in (JobStatus.QUEUED, JobStatus.RUNNING):
+            self._stage_out_logs(job_id)
+        return 0
+
+    def _finalize_slurm_job(
+        self,
+        job_id: str,
+        slurm_job_id: str,
+        real_status: str,
+    ) -> None:
         if self._stage_out_final(job_id) is not True:
             return
         with SessionLocal() as db:
@@ -398,5 +445,3 @@ class _SyncMixin(_SyncMixinBase):
                 Job.finalization_status: None,
             }, synchronize_session=False)
             db.commit()
-        if changed:
-            self._finalization_retry_after.pop(job_id, None)
