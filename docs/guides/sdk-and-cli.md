@@ -807,6 +807,9 @@ download_file(file_secret, "data/input.csv")  # relative path
 - `target_path` (str): target path
 - `timeout` (float, optional): timeout (seconds), default wait indefinitely
 - `overwrite` (bool, optional): overwrite existing file, default True
+- `job_id` (str, keyword-only): producing Job ID, used when waiting for relay imports
+- `wait_timeout` (float, keyword-only): maximum readiness wait in seconds, default 0 (disabled); separate from the HTTP download `timeout`
+- `poll_interval` (float, keyword-only): readiness polling interval in seconds, default 2
 
 **Returns**: `Path`
 
@@ -814,6 +817,31 @@ download_file(file_secret, "data/input.csv")  # relative path
 - `MagnusError`: file does not exist, has expired, or transfer failed
 
 `download_file_async` is the async version with the same parameters.
+
+To receive an offline relay output after computation finishes:
+
+```python
+status = magnus.get_file_status(secret, job_id=job_id)
+output = magnus.download_file(
+    secret,
+    "./results",
+    timeout=300,
+    job_id=job_id,
+    wait_timeout=900,
+)
+```
+
+`get_file_status(secret, *, job_id=None, timeout=10)` (also available on `MagnusClient`, with an `_async` variant) calls authenticated `GET /api/files/status/{token}?job_id=...`. It does not acquire a download, spend its count, or renew its TTL. The response has two independent fields:
+
+| Field | Meaning |
+|---|---|
+| `status: ready` | The file is currently downloadable; this observation does not reserve it. |
+| `status: pending` | A known custody entry is being written. |
+| `status: unavailable` | The known entry is expired, exhausted, deleted or missing; or the supplied producer has finished transferring without making it available. |
+| `status: unknown` | The controller has no live entry yet. It cannot distinguish a future relay import from an invalid token without more evidence. |
+| `job_transfers_pending` | Whether the supplied Job may still publish outputs; `null` without `job_id`. This is context, not proof the token belongs to that Job. |
+
+Waiting polls status only, then starts the download when ready. It waits for `pending`, or `unknown` with `job_transfers_pending=true`; unavailable entries and unknown entries without a pending producer fail immediately. A durable import receipt prevents an expired or consumed relay token from being treated as an unfinished import. Temporary secrets remain temporary, including across backend restarts. Status/authentication errors propagate instead of being interpreted as successful imports. The existing download endpoint still returns 200/404, and calls without `wait_timeout` retain their behavior and positional arguments. Opt-in status/wait requires a server with this endpoint; an older server's 404 fails explicitly, while ordinary downloads remain usable. Async cancellation during readiness polling cannot start a later download.
 
 Behavior notes:
 
@@ -1883,10 +1911,14 @@ Download a file or folder.
 magnus receive 7919-calm-boat-fire
 magnus receive 7919-calm-boat-fire -o my_data.csv
 magnus receive 7919-calm-boat-fire --output ./downloads/result.tar.gz
+magnus receive "$SECRET" --job "$JOB_ID" --wait 900 --timeout 300 -o ./results
 ```
 
 **Options**:
 - `-o, --output`: target path (can rename); if not specified, saved to the current directory
+- `--job`: producing Job ID for relay import status
+- `--wait`: readiness wait budget in seconds, default 0; requires a logged-in API profile
+- `--timeout`: HTTP download timeout in seconds, independent of the readiness budget
 
 ### magnus custody
 

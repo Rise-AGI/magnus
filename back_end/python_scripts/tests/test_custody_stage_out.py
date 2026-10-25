@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from types import SimpleNamespace
 import unittest
+import runpy
 from test_transport_timeouts import load_transport
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 def load_staging():
     path = SERVER / "_scheduler" / "_staging.py"
     namespace = {"remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
+    namespace.update({name: value for name, value in runpy.run_path(str(SERVER / "_custody_receipts.py")).items() if not name.startswith("__")})
     tree = ast.parse(path.read_text(encoding="utf-8"))
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
     exec(compile(tree, str(path), "exec"), namespace)

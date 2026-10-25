@@ -3,6 +3,7 @@ from importlib.metadata import version as _pkg_version, PackageNotFoundError as 
 from typing import Optional, Dict, Any, Union, Literal, List
 from pathlib import Path
 from enum import Enum
+import re
 
 from .exceptions import (
     MagnusError, APIError,
@@ -35,6 +36,8 @@ class FileSecret(str):
 
     @staticmethod
     def _validate_token(token: str) -> None:
+        if re.fullmatch(r"relay-[0-9a-f]{32}", token):
+            return
         parts = token.split("-")
         if len(parts) != 4:
             raise ValueError(f"FileSecret token must have 4 parts (prime-word-word-word), got {len(parts)}: '{token}'")
@@ -131,6 +134,8 @@ __all__ = [
     "remove_image_async",
     "download_file",
     "download_file_async",
+    "get_file_status",
+    "get_file_status_async",
     "custody_file",
     "custody_file_async",
     "save_site",
@@ -380,6 +385,32 @@ def call_service(service_id: str, payload: Union[Dict[str, Any], str, bytes, lis
 
 async def call_service_async(service_id: str, payload: Union[Dict[str, Any], str, bytes, list], endpoint: Optional[str] = None, timeout: float = 60.0, protocol: Literal["http", "mcp"] = "http", **kwargs: Any) -> Any:
     return await default_client.call_service_async(service_id, payload, endpoint, timeout, protocol, **kwargs)
+
+def get_file_status(
+    file_secret: str,
+    *,
+    job_id: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.get_file_status(
+        file_secret,
+        job_id = job_id,
+        timeout = timeout,
+    )
+
+
+async def get_file_status_async(
+    file_secret: str,
+    *,
+    job_id: Optional[str] = None,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return await default_client.get_file_status_async(
+        file_secret,
+        job_id = job_id,
+        timeout = timeout,
+    )
+
 
 def custody_file(path: str, expire_minutes: int = 60, max_downloads: Optional[int] = None, timeout: float = 300.0) -> str:
     return default_client.custody_file(path, expire_minutes, max_downloads, timeout)

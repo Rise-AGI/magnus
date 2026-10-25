@@ -947,6 +947,9 @@ def send_cmd(
 def receive_cmd(
     secret: str = typer.Argument(..., help="File secret code"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Target path (rename/move after receive)"),
+    job_id: Optional[str] = typer.Option(None, "--job", help="Producing Job ID for relay import status"),
+    wait_timeout: float = typer.Option(0.0, "--wait", min=0, help="Wait up to this many seconds for custody import"),
+    timeout: Optional[float] = typer.Option(None, "--timeout", min=0.001, help="HTTP download timeout in seconds, separate from --wait"),
 ):
     """
     Receive a file or folder.
@@ -959,11 +962,17 @@ def receive_cmd(
     from ..http_download import download_file as _download_file
     try:
         with SignalSafeSpinner(f"[magnus.prefix][Magnus][/magnus.prefix] Downloading..."):
-            result_path = _download_file(secret, target_path=output)
+            result_path = _download_file(
+                secret,
+                target_path = output,
+                timeout = timeout,
+                job_id = job_id,
+                wait_timeout = wait_timeout,
+            )
         print_msg(f"Saved to [cyan]{rich_escape(str(result_path))}[/cyan]")
     except KeyboardInterrupt:
         pass
-    except MagnusError as e:
+    except (MagnusError, ValueError) as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 

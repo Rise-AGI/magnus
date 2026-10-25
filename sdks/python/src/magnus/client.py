@@ -12,6 +12,7 @@ import tarfile as _tarfile
 import httpx
 from typing import Optional, Dict, Any, Union, Literal, List
 from pathlib import Path
+from urllib.parse import quote
 
 from .exceptions import (
     MagnusError, APIError,
@@ -23,7 +24,7 @@ from .config import (
     _get_current_site, normalize_address,
 )
 from .actions import execute_action
-from .file_transfer import is_file_secret, get_tmp_base, ENV_CUSTODY_DROP_DIR, FILE_SECRET_PREFIX
+from .file_transfer import is_file_secret, get_tmp_base, normalize_secret, ENV_CUSTODY_DROP_DIR, FILE_SECRET_PREFIX
 from ._http_errors import http_error_detail
 
 logger = logging.getLogger("magnus")
@@ -1808,6 +1809,52 @@ class MagnusClient:
         )
 
     # === Service Methods ===
+
+    def get_file_status(
+        self,
+        file_secret: str,
+        *,
+        job_id: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        """Observe custody without consuming a download or extending its TTL."""
+        token = quote(normalize_secret(file_secret), safe="")
+        try:
+            response = self.http.get(
+                f"/files/status/{token}",
+                params = {"job_id": job_id} if job_id is not None else {},
+                timeout = timeout,
+            )
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while checking file status.") from None
+        except httpx.TransportError as error:
+            raise self._network_error("checking file status", error) from None
+        self._handle_error(response)
+        try:
+            result = response.json()
+        except ValueError:
+            raise MagnusError("Invalid file status response") from None
+        if (
+            not isinstance(result, dict)
+            or result.get("status") not in ("ready", "pending", "unavailable", "unknown")
+            or (result.get("job_transfers_pending") is not None and not isinstance(result["job_transfers_pending"], bool))
+        ):
+            raise MagnusError("Invalid file status response")
+        return result
+
+    async def get_file_status_async(
+        self,
+        file_secret: str,
+        *,
+        job_id: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self.get_file_status,
+            file_secret,
+            job_id = job_id,
+            timeout = timeout,
+        )
 
     def custody_file(
         self,

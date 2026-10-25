@@ -5,6 +5,7 @@ import json
 import time
 import shutil
 import logging
+import math
 import httpx
 import tempfile
 from contextlib import contextmanager
@@ -306,22 +307,12 @@ def _download_once(
             return _publish_download(source, target, overwrite, tmp_dir)
 
 
-def download_file(
-    file_secret: str,
-    target_path: Optional[str] = None,
-    timeout: Optional[float] = None,
-    overwrite: bool = True,
+def _download_http(
+    token: str,
+    target_path: Optional[str],
+    timeout: Optional[float],
+    overwrite: bool,
 ) -> Path:
-    token = normalize_secret(file_secret)
-
-    # No-network remote-execution sites: the host has pre-staged the file into the
-    # drop-in dir (see _StagingMixin._stage_in_custody). Resolve it from the filesystem
-    # instead of hitting the backend, which compute nodes there cannot reach. Falls
-    # through to HTTP when the dir is unset (local / owned sites) or the token isn't staged.
-    staged = _read_staged_dropin(token, target_path, overwrite)
-    if staged is not None:
-        return staged
-
     url = _get_download_url(token)
 
     for attempt in range(_MAX_RETRIES):
@@ -336,15 +327,153 @@ def download_file(
     assert False, "unreachable"
 
 
+def _validate_wait_options(
+    wait_timeout: float,
+    poll_interval: float,
+) -> None:
+    if not math.isfinite(wait_timeout) or wait_timeout < 0:
+        raise ValueError("wait_timeout must be finite and nonnegative")
+    if not math.isfinite(poll_interval) or poll_interval <= 0:
+        raise ValueError("poll_interval must be finite and positive")
+
+
+def _ready_or_raise(
+    status: dict,
+) -> bool:
+    if status["status"] == "ready":
+        return True
+    if status["status"] == "unavailable":
+        raise _magnus_error("File is unavailable: missing, expired, consumed, or not retained after restart")
+    if status["status"] == "unknown" and status.get("job_transfers_pending") is not True:
+        raise _magnus_error("File availability is unknown; supply the producing job_id to wait for relay imports")
+    return False
+
+
+def _wait_remaining(
+    deadline: float,
+) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise _magnus_error("Timed out waiting for custody import; no download was started")
+    return remaining
+
+
+def _wait_for_file(
+    file_secret: str,
+    job_id: Optional[str],
+    wait_timeout: float,
+    poll_interval: float,
+) -> None:
+    from . import default_client
+    deadline = time.monotonic() + wait_timeout
+    while True:
+        status = default_client.get_file_status(
+            file_secret,
+            job_id = job_id,
+            timeout = min(10.0, _wait_remaining(deadline)),
+        )
+        _wait_remaining(deadline)
+        if _ready_or_raise(status):
+            return
+        time.sleep(min(poll_interval, _wait_remaining(deadline)))
+
+
+async def _wait_for_file_async(
+    file_secret: str,
+    job_id: Optional[str],
+    wait_timeout: float,
+    poll_interval: float,
+) -> None:
+    import asyncio
+    from . import default_client
+    deadline = time.monotonic() + wait_timeout
+    while True:
+        status = await default_client.get_file_status_async(
+            file_secret,
+            job_id = job_id,
+            timeout = min(10.0, _wait_remaining(deadline)),
+        )
+        _wait_remaining(deadline)
+        if _ready_or_raise(status):
+            return
+        await asyncio.sleep(min(poll_interval, _wait_remaining(deadline)))
+
+
+def download_file(
+    file_secret: str,
+    target_path: Optional[str] = None,
+    timeout: Optional[float] = None,
+    overwrite: bool = True,
+    *,
+    job_id: Optional[str] = None,
+    wait_timeout: float = 0.0,
+    poll_interval: float = 2.0,
+) -> Path:
+    _validate_wait_options(
+        wait_timeout,
+        poll_interval,
+    )
+    token = normalize_secret(file_secret)
+    staged = _read_staged_dropin(
+        token,
+        target_path,
+        overwrite,
+    )
+    if staged is not None:
+        return staged
+    if wait_timeout > 0:
+        _wait_for_file(
+            file_secret,
+            job_id,
+            wait_timeout,
+            poll_interval,
+        )
+    return _download_http(
+        token,
+        target_path,
+        timeout,
+        overwrite,
+    )
+
+
 async def download_file_async(
     file_secret: str,
     target_path: Optional[str] = None,
     timeout: Optional[float] = None,
     overwrite: bool = True,
+    *,
+    job_id: Optional[str] = None,
+    wait_timeout: float = 0.0,
+    poll_interval: float = 2.0,
 ) -> Path:
     import asyncio
+    _validate_wait_options(
+        wait_timeout,
+        poll_interval,
+    )
+    token = normalize_secret(file_secret)
+    staged = await asyncio.to_thread(
+        _read_staged_dropin,
+        token,
+        target_path,
+        overwrite,
+    )
+    if staged is not None:
+        return staged
+    if wait_timeout > 0:
+        # Poll in the coroutine so cancellation cannot start a later download.
+        await _wait_for_file_async(
+            file_secret,
+            job_id,
+            wait_timeout,
+            poll_interval,
+        )
     return await asyncio.to_thread(
-        download_file, file_secret, target_path, timeout, overwrite,
+        _download_http,
+        token,
+        target_path,
+        timeout,
+        overwrite,
     )
 
 

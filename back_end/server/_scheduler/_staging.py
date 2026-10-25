@@ -25,6 +25,11 @@ from time import monotonic
 from typing import TYPE_CHECKING
 from .._magnus_config import magnus_config
 from .._file_custody_manager import file_custody_manager
+from .._custody_receipts import (
+    _RELAY_TOKEN_RE,
+    _read_custody_receipts,
+    _write_custody_receipts,
+)
 from . import (
     logger,
     magnus_workspace_path,
@@ -40,8 +45,6 @@ from .._slurm_manager._ssh_auto_connect import remaining_timeout
 # pulls them back and registers each in custody under its token. Must match the path
 # the wrapper exports into the container.
 _CUSTODY_DROP_SUBDIR = ".magnus_custody_drop"
-_CUSTODY_RECEIPTS_FILE = ".magnus_custody_receipts.json"
-_RELAY_TOKEN_RE = re.compile(r"relay-[0-9a-f]{32}\Z")
 
 # Inbound counterpart of _CUSTODY_DROP_SUBDIR: before sbatch, the host stages the custody
 # files a job's entry_command references into <remote_table>/<this>/<token>/ (file +
@@ -218,48 +221,6 @@ def _is_safe_leaf(name: str) -> bool:
         and not any(character in name for character in ("/", "\\", "\0"))
         and os.path.basename(name) == name
     )
-
-
-def _read_custody_receipts(
-    local_table: str,
-) -> dict:
-    path = Path(local_table) / _CUSTODY_RECEIPTS_FILE
-    try:
-        with path.open(encoding="utf-8") as source:
-            receipts = json.load(source)
-    except FileNotFoundError:
-        return {"entries": {}, "logs_complete": False}
-    if (
-        not isinstance(receipts, dict)
-        or not isinstance(receipts.get("entries"), dict)
-        or not isinstance(receipts.get("logs_complete"), bool)
-        or not all(
-            isinstance(token, str)
-            and _RELAY_TOKEN_RE.fullmatch(token)
-            and isinstance(digest, str)
-            and re.fullmatch(r"[0-9a-f]{64}", digest)
-            for token, digest in receipts["entries"].items()
-        )
-    ):
-        raise ValueError("Invalid custody registration receipts")
-    return receipts
-
-
-def _write_custody_receipts(
-    local_table: str,
-    receipts: dict,
-) -> None:
-    os.makedirs(local_table, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=".custody-receipts-", dir=local_table)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
-            json.dump(receipts, destination, sort_keys=True)
-            destination.flush()
-            os.fsync(destination.fileno())
-        os.replace(temporary, os.path.join(local_table, _CUSTODY_RECEIPTS_FILE))
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
 
 
 def _validate_custody_metadata(

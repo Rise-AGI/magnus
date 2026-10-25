@@ -807,6 +807,9 @@ download_file(file_secret, "data/input.csv")  # 相对路径
 - `target_path` (str): 目标路径
 - `timeout` (float, 可选): 超时（秒），默认无限等待
 - `overwrite` (bool, 可选): 覆盖已存在文件，默认 True
+- `job_id` (str，仅限关键字): 产出文件的 Job ID，用于等待离线 relay 导入
+- `wait_timeout` (float，仅限关键字): 就绪等待预算（秒），默认 0（关闭）；与 HTTP 下载的 `timeout` 分开
+- `poll_interval` (float，仅限关键字): 就绪轮询间隔（秒），默认 2
 
 **返回值**：`Path`
 
@@ -814,6 +817,31 @@ download_file(file_secret, "data/input.csv")  # 相对路径
 - `MagnusError`: 文件不存在、已过期、传输失败
 
 `download_file_async` 为异步版本，参数相同。
+
+计算结束后接收离线 relay 成果：
+
+```python
+status = magnus.get_file_status(secret, job_id=job_id)
+output = magnus.download_file(
+    secret,
+    "./results",
+    timeout=300,
+    job_id=job_id,
+    wait_timeout=900,
+)
+```
+
+`get_file_status(secret, *, job_id=None, timeout=10)`（`MagnusClient` 同样提供，也有 `_async` 版本）调用需要登录的 `GET /api/files/status/{token}?job_id=...`。查询不领取文件、不消耗下载次数、不延长 TTL。响应包含两个独立字段：
+
+| 字段 | 含义 |
+|---|---|
+| `status: ready` | 当前可下载；查询不会为调用方预留文件。 |
+| `status: pending` | 已知的 custody 条目正在写入。 |
+| `status: unavailable` | 已知条目已过期、次数耗尽、被删除或文件缺失；或所提供的来源 Job 已完成回传而文件仍不可用。 |
+| `status: unknown` | 控制面尚无在线条目，不能仅凭取件码区分未来导入和无效 token。 |
+| `job_transfers_pending` | 所提供的 Job 是否仍可能发布成果；未传 `job_id` 时为 `null`。这是等待依据，不证明取件码属于该 Job。 |
+
+等待期间只查询状态，就绪后才开始下载。`pending` 或伴随 `job_transfers_pending=true` 的 `unknown` 会继续等待；不可用条目以及没有待回传 Job 的未知条目立即报错。已登记的导入回执可防止把已消费或过期的 relay token 误认为还没导入。临时 secret 的期限、次数和重启语义不变。状态查询及认证错误直接上报，不当作导入成功。原下载端点仍返回 200/404，不传 `wait_timeout` 的调用保持原行为和位置参数。主动查询／等待需要服务端支持新端点；旧服务端的 404 会明确报错，普通下载仍可使用。异步等待在取消后不会继续发起下载。
 
 行为说明：
 
@@ -1883,10 +1911,14 @@ magnus send data.csv --max-downloads 3
 magnus receive 7919-calm-boat-fire
 magnus receive 7919-calm-boat-fire -o my_data.csv
 magnus receive 7919-calm-boat-fire --output ./downloads/result.tar.gz
+magnus receive "$SECRET" --job "$JOB_ID" --wait 900 --timeout 300 -o ./results
 ```
 
 **选项**：
 - `-o, --output`: 目标路径（可重命名），不指定则落到当前目录
+- `--job`: 产出文件的 Job ID，用于 relay 导入状态查询
+- `--wait`: 就绪等待预算（秒），默认 0；需要已登录的 API profile
+- `--timeout`: HTTP 下载超时（秒），与就绪等待预算独立
 
 ### magnus custody
 

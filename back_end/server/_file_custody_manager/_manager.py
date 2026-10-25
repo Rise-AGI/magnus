@@ -10,7 +10,7 @@ import asyncio
 import threading
 from concurrent.futures import CancelledError
 from pathlib import Path
-from typing import Any, Optional, Dict, Tuple, BinaryIO
+from typing import Any, Literal, Optional, Dict, Tuple, BinaryIO
 
 from library import is_disk_full_oserror
 
@@ -321,6 +321,28 @@ class FileCustodyManager:
                     token,
                 )))
             raise
+
+    def get_file_status(
+        self,
+        token: str,
+    ) -> Literal["ready", "pending", "unavailable", "unknown"]:
+        """Observe availability without a lease, download count or TTL renewal."""
+        with self._lock:
+            entry = self._entries.get(token)
+            if entry is None:
+                return "unknown"
+            if entry.delete_pending or entry.deleting:
+                return "unavailable"
+            if entry.writing:
+                return "pending"
+            if (
+                entry.expires_at == 0.0
+                or time.time() >= entry.expires_at
+                or (entry.max_downloads is not None and entry.download_count >= entry.max_downloads)
+                or not (entry.file_dir / entry.original_filename).is_file()
+            ):
+                return "unavailable"
+            return "ready"
 
     def get_entry(
         self,
