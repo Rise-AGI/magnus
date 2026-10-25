@@ -162,6 +162,12 @@ class AllocationTests(unittest.TestCase):
             self.module.validate_allocation_visibility(snapshot, [])
         self.module.validate_allocation_visibility(snapshot, [{"gpu_count": 2, "cpu_count": 8, "memory_mb": 8192}])
         self.module.validate_allocation_visibility(self.module.NodeSnapshot(4, 32, 64000, observed_allocated_gpus=0), [{"gpu_count": 2}])
+        gpu_snapshot = self.module.NodeSnapshot(4, 32, 64000, observed_allocated_gpus=2, observed_allocated_cpus=16)
+        with self.assertRaisesRegex(ValueError, "cpu_count"):
+            self.module.validate_allocation_visibility(gpu_snapshot, [{"gpu_count": 2}])
+        self.module.validate_allocation_visibility(gpu_snapshot, [{"gpu_count": 2}], resource_fields=("gpu_count",))
+        with self.assertRaisesRegex(ValueError, "gpu_count"):
+            self.module.validate_allocation_visibility(gpu_snapshot, [], resource_fields=("gpu_count",))
 
     def test_untyped_actual_gpu_does_not_inherit_ui_alias(self):
         row = self.task(tres_alloc_str="cpu=128,mem=1G,gres/gpu=4")
@@ -349,7 +355,7 @@ class CacheAndHistoryTests(unittest.TestCase):
         def tasks(**kwargs):
             calls.append(kwargs)
             return [{"id": "queued", "gpu_count": 6}, {"id": "releasing", "gpu_count": 2}, {"id": "external", "gpu_count": 4}]
-        manager = SimpleNamespace(get_all_running_tasks=tasks, get_node_snapshot=lambda **kwargs: module.NodeSnapshot(16, 128, 512000, nodes=(SimpleNamespace(name="one"),)))
+        manager = SimpleNamespace(get_all_running_tasks=tasks, get_node_snapshot=lambda **kwargs: module.NodeSnapshot(16, 128, 512000, nodes=(SimpleNamespace(name="one", gpu_by_type={"a100": 16}, allocated_gpus=12),), observed_allocated_gpus=12, observed_allocated_cpus=128, observed_allocated_mem_mb=512000))
         instance = SimpleNamespace(config=config, target=SimpleNamespace(id="default"), _job_query=lambda db, *entities: db.query(*entities), slurm_manager=manager, last_snapshot_time=datetime.now(timezone.utc)-timedelta(seconds=10))
         namespace = {"datetime": datetime, "timezone": timezone, "is_local_mode": False, "magnus_config": config, "resource_partitions": module.resource_partitions, "validate_allocation_visibility": module.validate_allocation_visibility, "SessionLocal": Session, "Job": SimpleNamespace(slurm_job_id=Field()), "ClusterSnapshot": lambda **fields: SimpleNamespace(**fields), "logger": logging.getLogger("history-test")}
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
@@ -358,18 +364,43 @@ class CacheAndHistoryTests(unittest.TestCase):
         self.assertEqual((added[0].total_gpus, added[0].slurm_used_gpus, added[0].magnus_used_gpus), (16, 12, 8))
         self.assertEqual(calls[0], {"node_names": ["one"], "_raise_on_error": True})
         previous = instance.last_snapshot_time = datetime.now(timezone.utc)-timedelta(seconds=10)
+        failed_calls = []
         def failed(**kwargs):
+            failed_calls.append(kwargs)
             raise OSError("SSH disconnected")
         manager.get_all_running_tasks = failed
         with self.assertLogs("history-test", level="ERROR"):
             namespace["_record_snapshot"](instance)
         self.assertEqual(len(added), 1)
-        self.assertEqual(instance.last_snapshot_time, previous)
-        manager.get_all_running_tasks = lambda **kwargs: [{"id": "crossing", "gpu_count": 8, "scope_is_subset": False}]
-        with self.assertLogs("history-test", level="WARNING"):
+        self.assertGreater(instance.last_snapshot_time, previous)
+        self.assertEqual(len(failed_calls), 1)
+        namespace["_record_snapshot"](instance)
+        self.assertEqual(len(failed_calls), 1)
+        instance.last_snapshot_time = previous
+        manager.get_all_running_tasks = lambda **kwargs: [{"id": "crossing", "gpu_count": 12, "scope_is_subset": False}]
+        with self.assertLogs("history-test", level="WARNING") as captured:
             namespace["_record_snapshot"](instance)
+        self.assertIn("cross the selected node scope", captured.output[0])
+        self.assertEqual(captured.records[0].levelname, "WARNING")
         self.assertEqual(len(added), 1)
-        self.assertEqual(instance.last_snapshot_time, previous)
+        self.assertGreater(instance.last_snapshot_time, previous)
+        manager.get_all_running_tasks = lambda **kwargs: []
+        unknown = SimpleNamespace(name="hidden", gpu_by_type={"a100": 4}, allocated_gpus=None)
+        known = SimpleNamespace(name="known", gpu_by_type={"a100": 4}, allocated_gpus=0)
+        for nodes in ((unknown,), (known, unknown)):
+            with self.subTest(nodes=len(nodes)):
+                manager.get_node_snapshot = lambda **kwargs: module.NodeSnapshot(4 * len(nodes), 128, 512000, nodes=nodes, observed_allocated_gpus=0, observed_allocated_cpus=128)
+                instance.last_snapshot_time = previous
+                with self.assertLogs("history-test", level="WARNING") as captured:
+                    namespace["_record_snapshot"](instance)
+                self.assertIn("GPU node allocation is unknown", captured.output[0])
+                self.assertEqual(len(added), 1)
+        cpu_node = SimpleNamespace(name="cpu", gpu_by_type={}, allocated_gpus=0)
+        manager.get_node_snapshot = lambda **kwargs: module.NodeSnapshot(0, 128, 512000, nodes=(cpu_node,), observed_allocated_gpus=0, observed_allocated_cpus=128)
+        instance.last_snapshot_time = previous
+        namespace["_record_snapshot"](instance)
+        self.assertEqual((added[-1].total_gpus, added[-1].slurm_used_gpus, added[-1].magnus_used_gpus), (0, 0, 0))
+        self.assertEqual(len(added), 2)
 
 
 if __name__ == "__main__":

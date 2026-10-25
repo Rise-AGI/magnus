@@ -29,6 +29,9 @@ class _SyncMixin(_SyncMixinBase):
             self.config["server"]["scheduler"]["snapshot_interval"]:
             return
 
+        # Failed or incomplete samples must not turn a five-minute query into
+        # heartbeat-rate traffic against a shared scheduler.
+        self.last_snapshot_time = now
         try:
             # Phase 1 — SLURM 调用（无 session）
             assert self.slurm_manager is not None
@@ -41,7 +44,14 @@ class _SyncMixin(_SyncMixinBase):
                 node_names = [node.name for node in capacity.nodes] if partitions else None,
                 _raise_on_error = True,
             )
-            validate_allocation_visibility(capacity, tasks)
+            if any(node.gpu_by_type and node.allocated_gpus is None for node in capacity.nodes):
+                logger.warning("Skipped cluster history sample: GPU node allocation is unknown")
+                return
+            validate_allocation_visibility(
+                capacity,
+                tasks,
+                resource_fields=("gpu_count",),
+            )
             if any(not task.get("scope_is_subset", True) or task.get("gpu_count_source") == "per_node_fallback" for task in tasks):
                 logger.warning("Skipped cluster history sample: GPU allocations are inferred or cross the selected node scope")
                 return
@@ -70,7 +80,6 @@ class _SyncMixin(_SyncMixinBase):
                 db.add(snapshot)
                 db.commit()
                 logger.debug(f"Recorded Cluster Snapshot: Total={snapshot.total_gpus}, Used={snapshot.slurm_used_gpus}, Magnus={magnus_usage}")
-            self.last_snapshot_time = now
         except Exception as error:
             logger.error(f"Failed to record cluster snapshot: {error}")
 

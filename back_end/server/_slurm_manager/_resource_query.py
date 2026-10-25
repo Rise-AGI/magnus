@@ -445,6 +445,8 @@ class NodeSnapshot:
 def validate_allocation_visibility(
     snapshot: NodeSnapshot,
     tasks: List[Dict],
+    *,
+    resource_fields: Tuple[str, ...] = ("gpu_count", "cpu_count", "memory_mb"),
 ) -> None:
     # PrivateData can hide jobs even with --all. Node allocation is a lower
     # bound (it may clear during CG); never advertise a visibility gap as free.
@@ -453,7 +455,7 @@ def validate_allocation_visibility(
         (snapshot.observed_allocated_cpus, "cpu_count"),
         (snapshot.observed_allocated_mem_mb, "memory_mb"),
     ):
-        if observed is not None and sum(task.get(field, 0) for task in tasks) < observed:
+        if field in resource_fields and observed is not None and sum(task.get(field, 0) for task in tasks) < observed:
             raise ValueError(f"Visible jobs do not explain node allocation for {field}")
 
 
