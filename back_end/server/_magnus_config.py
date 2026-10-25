@@ -459,7 +459,17 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _warn_extra_keys(slurm_cfg, {"partition", "qos", "account", "mem_mode", "mem_per_cpu_mb", "module_loads", "module_init", "mpi_type", "srun_extra_flags"}, "execution.slurm")
         expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache", "slurm"}
 
-    _warn_extra_keys(execution, expected_exec_keys | {"image_build", "target_id", "target_name", "targets"}, "execution")
+    execution.setdefault("container_image_mode", "native")
+    execution.setdefault("container_prepare_timeout_seconds", 300)
+    if execution["container_image_mode"] not in ("native", "sandbox"):
+        raise ValueError("execution.container_image_mode must be native or sandbox")
+    if is_local and execution["container_image_mode"] != "native":
+        raise ValueError("Sandbox image preparation requires the Slurm backend")
+    prepare_timeout = execution["container_prepare_timeout_seconds"]
+    if type(prepare_timeout) is not int or prepare_timeout <= 0:
+        raise ValueError("execution.container_prepare_timeout_seconds must be a positive integer")
+
+    _warn_extra_keys(execution, expected_exec_keys | {"image_build", "target_id", "target_name", "targets", "container_image_mode", "container_prepare_timeout_seconds"}, "execution")
 
     resource_cache = execution["resource_cache"]
     _check_key(resource_cache, "container_cache_size", str)

@@ -129,6 +129,8 @@ server:
 execution:
   backend: slurm                         # slurm | local
   container_runtime: apptainer           # apptainer | singularity (slurm) | docker (local)
+  container_image_mode: native           # native | sandbox (Slurm: one read-only image per Job)
+  container_prepare_timeout_seconds: 300 # sandbox conversion deadline, within the allocation
   allow_root: false
   # Optional native Dockerfile environments. Existing sites need no builder.
   # A dedicated BuildKit worker owns its layer cache and must have resource/disk

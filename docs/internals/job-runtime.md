@@ -161,13 +161,54 @@ ${MAGNUS_HOME}/.tmp/                         SDK file relay directory (container
 
 Therefore, in the Web scenario, the semantics of `--output/-o <target>` is not "write to a specified local path in the browser", but rather "suggested download name".
 
-The container filesystem is a read-only squashfs (SIF). The writable layer depends on the isolation mode:
+With the default `execution.container_image_mode: native`, the runtime receives
+the SIF directly. Its writable layer depends on the isolation mode:
 
 | Mode | Writable layer | Capacity limit | Description |
 |------|--------|----------|------|
 | containall + overlay | ephemeral overlay (sparse ext3 image) | `ephemeral_storage` | Default path (rootless apptainer); `--sparse` creation is instant and disk usage is on-demand |
 | containall/contain + writable-tmpfs | RAM tmpfs | shared with `memory_demand` | setuid apptainer or `MAGNUS_NO_OVERLAY=1` |
 | none (bare run) | host filesystem pass-through | unlimited | `MAGNUS_CONTAIN_LEVEL=none`, equivalent to pre-overlay behavior |
+
+### Runtime image preparation
+
+Some unprivileged Singularity installations extract a SIF to a directory on every
+execution. Launching many tasks can therefore exhaust shared filesystem file-count
+quotas even when the compressed image is small and byte capacity is available.
+On these Slurm targets, set `execution.container_image_mode: sandbox`.
+This mode requires the execution UID to own the Job temporary directory. Local
+Slurm uses only the backend's default runner in this mode; cross-user runners
+remain on `native`. A directory image's permissions can mask inherited cleanup
+ACLs, so unsupported ownership is rejected before conversion.
+
+The wrapper invokes the selected runtime's native
+`build --sandbox --notest --disable-cache` once, from the already staged local SIF,
+before launching tasks. GNU `timeout` bounds the conversion to
+`execution.container_prepare_timeout_seconds` (default 300), followed by a
+five-second termination grace. Preparation consumes the existing Slurm allocation
+and time limit. Failed or timed-out conversion starts no user tasks and writes no
+success marker. Each attempt uses a fresh Job-private directory under
+`{ephemeral}/.magnus_tmp/`; partial preparations are never reused.
+
+All tasks execute the same directory image read-only, without an overlay or
+`--writable-tmpfs`. The workspace remains writable. Separate Job-and-node-private
+directories are bound to `/tmp`, `/var/tmp` and `$MAGNUS_HOME/.tmp`; `/tmp` and
+`/var/tmp` share one directory, while SDK transfer scratch has its own directory.
+Same-node tasks share these temporary paths; different nodes and Jobs do not.
+`TMPDIR` is set to `/tmp`, and the entry command may override it. Dependencies
+belong in the image; arbitrary writes to its root filesystem are not supported
+in this mode. `ephemeral_storage` is not a hard quota for these directory writes.
+
+The preparation and temporary paths must be visible to the allocated nodes, like
+the existing Job workspace. SSH targets place them under the remote Job directory,
+not the controller's `server.ephemeral_root`. The existing terminal cleanup owns
+these directories, including leftovers after cancellation or host failure; there
+is no persistent sandbox-image cache. Cleanup restores owner traversal/write
+permissions on directories it owns, without changing files or following image
+symlinks, before removing scratch. Container conversion may temporarily need
+more than one image's unpacked space. Configure storage for simultaneous Jobs as
+well as image size. The default `native` mode and Docker/local behavior are
+unchanged; sandbox preparation is available to both Singularity and Apptainer.
 
 ### SDK runtime detection protocol
 
@@ -176,16 +217,22 @@ The SDK's `file_transfer.get_tmp_base()` uses the following criteria to determin
 1. The environment variable `MAGNUS_HOME` exists
 2. `$MAGNUS_HOME/workspace/` is an existing directory (created and bind-mounted by the Magnus runtime)
 
-When both conditions are met, the relay directory is `$MAGNUS_HOME/.tmp/` (container writable layer); otherwise it falls back to the system `/tmp`.
+When both conditions are met, the relay directory is `$MAGNUS_HOME/.tmp/`; otherwise
+it falls back to the system temporary directory. Native mode supplies this path
+through the container writable layer; sandbox mode explicitly binds writable
+Job-and-node-private storage at the same path, so old SDKs retain their behavior.
 
 **Why not `/tmp`**: under both isolation modes, `/tmp` is not an ideal relay location:
 
 | Mode | `/tmp` location | Problem |
 |------|-------------|------|
 | overlay | inside the overlay image | shares the `ephemeral_storage` quota with in-container writes like pip install |
-| writable-tmpfs | RAM tmpfs | limited capacity (kernel default 50% cgroup RAM), large files trigger ENOSPC |
+| writable-tmpfs | RAM tmpfs | bounded by runtime session-directory settings and Job memory; large files can trigger ENOSPC |
 
-`$MAGNUS_HOME/.tmp/` is also located on the container writable layer (overlay or tmpfs) and shares the same write budget as `/tmp`, but avoids mingling with system temporary files. More importantly, it does **not** write into `$MAGNUS_HOME/workspace/` (a host-disk bind mount), thereby preserving container isolation — user code inside the container cannot escape to the host filesystem via relay files.
+In native mode, `$MAGNUS_HOME/.tmp/` shares the container writable layer's budget
+with `/tmp`, while keeping transfer files separate. Explicit Job-directory binds
+are also part of the runtime's isolation boundary; a writable layer alone does
+not establish filesystem isolation.
 
 In nested container scenarios, the inner `$MAGNUS_HOME/workspace/` is also part of the bind-mount chain, and the detection protocol still works; the inner `$MAGNUS_HOME/.tmp/` is still located on the inner container's writable layer.
 

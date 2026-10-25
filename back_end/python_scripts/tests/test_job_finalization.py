@@ -101,6 +101,7 @@ class SlurmFinalizationTests(unittest.TestCase):
             "magnus_ephemeral_workspace_path": str(self.root),
             "is_local_mode": False,
             "magnus_config": {},
+            "remove_job_path": remove,
             "delete_file": remove,
         }
         load_mixin("_scheduler/_sync.py", self.namespace)
@@ -349,11 +350,11 @@ class SlurmFinalizationTests(unittest.TestCase):
 
     def test_failed_local_delete_keeps_cleanup_pending(self):
         self.add_job()
-        self.namespace["delete_file"] = lambda path: None
+        self.namespace["remove_job_path"] = lambda path: None
         self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.FAILED, "slurm-job", "CLEANUP"))
         self.assertFalse(any(event[0] == "cleanup" for event in self.events))
-        self.namespace["delete_file"] = remove
+        self.namespace["remove_job_path"] = remove
         self.sync(self.new_scheduler())
         self.assertIsNone(self.state()[2])
 

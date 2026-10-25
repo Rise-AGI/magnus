@@ -2,7 +2,7 @@
 import os
 import traceback
 from typing import TYPE_CHECKING, Optional
-from pywheels.file_tools import delete_file
+from .._workspace_cleanup import remove_job_path
 from ..database import SessionLocal
 from ..models import Job, JobStatus
 from . import logger, magnus_workspace_path, magnus_ephemeral_workspace_path
@@ -96,7 +96,7 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
                         if os.path.islink(path):
                             os.unlink(path)
                         else:
-                            delete_file(path)
+                            remove_job_path(path)
                         if os.path.lexists(path):
                             raise OSError(f"Could not remove {path}")
             # When ephemeral_root is split onto a separate disk, the overlay +
@@ -107,7 +107,7 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
                 if os.path.islink(job_ephemeral_table):
                     os.unlink(job_ephemeral_table)
                 else:
-                    delete_file(job_ephemeral_table)
+                    remove_job_path(job_ephemeral_table)
                 if os.path.lexists(job_ephemeral_table):
                     raise OSError(f"Could not remove {job_ephemeral_table}")
             # 远端执行：删掉远端 job 工作区（持久产物已在终态 _stage_out_final 拉回本机，

@@ -103,14 +103,40 @@ class TargetConfigurationTests(unittest.TestCase):
         exec(compile(ast.Module(body=functions, type_ignores=[]), "config", "exec"), namespace)
         validate = namespace["_prepare_and_validate_magnus_config"]
         config = YAML(typ="safe").load(SERVER.parents[1] / "configs/magnus_config.yaml.example")
+        config["execution"].pop("container_image_mode", None)
+        config["execution"].pop("container_prepare_timeout_seconds", None)
         config["execution"]["targets"] = configuration()["execution"]["targets"]
         config["execution"]["targets"]["second"]["cluster"]["scheduling"] = {"mode": "tenant"}
+        settings = config["execution"]["targets"]["second"]
+        settings.update(container_image_mode="sandbox", container_prepare_timeout_seconds=120)
         remote = config["execution"]["targets"]["second"]["transport"]["ssh"]
         remote.update(host="example.invalid", user="test", auto_connect={"command": ["connector", "second"]})
         validate(config)
         targets = targets_module.execution_targets(config, validate=validate)
         self.assertEqual(targets["second"].config["transport"]["ssh"]["auto_connect"]["timeout_seconds"], 45)
         self.assertIsNone(targets["second"].config["execution"]["slurm"]["module_init"])
+        default = targets_module.select_execution_target(targets, None)
+        self.assertEqual(default.config["execution"]["container_image_mode"], "native")
+        self.assertEqual(default.config["execution"]["container_prepare_timeout_seconds"], 300)
+        self.assertEqual(targets["second"].config["execution"]["container_image_mode"], "sandbox")
+        self.assertEqual(targets["second"].config["execution"]["container_prepare_timeout_seconds"], 120)
+        for field, value in (
+            ("container_image_mode", "unknown"),
+            ("container_prepare_timeout_seconds", 0),
+            ("container_prepare_timeout_seconds", True),
+            ("container_prepare_timeout_seconds", "120"),
+        ):
+            original = settings[field]
+            settings[field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                targets_module.execution_targets(config, validate=validate)
+            settings[field] = original
+        local = YAML(typ="safe").load(SERVER.parents[1] / "configs/magnus_config.yaml.example")
+        local["server"]["auth"]["provider"] = "local"
+        local["server"]["auth"].pop("feishu_client")
+        local["execution"].update(backend="local", container_runtime="docker", container_image_mode="sandbox")
+        with self.assertRaisesRegex(ValueError, "Slurm backend"):
+            validate(local)
         remote["auto_connect"]["password"] = "must-not-mix"
         with self.assertRaisesRegex(ValueError, "cannot include password"):
             targets_module.execution_targets(config, validate=validate)

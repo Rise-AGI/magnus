@@ -1,0 +1,62 @@
+"""Exercise deletion permissions and link boundaries without a running server."""
+import ast
+import importlib.util
+import os
+from pathlib import Path
+import stat
+import tempfile
+import unittest
+
+
+SOURCE = Path(__file__).resolve().parents[2] / "server" / "_workspace_cleanup.py"
+SPEC = importlib.util.spec_from_file_location("isolated_workspace_cleanup", SOURCE)
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+
+class WorkspaceCleanupTests(unittest.TestCase):
+    def test_readonly_and_unsearchable_directories_are_removed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "job"
+            nested = root / "readonly" / "unsearchable"
+            nested.mkdir(parents=True)
+            (nested / "file").write_text("scratch")
+            nested.chmod(0)
+            nested.parent.chmod(0o555)
+            try:
+                MODULE.remove_job_path(root)
+                self.assertFalse(root.exists())
+            finally:
+                if nested.parent.exists():
+                    nested.parent.chmod(0o700)
+                    if nested.exists():
+                        nested.chmod(0o700)
+
+    @unittest.skipUnless(os.name == "posix", "Symlink creation is platform-specific")
+    def test_symlinks_and_hardlinked_files_do_not_modify_external_data(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            external = parent / "external"
+            external.mkdir()
+            protected = external / "file"
+            protected.write_text("keep")
+            protected.chmod(0o444)
+            root = parent / "job"
+            root.mkdir()
+            (root / "directory-link").symlink_to(external, target_is_directory=True)
+            (root / "broken-link").symlink_to(parent / "missing")
+            os.link(protected, root / "hardlink")
+            MODULE.remove_job_path(root)
+            self.assertEqual(protected.read_text(), "keep")
+            self.assertEqual(stat.S_IMODE(protected.stat().st_mode), 0o444)
+            root.symlink_to(external, target_is_directory=True)
+            MODULE.remove_job_path(root)
+            self.assertTrue(protected.exists())
+            MODULE.remove_job_path(root)
+
+    def test_helper_is_compatible_with_remote_python(self):
+        ast.parse(SOURCE.read_text(), feature_version=(3, 6))
+
+
+if __name__ == "__main__":
+    unittest.main()

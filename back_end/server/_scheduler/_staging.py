@@ -625,7 +625,12 @@ class _StagingMixin(_StagingMixinBase):
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
         removed = transport.run(
-            ["rm", "-rf", remote_table],
+            [
+                "python3", "-c",
+                (Path(__file__).resolve().parents[1] / "_workspace_cleanup.py").read_text(encoding="utf-8")
+                + "\nimport sys\nremove_job_path(sys.argv[1])\n",
+                remote_table,
+            ],
             timeout = 30,
         )
         if removed.returncode != 0:

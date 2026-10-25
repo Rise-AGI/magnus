@@ -144,6 +144,12 @@ class _SubmitMixin(_SubmitMixinBase):
                 return False
             user_magnus = self.config["cluster"]["default_runner"]
             effective_runner = job.runner if job.runner is not None else user_magnus
+            if (
+                self.config["execution"].get("container_image_mode", "native") == "sandbox"
+                and not self._is_remote_execution()
+                and effective_runner != user_magnus
+            ):
+                raise ValueError("Sandbox image mode requires the backend's default runner")
 
             # 本机路径：wrapper 在本机生成、本机 init 工作区骨架、回读 marker/产物的
             # 落点；local_repo_dir 是 Preparing 阶段本地 clone 的落点（relay 模式下推往远端）。
@@ -238,6 +244,8 @@ class _SubmitMixin(_SubmitMixinBase):
             mpi_type = mpi_type,
             srun_extra_flags = srun_extra_flags,
             enable_custody_drop = self._is_remote_execution(),
+            container_image_mode = self.config["execution"].get("container_image_mode", "native"),
+            container_prepare_timeout_seconds = self.config["execution"].get("container_prepare_timeout_seconds", 300),
         )
 
         wrapper_path = f"{job_working_table}/wrapper.py"

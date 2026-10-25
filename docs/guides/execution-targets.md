@@ -51,6 +51,12 @@ be overridden per target. Use separate remote roots and control sockets for
 independent execution environments. Multiple targets require the Slurm backend;
 Docker/local keeps its existing single-host behavior.
 
+Targets may also override `container_image_mode` (`native` by default) and
+`container_prepare_timeout_seconds` (300 by default). On runtimes that extract
+every SIF invocation, `sandbox` prepares one read-only directory image per Job
+before launching its tasks. See [runtime image preparation](../internals/job-runtime.md#runtime-image-preparation)
+for writable temporary directories, same-user ownership, storage and cleanup requirements.
+
 Target IDs use letters, digits, `_` and `-`, start with a letter or digit, and are
 at most 64 characters. Keep IDs and the default target identity stable. New Jobs
 store the resolved ID, including when the caller omits it. Legacy rows with a

@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -36,8 +37,10 @@ class FileTransport:
         self.fail_cleanup = False
 
     def run(self, command, **kwargs):
-        if command[:2] == ["rm", "-rf"]:
-            return SimpleNamespace(returncode=int(self.fail_cleanup), stderr="cleanup failed")
+        if command[:2] == ["python3", "-c"] and "remove_job_path(sys.argv[1])" in command[2]:
+            if self.fail_cleanup:
+                return SimpleNamespace(returncode=1, stderr="cleanup failed")
+            return subprocess.run(command, capture_output=True, text=True, timeout=10)
         if command[:2] == ["mkdir", "-p"]:
             Path(command[-1]).mkdir(parents=True, exist_ok=True)
             return SimpleNamespace(returncode=0)
@@ -289,6 +292,14 @@ class CustodyStageOutTests(unittest.TestCase):
         self.transport.fail_cleanup = True
         with self.assertRaises(RuntimeError):
             self.scheduler._cleanup_remote_job("job")
+
+    def test_remote_cleanup_reclaims_readonly_image_directories(self):
+        image = self.remote / "readonly-image"
+        image.mkdir(parents=True)
+        (image / "payload").write_text("scratch")
+        image.chmod(0o555)
+        self.scheduler._cleanup_remote_job("job")
+        self.assertFalse(self.remote.exists())
 
 
 if __name__ == "__main__":

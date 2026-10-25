@@ -161,13 +161,45 @@ ${MAGNUS_HOME}/.tmp/                         SDK 文件中转目录 (容器可�
 
 因此在 Web 场景里，`--output/-o <target>` 的语义不是“写入浏览器本地指定路径”，而是“建议下载名”。
 
-容器文件系统是只读 squashfs (SIF)。可写层取决于隔离模式：
+默认 `execution.container_image_mode: native` 将 SIF 直接交给运行时，
+可写层取决于隔离模式：
 
 | 模式 | 可写层 | 容量限制 | 说明 |
 |------|--------|----------|------|
 | containall + overlay | ephemeral overlay (sparse ext3 image) | `ephemeral_storage` | 默认路径（rootless apptainer），`--sparse` 创建瞬间完成且按需占用磁盘 |
 | containall/contain + writable-tmpfs | RAM tmpfs | 与 `memory_demand` 共享 | setuid apptainer 或 `MAGNUS_NO_OVERLAY=1` |
 | none（裸跑） | host 文件系统穿透 | 无限制 | `MAGNUS_CONTAIN_LEVEL=none`，等效 overlay 出现之前的行为 |
+
+### 运行时镜像准备
+
+部分非特权 Singularity 安装每次执行 SIF 都会先展开目录。多 task 并发因此可能耗尽
+共享文件系统的文件数量配额，即使压缩镜像很小、字节容量仍充足。这类 Slurm 目标
+可配置 `execution.container_image_mode: sandbox`。
+此模式要求执行 UID 拥有 Job 临时目录。本地 Slurm 仅允许后端默认 runner，跨用户
+runner 继续使用 `native`。目录镜像权限可能屏蔽继承的清理 ACL，因此在转换前拒绝
+不满足属主条件的配置。
+
+wrapper 在启动 task 前，使用选定运行时原生的
+`build --sandbox --notest --disable-cache`，从已经送达的本地 SIF 转换一次。
+GNU `timeout` 将转换限制在 `execution.container_prepare_timeout_seconds`
+（默认 300 秒）内，之后有 5 秒终止宽限。准备过程占用原 Slurm 分配与时间上限。
+转换失败或超时不会启动用户 task，也不会写成功标记。每次尝试在
+`{ephemeral}/.magnus_tmp/` 下创建独立的 Job 私有目录，不复用半成品。
+
+所有 task 只读执行同一目录镜像，不添加 overlay 或 `--writable-tmpfs`，workspace
+继续可写。按 Job 和节点隔离的目录显式绑定到 `/tmp`、`/var/tmp` 和
+`$MAGNUS_HOME/.tmp`；前两者共享目录，SDK 中转文件使用另一目录。
+同节点 task 共享这些临时路径，不同节点及不同 Job 互不共用。`TMPDIR` 默认设为
+`/tmp`，entry command 可以覆盖。依赖应放入镜像，此模式不支持任意修改镜像根目录；
+`ephemeral_storage` 不是这些目录写入的硬配额。
+
+准备目录和临时目录与现有 workspace 一样，必须对分配的节点可见。SSH 目标使用
+远端 Job 目录，不能把控制面的 `server.ephemeral_root` 当作远端路径。现有终态
+清理负责回收这些目录及取消、异常退出后的残留，不新增持久 sandbox 镜像缓存。
+删除前仅恢复清理用户所拥有目录的读写和遍历权限，不改变文件权限或跟随镜像符号链接。
+转换期间可能暂时需要超过一份完整镜像的解包空间，容量配置也应考虑多个并行 Job。
+默认 `native` 模式及 Docker/local 行为保持；sandbox 准备同时支持 Singularity 与
+Apptainer。
 
 ### SDK 运行环境检测协议
 
@@ -176,16 +208,20 @@ SDK 的 `file_transfer.get_tmp_base()` 用以下判据决定文件中转目录�
 1. 环境变量 `MAGNUS_HOME` 存在
 2. `$MAGNUS_HOME/workspace/` 是已存在的目录（由 Magnus runtime 创建并 bind-mount）
 
-两个条件都满足时，中转目录为 `$MAGNUS_HOME/.tmp/`（容器可写层），否则 fallback 到系统 `/tmp`。
+两个条件都满足时，中转目录为 `$MAGNUS_HOME/.tmp/`，否则使用系统临时目录。
+native 模式由容器可写层提供该路径；sandbox 模式在同一路径显式绑定按 Job 和节点
+隔离的可写目录，已有 SDK 无需改变调用方式。
 
 **为什么不用 `/tmp`**：在两种隔离模式下 `/tmp` 都不是理想的中转位置：
 
 | 模式 | `/tmp` 位置 | 问题 |
 |------|-------------|------|
 | overlay | overlay 镜像内 | 与 pip install 等容器内写入共享 `ephemeral_storage` 配额 |
-| writable-tmpfs | RAM tmpfs | 容量有限（内核默认 50% cgroup RAM），大文件触发 ENOSPC |
+| writable-tmpfs | RAM tmpfs | 受运行时 session 目录配置及 Job 内存限制，大文件可能触发 ENOSPC |
 
-`$MAGNUS_HOME/.tmp/` 同样位于容器可写层（overlay 或 tmpfs），与 `/tmp` 共享同一写入预算，但避免了与系统临时文件混杂。更重要的是，它**不**写入 `$MAGNUS_HOME/workspace/`（host 磁盘 bind mount），从而保持容器隔离——容器内用户代码不会通过中转文件逃逸到宿主机文件系统。
+native 模式的 `$MAGNUS_HOME/.tmp/` 与 `/tmp` 共享容器可写层的预算，但分开存放
+中转文件。显式绑定的 Job 目录也是运行时隔离边界的一部分，不能仅凭是否处于可写层
+判断文件系统隔离是否成立。
 
 嵌套容器场景下，内层 `$MAGNUS_HOME/workspace/` 同样是 bind-mount 链的一环，检测协议同样有效；内层 `$MAGNUS_HOME/.tmp/` 仍位于内层容器的可写层。
 

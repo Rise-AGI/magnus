@@ -45,6 +45,11 @@ execution:
 属于整个站点，不能按目标覆盖。独立执行环境使用独立远端根目录和 control socket。
 多目标要求 Slurm 后端；Docker/local 保持原有单机行为。
 
+目标还可覆盖 `container_image_mode`（默认 `native`）和
+`container_prepare_timeout_seconds`（默认 300）。对于每次执行 SIF 都会解包的运行时，
+`sandbox` 会在启动各 task 前为整个 Job 准备一份只读目录镜像。
+可写临时目录、同用户属主要求与回收边界见[运行时镜像准备](../internals/job-runtime.zh-CN.md#运行时镜像准备)。
+
 目标 ID 使用字母、数字、`_`、`-`，以字母或数字开头，最多 64 字符。ID 与默认目标
 的身份应保持稳定。新 Job 保存解析后的 ID，即使调用方没有指定。旧库 NULL 目标
 归属原有默认部署。移除仍有未完成 Job 的目标会阻止启动，不会把它们转到其他集群。

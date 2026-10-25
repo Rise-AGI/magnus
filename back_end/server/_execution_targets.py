@@ -6,7 +6,15 @@ from typing import Any, Callable
 
 
 _TARGET_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z")
-_OVERRIDES = {"name", "transport", "slurm", "container_runtime", "cluster"}
+_OVERRIDES = {
+    "name",
+    "transport",
+    "slurm",
+    "container_runtime",
+    "container_image_mode",
+    "container_prepare_timeout_seconds",
+    "cluster",
+}
 
 
 @dataclass(frozen=True)
@@ -79,8 +87,9 @@ def execution_targets(
                 target["execution"]["slurm"] = {**target["execution"].get("slurm", {}), **deepcopy(value)}
             else:
                 target["cluster"].update(deepcopy(value))
-        if "container_runtime" in settings:
-            target["execution"]["container_runtime"] = settings["container_runtime"]
+        for field in ("container_runtime", "container_image_mode", "container_prepare_timeout_seconds"):
+            if field in settings:
+                target["execution"][field] = settings[field]
         target["execution"]["target_id"] = target_id
         target["execution"]["target_name"] = name
         if validate is not None:

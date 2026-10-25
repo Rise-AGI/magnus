@@ -34,20 +34,11 @@ def normalize_secret(file_secret: str) -> str:
 
 
 def get_tmp_base() -> Optional[str]:
-    """返回文件中转目录。Magnus job 内返回容器可写层路径，否则 None (fallback 系统 /tmp)。
+    """Use the runtime-provided scratch directory inside a Magnus container.
 
-    背景：Magnus 容器有两种可写层模式：
-    - overlay 模式：可写层是 ext3 镜像，受 ephemeral_storage 约束
-    - writable-tmpfs 模式：可写层是 RAM tmpfs，受 memory_demand 约束
-    两种模式下 /tmp 都在可写层内，但默认 tmpfs 容量可能很小。
-
-    此函数将中转目录放在 $MAGNUS_HOME/.tmp/（容器可写层），而非
-    $MAGNUS_HOME/workspace/.tmp/（host 磁盘 bind mount），以保持容器隔离。
-    中转文件与容器内其他写入（pip install 等）共享同一写入预算——
-    这正是用户通过 ephemeral_storage / memory_demand 声明的预期。
-
-    判据：MAGNUS_HOME 环境变量存在 + workspace 目录已由 Magnus runtime 创建。
-    嵌套容器场景下 bind-mount 链保持不变，此函数同样有效。
+    The runtime supplies $MAGNUS_HOME/.tmp through an overlay, tmpfs, or a
+    job-private bind mount. Capacity follows that runtime mode; the SDK does
+    not impose a separate disk quota. Outside Magnus, use tempfile's default.
     """
     magnus_home = os.environ.get("MAGNUS_HOME")
     if magnus_home:

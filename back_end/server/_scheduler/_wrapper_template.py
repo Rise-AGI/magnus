@@ -32,7 +32,13 @@ def _build_wrapper_content(
     mpi_type: Optional[str] = None,
     srun_extra_flags: Optional[List[str]] = None,
     enable_custody_drop: bool = False,
+    container_image_mode: str = "native",
+    container_prepare_timeout_seconds: int = 300,
 ) -> str:
+    if container_image_mode not in ("native", "sandbox"):
+        raise ValueError("Unsupported container image mode")
+    if type(container_prepare_timeout_seconds) is not int or container_prepare_timeout_seconds <= 0:
+        raise ValueError("Container preparation timeout must be a positive integer")
     success_marker_path = f"{job_working_table}/.magnus_success"
 
     # 多节点执行：node_count>1 或 tasks_per_node>1 时用 srun 跨节点铺 rank —— 把容器 exec
@@ -97,17 +103,31 @@ def _build_wrapper_content(
     #
     # heredoc 分隔符加引号 → 内容一律不在 node 0 展开；`exec "$@"` 让启动器对容器命令本身
     # 完全透明（参数由 node 0 的 $APPTAINER_CMD 词法切分后原样传入）。
-    if _is_multinode:
-        rank_launch_path = "{work_dir}/.magnus_rank_launch.sh"
+    sandbox_mode = container_image_mode == "sandbox"
+    temporary_bind_shell = ""
+    if sandbox_mode:
+        # A read-only directory image cannot supply writable /tmp through an
+        # overlay on every filesystem. Same-node tasks share job-private tmp.
+        temporary_bind_shell = f'''_node_id="$SLURM_NODEID"
+[ -n "$_node_id" ] || _node_id=0
+case "$_node_id" in ''|*[!0-9]*) echo "[Magnus] Invalid Slurm node identity" >&2; exit 1;; esac
+_job_tmp="$MAGNUS_RUNTIME_TEMP/$_node_id"
+mkdir -p "$_job_tmp/tmp" "$_job_tmp/sdk"
+export {runtime_var_prefix}_BIND="${runtime_var_prefix}_BIND,$_job_tmp/tmp:/tmp,$_job_tmp/tmp:/var/tmp,$_job_tmp/sdk:$MAGNUS_HOME/.tmp"
+export {runtime_env_prefix}_TMPDIR=/tmp
+'''
+    if _is_multinode or sandbox_mode:
+        rank_launch_path = '{shlex.quote(os.path.join(work_dir, ".magnus_rank_launch.sh"))}'
         multinode_rank_launch_block = f"""cat > {rank_launch_path} <<'MAGNUS_RANK_LAUNCH_EOF'
 #!/bin/bash
+set -e
 if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
     export {runtime_env_prefix}_CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES"
 fi
 while IFS='=' read -r _name _value; do
     [ -n "$_name" ] && export "{runtime_env_prefix}_$_name=$_value"
 done < <(env | grep -E '^(SLURM_|PMI_|PMIX_)')
-exec "$@"
+{temporary_bind_shell}exec "$@"
 MAGNUS_RANK_LAUNCH_EOF
 
 """
@@ -154,6 +174,8 @@ import subprocess
 import threading
 import time
 import json
+import shlex
+import tempfile
 
 # These paths serve OOM detection and signal forwarding. Resource metrics use
 # Slurm's job accounting so sibling steps and other nodes are included.
@@ -483,6 +505,11 @@ def main():
     magnus_address = {repr(magnus_address)}
     job_id = {repr(job_id)}
     ephemeral_storage = {repr(ephemeral_storage)}
+    container_image_mode = {repr(container_image_mode)}
+    # Image permissions can mask inherited ACLs after extraction. A different
+    # owner cannot reliably reclaim the tree, including after a hard kill.
+    if container_image_mode == "sandbox" and os.stat(ephemeral_dir).st_uid != os.geteuid():
+        raise RuntimeError("Sandbox image mode requires ownership of the Job temporary directory")
     apptainer_tmp_dir = os.path.join(ephemeral_dir, ".magnus_tmp")
     apptainer_cache_dir = os.path.join(ephemeral_dir, ".magnus_cache")
 
@@ -529,6 +556,26 @@ def main():
     try:
         os.makedirs(apptainer_tmp_dir, exist_ok=True)
         os.makedirs(apptainer_cache_dir, exist_ok=True)
+        runtime_image_path = sif_path
+        runtime_temporary_path = ""
+        prepare_image_shell = ""
+        if container_image_mode == "sandbox":
+            # One conversion precedes task fan-out. Each attempt has its own
+            # directory; failed preparations are never reused as ready images.
+            runtime_directory = tempfile.mkdtemp(prefix="runtime-", dir=apptainer_tmp_dir)
+            runtime_image_path = os.path.join(runtime_directory, "rootfs")
+            runtime_temporary_path = os.path.join(runtime_directory, "temporary")
+            prepare_image_shell = (
+                'echo "[Magnus] Preparing one read-only sandbox for this Job"\\n'
+                'if timeout --signal=TERM --kill-after=5 '
+                + {repr(str(container_prepare_timeout_seconds))}
+                + ' {runtime_binary} build --sandbox --notest --disable-cache '
+                + shlex.quote(runtime_image_path) + ' ' + shlex.quote(sif_path) + '; then :; else\\n'
+                '_prepare_status=$?\\n'
+                'echo "[Magnus] Runtime image preparation failed (exit $_prepare_status); no tasks started" >&2\\n'
+                'exit "$_prepare_status"\\nfi\\n'
+                'echo "[Magnus] Runtime image preparation complete"\\n'
+            )
 
         shell_cmd = f"""set -e
 export {runtime_env_prefix}_MAGNUS_TOKEN={{user_token}}
@@ -547,8 +594,10 @@ export {runtime_env_prefix}_MAGNUS_RESULT=$MAGNUS_HOME/workspace/.magnus_result
 export {runtime_env_prefix}_MAGNUS_ACTION=$MAGNUS_HOME/workspace/.magnus_action
 export {runtime_env_prefix}_MAGNUS_METRICS_DIR=$MAGNUS_HOME/workspace/metrics
 export {runtime_env_prefix}_MAGNUS_METRICS_PROTO=metrics.v1
-export {runtime_var_prefix}_TMPDIR={{apptainer_tmp_dir}}
-export {runtime_var_prefix}_CACHEDIR={{apptainer_cache_dir}}
+export {runtime_var_prefix}_TMPDIR={{shlex.quote(apptainer_tmp_dir)}}
+export {runtime_var_prefix}_CACHEDIR={{shlex.quote(apptainer_cache_dir)}}
+{{prepare_image_shell}}
+export MAGNUS_RUNTIME_TEMP={{shlex.quote(runtime_temporary_path)}}
 # 追加 workspace bind mount: host {{work_dir}} → 容器 $MAGNUS_HOME/workspace
 # SDK 的 get_tmp_base() 依赖此 bind mount 判断运行环境（MAGNUS_HOME 存在 + workspace 目录存在 → 用 $MAGNUS_HOME/.tmp/ 中转文件，位于容器可写层而非 host 磁盘）
 export {runtime_var_prefix}_BIND="${{{{{runtime_var_prefix}_BIND:+${{{{{runtime_var_prefix}_BIND}}}},}}}}{{work_dir}}:$MAGNUS_HOME/workspace"
@@ -581,50 +630,52 @@ fi
 [ "$APPTAINER_CONTAIN" = "none" ] && APPTAINER_CONTAIN=""
 
 if [ -n "$APPTAINER_CONTAIN" ]; then
-    APPTAINER_FLAGS="--nv --$APPTAINER_CONTAIN --no-mount tmp"
-    if [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]{multinode_overlay_guard}; then
+    APPTAINER_FLAGS=(--nv "--$APPTAINER_CONTAIN" --no-mount tmp)
+    if [ {{shlex.quote(container_image_mode)}} = "sandbox" ]; then
+        echo "[Magnus] Using a shared read-only image and job temporary directories; ephemeral_storage is not a hard quota" >&2
+    elif [ "${{{{MAGNUS_NO_OVERLAY:-0}}}}" != "1" ] && [ -z "$_setuid_apptainer" ]{multinode_overlay_guard}; then
         # An unclean prior run (power loss / SIGKILL) can leave a stale overlay image
         # whose finally-block cleanup never ran; apptainer refuses to create over an
         # existing image. The overlay is strictly per-run scratch, so any leftover is
         # garbage -- drop it before creating so a re-run isn't blocked by it.
-        rm -f {{overlay_path}} {{overlay_path}}.ext3
-        if ! {runtime_binary} overlay create --sparse --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}} 2>/dev/null; then
+        rm -f -- {{shlex.quote(overlay_path)}} {{shlex.quote(overlay_path + '.ext3')}}
+        if ! {runtime_binary} overlay create --sparse --size {{_parse_size_to_mb(ephemeral_storage)}} {{shlex.quote(overlay_path)}} 2>/dev/null; then
             echo "[Magnus] WARNING: --sparse not supported (apptainer < 1.3?), falling back to dense overlay" >&2
-            if ! {runtime_binary} overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{overlay_path}}; then
+            if ! {runtime_binary} overlay create --size {{_parse_size_to_mb(ephemeral_storage)}} {{shlex.quote(overlay_path)}}; then
                 echo "[Magnus] ERROR: failed to create ephemeral overlay at {{overlay_path}}; the ephemeral disk may be full -- check free space on its volume" >&2
                 exit 1
             fi
         fi
-        APPTAINER_FLAGS="$APPTAINER_FLAGS --overlay {{overlay_path}}"
+        APPTAINER_FLAGS+=(--overlay {{shlex.quote(overlay_path)}})
     else
-        APPTAINER_FLAGS="$APPTAINER_FLAGS --writable-tmpfs"
+        APPTAINER_FLAGS+=(--writable-tmpfs)
         echo "[Magnus] WARNING: overlay skipped ({multinode_overlay_reason}${{{{_setuid_apptainer:+setuid apptainer}}}}${{{{MAGNUS_NO_OVERLAY:+MAGNUS_NO_OVERLAY=1}}}}), ephemeral_storage={{ephemeral_storage}} not enforced, using writable-tmpfs (RAM)" >&2
     fi
 else
-    APPTAINER_FLAGS="--nv"
+    APPTAINER_FLAGS=(--nv)
     echo "[Magnus] WARNING: containment disabled (MAGNUS_CONTAIN_LEVEL=none), host filesystem visible, no write isolation" >&2
 fi
 
 # --containall / --contain isolates HOME, so --env HOME=... works cleanly.
 # Without containment, Apptainer forbids overriding HOME via --env, so skip it.
 if [ -n "$APPTAINER_CONTAIN" ]; then
-    APPTAINER_FLAGS="$APPTAINER_FLAGS --env HOME=$MAGNUS_HOME"
+    APPTAINER_FLAGS+=(--env "HOME=$MAGNUS_HOME")
 fi
 
 if [ "${{{{MAGNUS_FAKEROOT:-0}}}}" = "1" ]; then
-    APPTAINER_FLAGS="$APPTAINER_FLAGS --fakeroot"
+    APPTAINER_FLAGS+=(--fakeroot)
 fi
 
-{multinode_rank_launch_block}APPTAINER_CMD="{srun_prefix}{rank_launch_prefix}{runtime_binary} exec $APPTAINER_FLAGS --pwd $MAGNUS_HOME/workspace/repository {{sif_path}} bash $MAGNUS_HOME/workspace/.magnus_user_script.sh"
+{multinode_rank_launch_block}APPTAINER_CMD=({srun_prefix}{rank_launch_prefix}{runtime_binary} exec "${{{{APPTAINER_FLAGS[@]}}}}" --pwd "$MAGNUS_HOME/workspace/repository" {{shlex.quote(runtime_image_path)}} bash "$MAGNUS_HOME/workspace/.magnus_user_script.sh")
 
 if [ "${{{{MAGNUS_NET_MODE:-host}}}}" = "bridge" ]; then
     ROOTLESSKIT_FLAGS="--net=slirp4netns --port-driver=builtin --publish $MAGNUS_PORT_MAP"
     if [ "${{{{MAGNUS_HOST_LOOPBACK:-0}}}}" != "1" ]; then
         ROOTLESSKIT_FLAGS="$ROOTLESSKIT_FLAGS --disable-host-loopback"
     fi
-    rootlesskit $ROOTLESSKIT_FLAGS $APPTAINER_CMD
+    rootlesskit $ROOTLESSKIT_FLAGS "${{{{APPTAINER_CMD[@]}}}}"
 else
-    $APPTAINER_CMD
+    "${{{{APPTAINER_CMD[@]}}}}"
 fi
 """
         ret_code = subprocess.call(
