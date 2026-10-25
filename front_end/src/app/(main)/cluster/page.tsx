@@ -170,17 +170,17 @@ export default function ClusterPage() {
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
           <div className="flex items-center gap-2 text-cyan-400 mb-2">
             <Cpu className="w-4 h-4" />
-            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.allocatedCpuMem")}</span>
+            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableCpuMem")}</span>
           </div>
           {cluster ? (
             <>
               <div className="flex items-baseline gap-1.5 mb-2">
-                <span className="text-3xl font-bold text-white">{resourceInfo?.cpuAllocated}</span>
+                <span className="text-3xl font-bold text-white">{resourceInfo?.cpuFree}</span>
                 <span className="text-zinc-500 text-sm">/ {cluster.resources.cpu_total} {t("cluster.cores")}</span>
               </div>
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs">
                 <span className="font-mono">RAM:</span>
-                <span>{resourceInfo?.memoryAllocated} / {resourceInfo?.memoryTotal}</span>
+                <span>{resourceInfo?.memoryFree} / {resourceInfo?.memoryTotal}</span>
               </div>
             </>
           ) : clusterRefreshFailed ? (
@@ -193,12 +193,12 @@ export default function ClusterPage() {
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
           <div className="flex items-center gap-2 text-emerald-400 mb-2">
             <Activity className="w-4 h-4" />
-            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.allocatedGpus")}</span>
+            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableGpus")}</span>
           </div>
           {cluster ? (
             <>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-3xl font-bold text-white">{resourceInfo?.gpuAllocated}</span>
+                <span className="text-3xl font-bold text-white">{resourceInfo?.gpuFree}</span>
                 <span className="text-zinc-500 text-sm">/ {cluster.resources.total}</span>
               </div>
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs font-mono">

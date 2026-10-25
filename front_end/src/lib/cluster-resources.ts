@@ -45,9 +45,9 @@ export function presentClusterResources(
     : oldFreeIsExact ? Math.max(0, resources.mem_total_mb - resources.mem_free_mb) : null;
   return {
     stale,
-    cpuAllocated: cpu == null ? unknown : `${cpu}`,
-    gpuAllocated: gpu == null ? unknown : `${gpu}`,
-    memoryAllocated: memory == null ? unknown : formatResourceMemory(memory * 1024 ** 2),
+    cpuFree: cpu == null ? unknown : `${Math.max(0, resources.cpu_total - cpu)}`,
+    gpuFree: gpu == null ? unknown : `${Math.max(0, resources.total - gpu)}`,
+    memoryFree: memory == null ? unknown : formatResourceMemory(Math.max(0, resources.mem_total_mb - memory) * 1024 ** 2),
     memoryTotal: formatResourceMemory(resources.mem_total_mb * 1024 ** 2),
   };
 }
