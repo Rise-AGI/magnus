@@ -115,6 +115,7 @@ class SlurmFinalizationTests(unittest.TestCase):
 
     def new_scheduler(self):
         actor = self.scheduler_class()
+        actor._job_query = lambda db, *entities: db.query(*entities)
         actor._finalization_retry_after = {}
         actor._test_artifact_retry = {}
         actor._preparing_jobs_lock = threading.Lock()
@@ -433,6 +434,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         namespace["resource_manager"] = SimpleNamespace(builds=SimpleNamespace(diagnostics_root=self.root / "diagnostics"))
         load_mixin("_scheduler/_workspace_gc.py", namespace)
         gc = namespace["_WorkspaceGCMixin"]()
+        gc.inflight_job_ids = lambda: set(gc.preparing_jobs) | gc._submitting_jobs
         gc.last_workspace_gc_time = datetime.min.replace(tzinfo=timezone.utc)
         gc.preparing_jobs = {}
         gc._submitting_jobs = set()
@@ -454,6 +456,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         namespace["_run_blocking_io"] = run
         decisions = load_method("_scheduler/_decisions.py", "_make_decisions", namespace)
         actor = SimpleNamespace(
+            _job_query=lambda db, *entities: db.query(*entities),
             preparing_jobs={},
             _preparing_jobs_lock=threading.Lock(),
             _queue_pending_submission=lambda: None,
@@ -584,6 +587,8 @@ class SlurmFinalizationTests(unittest.TestCase):
             connection.execute(text("CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT, slurm_job_id TEXT, created_at TEXT, user_id TEXT, result TEXT)"))
             connection.execute(text("INSERT INTO jobs VALUES ('legacy', 'FAILED', NULL, '2026-10-19', 'owner', 'original evidence')"))
             connection.execute(text("CREATE TABLE explorer_sessions (id TEXT PRIMARY KEY)"))
+            connection.execute(text("CREATE TABLE services (id TEXT PRIMARY KEY)"))
+            connection.execute(text("CREATE TABLE cluster_snapshots (id INTEGER PRIMARY KEY)"))
         namespace = dict(
             self.namespace,
             engine=engine,

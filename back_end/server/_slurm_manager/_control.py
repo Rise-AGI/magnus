@@ -1,9 +1,9 @@
 # back_end/server/_slurm_manager/_control.py
 """SLURM 任务提交与终止：sbatch / scancel 包装。"""
 import os
+import shlex
 from typing import Dict, Optional
 
-from .._magnus_config import magnus_config
 from .._job_resources import resolve_job_resource_target
 from .._size_utils import effective_cpu_count_per_cpu, parse_memory_bytes
 from . import logger
@@ -50,11 +50,11 @@ class _ControlMixin:
         个 token，复合结构后半段会被静默吞掉。当前唯一调用点 `_scheduler/_submit.py`
         传 `python3 {wrapper_path}`，满足约束。
         """
-        slurm_config = magnus_config["execution"]["slurm"]
+        slurm_config = self.config["execution"]["slurm"]
         target = resolve_job_resource_target(
             gpu_count = gpus,
             gpu_type = gpu_type,
-            config = magnus_config,
+            config = self.config,
         )
 
         # module_loads：在 batch script 里、exec wrapper 之前注入 `module load` 行，
@@ -62,11 +62,13 @@ class _ControlMixin:
         # 为空时这段为空串，script_content 与历史字节级一致。`exec` 让 module load 后的
         # 环境（PATH 等）经 POSIX exec 继承给 wrapper.py。
         module_loads = slurm_config["module_loads"]
+        module_init = slurm_config.get("module_init")
+        init_line = f"source {shlex.quote(module_init)} || exit $?\n" if module_init else ""
         module_lines = "".join(
-            f"module load {module_name}\n"
+            f"module load {shlex.quote(module_name)} || exit $?\n"
             for module_name in module_loads
         )
-        script_content = f"#!/bin/bash\ntrap '' TERM\n{module_lines}\nexec {entry_command}"
+        script_content = f"#!/bin/bash\ntrap '' TERM\n{init_line}{module_lines}\nexec {entry_command}"
 
         command = [
             "sbatch",

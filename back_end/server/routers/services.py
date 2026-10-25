@@ -28,6 +28,7 @@ from .._scheduler import scheduler
 from .auth import get_current_user
 from .users import _get_all_subordinate_ids
 from .jobs import enforce_field_size_limits
+from .cluster import _resolve_target
 from ._authz import (
     assert_can_manage_resource,
     assert_valid_transfer_target,
@@ -48,10 +49,6 @@ _service_spawn_locks = defaultdict(asyncio.Lock)
 _service_semaphores: Dict[str, asyncio.Semaphore] = {}
 _service_semaphores_lock = threading.Lock()
 
-# 远端站点（transport=ssh）不支持 services：proxy 连的是 Magnus 宿主机的
-# 127.0.0.1:{port}，而远端 job 跑在计算节点上、无网络路径回到 Magnus，服务永远拉不起。
-# 明确 fail-fast（501）而非让用户撞 127.0.0.1 的神秘超时；待将来有反向 service 网关再放开。
-_SERVICES_SUPPORTED = magnus_config["transport"]["mode"] != "ssh"
 _REMOTE_SERVICES_DETAIL = (
     "Services are unavailable on this site: it drives a remote cluster over SSH, and "
     "remote compute nodes have no network path back to Magnus, so a service can never "
@@ -78,6 +75,7 @@ class ServiceSnapshot(BaseModel):
     job_task_name: str
     job_description: str
     owner_id: str
+    execution_target: Optional[str] = None
     namespace: str
     repo_name: str
     branch: str
@@ -154,6 +152,10 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
         if not service.is_active:
             raise HTTPException(status_code=503, detail="Service stopped by user (spawn aborted).")
 
+        target = _resolve_target(service.execution_target)
+        config = target.config
+        if config["transport"]["mode"] == "ssh":
+            raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
         current_job = service.current_job
 
         should_revive = False
@@ -183,10 +185,11 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
             resolved_resources = apply_cluster_defaults({
                 "cpu_count": service.cpu_count,
                 "memory_demand": service.memory_demand,
-            })
-            normalize_per_cpu_resources(resolved_resources)
+            }, config=config)
+            normalize_per_cpu_resources(resolved_resources, config=config)
 
             new_job = models.Job(
+                execution_target = target.id,
                 task_name = service.job_task_name,
                 description = service.job_description,
                 user_id = service.owner_id,
@@ -198,7 +201,7 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 gpu_type = service.gpu_type,
                 cpu_count = resolved_resources["cpu_count"],
                 memory_demand = resolved_resources["memory_demand"],
-                resource_mode = resource_mode_for_execution(magnus_config["execution"]),
+                resource_mode = resource_mode_for_execution(config["execution"]),
                 ephemeral_storage = service.ephemeral_storage,
                 runner = service.runner,
                 entry_command = env_cmd,
@@ -207,7 +210,7 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 # NOTE: Service.container_image is schema-nullable (models/_service.py: Mapped[str | None]),
                 # and ordinary service jobs still require an image. New services route through apply_cluster_defaults,
                 # but legacy rows predating that helper may still hold NULL — keep this fallback as defense in depth.
-                container_image = service.container_image or magnus_config["cluster"]["default_container_image"],
+                container_image = service.container_image or config["cluster"]["default_container_image"],
                 system_entry_command = service.system_entry_command,
             )
 
@@ -270,30 +273,38 @@ def create_service(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 )-> models.Service:
-    if not _SERVICES_SUPPORTED:
-        raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
-
     existing = db.query(Service).filter(Service.id == service_data.id).first()
-
-    if not existing:
+    if existing:
+        assert_can_manage_resource(db, current_user, existing.owner_id, resource_label="service")
+    else:
         assert_id_available(db, service_data.id)
 
+    target_id = service_data.execution_target
+    if existing and "execution_target" not in service_data.model_fields_set:
+        target_id = existing.execution_target
+    target = _resolve_target(target_id)
+    config = target.config
+    if config["transport"]["mode"] == "ssh":
+        raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
+    if existing and (existing.is_active or existing.current_job_id):
+        if target.id != _resolve_target(existing.execution_target).id:
+            raise HTTPException(status_code=409, detail="Stop the service before changing its execution target")
+
     data = service_data.model_dump()
+    data["execution_target"] = target.id
     enforce_field_size_limits(data, "service")
 
     # 所有 Optional 字段填入集群默认值
-    apply_cluster_defaults(data)
+    apply_cluster_defaults(data, config=config)
     # per_cpu 站点把 cpu_count / memory_demand 归一化为真实分配值（与 jobs.py 对齐）
-    normalize_per_cpu_resources(data)
+    normalize_per_cpu_resources(data, config=config)
     # 与 jobs.py 对齐：超额请求转 HTTP 400，避免通过 service revive 绕过 Job 资源上限
     try:
-        validate_cluster_limits(data)
+        validate_cluster_limits(data, config=config)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     if existing:
-        assert_can_manage_resource(db, current_user, existing.owner_id, resource_label="service")
-
         was_active = existing.is_active
         will_be_active = data.get("is_active", was_active)
 
@@ -479,9 +490,6 @@ async def proxy_service_request(
     request: Request,
     # REMOVED: db: Session = Depends(database.get_db)->Fixes Connection Holding
 )-> StreamingResponse:
-    if not _SERVICES_SUPPORTED:
-        raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
-
     # === 1. Start SLA Timer ===
     start_time = datetime.now(timezone.utc)
     total_budget: Optional[float] = None 
@@ -500,6 +508,9 @@ async def proxy_service_request(
         
         # B. Get Config
         service_snap = await _safe_db_call(_get_service_snapshot_standalone, service_id)
+        target = _resolve_target(service_snap.execution_target)
+        if target.config["transport"]["mode"] == "ssh":
+            raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
         
         # Set Budget based on Service Configuration
         total_budget = float(service_snap.request_timeout)

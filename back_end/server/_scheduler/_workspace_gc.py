@@ -88,9 +88,7 @@ class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
                     Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None) | Job.finalization_status.isnot(None),
                 ).all()
             }
-        with self._preparing_jobs_lock:
-            active_job_ids.update(self.preparing_jobs)
-            active_job_ids.update(self._submitting_jobs)
+        active_job_ids.update(self.inflight_job_ids())
 
         try:
             terminal_jobs = _measure_terminal_job_artifacts(
@@ -120,8 +118,7 @@ class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
                     Job.id == artifacts.job_id,
                     Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None) | Job.finalization_status.isnot(None),
                 ).first() is not None
-            with self._preparing_jobs_lock:
-                active = active or artifacts.job_id in self.preparing_jobs or artifacts.job_id in self._submitting_jobs
+            active = active or artifacts.job_id in self.inflight_job_ids()
             if active:
                 total_bytes -= artifacts.size_bytes
                 continue

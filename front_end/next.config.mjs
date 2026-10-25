@@ -40,6 +40,29 @@ const clusterConfig = {
   display_timezone: magnusConfig.server.display_timezone ?? 'Asia/Shanghai',
 };
 
+const executionTargets = [
+  {
+    id: magnusConfig.execution?.target_id ?? 'default',
+    name: magnusConfig.execution?.target_name ?? clusterConfig.name,
+    cluster: clusterConfig,
+    services_supported: magnusConfig.transport?.mode !== 'ssh',
+  },
+  ...Object.entries(magnusConfig.execution?.targets ?? {}).map(([id, target]) => {
+    const slurm = { ...slurmConfig, ...target.slurm };
+    return {
+      id,
+      name: target.name ?? id,
+      cluster: {
+        ...clusterConfig,
+        ...target.cluster,
+        mem_mode: slurm.mem_mode ?? 'explicit',
+        mem_per_cpu_mb: slurm.mem_per_cpu_mb ?? 4000,
+      },
+      services_supported: (target.transport ?? magnusConfig.transport)?.mode !== 'ssh',
+    };
+  }),
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // 唯一的 next/image 使用已禁用优化，关闭未使用的图片优化接口。
@@ -53,6 +76,7 @@ const nextConfig = {
       : {}),
     NEXT_PUBLIC_POLL_INTERVAL: (magnusConfig.client?.jobs?.poll_interval ?? 2).toString(),
     NEXT_PUBLIC_SERVER_ADDRESS: serverAddress,
+    NEXT_PUBLIC_EXECUTION_TARGETS: JSON.stringify(executionTargets),
     NEXT_PUBLIC_CLUSTER_CONFIG: JSON.stringify(clusterConfig),
   },
   allowedDevOrigins: [

@@ -90,17 +90,23 @@ def create_job(
             status_code = 503,
             detail = "Dockerfile builds are not enabled on this Magnus site",
         )
-    apply_cluster_defaults(job_dict)
-    normalize_per_cpu_resources(job_dict)
-    validate_cluster_limits(job_dict)
+    try:
+        worker = scheduler.for_target(job_dict["execution_target"])
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    config = worker.config
+    job_dict["execution_target"] = worker.target.id
+    apply_cluster_defaults(job_dict, config=config)
+    normalize_per_cpu_resources(job_dict, config=config)
+    validate_cluster_limits(job_dict, config=config)
     enforce_field_size_limits(job_dict, "job")
 
     # 节点可用性 precheck：杜绝节点全部 drain/down/reboot 期间用户提交"看似成功
     # 但永远 PENDING"的 ghost job——前端反复点提交都返回 200、SDK 用户脚本累积一片
     # PENDING、cluster 视图被污染。SLURM 模式下走 has_schedulable_node()；local
     # 模式无此概念跳过。失败时 has_schedulable_node 自身 fail-open，不会引入新故障。
-    if not is_local_mode and scheduler.slurm_manager is not None:
-        if not scheduler.slurm_manager.has_schedulable_node():
+    if not is_local_mode and worker.slurm_manager is not None:
+        if not worker.slurm_manager.has_schedulable_node():
             raise HTTPException(
                 status_code = 503,
                 detail = (
@@ -111,7 +117,7 @@ def create_job(
 
     db_job = models.Job(
         **job_dict,
-        resource_mode = resource_mode_for_execution(magnus_config["execution"]),
+        resource_mode = resource_mode_for_execution(config["execution"]),
         user_id = user_id,
         status = JobStatus.PREPARING,
     )
@@ -220,6 +226,7 @@ def get_job_capabilities(
 ) -> Dict[str, Any]:
     return {
         "dockerfile": True,
+        "execution_targets": True,
         "image_build_enabled": magnus_config["execution"]["image_build"]["enabled"],
         "default_repository": {"namespace": "Rise-AGI", "repo_name": "magnus"},
     }

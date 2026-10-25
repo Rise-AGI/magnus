@@ -8,16 +8,12 @@ from typing import TYPE_CHECKING, List
 from sqlalchemy.orm import Session
 from pywheels.file_tools import guarantee_file_exist
 from ..models import Job, JobStatus
-from .._magnus_config import magnus_config
 from .._job_dir_access import grant_job_dir_runner_access
 from .._resource_manager import resource_manager
 from . import (
     logger,
     magnus_workspace_path,
     magnus_ephemeral_workspace_path,
-    magnus_remote_workspace_path,
-    magnus_remote_ephemeral_workspace_path,
-    magnus_remote_container_cache_path,
 )
 from ._wrapper_template import _build_wrapper_content
 from ._relay_build_cache import remote_built_sif_path
@@ -102,7 +98,7 @@ class _SubmitMixin(_SubmitMixinBase):
         message: str,
     ) -> None:
         db.rollback()
-        db.query(Job).filter(
+        self._job_query(db, Job).filter(
             Job.id == job_id,
             Job.status == JobStatus.PENDING,
             Job.slurm_job_id.is_(None),
@@ -125,7 +121,7 @@ class _SubmitMixin(_SubmitMixinBase):
             return True
         # Artifacts are disposable. Recover a missing runtime copy by preparing
         # again, but do not overwrite a concurrent user termination.
-        db.query(Job).filter(Job.id == job.id, Job.status == JobStatus.PENDING).update({
+        self._job_query(db, Job).filter(Job.id == job.id, Job.status == JobStatus.PENDING).update({
             Job.status: JobStatus.PREPARING,
         }, synchronize_session=False)
         db.commit()
@@ -146,7 +142,7 @@ class _SubmitMixin(_SubmitMixinBase):
         try:
             if not self._built_environment_ready(db, job):
                 return False
-            user_magnus = magnus_config["cluster"]["default_runner"]
+            user_magnus = self.config["cluster"]["default_runner"]
             effective_runner = job.runner if job.runner is not None else user_magnus
 
             # 本机路径：wrapper 在本机生成、本机 init 工作区骨架、回读 marker/产物的
@@ -157,8 +153,8 @@ class _SubmitMixin(_SubmitMixinBase):
             # 执行端路径：job 真正运行处。本机执行下逐字等于上面的本机路径（下方
             # wrapper 内容与 sbatch 参数字节级不变）；远端执行（transport=ssh）下指向
             # remote_root 下的工作区，由 _stage_in_job 在远端建好并推送 wrapper。
-            remote_job_working_table = f"{magnus_remote_workspace_path}/jobs/{job.id}"
-            remote_job_ephemeral_table = f"{magnus_remote_ephemeral_workspace_path}/jobs/{job.id}"
+            remote_job_working_table = f"{self.remote_workspace_path}/jobs/{job.id}"
+            remote_job_ephemeral_table = f"{self.remote_ephemeral_workspace_path}/jobs/{job.id}"
             remote_repo_dir = f"{remote_job_working_table}/repository"
 
             self._init_job_working_dir(job_working_table)
@@ -174,15 +170,15 @@ class _SubmitMixin(_SubmitMixinBase):
                 # 同盘时二者是同一目录，该权限已随仓库准备阶段对 working table 的授权一并给到。
                 grant_job_dir_runner_access(job_ephemeral_table, effective_runner)
 
-            allow_root = magnus_config["execution"]["allow_root"]
+            allow_root = self.config["execution"]["allow_root"]
             user_token = job.user.token or ""
-            magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['front_end_port']}"
+            magnus_address = f"{self.config['server']['address']}:{self.config['server']['front_end_port']}"
             job_id = str(job.id)
 
             # 多节点参数：None 归一为 1。node_count=1 && tasks_per_node=1 时下方 sbatch 不发
             # --nodes/--ntasks、wrapper 走原单容器路径，整条链路字节级不变。mpi_type /
             # srun_extra_flags 仅多节点 wrapper 的 srun 用到。
-            slurm_exec_config = magnus_config["execution"].get("slurm") or {}
+            slurm_exec_config = self.config["execution"].get("slurm") or {}
             mpi_type = slurm_exec_config.get("mpi_type")
             srun_extra_flags = slurm_exec_config.get("srun_extra_flags") or []
             node_count = job.node_count if (job.node_count is not None and job.node_count > 0) else 1
@@ -207,18 +203,21 @@ class _SubmitMixin(_SubmitMixinBase):
         remote_sif_path = local_sif_path
         if self._is_remote_execution():
             remote_sif_path = (
-                remote_built_sif_path(build_digest)
+                remote_built_sif_path(
+                    build_digest,
+                    cache_path=self.remote_container_cache_path,
+                )
                 if build_digest is not None
-                else f"{magnus_remote_container_cache_path}/{os.path.basename(local_sif_path)}"
+                else f"{self.remote_container_cache_path}/{os.path.basename(local_sif_path)}"
             )
-        default_system_entry_command = magnus_config["cluster"]["default_system_entry_command"]
+        default_system_entry_command = self.config["cluster"]["default_system_entry_command"]
         base_system_entry_command = job.system_entry_command if job.system_entry_command else default_system_entry_command
         system_entry_command = base_system_entry_command.strip()
 
-        default_ephemeral_storage = magnus_config["cluster"]["default_ephemeral_storage"]
+        default_ephemeral_storage = self.config["cluster"]["default_ephemeral_storage"]
         ephemeral_storage = job.ephemeral_storage if job.ephemeral_storage else default_ephemeral_storage
 
-        container_runtime = magnus_config["execution"]["container_runtime"]
+        container_runtime = self.config["execution"]["container_runtime"]
 
         wrapper_content = _build_wrapper_content(
             job_working_table = remote_job_working_table,
@@ -346,7 +345,7 @@ class _SubmitMixin(_SubmitMixinBase):
             self._init_job_working_dir(job_working_table)
 
             user_token = job.user.token or ""
-            magnus_address = f"{magnus_config['server']['address']}:{magnus_config['server']['back_end_port']}"
+            magnus_address = f"{self.config['server']['address']}:{self.config['server']['back_end_port']}"
             job_id = str(job.id)
 
             # 准备用户脚本（强制 LF：脚本在 Linux 容器内执行）
@@ -362,7 +361,7 @@ class _SubmitMixin(_SubmitMixinBase):
             ]
 
             # 解析 system_entry_command 中的 APPTAINER_BIND（如有）
-            default_system_entry_command = magnus_config["cluster"]["default_system_entry_command"]
+            default_system_entry_command = self.config["cluster"]["default_system_entry_command"]
             base_system_entry_command = job.system_entry_command if job.system_entry_command else default_system_entry_command
             system_entry_command = base_system_entry_command.strip()
             if system_entry_command:
@@ -376,7 +375,7 @@ class _SubmitMixin(_SubmitMixinBase):
                 container_magnus_address = magnus_address
             else:
                 network_mode = None  # Docker Desktop default bridge
-                back_end_port = magnus_config["server"]["back_end_port"]
+                back_end_port = self.config["server"]["back_end_port"]
                 container_magnus_address = f"http://host.docker.internal:{back_end_port}"
 
             # 环境变量
@@ -422,7 +421,7 @@ class _SubmitMixin(_SubmitMixinBase):
         except Exception as error:
             logger.error(f"Job {job.id} Docker submission error: {error}\n{traceback.format_exc()}")
             db.rollback()
-            db.query(Job).filter(
+            self._job_query(db, Job).filter(
                 Job.id == job.id,
                 Job.status == JobStatus.PENDING,
             ).update({

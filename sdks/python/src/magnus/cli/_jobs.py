@@ -128,6 +128,7 @@ _JOB_PARAM_KEYS: Dict[str, type] = {
     "description": str,
     "container_image": str,
     "dockerfile": str,
+    "execution_target": str,
     "cpu_count": int,
     "memory_demand": str,
     "node_count": int,
@@ -242,6 +243,7 @@ Optional parameters:
   --repo-name TEXT          Repository name (default: Rise-AGI/magnus)
   --branch TEXT             Git branch (default: repository default branch)
   --commit-sha TEXT         Git revision (default: HEAD)
+  --execution-target ID    Select a configured execution cluster
   --dockerfile TEXT         Build the runtime from Dockerfile text, with an empty context
   --dockerfile-file PATH    Read Dockerfile text from a local UTF-8 file
   --gpu-type TEXT           GPU model (e.g. a100, rtx5090)

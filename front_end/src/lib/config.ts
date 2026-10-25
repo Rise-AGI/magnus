@@ -77,6 +77,24 @@ if (!parsedConfig.gpus) {
 
 export const CLUSTER_CONFIG = parsedConfig;
 
+export interface ExecutionTarget {
+  id: string;
+  name: string;
+  cluster: ClusterConfig;
+  services_supported: boolean;
+}
+
+export const EXECUTION_TARGETS: ExecutionTarget[] = JSON.parse(
+  process.env.NEXT_PUBLIC_EXECUTION_TARGETS ?? JSON.stringify([
+    { id: "default", name: CLUSTER_CONFIG.name, cluster: CLUSTER_CONFIG, services_supported: true },
+  ]),
+);
+export const DEFAULT_EXECUTION_TARGET = EXECUTION_TARGETS[0].id;
+export function getExecutionTarget(id?: string | null): ExecutionTarget | undefined {
+  return EXECUTION_TARGETS.find(target => target.id === (id ?? DEFAULT_EXECUTION_TARGET));
+}
+
+
 export const PHYSICAL_GPUS = CLUSTER_CONFIG.gpus;
 // 全站展示时间统一用它渲染（见 lib/utils.ts）。后端 server.display_timezone 是唯一真源；
 // 这里的兜底只在旧 yaml 没有该键时生效，与后端默认值保持一致。

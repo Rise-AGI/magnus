@@ -1,0 +1,74 @@
+"""Opt-in target routing and the original positional SDK contract."""
+import asyncio
+import importlib
+import inspect
+import json
+from pathlib import Path
+import sys
+import types
+import unittest
+
+import httpx
+
+
+PACKAGE = "_magnus_target_tests"
+package = types.ModuleType(PACKAGE)
+package.__path__ = [str(Path(__file__).resolve().parents[1] / "src/magnus")]
+sys.modules[PACKAGE] = package
+client_module = importlib.import_module(f"{PACKAGE}.client")
+
+
+class ExecutionTargetTests(unittest.TestCase):
+    def setUp(self):
+        self.requests = []
+        self.supported = True
+        self.client = client_module.MagnusClient.__new__(client_module.MagnusClient)
+        self.client.address = "https://example.invalid"
+        self.client._client = httpx.Client(base_url="https://example.invalid/api", transport=httpx.MockTransport(self.handle))
+        self.addCleanup(self.client._client.close)
+
+    def handle(self, request):
+        self.requests.append(request)
+        if request.url.path.endswith("capabilities"):
+            return httpx.Response(200, json={"execution_targets": self.supported, "dockerfile": True, "image_build_enabled": True})
+        if request.url.path.endswith("/submit"):
+            return httpx.Response(200, json={"id": "submitted"})
+        if request.url.path.endswith("/targets"):
+            return httpx.Response(200, json=[{"id": "first"}, {"id": "second"}])
+        return httpx.Response(200, json={"resources": {}})
+
+    def test_old_positional_arguments_and_no_target_never_add_a_capability_request(self):
+        result = self.client.submit_job(
+            "task", "true", "repo", "branch", "revision", "cpu", 0, "owner", "A2",
+            "description", "docker://image", 2, "4G", 1, 1, 2, "10G", "runner", "", 7.0,
+        )
+        self.assertEqual(result, "submitted")
+        self.assertEqual(len(self.requests), 1)
+        payload = json.loads(self.requests[0].content)
+        self.assertNotIn("execution_target", payload)
+        self.assertEqual(payload["cpu_count"], 2)
+        self.assertEqual(self.requests[0].extensions["timeout"]["read"], 7.0)
+        parameter = inspect.signature(self.client.submit_job).parameters["execution_target"]
+        self.assertEqual(parameter.kind, inspect.Parameter.KEYWORD_ONLY)
+
+    def test_target_and_dockerfile_share_one_capability_check(self):
+        self.client.submit_job("task", "true", execution_target="second", dockerfile="FROM scratch")
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(json.loads(self.requests[-1].content)["execution_target"], "second")
+
+    def test_old_server_cannot_silently_submit_to_the_wrong_cluster(self):
+        self.supported = False
+        with self.assertRaises(client_module.MagnusError):
+            self.client.submit_job("task", "true", execution_target="second")
+        self.assertEqual([request.method for request in self.requests], ["GET"])
+
+    def test_async_submission_and_cluster_query_preserve_target(self):
+        asyncio.run(self.client.submit_job_async("task", "true", execution_target="second"))
+        self.assertEqual(json.loads(self.requests[-1].content)["execution_target"], "second")
+        asyncio.run(self.client.get_cluster_stats_async(execution_target="second"))
+        self.assertEqual(self.requests[-1].url.params["execution_target"], "second")
+        self.assertEqual([item["id"] for item in self.client.get_execution_targets()], ["first", "second"])
+
+
+if __name__ == "__main__":
+    unittest.main()

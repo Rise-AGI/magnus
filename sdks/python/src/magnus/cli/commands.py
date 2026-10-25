@@ -29,6 +29,7 @@ from .. import (
     call_service,
     custody_file as api_custody_file,
     get_cluster_stats as api_get_cluster_stats,
+    get_execution_targets as api_get_execution_targets,
     list_services as api_list_services,
 )
 from ._shared import (
@@ -773,6 +774,8 @@ def job_logs_cmd(
 
 @app.command(name="cluster")
 def cluster_status_cmd(
+    execution_target: Optional[str] = typer.Option(None, "--execution-target", help="Execution cluster ID"),
+    targets: bool = typer.Option(False, "--targets", help="List configured execution clusters"),
     format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: table, yaml, json"),
 ):
     """
@@ -788,7 +791,10 @@ def cluster_status_cmd(
       magnus cluster -f yaml | yq '.resources.free'
     """
     try:
-        result = api_get_cluster_stats()
+        if targets:
+            _output_data(api_get_execution_targets(), "json" if format == "json" else "yaml")
+            return
+        result = api_get_cluster_stats(execution_target=execution_target)
         resources = result.get("resources", {})
         running_jobs = result.get("running_jobs", [])
         pending_jobs = result.get("pending_jobs", [])

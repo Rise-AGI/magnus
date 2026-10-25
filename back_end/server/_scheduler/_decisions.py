@@ -17,7 +17,7 @@ from library.fundamental.scheduling import (
 )
 from ..database import SessionLocal
 from ..models import Job, JobStatus, JobType, job_metadata_load_options
-from .._magnus_config import is_local_mode, magnus_config
+from .._magnus_config import is_local_mode
 from .._resource_manager._helpers import _run_blocking_io
 from .._slurm_manager._resource_query import validate_allocation_visibility
 from . import logger
@@ -54,7 +54,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
             # Keep cancelled tasks registered until their filesystem I/O drains.
             # These rows only identify tasks to start. Commands and Dockerfiles
             # are loaded once by each preparation task, not on every tick.
-            preparing_jobs = db.query(Job.id).filter(Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING])).all()
+            preparing_jobs = self._job_query(db, Job.id).filter(Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING])).all()
             for job in preparing_jobs:
                 with self._preparing_jobs_lock:
                     if job.id in self.preparing_jobs:
@@ -78,8 +78,8 @@ class _DecisionsMixin(_DecisionsMixinBase):
                     logger.error(f"Job {jid} preparation crashed: {exc}")
                     # _clean_up_working_table 在远端执行下含 ssh `rm -rf`（+ 可能触发 socket
                     # 重建），这里跑在事件循环上，丢线程池避免阻塞 loop。
-                    await asyncio.to_thread(self._clean_up_working_table, jid)
-                    db.query(Job).filter(
+                    await _run_blocking_io(self._clean_up_working_table, jid)
+                    self._job_query(db, Job).filter(
                         Job.id == jid,
                         Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
                     ).update({
@@ -94,13 +94,13 @@ class _DecisionsMixin(_DecisionsMixinBase):
             # 释放，立即 resubmit 会让旧+新两个 SLURM step 同时占资源 + 让 cluster
             # endpoint 在新 slurm_id 写入后丢失旧 slurm_id 的 magnus 关联。等
             # _sync_reality_slurm 在 SLURM 真正释放后清空 slurm_job_id 才进这里。
-            paused_jobs = db.query(Job.id).filter(
+            paused_jobs = self._job_query(db, Job.id).filter(
                 Job.status == JobStatus.PAUSED,
                 Job.slurm_job_id.is_(None),
                 Job.finalization_status.is_(None),
             ).all()
             for job in paused_jobs:
-                changed = db.query(Job).filter(
+                changed = self._job_query(db, Job).filter(
                     Job.id == job.id,
                     Job.status == JobStatus.PAUSED,
                     Job.slurm_job_id.is_(None),
@@ -141,7 +141,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
 
     def _schedule_pending_jobs(self):
         with SessionLocal(expire_on_commit=False) as db:
-            jobs = db.query(Job).options(*job_metadata_load_options()).filter(
+            jobs = self._job_query(db, Job).options(*job_metadata_load_options()).filter(
                 Job.status == JobStatus.PENDING,
             ).all()
             if not jobs:
@@ -153,7 +153,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
             )
             if is_local_mode:
                 submit_ids = [jobs[0].id]
-            elif magnus_config["cluster"]["scheduling"]["mode"] == "tenant":
+            elif self.config["cluster"]["scheduling"]["mode"] == "tenant":
                 # A shared cluster owns placement, fairshare and preemption.
                 submit_ids = [job.id for job in jobs]
             else:
@@ -172,15 +172,15 @@ class _DecisionsMixin(_DecisionsMixinBase):
             tasks = self.slurm_manager.get_all_running_tasks(_raise_on_error=True)
             validate_allocation_visibility(snapshot, tasks)
             observed_ids = {task["id"] for task in tasks}
-            queued = db.query(Job.slurm_job_id).filter(Job.status == JobStatus.QUEUED).all()
+            queued = self._job_query(db, Job.slurm_job_id).filter(Job.status == JobStatus.QUEUED).all()
             if any(row[0] not in observed_ids for row in queued):
                 # A successful sbatch has not appeared in allocated resources yet.
                 # Do not promise the same free capacity again on the next tick.
                 return []
-            gpu_types = gpu_dimensions(snapshot, tasks, jobs, magnus_config)
+            gpu_types = gpu_dimensions(snapshot, tasks, jobs, self.config)
             total, free = self._compute_cluster_resources(snapshot, tasks, gpu_types)
             head = jobs[0]
-            target = job_resource_target(head, magnus_config)
+            target = job_resource_target(head, self.config)
             eligible_nodes = target_nodes(
                 snapshot.nodes,
                 target,
@@ -189,7 +189,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
             node_count = head.node_count or 1
             if len(eligible_nodes) < node_count:
                 return []
-            demand = job_resource_vector(head, magnus_config, gpu_types)
+            demand = job_resource_vector(head, self.config, gpu_types)
             if demand is None:
                 # Defaults and --mem=0 need SLURM's interpretation. Send only the
                 # priority head; the QUEUED barrier above reserves the uncertainty.
@@ -235,8 +235,8 @@ class _DecisionsMixin(_DecisionsMixinBase):
                     return []
             candidates = []
             for job in jobs:
-                job_target = job_resource_target(job, magnus_config)
-                request = job_resource_vector(job, magnus_config, gpu_types)
+                job_target = job_resource_target(job, self.config)
+                request = job_resource_vector(job, self.config, gpu_types)
                 if (
                     request is None
                     or (job.node_count or 1) != 1
@@ -269,7 +269,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 with self._preparing_jobs_lock:
                     self._submitting_jobs.add(job_id)
                 try:
-                    job = db.query(Job).filter(Job.id == job_id).first()
+                    job = self._job_query(db, Job).filter(Job.id == job_id).first()
                     if job is None:
                         continue
                     if is_local_mode:
@@ -279,7 +279,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 finally:
                     try:
                         db.rollback()
-                        db.query(Job).filter(
+                        self._job_query(db, Job).filter(
                             Job.id == job_id,
                             Job.status == JobStatus.TERMINATED,
                             Job.slurm_job_id.is_(None),
@@ -313,7 +313,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
         if demand.fits_within(free):
             return False
         allocations = {task["id"]: task for task in tasks}
-        running_b_jobs = db.query(Job).options(*job_metadata_load_options()).filter(
+        running_b_jobs = self._job_query(db, Job).options(*job_metadata_load_options()).filter(
             Job.status == JobStatus.RUNNING,
             Job.job_type.in_([JobType.B1, JobType.B2]),
         ).all()
@@ -380,7 +380,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
         # Phase 2.5 用 `slurm_job_id IS None` 过滤等真正释放再 resubmit。
         # A terminate/completion in another session must not be resurrected by
         # this decision snapshot after the external cancellation has finished.
-        db.query(Job).filter(
+        self._job_query(db, Job).filter(
             Job.id == job.id,
             Job.status == JobStatus.RUNNING,
         ).update({

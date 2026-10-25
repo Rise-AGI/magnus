@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from pywheels.file_tools import guarantee_file_exist
 from ..database import SessionLocal
 from ..models import Job, JobStatus, CachedImage
-from .._magnus_config import magnus_config, is_local_mode
+from .._magnus_config import is_local_mode
 from .._resource_manager import resource_manager, _image_to_sif_filename
 from .._resource_manager._helpers import _run_blocking_io
 from . import logger, magnus_workspace_path, magnus_container_cache_path
@@ -132,7 +132,7 @@ class _ResourcesMixin(_ResourcesMixinBase):
                 return
             container_image = job.container_image
             dockerfile = job.dockerfile
-            effective_runner = job.runner or magnus_config["cluster"]["default_runner"]
+            effective_runner = job.runner or self.config["cluster"]["default_runner"]
             namespace = job.namespace
             repo_name = job.repo_name
             branch = job.branch

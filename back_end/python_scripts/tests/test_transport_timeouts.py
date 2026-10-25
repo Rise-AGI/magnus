@@ -151,7 +151,7 @@ class TransportDeadlineTests(unittest.TestCase):
         namespace = load_transport()
         namespace["master_alive"] = lambda *args, **kwargs: False
         namespace["_establish"] = lambda *args, **kwargs: self.fail("auth started while another owner holds the lock")
-        lock = namespace["_establish_lock"]
+        lock = namespace["_connection_lock"]("socket")
         lock.acquire()
         try:
             started = time.monotonic()
@@ -219,15 +219,57 @@ class TransportDeadlineTests(unittest.TestCase):
         namespace.update(
             _slurm_view_cache={},
             _slurm_view_cache_lock=namespace["threading"].Lock(),
-            _slurm_view_refresh_lock=SimpleNamespace(
+            _slurm_view_refresh_locks={"cold": SimpleNamespace(
                 acquire=lambda **kwargs: waits.append(kwargs) or False,
                 release=lambda: self.fail("released another refresh owner's lock"),
-            ),
+            )},
         )
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
         with self.assertRaises(TimeoutError):
             namespace["_cached_slurm_view"]("cold", 5, lambda: self.fail("lock not acquired"))
         self.assertEqual(waits, [{"timeout": 30}])
+
+
+class ConnectorCommandTests(unittest.TestCase):
+    def test_connector_gets_socket_identity_and_must_prove_master_ready(self):
+        namespace = load_transport()
+        with tempfile.TemporaryDirectory() as directory:
+            result = Path(directory) / "identity"
+            script = "import os,pathlib; pathlib.Path("+repr(str(result))+").write_text('|'.join(os.environ[k] for k in ['MAGNUS_SSH_CONTROL_PATH','MAGNUS_SSH_HOST','MAGNUS_SSH_USER']))"
+            config = {"command": [sys.executable, "-c", script], "timeout_seconds": 2}
+            namespace["master_alive"] = lambda *args, **kwargs: False
+            with self.assertRaisesRegex(RuntimeError, "requested control socket"):
+                namespace["_establish_command"]("socket", "host", "user", config)
+            self.assertEqual(result.read_text(), "socket|host|user")
+            namespace["master_alive"] = lambda *args, **kwargs: True
+            namespace["_establish_command"]("socket", "host", "user", config)
+
+    def test_connector_errors_do_not_expose_authentication_output(self):
+        namespace = load_transport()
+        config = {"command": [sys.executable, "-c", "import sys; print('private-authentication-material',file=sys.stderr);sys.exit(3)"]}
+        with self.assertRaisesRegex(RuntimeError, r"SSH connector failed \(exit 3\)") as failure:
+            namespace["_establish_command"]("socket", "host", "user", config)
+        self.assertNotIn("private-authentication-material", str(failure.exception))
+
+    def test_connector_timeout_is_bounded_and_reaps_process(self):
+        namespace = load_transport()
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            namespace["_establish_command"](
+                "socket", "host", "user",
+                {"command": [sys.executable, "-c", "import time;time.sleep(60)"], "timeout_seconds": 0.05},
+            )
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_other_target_authentication_does_not_share_the_blocked_lock(self):
+        namespace = load_transport()
+        lock = namespace["_connection_lock"]("one")
+        namespace["master_alive"] = lambda *args, **kwargs: False
+        established = []
+        namespace["_establish"] = lambda *args, **kwargs: established.append(args[0])
+        with lock:
+            namespace["ensure_control_master"]("two", "host", "user", {}, deadline=time.monotonic()+1)
+        self.assertEqual(established, ["two"])
 
 
 if __name__ == "__main__":

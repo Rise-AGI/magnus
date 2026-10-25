@@ -10,7 +10,8 @@ from .._resource_manager import resource_manager
 from .._resource_manager._helpers import _run_blocking_io
 from .._slurm_manager import SlurmManager
 from .._docker_manager import DockerManager
-from .._magnus_config import is_local_mode
+from .._magnus_config import is_local_mode, configured_execution_targets
+from .._execution_targets import ExecutionTarget, select_execution_target
 from . import logger
 from ._sync import _SyncMixin
 from ._submit import _SubmitMixin
@@ -18,7 +19,6 @@ from ._decisions import _DecisionsMixin
 from ._resources import _ResourcesMixin
 from ._job_lifecycle import _JobLifecycleMixin
 from ._staging import _StagingMixin
-from ._workspace_gc import _WorkspaceGCMixin
 from ._artifact_recovery import _ArtifactRecoveryMixin
 
 
@@ -29,7 +29,6 @@ class MagnusScheduler(
     _ResourcesMixin,
     _JobLifecycleMixin,
     _StagingMixin,
-    _WorkspaceGCMixin,
     _ArtifactRecoveryMixin,
 ):
     """Job 调度器主类。
@@ -44,7 +43,17 @@ class MagnusScheduler(
     - _WorkspaceGCMixin: 持久 job 工作区总量上限的低频滚动回收
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        target: ExecutionTarget | None = None,
+    ):
+        self.target = target or select_execution_target(configured_execution_targets, None)
+        self.config = self.target.config
+        remote = self.config["transport"]["mode"] == "ssh"
+        self.remote_workspace_path = f"{self.target.remote_root}/workspace"
+        ephemeral_root = self.target.remote_root if remote else self.config["server"]["ephemeral_root"]
+        self.remote_ephemeral_workspace_path = f"{ephemeral_root}/workspace"
+        self.remote_container_cache_path = f"{self.target.remote_root}/container_cache"
         if is_local_mode:
             self.docker_manager = DockerManager()
             self.slurm_manager = None
@@ -52,7 +61,7 @@ class MagnusScheduler(
             logger.info("🐳 Scheduler initialized in LOCAL mode (Docker backend)")
         else:
             try:
-                self.slurm_manager = SlurmManager()
+                self.slurm_manager = SlurmManager(config=self.config)
                 self.enabled = True
             except RuntimeError as error:
                 logger.critical(f"Scheduler disabled due to missing SLURM: {error}")
@@ -96,11 +105,32 @@ class MagnusScheduler(
             # scontrol，秒级，且 auto_connect 时可能触发 socket 重建）——同样丢线程池，
             # 否则会周期性阻塞 event loop。tick 串行执行，线程内独占无并发。
             await _run_blocking_io(self._record_snapshot)
-            # 低频容量回收：内部按 _WORKSPACE_GC_INTERVAL_SECONDS 自节流，遍历 workspace
-            # 做 du 是阻塞 I/O，同 _sync/_record_snapshot 一样卸到线程池，不占 event loop。
-            await _run_blocking_io(self._reclaim_workspace_over_cap)
         except Exception as error:
             logger.error(f"Scheduler tick failed: {error}", exc_info=True)
+
+    def _job_query(
+        self,
+        db: Session,
+        *entities,
+    ):
+        return db.query(*entities).filter(self.target.job_filter(Job))
+
+    def inflight_job_ids(
+        self,
+    ) -> set[str]:
+        with self._preparing_jobs_lock:
+            return set(self.preparing_jobs) | self._submitting_jobs
+
+    async def shutdown(
+        self,
+    ) -> None:
+        await self.shutdown_submission()
+        await self.shutdown_artifact_recovery()
+        with self._preparing_jobs_lock:
+            tasks = list(self.preparing_jobs.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     def terminate_job(self, db: Session, job: Job) -> None:
         """API endpoint for user-initiated job termination"""

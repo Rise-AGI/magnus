@@ -4,6 +4,7 @@ import logging
 from typing import Set, Type
 from library import *
 from ._size_utils import _parse_size_string, effective_cpu_count_per_cpu, parse_memory_bytes
+from ._execution_targets import execution_targets
 
 
 __all__ = [
@@ -210,30 +211,46 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         if ssh["auto_connect"] is not None:
             _check_key(ssh, "auto_connect", dict)
             auto_connect = ssh["auto_connect"]
-            # 密钥（登录密码、TOTP 种子）各自内联值或 chmod 600 文件路径二选一。
-            _check_one_secret_source(
-                auto_connect, "password", "password_file", "transport.ssh.auto_connect",
-            )
-            _check_one_secret_source(
-                auto_connect, "totp_secret", "totp_secret_file", "transport.ssh.auto_connect",
-            )
-            # control_persist：重建时 master 的存活时长；prompt 正则：站点提示词措辞与
-            # 默认不符时覆盖（None 即用内置默认，见 _ssh_auto_connect）。
-            auto_connect.setdefault("control_persist", "8h")
-            auto_connect.setdefault("password_prompt", None)
-            auto_connect.setdefault("totp_prompt", None)
-            _check_key(auto_connect, "control_persist", str)
-            _check_key(auto_connect, "password_prompt", str, nullable=True)
-            _check_key(auto_connect, "totp_prompt", str, nullable=True)
-            _warn_extra_keys(
-                auto_connect,
-                {
-                    "password", "password_file",
-                    "totp_secret", "totp_secret_file",
-                    "control_persist", "password_prompt", "totp_prompt",
-                },
-                "transport.ssh.auto_connect",
-            )
+            if "command" in auto_connect:
+                command = auto_connect["command"]
+                if not isinstance(command, list) or not command or any(
+                    not isinstance(argument, str) or not argument or "\x00" in argument
+                    for argument in command
+                ):
+                    raise ValueError("transport.ssh.auto_connect.command must be a nonempty argv list")
+                if set(auto_connect) - {"command", "timeout_seconds", "control_persist"}:
+                    raise ValueError("SSH command authentication cannot include password/TOTP settings")
+                auto_connect.setdefault("timeout_seconds", 45)
+                timeout = auto_connect["timeout_seconds"]
+                if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+                    raise ValueError("SSH connector timeout_seconds must be a positive integer")
+                auto_connect.setdefault("control_persist", "8h")
+                _check_key(auto_connect, "control_persist", str)
+            else:
+                # 密钥（登录密码、TOTP 种子）各自内联值或 chmod 600 文件路径二选一。
+                _check_one_secret_source(
+                    auto_connect, "password", "password_file", "transport.ssh.auto_connect",
+                )
+                _check_one_secret_source(
+                    auto_connect, "totp_secret", "totp_secret_file", "transport.ssh.auto_connect",
+                )
+                # control_persist：重建时 master 的存活时长；prompt 正则：站点提示词措辞与
+                # 默认不符时覆盖（None 即用内置默认，见 _ssh_auto_connect）。
+                auto_connect.setdefault("control_persist", "8h")
+                auto_connect.setdefault("password_prompt", None)
+                auto_connect.setdefault("totp_prompt", None)
+                _check_key(auto_connect, "control_persist", str)
+                _check_key(auto_connect, "password_prompt", str, nullable=True)
+                _check_key(auto_connect, "totp_prompt", str, nullable=True)
+                _warn_extra_keys(
+                    auto_connect,
+                    {
+                        "password", "password_file",
+                        "totp_secret", "totp_secret_file",
+                        "control_persist", "password_prompt", "totp_prompt",
+                    },
+                    "transport.ssh.auto_connect",
+                )
         _warn_extra_keys(
             ssh,
             {"control_path", "host", "user", "remote_root", "resource_staging", "auto_connect", "transfer_timeout_seconds"},
@@ -415,6 +432,8 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         slurm_cfg.setdefault("mem_mode", "explicit")
         slurm_cfg.setdefault("mem_per_cpu_mb", 4000)
         slurm_cfg.setdefault("module_loads", [])
+        slurm_cfg.setdefault("module_init", None)
+        _check_key(slurm_cfg, "module_init", str, nullable=True)
         # 多节点执行（node_count>1）时 wrapper 用 srun 跨节点铺 rank：
         # - mpi_type：srun 的 --mpi 值（如 'pmix' / 'pmi2'）。None = 不加,用站点 srun 默认。
         # - srun_extra_flags：追加到 srun 的逃生阀（站点相关地微调 --cpu-bind / --exclusive 等）。
@@ -437,10 +456,10 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
                 f"当前值: {slurm_cfg['mem_per_cpu_mb']}"
             )
         _check_key(slurm_cfg, "module_loads", list)
-        _warn_extra_keys(slurm_cfg, {"partition", "qos", "account", "mem_mode", "mem_per_cpu_mb", "module_loads", "mpi_type", "srun_extra_flags"}, "execution.slurm")
+        _warn_extra_keys(slurm_cfg, {"partition", "qos", "account", "mem_mode", "mem_per_cpu_mb", "module_loads", "module_init", "mpi_type", "srun_extra_flags"}, "execution.slurm")
         expected_exec_keys = {"backend", "container_runtime", "allow_root", "resource_cache", "slurm"}
 
-    _warn_extra_keys(execution, expected_exec_keys | {"image_build"}, "execution")
+    _warn_extra_keys(execution, expected_exec_keys | {"image_build", "target_id", "target_name", "targets"}, "execution")
 
     resource_cache = execution["resource_cache"]
     _check_key(resource_cache, "container_cache_size", str)
@@ -591,8 +610,14 @@ def _load_magnus_config()-> Dict[str, Any]:
                 if _ssh.get("remote_root"):
                     _ssh["remote_root"] += "-develop"
 
+            for settings in (data.get("execution", {}).get("targets") or {}).values():
+                target_ssh = settings.get("transport", {}).get("ssh", {})
+                if target_ssh.get("remote_root"):
+                    target_ssh["remote_root"] += "-develop"
+
         # 快速失败：启动时验证配置完整性
         _prepare_and_validate_magnus_config(data)
+        execution_targets(data, validate=_prepare_and_validate_magnus_config)
 
         return data
     except Exception as error:
@@ -600,6 +625,10 @@ def _load_magnus_config()-> Dict[str, Any]:
 
 
 magnus_config = _load_magnus_config()
+configured_execution_targets = execution_targets(
+    magnus_config,
+    validate=_prepare_and_validate_magnus_config,
+)
 is_local_mode = magnus_config["execution"]["backend"] == "local"
 is_local_auth = magnus_config["server"]["auth"]["provider"] == "local"
 
@@ -630,14 +659,17 @@ _CLUSTER_DEFAULT_FIELDS = [
 ]
 
 
-def apply_cluster_defaults(data: Dict[str, Any])-> Dict[str, Any]:
+def apply_cluster_defaults(
+    data: Dict[str, Any],
+    config: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """填充 Job/Service 提交字典中未指定的资源字段为集群默认值。In-place + return self。
 
     只补提交字典里已经带的字段,不凭空注入新键:Service 提交（ServiceCreate）不含
     time_limit（常驻服务给墙钟会被超时误杀）,其 data 随后整体 splat 进 Service(**data),
     若注入了 Service 无此列的键会构造失败。
     """
-    cluster = magnus_config["cluster"]
+    cluster = (config if config is not None else magnus_config)["cluster"]
     for field, default_key in _CLUSTER_DEFAULT_FIELDS:
         if field == "container_image" and data.get("dockerfile") is not None:
             continue
@@ -648,7 +680,10 @@ def apply_cluster_defaults(data: Dict[str, Any])-> Dict[str, Any]:
     return data
 
 
-def normalize_per_cpu_resources(data: Dict[str, Any])-> Dict[str, Any]:
+def normalize_per_cpu_resources(
+    data: Dict[str, Any],
+    config: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """per_cpu 模式下，归一化每 task 的有效 CPU / 内存请求。In-place + return self。
 
     共享集群（execution.slurm.mem_mode='per_cpu'）禁用 --mem，SLURM 按 DefMemPerCPU 给每核
@@ -665,7 +700,7 @@ def normalize_per_cpu_resources(data: Dict[str, Any])-> Dict[str, Any]:
     """
     if data.get("cpu_count") is not None and data["cpu_count"] < 0:
         raise ValueError("cpu_count must not be negative")
-    slurm_cfg = magnus_config["execution"].get("slurm")
+    slurm_cfg = (config if config is not None else magnus_config)["execution"].get("slurm")
     if slurm_cfg is None or slurm_cfg.get("mem_mode") != "per_cpu":
         return data
 
@@ -682,7 +717,10 @@ def normalize_per_cpu_resources(data: Dict[str, Any])-> Dict[str, Any]:
     return data
 
 
-def validate_cluster_limits(data: Dict[str, Any])-> None:
+def validate_cluster_limits(
+    data: Dict[str, Any],
+    config: Dict[str, Any] | None = None,
+) -> None:
     """校验 Job/Service 提交字典中 cpu_count / memory_demand / gpu_type 与本站集群匹配。
     不匹配抛 ValueError，由 endpoint 层转为 HTTP 400。
 
@@ -690,7 +728,7 @@ def validate_cluster_limits(data: Dict[str, Any])-> None:
     卡上（用户透过 SDK 提交时尤甚，UI form 走 SearchableSelect 看不到非法选项），
     所以服务端必须把住，错误信息里列出本站实际支持哪些类型让用户改。
     """
-    cluster = magnus_config["cluster"]
+    cluster = (config if config is not None else magnus_config)["cluster"]
 
     max_cpu = cluster["max_cpu_count"]
     if data["cpu_count"] < 0:

@@ -36,6 +36,9 @@ def load_accounting():
     visibility = next(node for node in ast.parse(path.read_text(encoding="utf-8")).body if isinstance(node, ast.FunctionDef) and node.name == "validate_allocation_visibility")
     exec(compile(ast.Module(body=[visibility], type_ignores=[]), str(path), "exec"), namespace)
     namespace["logger"] = logging.getLogger("scheduler_resource_accounting_tests")
+    for name in ("_ControlMixin", "_DecisionsMixin"):
+        namespace[name].config = property(lambda self: namespace["magnus_config"])
+    namespace["_DecisionsMixin"]._job_query = staticmethod(lambda db, *entities: db.query(*entities))
     return namespace
 
 

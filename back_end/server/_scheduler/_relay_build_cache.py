@@ -8,27 +8,29 @@ import threading
 
 from sqlalchemy import or_
 
-from .._magnus_config import magnus_config
+from .._execution_targets import ExecutionTarget
 from .._size_utils import _parse_size_string
 from .._slurm_manager._transport import _Transport
 from ..database import SessionLocal
 from ..models import Job, JobStatus
-from . import magnus_remote_container_cache_path
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 # Scheduler submission runs in worker threads. Keep the DB protection snapshot,
 # remote reclamation and entire transfer in one critical section.
-_STAGING_LOCK = threading.Lock()
+_STAGING_LOCKS: dict[str, threading.Lock] = {}
+_STAGING_LOCKS_GUARD = threading.Lock()
 _RECEIVER_PATH = Path(__file__).with_name("_relay_build_receiver.py")
 
 
 def remote_built_sif_path(
     digest: str,
+    *,
+    cache_path: str,
 ) -> str:
     if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
         raise ValueError("Invalid built image digest")
-    return f"{magnus_remote_container_cache_path}/native_builds/{digest.split(':')[1]}.sif"
+    return f"{cache_path}/native_builds/{digest.split(':')[1]}.sif"
 
 
 def stage_built_sif(
@@ -37,13 +39,20 @@ def stage_built_sif(
     digest: str,
     *,
     job_id: str,
+    target: ExecutionTarget,
 ) -> None:
-    remote_path = remote_built_sif_path(digest)
-    config = magnus_config["execution"]["image_build"]
+    remote_path = remote_built_sif_path(
+        digest,
+        cache_path=f"{target.remote_root}/container_cache",
+    )
+    config = target.config["execution"]["image_build"]
     timeout = int(config["timeout_seconds"])
-    with _STAGING_LOCK:
+    with _STAGING_LOCKS_GUARD:
+        staging_lock = _STAGING_LOCKS.setdefault(target.id, threading.Lock())
+    with staging_lock:
         with SessionLocal() as db:
             records = db.query(Job.id, Job.build_result, Job.slurm_job_id).filter(
+                target.job_filter(Job),
                 Job.build_result.isnot(None),
                 or_(
                     Job.status.notin_([JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED]),

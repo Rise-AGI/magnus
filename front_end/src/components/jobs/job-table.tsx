@@ -9,6 +9,7 @@ import { useLanguage } from "@/context/language-context";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
+import { EXECUTION_TARGETS, getExecutionTarget } from "@/lib/config";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { JobResources } from "@/components/jobs/job-resources";
 import { UserAvatar } from "@/components/ui/user-avatar";
@@ -79,6 +80,7 @@ export function JobTable({
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold text-zinc-200 text-sm truncate">{job.task_name}</p>
                   <CopyableText text={job.id} className="text-[10px] tracking-wider" />
+                        {EXECUTION_TARGETS.length > 1 && <span className="text-[10px] text-zinc-500">{getExecutionTarget(job.execution_target)?.name ?? job.execution_target}</span>}
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <JobPriorityBadge type={job.job_type} />

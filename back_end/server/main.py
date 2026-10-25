@@ -367,10 +367,17 @@ def run_migrations()-> None:
                 conn.commit()
             logger.info("✅ Migration completed.")
 
-    for column in ("dockerfile", "build_result", "resource_mode", "finalization_status"):
+    for column in ("dockerfile", "build_result", "resource_mode", "finalization_status", "execution_target"):
         if column not in job_columns:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {column} TEXT"))
+    for table_name in ("services", "cluster_snapshots"):
+        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        if "execution_target" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN execution_target TEXT"))
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cluster_snapshots_execution_target ON cluster_snapshots (execution_target)"))
     _repair_legacy_job_metrics_reference()
     _make_job_container_image_nullable()
 
@@ -378,6 +385,8 @@ def run_migrations()-> None:
     # 站点上线前落库的老库需要在这里幂等补齐，否则热点读路径（列表分页 / cluster
     # 视图 / 调度循环）会一直全表扫描。索引对应的查询语义见 models/_job.py。
     job_indexes = {
+        "ix_jobs_target_status": "CREATE INDEX IF NOT EXISTS ix_jobs_target_status ON jobs (execution_target, status)",
+        "ix_jobs_target_slurm_id": "CREATE INDEX IF NOT EXISTS ix_jobs_target_slurm_id ON jobs (execution_target, slurm_job_id)",
         "ix_jobs_created_at": "CREATE INDEX IF NOT EXISTS ix_jobs_created_at ON jobs (created_at)",
         "ix_jobs_user_id_created_at": "CREATE INDEX IF NOT EXISTS ix_jobs_user_id_created_at ON jobs (user_id, created_at)",
         "ix_jobs_status": "CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs (status)",
@@ -554,7 +563,7 @@ async def lifespan(
 
     # Restore cache protection before any new preparation or cache collection.
     with SessionLocal() as db:
-        rows = db.query(models.Job.id, models.Job.build_result).filter(
+        rows = db.query(models.Job.id, models.Job.build_result, models.Job.execution_target).filter(
             models.Job.build_result.isnot(None),
             (models.Job.status.in_([
                 models.JobStatus.PREPARING,
@@ -565,10 +574,16 @@ async def lifespan(
                 models.JobStatus.PAUSED,
             ]) | models.Job.slurm_job_id.isnot(None)),
         ).all()
-        pins = {job_id: json.loads(result) for job_id, result in rows}
+        pins = {job_id: json.loads(result) for job_id, result, _ in rows}
+        active_targets = db.query(models.Job.execution_target).filter(
+            models.Job.status.notin_([models.JobStatus.SUCCESS, models.JobStatus.FAILED, models.JobStatus.TERMINATED])
+            | models.Job.slurm_job_id.isnot(None)
+            | models.Job.finalization_status.isnot(None),
+        ).distinct().all()
+        for (target_id,) in active_targets:
+            scheduler.for_target(target_id)
     resource_manager.builds.restore_pins(pins)
-    with scheduler._preparing_jobs_lock:
-        scheduler._build_pinned_jobs.update(pins)
+    scheduler.restore_pins([(job_id, target_id) for job_id, _, target_id in rows])
 
     scheduler_task = asyncio.create_task(run_scheduler_loop())
     service_manager_task = asyncio.create_task(service_manager.start_background_loop())
@@ -613,14 +628,8 @@ async def lifespan(
     except asyncio.CancelledError:
         logger.info("Scheduler loop stopped.")
 
-    await scheduler.shutdown_submission()
-    await scheduler.shutdown_artifact_recovery()
+    await scheduler.shutdown()
     file_custody_manager.shutdown()
-    with scheduler._preparing_jobs_lock:
-        preparing_tasks = list(scheduler.preparing_jobs.values())
-    for task in preparing_tasks:
-        task.cancel()
-    await asyncio.gather(*preparing_tasks, return_exceptions=True)
     await resource_manager.builds.shutdown()
 
 

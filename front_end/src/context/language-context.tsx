@@ -45,6 +45,8 @@ const translations = {
   "nav.skills": { zh: "技能", en: "Skills" },
   "nav.images": { zh: "镜像", en: "Images" },
   "nav.tools": { zh: "文件", en: "Files" },
+  "executionTarget.label": { zh: "执行集群", en: "Execution cluster" },
+  "executionTarget.unavailable": { zh: "请选择可用的执行集群", en: "Select an available execution cluster" },
   "nav.cluster": { zh: "集群", en: "Cluster" },
 
   // ===== Auth =====

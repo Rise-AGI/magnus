@@ -205,6 +205,7 @@ See [Job Runtime Documentation](docs/internals/job-runtime.md) for container exe
 - [Blueprint Crafting Guide](docs/guides/blueprint-crafting.md) — Type annotations, parameter metadata, file transfer
 - [Local Mode](docs/guides/local-mode.md) — Run Magnus locally with Docker instead of SLURM
 - [Dockerfile Jobs](docs/guides/image-building.md) — Build a cached runtime directly from a Job's Dockerfile
+- [Execution Targets](docs/guides/execution-targets.md) — Multiple Slurm clusters and official-client SSH renewal
 - [Metrics Protocol](docs/guides/metrics.md) — Cross-language metrics reporting protocol for Jobs
 
 <details>

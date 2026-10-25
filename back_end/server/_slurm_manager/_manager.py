@@ -13,13 +13,16 @@ class SlurmManager(_ResourceQueryMixin, _ControlMixin):
     def __init__(
         self,
         transport: Optional[_Transport] = None,
+        *,
+        config: Optional[dict] = None,
     ) -> None:
+        self.config = config if config is not None else magnus_config
         # 显式传入的 transport 优先（测试 / 特殊调用）；否则按站点 transport 配置
         # 构造 —— local 站点回落本机 subprocess，共享集群租户站点骑 SSH socket。
         self._transport = (
             transport
             if transport is not None
-            else build_transport(magnus_config["transport"])
+            else build_transport(self.config["transport"])
         )
 
     @property

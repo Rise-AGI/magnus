@@ -63,8 +63,11 @@ class Job(Base):
     # 单列索引就近声明在字段上（index=True）；跨列的复合索引在此声明。
     __table_args__ = (
         Index("ix_jobs_user_id_created_at", "user_id", "created_at"),
+        Index("ix_jobs_target_status", "execution_target", "status"),
+        Index("ix_jobs_target_slurm_id", "execution_target", "slurm_job_id"),
     )
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_hex_id)
+    execution_target: Mapped[str | None] = mapped_column(String, nullable=True)
     task_name: Mapped[str] = mapped_column(String, index=True)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
@@ -124,6 +127,7 @@ class ClusterSnapshot(Base):
     __tablename__ = "cluster_snapshots"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     timestamp: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    execution_target: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     total_gpus: Mapped[int] = mapped_column(Integer)
     slurm_used_gpus: Mapped[int] = mapped_column(Integer)
     magnus_used_gpus: Mapped[int] = mapped_column(Integer)

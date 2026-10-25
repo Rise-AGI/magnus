@@ -10,27 +10,9 @@ import { CodeEditor } from "@/components/ui/code-editor";
 import { client } from "@/lib/api";
 import { JobCapabilities } from "@/types/job";
 import { useLanguage } from "@/context/language-context";
-import {
-  PHYSICAL_GPUS,
-  getGpuLimit,
-  MAX_CPU_COUNT,
-  MAX_NODE_COUNT,
-  DEFAULT_NODE_COUNT,
-  DEFAULT_TASKS_PER_NODE,
-  DEFAULT_MEMORY,
-  DEFAULT_EPHEMERAL_STORAGE,
-  DEFAULT_CPU_COUNT,
-  DEFAULT_RUNNER,
-  DEFAULT_CONTAINER_IMAGE,
-  DEFAULT_SYSTEM_ENTRY_COMMAND,
-  IS_PER_CPU_MEMORY,
-  MEM_PER_CPU_MB,
-} from "@/lib/config";
-
-const GPU_TYPES = [
-  ...PHYSICAL_GPUS,
-  { label: "CPU Only", value: "cpu", meta: "Host Memory" },
-];
+import { CLUSTER_CONFIG, EXECUTION_TARGETS, DEFAULT_EXECUTION_TARGET, getExecutionTarget } from "@/lib/config";
+import { ExecutionTargetSelect } from "@/components/jobs/execution-target-select";
+import { useSearchParams } from "next/navigation";
 
 const JOB_TYPES = [
   { label: "A1 - 高优稳定", value: "A1", meta: "Non-Preemptible • Urgent" },
@@ -43,6 +25,7 @@ interface Branch { name: string; commit_sha: string; }
 interface Commit { sha: string; message: string; author: string; date: string; }
 
 export interface JobFormData {
+  execution_target?: string | null;
   taskName: string;
   description: string;
   namespace: string;
@@ -74,6 +57,26 @@ interface JobFormProps {
 
 const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuccess }: JobFormProps, ref) {
   const { t } = useLanguage();
+  const searchParams = useSearchParams();
+  const [executionTarget, setExecutionTarget] = useState(initialData?.execution_target ?? searchParams.get("execution_target") ?? DEFAULT_EXECUTION_TARGET);
+  const target = getExecutionTarget(executionTarget);
+  const config = target?.cluster ?? CLUSTER_CONFIG;
+  const PHYSICAL_GPUS = config.gpus;
+  const GPU_TYPES = [...PHYSICAL_GPUS, { label: "CPU Only", value: "cpu", meta: "Host Memory" }];
+  const MAX_CPU_COUNT = config.max_cpu_count;
+  const MAX_NODE_COUNT = config.max_node_count ?? 1;
+  const DEFAULT_NODE_COUNT = config.default_node_count ?? 1;
+  const DEFAULT_TASKS_PER_NODE = config.default_tasks_per_node ?? 1;
+  const DEFAULT_MEMORY = config.default_memory_demand;
+  const DEFAULT_EPHEMERAL_STORAGE = config.default_ephemeral_storage;
+  const DEFAULT_CPU_COUNT = config.default_cpu_count;
+  const DEFAULT_RUNNER = config.default_runner;
+  const DEFAULT_CONTAINER_IMAGE = config.default_container_image;
+  const DEFAULT_SYSTEM_ENTRY_COMMAND = config.default_system_entry_command;
+  const IS_PER_CPU_MEMORY = config.mem_mode === "per_cpu";
+  const MEM_PER_CPU_MB = config.mem_per_cpu_mb;
+  const getGpuLimit = (type: string) => type === "cpu" ? 0 : (config.gpus.find(gpu => gpu.value === type)?.limit ?? 0);
+
   const [taskName, setTaskName] = useState(initialData?.taskName || "");
   const [description, setDescription] = useState(initialData?.description || "");
   const [namespace, setNamespace] = useState(initialData?.namespace || "Rise-AGI");
@@ -148,6 +151,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   useImperativeHandle(ref, () => ({
     getPayload: () => {
       return {
+        execution_target: executionTarget,
         task_name: taskName,
         description: description,
         namespace: namespace,
@@ -178,6 +182,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
         setErrorMessage(t("jobForm.error.environmentConflict"));
         return;
       }
+
+      if (payload.execution_target !== undefined) setExecutionTarget(payload.execution_target ?? DEFAULT_EXECUTION_TARGET);
 
       // Identity
       if (payload.task_name !== undefined) setTaskName(payload.task_name);
@@ -334,6 +340,8 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     if (submittingRef.current) return;
     setErrorField(null); setErrorMessage(null);
 
+    if ((EXECUTION_TARGETS.length > 1 || initialData?.execution_target) && !capabilities?.execution_targets) { setErrorMessage(t("executionTarget.unavailable")); return; }
+    if (!target) { setErrorMessage(t("executionTarget.unavailable")); return; }
     if (!taskName.trim()) { setErrorField("taskName"); setErrorMessage("⚠️ Task Name is required"); scrollToError("field-taskName"); return; }
     if (!repoName.trim() && namespace.trim() && namespace.trim() !== "Rise-AGI") { setErrorField("repo"); setErrorMessage(t("jobForm.error.repoRequired")); scrollToError("field-repo"); return; }
     if (!gpuType) { setErrorMessage("⚠️ Select GPU Type"); return; }
@@ -341,6 +349,7 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
     if (environmentSource === "dockerfile" && !dockerfile.trim()) { setErrorField("dockerfile"); setErrorMessage(t("jobForm.error.dockerfileRequired")); scrollToError("field-environment"); return; }
 
     const payload = {
+      ...(EXECUTION_TARGETS.length > 1 || initialData?.execution_target ? { execution_target: executionTarget } : {}),
       task_name: taskName,
       description: description,
       namespace: namespace.trim() || "Rise-AGI",
@@ -398,6 +407,24 @@ const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuc
   return (
     <div className="flex flex-col gap-8">
 
+      <ExecutionTargetSelect
+        value={executionTarget}
+        onChange={id => {
+          setExecutionTarget(id);
+          const next = getExecutionTarget(id)?.cluster;
+          if (!next) return;
+          setCpuCount(0);
+          setMemoryDemand("");
+          setNodeCount(next.default_node_count ?? 1);
+          setTasksPerNode(next.default_tasks_per_node ?? 1);
+          setGpuType("cpu");
+          setGpuCount(0);
+          if (runner === DEFAULT_RUNNER) setRunner("");
+          if (containerImage === DEFAULT_CONTAINER_IMAGE) setContainerImage(next.default_container_image);
+          if (systemEntryCommand === DEFAULT_SYSTEM_ENTRY_COMMAND) setSystemEntryCommand(next.default_system_entry_command);
+        }}
+        disabled={submitting}
+      />
       {/* Task Info */}
       <div>
         <h3 className="text-zinc-200 text-sm font-semibold mb-4 flex items-center gap-2">

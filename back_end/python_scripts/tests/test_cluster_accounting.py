@@ -294,7 +294,8 @@ class CacheAndHistoryTests(unittest.TestCase):
             raise OSError("SSH disconnected")
         namespace = {
             "Depends": lambda dependency: None, "database": SimpleNamespace(get_db=None), "get_current_user": None,
-            "SlurmManager": lambda: object(), "is_local_mode": False, "_tenant_partitions": lambda: [],
+            "SlurmManager": lambda **kwargs: object(), "is_local_mode": False, "resource_partitions": lambda config: [],
+            "_resolve_target": lambda target_id: SimpleNamespace(id="default", config={}),
             "magnus_config": {"server": {"scheduler": {"cluster_stats_cache_ttl": 0}}},
             "_cached_slurm_view": failed, "HTTPException": HTTPException,
         }
@@ -309,7 +310,7 @@ class CacheAndHistoryTests(unittest.TestCase):
         function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_cached_slurm_view")
         clock = SimpleNamespace(value=0)
         lock = threading.Lock()
-        namespace = {"time": SimpleNamespace(monotonic=lambda: clock.value), "_slurm_view_cache": {}, "_slurm_view_cache_lock": threading.Lock(), "_slurm_view_refresh_lock": lock}
+        namespace = {"time": SimpleNamespace(monotonic=lambda: clock.value), "_slurm_view_cache": {}, "_slurm_view_cache_lock": threading.Lock(), "_slurm_view_refresh_locks": {"site": lock}, "threading": threading}
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
         cached = namespace["_cached_slurm_view"]
         self.assertEqual(cached("site", 5, lambda: "sample"), "sample")
@@ -349,7 +350,7 @@ class CacheAndHistoryTests(unittest.TestCase):
             calls.append(kwargs)
             return [{"id": "queued", "gpu_count": 6}, {"id": "releasing", "gpu_count": 2}, {"id": "external", "gpu_count": 4}]
         manager = SimpleNamespace(get_all_running_tasks=tasks, get_node_snapshot=lambda **kwargs: module.NodeSnapshot(16, 128, 512000, nodes=(SimpleNamespace(name="one"),)))
-        instance = SimpleNamespace(slurm_manager=manager, last_snapshot_time=datetime.now(timezone.utc)-timedelta(seconds=10))
+        instance = SimpleNamespace(config=config, target=SimpleNamespace(id="default"), _job_query=lambda db, *entities: db.query(*entities), slurm_manager=manager, last_snapshot_time=datetime.now(timezone.utc)-timedelta(seconds=10))
         namespace = {"datetime": datetime, "timezone": timezone, "is_local_mode": False, "magnus_config": config, "resource_partitions": module.resource_partitions, "validate_allocation_visibility": module.validate_allocation_visibility, "SessionLocal": Session, "Job": SimpleNamespace(slurm_job_id=Field()), "ClusterSnapshot": lambda **fields: SimpleNamespace(**fields), "logger": logging.getLogger("history-test")}
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
         namespace["_record_snapshot"](instance)

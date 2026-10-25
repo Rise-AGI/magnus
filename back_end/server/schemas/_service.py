@@ -16,6 +16,7 @@ class _ServiceContent(BaseModel):
 
 
 class ServiceBase(BaseModel):
+    execution_target: Optional[str] = None
     id: str = Field(..., description="Slug ID for the service")
     name: str
     description: Optional[str] = None

@@ -96,10 +96,12 @@ def _accounting_job_status(
     return status
 
 
-def _resolve_default_gpu_model() -> str:
+def _resolve_default_gpu_model(
+    config: dict | None = None,
+) -> str:
     """Only infer an untyped allocation's model on a single-model station."""
     try:
-        gpus = magnus_config.get("cluster", {}).get("gpus") or []
+        gpus = (config if config is not None else magnus_config).get("cluster", {}).get("gpus") or []
         models = {
             str(gpu["value"]).lower()
             for gpu in gpus
@@ -785,7 +787,7 @@ class _ResourceQueryMixin:
         Node filtering includes competitors submitted through other partitions.
         Strict callers reject incomplete evidence instead of treating it as free.
         """
-        default_gpu_model = _resolve_default_gpu_model()
+        default_gpu_model = _resolve_default_gpu_model(self.config)
         if node_names == []:
             return []
         command = [

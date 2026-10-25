@@ -60,6 +60,7 @@ export function useJobOperations({ onSuccess, onTerminateSuccess }: UseJobOperat
     setDrawerMode("clone");
     setSelectedJobId(job.id);
     setCloneData({
+      execution_target: full.execution_target,
       taskName: full.task_name, // 克隆时往往需要修改名字，这里保持原名或让用户自己改
       description: full.description || "",
       namespace: full.namespace,

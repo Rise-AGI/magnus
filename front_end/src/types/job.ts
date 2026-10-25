@@ -18,6 +18,7 @@ export interface JobResourceSummary {
 }
 
 export interface Job {
+  execution_target?: string | null;
   id: string;
   task_name: string;
   description?: string;
@@ -56,6 +57,7 @@ export interface Job {
 }
 
 export interface JobCapabilities {
+  execution_targets?: boolean;
   dockerfile: boolean;
   image_build_enabled: boolean;
 }

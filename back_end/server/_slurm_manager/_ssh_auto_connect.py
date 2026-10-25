@@ -11,6 +11,7 @@
 pexpect / pyotp 仅在真正重建时惰性 import，使本模块 import 期只依赖标准库。
 """
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -19,7 +20,15 @@ from typing import Dict, Optional
 # socket 是进程级唯一的全局资源，而 transport 实例可能每请求新建，故单飞锁必须是
 # 模块级 —— 并发命中死 socket 时只让一个线程真正重建，其余在 ensure 的快路径/锁上
 # 让行。
-_establish_lock = threading.Lock()
+_establish_locks: dict[str, threading.Lock] = {}
+_establish_locks_guard = threading.Lock()
+
+
+def _connection_lock(
+    control_path: str,
+) -> threading.Lock:
+    with _establish_locks_guard:
+        return _establish_locks.setdefault(control_path, threading.Lock())
 
 # keyboard-interactive 提示词的默认匹配（覆盖常见英文 + 中文措辞）。先匹配更具体的
 # 动态码提示、再匹配密码提示，故含 "otp" 的动态码提示即便也含 "password" 也会被正确
@@ -128,8 +137,9 @@ def ensure_control_master(
     进锁发现已被重建好即返回。"""
     if master_alive(control_path, host, user, deadline=deadline):
         return
+    establish_lock = _connection_lock(control_path)
     wait = remaining_timeout(deadline)
-    acquired = _establish_lock.acquire() if wait is None else _establish_lock.acquire(timeout=wait)
+    acquired = establish_lock.acquire() if wait is None else establish_lock.acquire(timeout=wait)
     if not acquired:
         raise TimeoutError("SSH master authentication is still in progress")
     try:
@@ -137,7 +147,7 @@ def ensure_control_master(
             return
         _establish(control_path, host, user, auto_connect, deadline=deadline)
     finally:
-        _establish_lock.release()
+        establish_lock.release()
 
 
 def _establish(
@@ -148,6 +158,9 @@ def _establish(
     *,
     deadline: Optional[float] = None,
 ) -> None:
+    if auto_connect.get("command") is not None:
+        _establish_command(control_path, host, user, auto_connect, deadline=deadline)
+        return
     import pexpect
     import pyotp
 
@@ -211,3 +224,60 @@ def _establish(
 
     if not master_alive(control_path, host, user, deadline=deadline):
         raise RuntimeError("ssh ControlMaster 建立后探活失败：socket 未就绪")
+
+
+def _establish_command(
+    control_path: str,
+    host: str,
+    user: str,
+    auto_connect: Dict,
+    *,
+    deadline: Optional[float] = None,
+) -> None:
+    """Delegate authentication to an operator-owned connector, without a shell.
+
+    Official access clients can keep their own credential/renewal protocol.
+    Only a successfully checked OpenSSH master satisfies this interface.
+    """
+    timeout = remaining_timeout(deadline, auto_connect.get("timeout_seconds", 45))
+    env = dict(os.environ)
+    env.update({
+        "MAGNUS_SSH_CONTROL_PATH": control_path,
+        "MAGNUS_SSH_HOST": host,
+        "MAGNUS_SSH_USER": user,
+        "MAGNUS_SSH_CONTROL_PERSIST": str(auto_connect.get("control_persist", "8h")),
+    })
+    with subprocess.Popen(
+        auto_connect["command"],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=os.name != "nt",
+    ) as process:
+        try:
+            process.wait(timeout=timeout)
+        except BaseException:
+            if os.name == "nt":
+                try:
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    )
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            process.wait()
+            raise
+    if process.returncode != 0:
+        # Connector output can contain authentication tokens or credentials.
+        raise RuntimeError(f"SSH connector failed (exit {process.returncode})")
+    if not master_alive(control_path, host, user, deadline=deadline):
+        raise RuntimeError("SSH connector did not establish the requested control socket")

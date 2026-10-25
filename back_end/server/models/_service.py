@@ -23,6 +23,7 @@ class Service(Base):
     request_timeout: Mapped[int] = mapped_column(Integer, default=60)
     idle_timeout: Mapped[int] = mapped_column(Integer, default=30)
     max_concurrency: Mapped[int] = mapped_column(Integer, default=64)
+    execution_target: Mapped[str | None] = mapped_column(String, nullable=True)
     namespace: Mapped[str] = mapped_column(String)
     repo_name: Mapped[str] = mapped_column(String)
     branch: Mapped[str] = mapped_column(String)

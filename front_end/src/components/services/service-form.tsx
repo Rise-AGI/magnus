@@ -8,25 +8,9 @@ import { NumberStepper } from "@/components/ui/number-stepper";
 import { client } from "@/lib/api";
 import { Service } from "@/types/service";
 import { useLanguage } from "@/context/language-context";
-import {
-  PHYSICAL_GPUS,
-  getGpuLimit,
-  MAX_CPU_COUNT,
-  DEFAULT_MEMORY,
-  DEFAULT_EPHEMERAL_STORAGE,
-  DEFAULT_CPU_COUNT,
-  DEFAULT_RUNNER,
-  DEFAULT_CONTAINER_IMAGE,
-  DEFAULT_SYSTEM_ENTRY_COMMAND,
-  IS_PER_CPU_MEMORY,
-  MEM_PER_CPU_MB,
-} from "@/lib/config";
+import { CLUSTER_CONFIG, EXECUTION_TARGETS, DEFAULT_EXECUTION_TARGET, getExecutionTarget } from "@/lib/config";
+import { ExecutionTargetSelect } from "@/components/jobs/execution-target-select";
 import { ServiceImplicitExport } from "@/lib/service-defaults";
-
-const GPU_TYPES = [
-  ...PHYSICAL_GPUS,
-  { label: "CPU Only", value: "cpu", meta: "Host Memory" },
-];
 
 const JOB_TYPES = [
   { label: "A1 - 高优稳定", value: "A1", meta: "Non-Preemptible • Urgent" },
@@ -39,6 +23,7 @@ interface Branch { name: string; commit_sha: string; }
 interface Commit { sha: string; message: string; author: string; date: string; }
 
 export interface ServiceFormData {
+  execution_target?: string | null;
   id: string; 
   name: string;
   description?: string | null; 
@@ -77,6 +62,22 @@ interface ServiceFormProps {
 const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onSuccess }: ServiceFormProps, ref) {
   const { t } = useLanguage();
   const data = initialData as ServiceFormData; 
+  const [executionTarget, setExecutionTarget] = useState(data?.execution_target ?? DEFAULT_EXECUTION_TARGET);
+  const target = getExecutionTarget(executionTarget);
+  const config = target?.cluster ?? CLUSTER_CONFIG;
+  const PHYSICAL_GPUS = config.gpus;
+  const GPU_TYPES = [...PHYSICAL_GPUS, { label: "CPU Only", value: "cpu", meta: "Host Memory" }];
+  const MAX_CPU_COUNT = config.max_cpu_count;
+  const DEFAULT_MEMORY = config.default_memory_demand;
+  const DEFAULT_EPHEMERAL_STORAGE = config.default_ephemeral_storage;
+  const DEFAULT_CPU_COUNT = config.default_cpu_count;
+  const DEFAULT_RUNNER = config.default_runner;
+  const DEFAULT_CONTAINER_IMAGE = config.default_container_image;
+  const DEFAULT_SYSTEM_ENTRY_COMMAND = config.default_system_entry_command;
+  const IS_PER_CPU_MEMORY = config.mem_mode === "per_cpu";
+  const MEM_PER_CPU_MB = config.mem_per_cpu_mb;
+  const getGpuLimit = (type: string) => type === "cpu" ? 0 : (config.gpus.find(gpu => gpu.value === type)?.limit ?? 0);
+
 
   // === Service Identity ===
   const [serviceId, setServiceId] = useState(data?.id || "");
@@ -131,6 +132,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
   useImperativeHandle(ref, () => ({
     getPayload: () => {
       return {
+        execution_target: executionTarget,
         id: serviceId,
         name,
         description,
@@ -157,6 +159,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
     },
     applyPayload: (payload: any) => {
       if (!payload) return;
+      if (payload.execution_target !== undefined) setExecutionTarget(payload.execution_target ?? DEFAULT_EXECUTION_TARGET);
       
       // Identity
       if (payload.id !== undefined) setServiceId(payload.id);
@@ -307,6 +310,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
 
     // Validations
     if (!name.trim()) { setErrorField("name"); setErrorMessage("⚠️ Service Name is required"); scrollToError("field-name"); return; }
+    if (!target || !target.services_supported) { setErrorMessage(t("executionTarget.unavailable")); return; }
     if (!serviceId.trim()) { setErrorField("serviceId"); setErrorMessage("⚠️ Service ID is required"); scrollToError("field-serviceId"); return; }
     if (!/^[a-z0-9-]+$/.test(serviceId)) { setErrorField("serviceId"); setErrorMessage("⚠️ Service ID must be lowercase slug"); scrollToError("field-serviceId"); return; }
     // Repo Validations
@@ -316,6 +320,7 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
     if (!command.trim()) { setErrorField("command"); setErrorMessage("⚠️ Command required"); return; }
 
     const payload: ServiceFormData = {
+      ...(EXECUTION_TARGETS.length > 1 || data?.execution_target ? { execution_target: executionTarget } : {}),
       id: serviceId,
       name,
       description,
@@ -346,6 +351,10 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
     };
     
     try {
+      if (payload.execution_target != null) {
+        const capabilities = await client("/api/jobs/capabilities");
+        if (!capabilities.execution_targets) throw new Error(t("executionTarget.unavailable"));
+      }
       await client("/api/services", { 
           method: "POST",
           json: payload 
@@ -371,6 +380,18 @@ const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onS
 
   return (
     <div className="flex flex-col gap-8">
+      <ExecutionTargetSelect value={executionTarget} onChange={id => {
+        setExecutionTarget(id);
+        const next = getExecutionTarget(id)?.cluster;
+        if (!next) return;
+        setCpuCount(0);
+        setMemoryDemand("");
+        setGpuType("cpu");
+        setGpuCount(0);
+        if (runner === DEFAULT_RUNNER) setRunner("");
+        if (containerImage === DEFAULT_CONTAINER_IMAGE) setContainerImage(next.default_container_image);
+        if (systemEntryCommand === DEFAULT_SYSTEM_ENTRY_COMMAND) setSystemEntryCommand(next.default_system_entry_command);
+      }} servicesOnly />
       
       {/* 1. Service Identity */}
       <div>

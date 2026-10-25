@@ -35,6 +35,11 @@ class _SchedulerProtocol:
     # === MagnusScheduler.__init__ 注入的属性 ===
     slurm_manager: Optional["SlurmManager"]
     docker_manager: Optional["DockerManager"]
+    target: Any
+    config: dict
+    remote_workspace_path: str
+    remote_ephemeral_workspace_path: str
+    remote_container_cache_path: str
     enabled: bool
     last_snapshot_time: datetime
     last_workspace_gc_time: datetime
@@ -50,6 +55,9 @@ class _SchedulerProtocol:
     _artifact_retry_after: Dict[str, float]
     _submission_task: Optional[asyncio.Task]
     _submitting_jobs: set[str]
+
+    def _job_query(self, db: "Session", *entities) -> Any: ...
+    def inflight_job_ids(self) -> set[str]: ...
 
     def _queue_pending_submission(self) -> None: ...
     async def shutdown_submission(self) -> None: ...

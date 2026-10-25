@@ -170,9 +170,10 @@ class JobResourceIntegrationTests(unittest.TestCase):
             magnus_config=self.config,
             models=SimpleNamespace(Job=lambda **values: SimpleNamespace(**values)),
             is_local_mode=True,
-            apply_cluster_defaults=lambda value: None,
-            normalize_per_cpu_resources=lambda value: None,
-            validate_cluster_limits=lambda value: None,
+            scheduler=SimpleNamespace(for_target=lambda target_id: SimpleNamespace(target=SimpleNamespace(id="default"), config=self.config)),
+            apply_cluster_defaults=lambda value, **kwargs: None,
+            normalize_per_cpu_resources=lambda value, **kwargs: None,
+            validate_cluster_limits=lambda value, **kwargs: None,
             enforce_field_size_limits=lambda *args: None,
         )
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
@@ -230,7 +231,7 @@ class JobResourceIntegrationTests(unittest.TestCase):
         namespace.update(
             magnus_config=self.config,
             is_local_mode=False,
-            SlurmManager=lambda: manager,
+            SlurmManager=lambda **kwargs: manager,
             _cached_slurm_view=lambda key, ttl, producer: producer(),
             _node_name="test",
             _gpu_model="test",
@@ -241,12 +242,15 @@ class JobResourceIntegrationTests(unittest.TestCase):
             get_current_user=None,
             or_=lambda *args: None,
             _scheduler_sort_key=lambda value: 0,
-            _tenant_partitions=lambda: [],
+            resource_partitions=lambda config: [],
+            _resolve_target=lambda target_id: SimpleNamespace(id="default", name="test", config=self.config, job_filter=lambda model: True),
             time=time,
             validate_allocation_visibility=load_queries().validate_allocation_visibility,
         )
         producer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_query_cluster_view")
-        exec(compile(ast.Module(body=[producer, route], type_ignores=[]), str(path), "exec"), namespace)
+        totals = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_cluster_resource_totals")
+        exec(compile(ast.Module(body=[totals, producer, route], type_ignores=[]), str(path), "exec"), namespace)
+        self.config["cluster"].setdefault("gpus", [])
         response = namespace["get_cluster_stats"](db=SimpleNamespace(query=lambda *args: query))
         for row in response["running_jobs"]:
             self.assertEqual(row.resource_summary.cpu_count, 128)

@@ -23,7 +23,6 @@ import hashlib
 from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING
-from .._magnus_config import magnus_config
 from .._file_custody_manager import file_custody_manager
 from .._custody_receipts import (
     _RELAY_TOKEN_RE,
@@ -33,8 +32,6 @@ from .._custody_receipts import (
 from . import (
     logger,
     magnus_workspace_path,
-    magnus_remote_workspace_path,
-    magnus_remote_container_cache_path,
 )
 from ._relay_build_cache import stage_built_sif
 from .._slurm_manager._ssh_auto_connect import remaining_timeout
@@ -258,7 +255,7 @@ class _StagingMixin(_StagingMixinBase):
         )
 
     def _remote_job_working_table(self, job_id: str) -> str:
-        return f"{magnus_remote_workspace_path}/jobs/{job_id}"
+        return f"{self.remote_workspace_path}/jobs/{job_id}"
 
     def _local_job_working_table(self, job_id: str) -> str:
         return f"{magnus_workspace_path}/jobs/{job_id}"
@@ -348,7 +345,7 @@ class _StagingMixin(_StagingMixinBase):
         if not self._is_remote_execution():
             return
         assert self.slurm_manager is not None
-        if magnus_config["transport"]["ssh"]["resource_staging"] != "relay":
+        if self.config["transport"]["ssh"]["resource_staging"] != "relay":
             return
         transport = self.slurm_manager.transport
 
@@ -358,10 +355,11 @@ class _StagingMixin(_StagingMixinBase):
                 local_sif_path,
                 build_digest,
                 job_id = job_id,
+                target = self.target,
             )
         else:
             remote_sif_path = (
-                f"{magnus_remote_container_cache_path}/{os.path.basename(local_sif_path)}"
+                f"{self.remote_container_cache_path}/{os.path.basename(local_sif_path)}"
             )
             already_cached = transport.run(["test", "-f", remote_sif_path])
             if already_cached.returncode != 0:
@@ -519,7 +517,7 @@ class _StagingMixin(_StagingMixinBase):
     ) -> bool:
         if not self._is_remote_execution():
             return True
-        deadline = monotonic() + magnus_config["transport"]["ssh"].get("transfer_timeout_seconds", 900)
+        deadline = monotonic() + self.config["transport"]["ssh"].get("transfer_timeout_seconds", 900)
         complete = True
         local_table = self._local_job_working_table(job_id)
         try:
@@ -549,7 +547,7 @@ class _StagingMixin(_StagingMixinBase):
             return True
         assert self.slurm_manager is not None
         if deadline is None:
-            deadline = monotonic() + magnus_config["transport"]["ssh"].get("transfer_timeout_seconds", 900)
+            deadline = monotonic() + self.config["transport"]["ssh"].get("transfer_timeout_seconds", 900)
         transport = self.slurm_manager.transport
         remote_drop = f"{self._remote_job_working_table(job_id)}/{_CUSTODY_DROP_SUBDIR}"
         local_table = self._local_job_working_table(job_id)

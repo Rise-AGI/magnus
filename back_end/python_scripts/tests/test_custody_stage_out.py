@@ -23,6 +23,7 @@ def load_staging():
     tree = ast.parse(path.read_text(encoding="utf-8"))
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
     exec(compile(tree, str(path), "exec"), namespace)
+    namespace["_StagingMixin"].config = namespace["magnus_config"]
     return namespace
 
 

@@ -10,6 +10,7 @@ from ._user import UserInfo
 
 
 class JobSubmission(BaseModel):
+    execution_target: Optional[str] = None
     task_name: str
     entry_command: str
     repo_name: Optional[str] = None
@@ -85,6 +86,7 @@ class JobListItem(BaseModel):
     branch: Optional[str] = None
     commit_sha: Optional[str] = None
     container_image: Optional[str] = None
+    execution_target: Optional[str] = None
     has_dockerfile: bool = False
     gpu_count: int
     gpu_type: str

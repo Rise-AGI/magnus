@@ -201,6 +201,7 @@ cd front_end && npm install && npm run dev
 - [Blueprint Crafting Guide](docs/guides/blueprint-crafting.zh-CN.md) —— 类型标注、参数元数据、文件传输
 - [Local Mode](docs/guides/local-mode.zh-CN.md) —— 用 Docker 代替 SLURM 在本地运行 Magnus
 - [Dockerfile Jobs](docs/guides/image-building.zh-CN.md) —— 直接从 Job 的 Dockerfile 构建并缓存运行环境
+- [多执行集群](docs/guides/execution-targets.zh-CN.md) —— 多 Slurm 集群与官方客户端 SSH 续期
 - [Metrics Protocol](docs/guides/metrics.zh-CN.md) —— Jobs 的跨语言指标上报协议
 
 <details>

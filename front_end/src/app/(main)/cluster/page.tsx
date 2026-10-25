@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Zap, Plus, Activity, Cpu, Clock, Server } from "lucide-react";
 import { client } from "@/lib/api";
 import { Job } from "@/types/job";
-import { POLL_INTERVAL } from "@/lib/config";
+import { POLL_INTERVAL, EXECUTION_TARGETS, DEFAULT_EXECUTION_TARGET } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { JobDrawer } from "@/components/jobs/job-drawer";
@@ -16,6 +16,8 @@ import { JobTable } from "@/components/jobs/job-table";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useUrlPagination } from "@/hooks/use-url-pagination";
 import { presentClusterResources, type ClusterResources } from "@/lib/cluster-resources";
+import { useSearchParams } from "next/navigation";
+import { ExecutionTargetSelect } from "@/components/jobs/execution-target-select";
 import { cn } from "@/lib/utils";
 
 interface ClusterStats {
@@ -29,7 +31,17 @@ interface ClusterStats {
 export default function ClusterPage() {
   const { user: currentUser } = useAuth();
   const { t } = useLanguage();
+  const searchParams = useSearchParams();
+  const executionTarget = searchParams.get("execution_target") ?? DEFAULT_EXECUTION_TARGET;
+  const selectTarget = (id: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("execution_target", id);
+    for (const key of ["my_page", "running_page", "pending_page"]) url.searchParams.delete(key);
+    window.history.pushState(null, "", url.pathname + url.search + url.hash);
+    setCluster(null);
+  };
 
+  const [loadedClusterTarget, setLoadedClusterTarget] = useState("");
   const [cluster, setCluster] = useState<ClusterStats | null>(null);
   const [activeJobs, setActiveJobs] = useState<Job[]>([]);
   const [totalMyJobs, setTotalMyJobs] = useState(0);
@@ -48,9 +60,9 @@ export default function ClusterPage() {
   const { page: pendingPage, pageSize: pendingSize, setPage: setPendingPage, setPageSize: setPendingSize } =
     useUrlPagination({ prefix: "pending", defaultPageSize: 5 });
 
-  const myKey = `${myPage}/${mySize}`;
-  const runningKey = `${runningPage}/${runningSize}`;
-  const pendingKey = `${pendingPage}/${pendingSize}`;
+  const myKey = `${executionTarget}/${myPage}/${mySize}`;
+  const runningKey = `${executionTarget}/${runningPage}/${runningSize}`;
+  const pendingKey = `${executionTarget}/${pendingPage}/${pendingSize}`;
   const requestKey = `${myKey}/${runningKey}/${pendingKey}`;
 
   const fetchData = useCallback(async (isBackground = false) => {
@@ -61,10 +73,12 @@ export default function ClusterPage() {
     if (!isBackground) setLoading(true);
     try {
       const myParams = new URLSearchParams({
+        ...(EXECUTION_TARGETS.length > 1 ? { execution_target: executionTarget } : {}),
         skip: ((myPage - 1) * mySize).toString(),
         limit: mySize.toString(),
       });
       const clusterParams = new URLSearchParams({
+        ...(EXECUTION_TARGETS.length > 1 ? { execution_target: executionTarget } : {}),
         running_skip: ((runningPage - 1) * runningSize).toString(),
         running_limit: runningSize.toString(),
         pending_skip: ((pendingPage - 1) * pendingSize).toString(),
@@ -132,7 +146,7 @@ export default function ClusterPage() {
         running: clusterData ? runningKey : previous.running,
         pending: clusterData ? pendingKey : previous.pending,
       }));
-      if (clusterData) setCluster(clusterData);
+      if (clusterData) { setCluster(clusterData); setLoadedClusterTarget(executionTarget); }
     } catch (e) {
       if (request !== fetchRequest.current) return;
       console.error("Failed to fetch cluster data", e);
@@ -144,7 +158,7 @@ export default function ClusterPage() {
         setLoading(false);
       }
     }
-  }, [myPage, mySize, runningPage, runningSize, pendingPage, pendingSize, myKey, runningKey, pendingKey, requestKey]);
+  }, [executionTarget, myPage, mySize, runningPage, runningSize, pendingPage, pendingSize, myKey, runningKey, pendingKey, requestKey]);
 
   const {
     drawerProps,
@@ -158,7 +172,7 @@ export default function ClusterPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
   usePolling(() => fetchData(true), POLL_INTERVAL);
 
-  const resourceInfo = cluster ? presentClusterResources(cluster.resources, t, clusterRefreshFailed) : null;
+  const resourceInfo = cluster && loadedClusterTarget === executionTarget ? presentClusterResources(cluster.resources, t, clusterRefreshFailed) : null;
   const waitingForPage = loading || settledRequestKey !== requestKey;
   const myPageReady = loadedPages.my === myKey;
   const runningPageReady = loadedPages.running === runningKey;
@@ -171,6 +185,7 @@ export default function ClusterPage() {
         html { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
+      <ExecutionTargetSelect value={executionTarget} onChange={selectTarget} className="mb-6 max-w-xs" />
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">{t("nav.cluster")}</h1>

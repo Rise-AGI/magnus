@@ -25,14 +25,14 @@ findFetch(source);
 assert.ok(callback, "Production cluster fetch callback must exist");
 const compiled = ts.transpileModule(`
 export function createFetchData(bindings: any) {
-  const { client, console, fetchRequest, myPage, mySize, runningPage, runningSize,
+  const { executionTarget, EXECUTION_TARGETS, setLoadedClusterTarget, client, console, fetchRequest, myPage, mySize, runningPage, runningSize,
     pendingPage, pendingSize, setLoading, setClusterRefreshFailed, setActiveJobs,
     setTotalMyJobs, setCluster, setLoadedPages, setSettledRequestKey } = bindings;
   ${["myKey", "runningKey", "pendingKey", "requestKey"].map(name => `const ${pageDeclarations.get(name)};`).join("\n")}
   return (${callback});
 }
 export function pageView(bindings: any) {
-  const { myPage, mySize, runningPage, runningSize, pendingPage, pendingSize,
+  const { executionTarget, myPage, mySize, runningPage, runningSize, pendingPage, pendingSize,
     loadedPages, settledRequestKey, loading, activeJobs, cluster } = bindings;
   const t = (key: string) => key;
   ${["myKey", "runningKey", "pendingKey", "requestKey", "waitingForPage", "myPageReady", "runningPageReady", "pendingPageReady"].map(name => `const ${pageDeclarations.get(name)};`).join("\n")}
@@ -47,6 +47,8 @@ function harness() {
   const state = { loading: true, cluster: null, stale: false, activeJobs: [], totalMyJobs: 0,
     loadedPages: { my: "", running: "", pending: "" }, settledRequestKey: "" };
   const bindings = {
+    executionTarget: "default", EXECUTION_TARGETS: [{id: "default"}, {id: "second"}],
+    setLoadedClusterTarget(value) { state.loadedClusterTarget = value; },
     console: { warn() {}, error() {} },
     fetchRequest: { current: null },
     myPage: 1, mySize: 5, runningSize: 5, pendingSize: 5, runningPage: 1, pendingPage: 1,
@@ -67,6 +69,7 @@ function harness() {
   }
   return { calls, state, resolvePair, page: myPage => createFetchData({ ...bindings, myPage }),
     running: runningPage => createFetchData({ ...bindings, runningPage }),
+    target: executionTarget => createFetchData({ ...bindings, executionTarget }),
     view: (pages = {}) => pageView({ ...bindings, ...state, ...pages }) };
 }
 
@@ -191,4 +194,22 @@ test("failed refresh preserves prior data, marks it stale, and permits recovery"
   await recovery;
   assert.equal(h.state.cluster.name, "recovered");
   assert.equal(h.state.stale, false);
+});
+
+
+test("target changes scope both requests and reject late responses from another cluster", async () => {
+  const h = harness();
+  const first = h.target("default")();
+  const second = h.target("second")();
+  assert.match(h.calls[2].url, /execution_target=second/);
+  assert.match(h.calls[3].url, /execution_target=second/);
+  assert.equal(h.view({ executionTarget: "second" })[1].loading, true);
+  h.resolvePair(2, "second-result");
+  await second;
+  h.resolvePair(0, "first-late");
+  await first;
+  assert.equal(h.state.cluster.name, "second-result");
+  assert.equal(h.state.loadedClusterTarget, "second");
+  assert.equal(h.view({ executionTarget: "default" })[1].loading, true);
+  assert.deepEqual(h.view({ executionTarget: "default" })[1].jobs, []);
 });

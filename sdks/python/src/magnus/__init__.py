@@ -102,6 +102,8 @@ __all__ = [
     "terminate_job_async",
     "signal_job",
     "signal_job_async",
+    "get_execution_targets",
+    "get_execution_targets_async",
     "get_cluster_stats",
     "get_cluster_stats_async",
     "list_blueprints",
@@ -202,6 +204,7 @@ def submit_job(
     timeout: float = 10.0,
     *,
     dockerfile: Optional[str] = None,
+    execution_target: Optional[str] = None,
 ) -> str:
     return default_client.submit_job(
         task_name,
@@ -225,6 +228,7 @@ def submit_job(
         system_entry_command,
         timeout,
         dockerfile=dockerfile,
+        execution_target=execution_target,
     )
 
 async def submit_job_async(
@@ -250,6 +254,7 @@ async def submit_job_async(
     timeout: float = 10.0,
     *,
     dockerfile: Optional[str] = None,
+    execution_target: Optional[str] = None,
 ) -> str:
     return await default_client.submit_job_async(
         task_name,
@@ -273,6 +278,7 @@ async def submit_job_async(
         system_entry_command,
         timeout,
         dockerfile=dockerfile,
+        execution_target=execution_target,
     )
 
 def execute_job(
@@ -300,6 +306,7 @@ def execute_job(
     execute_action: bool = True,
     *,
     dockerfile: Optional[str] = None,
+    execution_target: Optional[str] = None,
 ) -> Optional[str]:
     return default_client.execute_job(
         task_name,
@@ -325,6 +332,7 @@ def execute_job(
         poll_interval,
         execute_action,
         dockerfile=dockerfile,
+        execution_target=execution_target,
     )
 
 async def execute_job_async(
@@ -352,6 +360,7 @@ async def execute_job_async(
     execute_action: bool = True,
     *,
     dockerfile: Optional[str] = None,
+    execution_target: Optional[str] = None,
 ) -> Optional[str]:
     return await default_client.execute_job_async(
         task_name,
@@ -377,6 +386,7 @@ async def execute_job_async(
         poll_interval,
         execute_action,
         dockerfile=dockerfile,
+        execution_target=execution_target,
     )
 
 
@@ -509,11 +519,30 @@ def save_metric_chart(job_id: str, name: str, output: Path, labels: Optional[Dic
 async def save_metric_chart_async(job_id: str, name: str, output: Path, labels: Optional[Dict[str, str]] = None, since_ms: Optional[int] = None, until_ms: Optional[int] = None, step_domain: Optional[str] = None, max_points: int = 2000, format: str = "png", timeout: float = 60.0) -> Path:
     return await default_client.save_metric_chart_async(job_id, name, output, labels, since_ms, until_ms, step_domain, max_points, format, timeout)
 
-def get_cluster_stats(timeout: float = 10.0) -> Dict[str, Any]:
-    return default_client.get_cluster_stats(timeout)
+def get_execution_targets(
+    timeout: float = 10.0,
+) -> List[Dict[str, Any]]:
+    return default_client.get_execution_targets(timeout)
 
-async def get_cluster_stats_async(timeout: float = 10.0) -> Dict[str, Any]:
-    return await default_client.get_cluster_stats_async(timeout)
+async def get_execution_targets_async(
+    timeout: float = 10.0,
+) -> List[Dict[str, Any]]:
+    return await default_client.get_execution_targets_async(timeout)
+
+def get_cluster_stats(
+    timeout: float = 10.0,
+    *,
+    execution_target: Optional[str] = None,
+) -> Dict[str, Any]:
+    return default_client.get_cluster_stats(timeout, execution_target=execution_target)
+
+async def get_cluster_stats_async(
+    timeout: float = 10.0,
+    *,
+    execution_target: Optional[str] = None,
+) -> Dict[str, Any]:
+    return await default_client.get_cluster_stats_async(timeout, execution_target=execution_target)
+
 
 def list_blueprints(limit: int = 20, skip: int = 0, search: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
     return default_client.list_blueprints(limit, skip, search, timeout)

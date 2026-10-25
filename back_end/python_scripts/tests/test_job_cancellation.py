@@ -64,6 +64,7 @@ class JobCancellationTests(unittest.TestCase):
                 updates, cleanups, commits = [], [], []
                 manager = self.manager(0, 0 if accepted else 255)
                 actor = SimpleNamespace(
+                    _job_query=lambda db, *entities: db.query(*entities),
                     slurm_manager=SimpleNamespace(kill_job=lambda *args, **kwargs: self.kill(manager, *args, **kwargs)),
                     _clean_up_working_table=lambda value: cleanups.append(value),
                 )
@@ -93,6 +94,7 @@ class JobCancellationTests(unittest.TestCase):
                 cleanups, commits = [], []
                 manager = self.manager(0, 0 if accepted else 255)
                 actor = SimpleNamespace(
+                    _job_query=lambda db, *entities: db.query(*entities),
                     enabled=True, preparing_jobs={}, _submitting_jobs=set(), _preparing_jobs_lock=threading.Lock(), _loop=None,
                     slurm_manager=SimpleNamespace(kill_job=lambda *args, **kwargs: self.kill(manager, *args, **kwargs)),
                     _clean_up_working_table=lambda value: cleanups.append(value),

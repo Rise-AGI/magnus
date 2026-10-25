@@ -6,7 +6,7 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from ..database import SessionLocal
 from ..models import Job, JobStatus, ClusterSnapshot
-from .._magnus_config import magnus_config, is_local_mode
+from .._magnus_config import is_local_mode
 from .._slurm_manager._resource_query import resource_partitions, validate_allocation_visibility
 from . import logger, magnus_workspace_path
 
@@ -26,13 +26,13 @@ class _SyncMixin(_SyncMixinBase):
 
         now = datetime.now(timezone.utc)
         if (now - self.last_snapshot_time).total_seconds() < \
-            magnus_config["server"]["scheduler"]["snapshot_interval"]:
+            self.config["server"]["scheduler"]["snapshot_interval"]:
             return
 
         try:
             # Phase 1 — SLURM 调用（无 session）
             assert self.slurm_manager is not None
-            partitions = resource_partitions(magnus_config)
+            partitions = resource_partitions(self.config)
             capacity = self.slurm_manager.get_node_snapshot(
                 partitions = partitions or None,
                 _raise_on_error = True,
@@ -54,13 +54,14 @@ class _SyncMixin(_SyncMixinBase):
                 # only IDs; historical command blobs are never loaded here.
                 owned_ids = {
                     row[0]
-                    for row in db.query(Job.slurm_job_id).filter(
+                    for row in self._job_query(db, Job.slurm_job_id).filter(
                         Job.slurm_job_id.in_(list(allocations)),
                     ).distinct().all()
                 } if allocations else set()
                 magnus_usage = sum(allocations[job_id] for job_id in owned_ids)
 
                 snapshot = ClusterSnapshot(
+                    execution_target = self.target.id,
                     total_gpus = capacity.total_gpus,
                     slurm_used_gpus = sum(allocations.values()),
                     magnus_used_gpus = magnus_usage,
@@ -114,7 +115,7 @@ class _SyncMixin(_SyncMixinBase):
         if is_local_mode:
             self._sync_reality_docker()
             with SessionLocal() as db:
-                return dict(db.query(Job.id, Job.slurm_job_id).filter(
+                return dict(self._job_query(db, Job.id, Job.slurm_job_id).filter(
                     Job.finalization_status == "CLEANUP",
                 ).all())
         return self._sync_reality_slurm()
@@ -138,7 +139,7 @@ class _SyncMixin(_SyncMixinBase):
         with SessionLocal() as db:
             active_info = [
                 (job.id, job.status)
-                for job in db.query(Job).filter(
+                for job in self._job_query(db, Job).filter(
                     Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])
                 ).all()
             ]
@@ -171,7 +172,7 @@ class _SyncMixin(_SyncMixinBase):
         with SessionLocal() as db:
             for job_id, info in docker_results.items():
                 try:
-                    job = db.query(Job).filter(Job.id == job_id).first()
+                    job = self._job_query(db, Job).filter(Job.id == job_id).first()
                     if not job:
                         continue
 
@@ -252,7 +253,7 @@ class _SyncMixin(_SyncMixinBase):
         self,
     ) -> dict[str, str | None]:
         with SessionLocal() as db:
-            observations = db.query(
+            observations = self._job_query(db,
                 Job.id,
                 Job.status,
                 Job.slurm_job_id,
@@ -282,7 +283,7 @@ class _SyncMixin(_SyncMixinBase):
                     continue
                 if not slurm_job_id:
                     with SessionLocal() as db:
-                        db.query(Job).filter(
+                        self._job_query(db, Job).filter(
                             Job.id == job_id,
                             Job.status == original_status,
                             Job.slurm_job_id.is_(None),
@@ -302,7 +303,7 @@ class _SyncMixin(_SyncMixinBase):
                 real_status = finalization_status or self.slurm_manager.check_job_status(slurm_job_id)
                 if real_status == "RUNNING":
                     with SessionLocal() as db:
-                        db.query(Job).filter(
+                        self._job_query(db, Job).filter(
                             Job.id == job_id,
                             Job.status == JobStatus.QUEUED,
                             Job.slurm_job_id == slurm_job_id,
@@ -328,13 +329,13 @@ class _SyncMixin(_SyncMixinBase):
         real_status: str,
     ) -> bool:
         with SessionLocal() as db:
-            changed = db.query(Job).filter(
+            changed = self._job_query(db, Job).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
                 Job.finalization_status.is_(None) | (Job.finalization_status == real_status),
             ).update({Job.finalization_status: real_status}, synchronize_session=False)
             db.commit()
-            current = db.query(Job.status).filter(
+            current = self._job_query(db, Job.status).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
                 Job.finalization_status == real_status,
@@ -348,7 +349,7 @@ class _SyncMixin(_SyncMixinBase):
         # evidence of a missing success marker; custody transfer is independent.
         self._stage_out_markers(job_id)
         with SessionLocal() as db:
-            job = db.query(Job).filter(
+            job = self._job_query(db, Job).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
                 Job.finalization_status == real_status,
@@ -368,7 +369,7 @@ class _SyncMixin(_SyncMixinBase):
                         job.result = f"Scheduler reported {real_status} during execution"
                 values = {Job.status: job.status, Job.result: job.result, Job.action: job.action}
                 db.expunge(job)
-                db.query(Job).filter(
+                self._job_query(db, Job).filter(
                     Job.id == job_id,
                     Job.status == original_status,
                     Job.slurm_job_id == slurm_job_id,
@@ -383,7 +384,7 @@ class _SyncMixin(_SyncMixinBase):
         slurm_job_id: str | None,
     ) -> int:
         with SessionLocal() as db:
-            current = db.query(Job.status, Job.finalization_status).filter(
+            current = self._job_query(db, Job.status, Job.finalization_status).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
             ).first()
@@ -412,7 +413,7 @@ class _SyncMixin(_SyncMixinBase):
         if self._stage_out_final(job_id) is not True:
             return
         with SessionLocal() as db:
-            changed = db.query(Job).filter(
+            changed = self._job_query(db, Job).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
                 Job.finalization_status == real_status,
@@ -429,7 +430,7 @@ class _SyncMixin(_SyncMixinBase):
         # Commit the cleanup phase before removing markers. A restart must not
         # classify the same completed execution again using its deleted marker.
         with SessionLocal() as db:
-            current = db.query(Job.id).filter(
+            current = self._job_query(db, Job.id).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
                 Job.finalization_status == "CLEANUP",
@@ -439,7 +440,7 @@ class _SyncMixin(_SyncMixinBase):
         if self._clean_up_working_table(job_id) is not True:
             return
         with SessionLocal() as db:
-            changed = db.query(Job).filter(
+            changed = self._job_query(db, Job).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
                 Job.finalization_status == "CLEANUP",

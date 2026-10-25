@@ -709,6 +709,7 @@ class MagnusClient:
         runner: Optional[str],
         system_entry_command: Optional[str],
         dockerfile: Optional[str] = None,
+        execution_target: Optional[str] = None,
     ) -> Dict[str, Any]:
         if repo_name is None or not repo_name.strip():
             if namespace not in ("", "Rise-AGI"):
@@ -730,6 +731,7 @@ class MagnusClient:
             ("description", description),
             ("container_image", container_image),
             ("dockerfile", dockerfile),
+            ("execution_target", execution_target),
             ("cpu_count", cpu_count),
             ("memory_demand", memory_demand),
             ("node_count", node_count),
@@ -767,13 +769,19 @@ class MagnusClient:
         timeout: float = 10.0,
         *,
         dockerfile: Optional[str] = None,
+        execution_target: Optional[str] = None,
     ) -> str:
+        capabilities = None
+        if execution_target is not None:
+            capabilities = self.get_job_capabilities(timeout=timeout)
+            if capabilities.get("execution_targets") is not True:
+                raise MagnusError("This server does not support execution targets; upgrade the server first")
         if dockerfile is not None:
             if not dockerfile.strip():
                 raise MagnusError("dockerfile must not be blank")
             if container_image is not None:
                 raise MagnusError("Choose either dockerfile or container_image")
-            capabilities = self.get_job_capabilities(timeout=timeout)
+            capabilities = capabilities or self.get_job_capabilities(timeout=timeout)
             if capabilities.get("dockerfile") is not True:
                 raise MagnusError("This server does not support Dockerfile jobs; upgrade the server first")
             if not capabilities.get("image_build_enabled"):
@@ -784,6 +792,7 @@ class MagnusClient:
             container_image, cpu_count, memory_demand, node_count, tasks_per_node, time_limit, ephemeral_storage,
             runner, system_entry_command,
             dockerfile=dockerfile,
+            execution_target=execution_target,
         )
         try:
             resp = self.http.post("/jobs/submit", json=payload, timeout=timeout)
@@ -818,6 +827,7 @@ class MagnusClient:
         timeout: float = 10.0,
         *,
         dockerfile: Optional[str] = None,
+        execution_target: Optional[str] = None,
     ) -> str:
         return await asyncio.to_thread(
             self.submit_job,
@@ -826,6 +836,7 @@ class MagnusClient:
             container_image, cpu_count, memory_demand, node_count, tasks_per_node, time_limit, ephemeral_storage,
             runner, system_entry_command, timeout,
             dockerfile=dockerfile,
+            execution_target=execution_target,
         )
 
     def execute_job(
@@ -854,6 +865,7 @@ class MagnusClient:
         execute_action: bool = True,
         *,
         dockerfile: Optional[str] = None,
+        execution_target: Optional[str] = None,
     ) -> Optional[str]:
         job_id = self.submit_job(
             task_name=task_name, entry_command=entry_command,
@@ -866,6 +878,7 @@ class MagnusClient:
             time_limit=time_limit, ephemeral_storage=ephemeral_storage,
             runner=runner, system_entry_command=system_entry_command,
             dockerfile=dockerfile,
+            execution_target=execution_target,
         )
         return self._poll_job_completion(job_id, timeout, poll_interval, execute_action)
 
@@ -895,6 +908,7 @@ class MagnusClient:
         execute_action: bool = True,
         *,
         dockerfile: Optional[str] = None,
+        execution_target: Optional[str] = None,
     ) -> Optional[str]:
         job_id = await self.submit_job_async(
             task_name=task_name, entry_command=entry_command,
@@ -907,6 +921,7 @@ class MagnusClient:
             time_limit=time_limit, ephemeral_storage=ephemeral_storage,
             runner=runner, system_entry_command=system_entry_command,
             dockerfile=dockerfile,
+            execution_target=execution_target,
         )
         return await self._poll_job_completion_async(job_id, timeout, poll_interval, execute_action)
 
@@ -1369,12 +1384,38 @@ class MagnusClient:
             step_domain, max_points, format, timeout,
         )
 
+    def get_execution_targets(
+        self,
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        try:
+            response = self.http.get("/cluster/targets", timeout=timeout)
+            self._handle_error(response)
+            return response.json()
+        except httpx.TimeoutException:
+            raise MagnusError("Request timed out while getting execution targets.")
+        except httpx.TransportError as error:
+            raise self._network_error("getting execution targets", error)
+
+    async def get_execution_targets_async(
+        self,
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self.get_execution_targets, timeout)
+
     def get_cluster_stats(
         self,
         timeout: float = 10.0,
+        *,
+        execution_target: Optional[str] = None,
     ) -> Dict[str, Any]:
         try:
-            resp = self.http.get("/cluster/stats", timeout=timeout)
+            params = {}
+            if execution_target is not None:
+                if self.get_job_capabilities(timeout=timeout).get("execution_targets") is not True:
+                    raise MagnusError("This server does not support execution targets")
+                params["execution_target"] = execution_target
+            resp = self.http.get("/cluster/stats", params=params, timeout=timeout)
             self._handle_error(resp)
             return resp.json()
         except httpx.TimeoutException:
@@ -1385,8 +1426,10 @@ class MagnusClient:
     async def get_cluster_stats_async(
         self,
         timeout: float = 10.0,
+        *,
+        execution_target: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return await asyncio.to_thread(self.get_cluster_stats, timeout)
+        return await asyncio.to_thread(self.get_cluster_stats, timeout, execution_target=execution_target)
 
     def list_blueprints(
         self,

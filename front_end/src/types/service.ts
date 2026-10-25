@@ -3,6 +3,7 @@ import { Job } from "./job";
 import { User } from "@/types/auth";
 
 export interface Service {
+  execution_target?: string | null;
   id: string;
   owner_id: string;
   name: string;

@@ -1,0 +1,92 @@
+"""Route immutable Job execution identities to independent scheduler workers."""
+import asyncio
+from datetime import datetime, timezone
+
+from .._execution_targets import select_execution_target
+from .._magnus_config import configured_execution_targets
+from .._resource_manager._helpers import _run_blocking_io
+from . import logger
+from ._core import MagnusScheduler
+from ._workspace_gc import _WorkspaceGCMixin
+
+
+class SchedulerCoordinator(_WorkspaceGCMixin):
+    def __init__(
+        self,
+    ) -> None:
+        self.workers = {
+            target_id: MagnusScheduler(target)
+            for target_id, target in configured_execution_targets.items()
+        }
+        self._ticks: dict[str, asyncio.Task] = {}
+        self._gc_task: asyncio.Task | None = None
+        self.last_workspace_gc_time = datetime.min.replace(tzinfo=timezone.utc)
+
+    def for_target(
+        self,
+        target_id: str | None,
+    ) -> MagnusScheduler:
+        target = select_execution_target(configured_execution_targets, target_id)
+        return self.workers[target.id]
+
+    def inflight_job_ids(
+        self,
+    ) -> set[str]:
+        return set().union(*(worker.inflight_job_ids() for worker in self.workers.values()))
+
+    async def tick(
+        self,
+    ) -> None:
+        # Each target gets at most one reconciliation pass in flight. A slow
+        # filesystem or authentication failure must not stall another cluster.
+        for target_id, worker in self.workers.items():
+            task = self._ticks.get(target_id)
+            if task is None or task.done():
+                self._consume_result(task)
+                self._ticks[target_id] = asyncio.create_task(worker.tick())
+        if self._gc_task is None or self._gc_task.done():
+            self._consume_result(self._gc_task)
+            self._gc_task = asyncio.create_task(_run_blocking_io(self._reclaim_workspace_over_cap))
+
+    @staticmethod
+    def _consume_result(
+        task: asyncio.Task | None,
+    ) -> None:
+        if task is None or task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error("Scheduler background pass failed: %s", error)
+
+    def terminate_job(
+        self,
+        db,
+        job,
+    ) -> None:
+        self.for_target(job.execution_target).terminate_job(db, job)
+
+    def signal_job(
+        self,
+        job,
+    ) -> None:
+        self.for_target(job.execution_target).signal_job(job)
+
+    def restore_pins(
+        self,
+        rows,
+    ) -> None:
+        for job_id, target_id in rows:
+            worker = self.for_target(target_id)
+            with worker._preparing_jobs_lock:
+                worker._build_pinned_jobs.add(job_id)
+
+    async def shutdown(
+        self,
+    ) -> None:
+        tasks = list(self._ticks.values())
+        if self._gc_task is not None:
+            tasks.append(self._gc_task)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*(worker.shutdown() for worker in self.workers.values()))

@@ -14,15 +14,14 @@ from ..models import JobStatus, JobType
 from ..schemas import ClusterStatsResponse, JobListItem, JobResourceSummary, PagedJobResponse, UserInfo
 from .._job_resources import allocated_job_resources, resource_mode_for_execution
 from .auth import get_current_user
-from .._magnus_config import magnus_config, is_local_mode
+from .._magnus_config import magnus_config, is_local_mode, configured_execution_targets
+from .._execution_targets import select_execution_target
 from .._slurm_manager import SlurmManager
 from .._slurm_manager._resource_query import resource_partitions
 
 
 _node_name = magnus_config["cluster"]["name"]
-_gpu_model = " / ".join(dict.fromkeys(
-    gpu["label"] for gpu in magnus_config["cluster"]["gpus"]
-)) or "N/A"
+
 
 
 router = APIRouter()
@@ -42,7 +41,7 @@ router = APIRouter()
 # 缓存值）时才在锁上短暂等待那唯一的首刷。陈旧度上限约 TTL + 一次查询耗时，对集群总览可接受。
 _slurm_view_cache: dict = {}
 _slurm_view_cache_lock = threading.Lock()    # 保护 _slurm_view_cache 的快操作
-_slurm_view_refresh_lock = threading.Lock()  # single-flight：同一时刻只允许一个远端刷新
+_slurm_view_refresh_locks: dict = {}
 
 
 def _cached_slurm_view(cache_key, ttl_seconds: int, producer: Callable):
@@ -55,13 +54,14 @@ def _cached_slurm_view(cache_key, ttl_seconds: int, producer: Callable):
 
     with _slurm_view_cache_lock:
         cached = _slurm_view_cache.get(cache_key)
+        refresh_lock = _slurm_view_refresh_locks.setdefault(cache_key, threading.Lock())
     if cached is not None and time.monotonic() - cached[0] < ttl_seconds:
         return cached[1]
 
     if cached is not None:
         # 有陈旧值：抢到刷新锁就由我刷新，抢不到（已有刷新在飞）就立即返回陈旧值，
         # 绝不堆叠打 socket —— 这是防雪崩的关键。
-        if not _slurm_view_refresh_lock.acquire(blocking=False):
+        if not refresh_lock.acquire(blocking=False):
             # A slow/stuck refresh must not keep advertising an arbitrarily old
             # allocation. The client can distinguish brief stale reuse from a
             # fresh sample; beyond this bound report unavailable instead.
@@ -70,7 +70,7 @@ def _cached_slurm_view(cache_key, ttl_seconds: int, producer: Callable):
             raise RuntimeError("Slurm resource cache exceeded its stale limit")
     else:
         # 冷启动无任何值：在锁上等那唯一的首刷，等到后下面 re-check 直接拿到结果。
-        if not _slurm_view_refresh_lock.acquire(timeout=30):
+        if not refresh_lock.acquire(timeout=30):
             raise TimeoutError("Slurm resource refresh is still in progress")
 
     try:
@@ -84,7 +84,7 @@ def _cached_slurm_view(cache_key, ttl_seconds: int, producer: Callable):
             _slurm_view_cache[cache_key] = (time.monotonic(), value)
         return value
     finally:
-        _slurm_view_refresh_lock.release()
+        refresh_lock.release()
 
 
 def _get_cluster_stats_local(db: Session, running_skip: int, running_limit: int, pending_skip: int, pending_limit: int):
@@ -162,8 +162,29 @@ def _scheduler_sort_key(job):
     return (p_score, -job.created_at.timestamp())
 
 
-def _tenant_partitions() -> List[str]:
-    return resource_partitions(magnus_config)
+def _resolve_target(
+    target_id: str | None,
+):
+    try:
+        return select_execution_target(configured_execution_targets, target_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get("/cluster/targets")
+def get_execution_targets(
+    _: models.User = Depends(get_current_user),
+):
+    return [{
+        "id": target.id,
+        "name": target.name,
+        "is_default": target.is_default,
+        "cluster": {
+            **target.config["cluster"],
+            "mem_mode": target.config["execution"].get("slurm", {}).get("mem_mode", "explicit"),
+            "mem_per_cpu_mb": target.config["execution"].get("slurm", {}).get("mem_per_cpu_mb", 4000),
+        },
+    } for target in configured_execution_targets.values()]
 
 
 def _cluster_resource_totals(
@@ -220,20 +241,23 @@ def get_cluster_stats(
     running_limit: int = 10,
     pending_skip: int = 0,
     pending_limit: int = 10,
+    execution_target: str | None = None,
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
 ):
+    target = _resolve_target(execution_target)
+    config = target.config
     if is_local_mode:
         return _get_cluster_stats_local(db, running_skip, running_limit, pending_skip, pending_limit)
 
     # --- 1. 获取 Slurm 真实数据 ---
     # SlurmManager 涉及阻塞 Shell 命令，必须在线程池中运行 (def)
-    slurm_manager = SlurmManager()
-    tenant_partitions = _tenant_partitions()
+    slurm_manager = SlurmManager(config=config)
+    tenant_partitions = resource_partitions(config)
     cluster_stats_cache_ttl = magnus_config["server"]["scheduler"]["cluster_stats_cache_ttl"]
     try:
         all_slurm_tasks, node_snapshot, observed_at, observed_monotonic = _cached_slurm_view(
-            ("cluster_view", tuple(tenant_partitions)),
+            ("cluster_view", target.id, tuple(tenant_partitions)),
             cluster_stats_cache_ttl,
             lambda: _query_cluster_view(slurm_manager, tenant_partitions),
         )
@@ -250,6 +274,7 @@ def get_cluster_stats(
     magnus_jobs_orm = []
     if running_slurm_ids:
         magnus_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
+            target.job_filter(models.Job),
             models.Job.slurm_job_id.in_(running_slurm_ids)
         ).all()
 
@@ -273,7 +298,7 @@ def get_cluster_stats(
             job_resp = JobListItem.model_validate(job_orm)
             job_resp.resource_summary = JobResourceSummary(**allocated_job_resources(
                 task,
-                mode = resource_mode_for_execution(magnus_config["execution"]),
+                mode = resource_mode_for_execution(config["execution"]),
             ))
             all_running_jobs.append(job_resp)
 
@@ -304,6 +329,7 @@ def get_cluster_stats(
                 external_memory_demand = f"{external_memory_mb}M"
 
             mock_job = JobListItem(
+                execution_target = target.id,
                 task_name = task["name"],
                 description = "External slurm task",
                 namespace = "External",
@@ -317,7 +343,7 @@ def get_cluster_stats(
                 memory_demand = external_memory_demand,
                 resource_summary = JobResourceSummary(**allocated_job_resources(
                     task,
-                    mode = resource_mode_for_execution(magnus_config["execution"]),
+                    mode = resource_mode_for_execution(config["execution"]),
                 )),
                 job_type = JobType.EXTERNAL,
                 id = f"{slurm_id} (slurm)",
@@ -358,10 +384,12 @@ def get_cluster_stats(
         if running_job_ids else None
     )
     pending_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
+            target.job_filter(models.Job),
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
         *([not_running_in_slurm] if not_running_in_slurm is not None else []),
     ).all()
     preparing_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
+            target.job_filter(models.Job),
         models.Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
         *([not_running_in_slurm] if not_running_in_slurm is not None else []),
     ).all()
@@ -381,8 +409,8 @@ def get_cluster_stats(
 
     return {
         "resources": {
-            "node": _node_name,
-            "gpu_model": _gpu_model,
+            "node": target.name,
+            "gpu_model": " / ".join(dict.fromkeys(gpu["label"] for gpu in config["cluster"]["gpus"])) or "N/A",
             **_cluster_resource_totals(node_snapshot),
             "observed_at": observed_at,
             "is_stale": is_stale,
@@ -406,6 +434,7 @@ def get_cluster_stats(
 def get_my_active_jobs(
     skip: int = 0,
     limit: int = 5,
+    execution_target: str | None = None,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -420,20 +449,24 @@ def get_my_active_jobs(
             ids.extend(_collect_descendant_ids(child))
         return ids
 
+    target = _resolve_target(execution_target)
     user_ids = [current_user.id] + _collect_descendant_ids(current_user)
 
     # 获取 Running 任务
     running_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
+        target.job_filter(models.Job),
         models.Job.user_id.in_(user_ids),
         models.Job.status == JobStatus.RUNNING,
     ).order_by(models.Job.start_time.desc()).all()
 
     # 获取排队任务
     queued_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
+        target.job_filter(models.Job),
         models.Job.user_id.in_(user_ids),
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
     ).all()
     preparing_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
+        target.job_filter(models.Job),
         models.Job.user_id.in_(user_ids),
         models.Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
     ).all()
