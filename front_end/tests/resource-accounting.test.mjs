@@ -107,7 +107,7 @@ test("nullable node dimensions preserve other known available capacity", () => {
   assert.equal(view.cpuFree, "Unknown");
   assert.equal(view.gpuFree, "6");
   assert.equal(view.memoryFree, "250 GiB");
-  assert.equal(t("cluster.availableCpuMem"), "Available CPUs / Memory");
+  assert.equal(t("cluster.availableCpuMem"), "CPUs / Memory");
   assert.equal(translate("zh")("cluster.availableGpus"), "可用 GPU");
 });
 
