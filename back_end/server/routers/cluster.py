@@ -16,7 +16,7 @@ from .._job_resources import allocated_job_resources, resource_mode_for_executio
 from .auth import get_current_user
 from .._magnus_config import magnus_config, is_local_mode
 from .._slurm_manager import SlurmManager
-from .._slurm_manager._resource_query import resource_partitions, validate_allocation_visibility
+from .._slurm_manager._resource_query import resource_partitions
 
 
 _node_name = magnus_config["cluster"]["name"]
@@ -166,6 +166,34 @@ def _tenant_partitions() -> List[str]:
     return resource_partitions(magnus_config)
 
 
+def _cluster_resource_totals(
+    snapshot,
+) -> dict:
+    # Job rows may cross this node pool or remain in CG after node accounting
+    # changes. Resource cards describe the selected nodes, not that job list.
+    allocated = {}
+    for key, attribute in (
+        ("gpu_used", "allocated_gpus"),
+        ("cpu_used", "allocated_cpus"),
+        ("mem_used_mb", "allocated_mem_mb"),
+    ):
+        values = [getattr(node, attribute) for node in snapshot.nodes]
+        allocated[key] = sum(values) if values and all(value is not None for value in values) else None
+    return {
+        **allocated,
+        "total": snapshot.total_gpus,
+        "cpu_total": snapshot.cpu_total,
+        "mem_total_mb": snapshot.mem_total_mb,
+        # Retain numeric legacy fields; allocation_tracked guards unknown data
+        # for old clients. New clients can read each nullable dimension directly.
+        "used": allocated["gpu_used"] if allocated["gpu_used"] is not None else 0,
+        "free": max(0, snapshot.total_gpus - allocated["gpu_used"]) if allocated["gpu_used"] is not None else 0,
+        "cpu_free": max(0, snapshot.cpu_total - allocated["cpu_used"]) if allocated["cpu_used"] is not None else 0,
+        "mem_free_mb": max(0, snapshot.mem_total_mb - allocated["mem_used_mb"]) if allocated["mem_used_mb"] is not None else 0,
+        "allocation_tracked": all(value is not None for value in allocated.values()),
+    }
+
+
 def _query_cluster_view(
     slurm_manager: SlurmManager,
     partitions: List[str],
@@ -180,7 +208,6 @@ def _query_cluster_view(
         node_names = [node.name for node in snapshot.nodes] if partitions else None,
         _raise_on_error = True,
     )
-    validate_allocation_visibility(snapshot, tasks)
     return tasks, snapshot, datetime.now(timezone.utc), time.monotonic()
 
 
@@ -315,25 +342,6 @@ def get_cluster_stats(
 
     sorted_all_running = magnus_group + external_group
 
-    # 三个 alloc 维度（gpu / cpu / mem）都从 squeue 的 job-level 数字派生（all_slurm_tasks），
-    # alloc 不走 scontrol 的 CPUAlloc / AllocMem——后者在 CG 期间立即清零，跟 squeue 视角
-    # 下 job 仍占 cpu / mem 矛盾，详见 _slurm_manager._resource_query.NodeSnapshot docstring。
-    # DB gpu_count is a per-node request; Slurm tasks carry whole-job allocation.
-    used_gpus = sum(task["gpu_count"] for task in all_slurm_tasks)
-    used_cpus = sum(task.get("cpu_count", 0) for task in all_slurm_tasks)
-    used_mem_mb = sum(task.get("memory_mb", 0) for task in all_slurm_tasks)
-
-    # Configured totals include offline nodes. Free subtracts their capacity as
-    # well as job allocations: a conservative lower bound for draining nodes.
-    display_total = node_snapshot.total_gpus
-    cpu_total = node_snapshot.cpu_total
-    mem_total_mb = node_snapshot.mem_total_mb
-    unavailable_gpus = node_snapshot.unavailable_gpus
-    unavailable_cpus = node_snapshot.unavailable_cpus
-    unavailable_mem_mb = node_snapshot.unavailable_mem_mb
-    usage_is_upper_bound = any(not task.get("scope_is_subset", True) or task.get("usage_is_upper_bound", False) for task in all_slurm_tasks)
-    free_gpus = max(0, display_total - used_gpus - unavailable_gpus)
-
     # --- 5. Running 列表分页切片 ---
     total_running = len(sorted_all_running)
     paginated_running = sorted_all_running[running_skip : running_skip + running_limit]
@@ -375,23 +383,13 @@ def get_cluster_stats(
         "resources": {
             "node": _node_name,
             "gpu_model": _gpu_model,
-            "total": display_total,
-            "free": free_gpus,
-            "used": used_gpus,
-            "cpu_total": cpu_total,
-            "cpu_free": max(0, cpu_total - used_cpus - unavailable_cpus),
-            "mem_total_mb": mem_total_mb,
-            "mem_free_mb": max(0, mem_total_mb - used_mem_mb - unavailable_mem_mb),
+            **_cluster_resource_totals(node_snapshot),
             "observed_at": observed_at,
             "is_stale": is_stale,
-            "free_is_lower_bound": bool(unavailable_gpus or unavailable_cpus or unavailable_mem_mb or usage_is_upper_bound),
-            "usage_is_upper_bound": usage_is_upper_bound,
-            "allocation_tracked": True,
-            "allocation_inferred": any(task.get("allocation_inferred", False) for task in all_slurm_tasks),
             "accounting_scope": "partition" if tenant_partitions else "cluster",
-            "unavailable_gpus": unavailable_gpus,
-            "unavailable_cpus": unavailable_cpus,
-            "unavailable_mem_mb": unavailable_mem_mb,
+            "unavailable_gpus": node_snapshot.unavailable_gpus,
+            "unavailable_cpus": node_snapshot.unavailable_cpus,
+            "unavailable_mem_mb": node_snapshot.unavailable_mem_mb,
             "node_count": node_snapshot.node_count,
         },
         "running_jobs": paginated_running,

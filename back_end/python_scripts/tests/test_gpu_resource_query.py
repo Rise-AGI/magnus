@@ -77,6 +77,12 @@ class SlurmGpuTests(unittest.TestCase):
                 self.assertEqual(self.module._parse_gpu_resources(value), [])
         self.assertEqual(self.module._parse_gpu_resources("gpu:2,gres/gpu:3"), [(None, 2), (None, 3)])
 
+    def test_null_type_in_detailed_gres_is_an_untyped_allocation(self):
+        for value, count in (("gpu:(null):4(IDX:0-3)", 4), ("gpu:(null):0(IDX:N/A)", 0)):
+            with self.subTest(value=value):
+                self.assertEqual(self.module._parse_gpu_resources(value), [(None, count)])
+                self.assertTrue(self.module._gpu_source_valid(value))
+
     def test_allocated_total_is_not_added_to_typed_tres(self):
         self.assertEqual(
             self.allocation(
@@ -208,7 +214,7 @@ class Field:
 
 
 class ClusterGpuTests(unittest.TestCase):
-    def test_cluster_uses_allocation_instead_of_db_per_node_request(self):
+    def response(self, node_gpus=6):
         source = SERVER / "routers" / "cluster.py"
         tree = ast.parse(source.read_text(encoding="utf-8"))
         route = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "get_cluster_stats")
@@ -228,7 +234,10 @@ class ClusterGpuTests(unittest.TestCase):
         query.all = lambda: next(results)
         manager = SimpleNamespace(
             get_all_running_tasks=lambda **kwargs: [{"id": "123", "gpu_count": 6, "cpu_count": 3, "memory_mb": 3072}],
-            get_node_snapshot=lambda **kwargs: load_queries().NodeSnapshot(6, 32, 64000),
+            get_node_snapshot=lambda **kwargs: load_queries().NodeSnapshot(
+                6, 32, 64000,
+                nodes=(SimpleNamespace(allocated_gpus=node_gpus, allocated_cpus=3, allocated_mem_mb=3072),),
+            ),
         )
         config = {"execution": {"backend": "slurm"}, "cluster": {"scheduling": {"mode": "authoritative"}, "gpus": [
             {"label": "RTX 5090"}, {"label": "A100"}, {"label": "A100"},
@@ -245,21 +254,31 @@ class ClusterGpuTests(unittest.TestCase):
             "_scheduler_sort_key": lambda value: 0,
             "_tenant_partitions": lambda: [],
             "time": time,
-            "validate_allocation_visibility": load_queries().validate_allocation_visibility,
         }
         from test_job_resources import load_resources
         namespace.update(load_resources())
         namespace["JobResourceSummary"] = lambda **values: SimpleNamespace(**values)
         producer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_query_cluster_view")
-        isolated = ast.Module(body=[model_assignment, producer, route], type_ignores=[])
+        totals = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_cluster_resource_totals")
+        isolated = ast.Module(body=[model_assignment, totals, producer, route], type_ignores=[])
         exec(compile(isolated, str(source), "exec", flags=__future__.annotations.compiler_flag), namespace)
-        response = namespace["get_cluster_stats"](db=SimpleNamespace(query=lambda *args: query))
+        return namespace["get_cluster_stats"](db=SimpleNamespace(query=lambda *args: query))
+
+    def test_cluster_uses_allocation_instead_of_db_per_node_request(self):
+        response = self.response()
         self.assertEqual(response["resources"]["used"], 6)
         self.assertEqual(response["resources"]["free"], 0)
         self.assertEqual(response["resources"]["gpu_model"], "RTX 5090 / A100")
         self.assertEqual(response["running_jobs"][0].gpu_count, 2)
         self.assertEqual(response["running_jobs"][0].resource_summary.gpu_count, 6)
         self.assertEqual(response["running_jobs"][0].resource_summary.basis, "allocation")
+
+    def test_cluster_pool_allocation_is_independent_of_whole_job_rows(self):
+        response = self.response(node_gpus=2)
+        self.assertEqual(response["resources"]["gpu_used"], 2)
+        self.assertEqual(response["resources"]["used"], 2)
+        self.assertEqual(response["resources"]["free"], 4)
+        self.assertEqual(response["running_jobs"][0].resource_summary.gpu_count, 6)
 
 
 if __name__ == "__main__":

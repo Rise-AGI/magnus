@@ -93,8 +93,8 @@ const translations = {
   "cluster.newJob": { zh: "新建任务", en: "New Job" },
   "cluster.myActiveJobs": { zh: "我负责的活跃任务", en: "Active Jobs I Oversee" },
   "cluster.noActiveJobs": { zh: "暂无活跃任务。", en: "No active jobs." },
-  "cluster.availableGpus": { zh: "可用 GPU", en: "Available GPUs" },
-  "cluster.availableCpuMem": { zh: "CPU / 内存", en: "CPUs / Memory" },
+  "cluster.allocatedGpus": { zh: "已分配 GPU", en: "Allocated GPUs" },
+  "cluster.allocatedCpuMem": { zh: "已分配 CPU / 内存", en: "Allocated CPUs / Memory" },
   "cluster.cores": { zh: "核心", en: "cores" },
   "cluster.activeJobs": { zh: "活跃任务", en: "Active Jobs" },
   "cluster.activeJobsDesc": { zh: "正在集群上执行", en: "Currently executing on cluster" },
@@ -104,7 +104,6 @@ const translations = {
   "cluster.noRunningJobs": { zh: "暂无运行中的任务。", en: "No running jobs." },
   "cluster.queuedJobs": { zh: "排队或准备中的任务", en: "Queued or Preparing Jobs" },
   "cluster.queueEmpty": { zh: "队列为空。", en: "Queue is empty." },
-  "cluster.resourcesGpuAllocated": { zh: "GPU 分配：{count}", en: "GPU allocated: {count}" },
 
   // ===== Jobs =====
   "jobs.title": { zh: "任务管理", en: "Job Management" },

@@ -170,17 +170,17 @@ export default function ClusterPage() {
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
           <div className="flex items-center gap-2 text-cyan-400 mb-2">
             <Cpu className="w-4 h-4" />
-            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableCpuMem")}</span>
+            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.allocatedCpuMem")}</span>
           </div>
           {cluster ? (
             <>
               <div className="flex items-baseline gap-1.5 mb-2">
-                <span className="text-3xl font-bold text-white">{resourceInfo?.cpuFree}</span>
+                <span className="text-3xl font-bold text-white">{resourceInfo?.cpuAllocated}</span>
                 <span className="text-zinc-500 text-sm">/ {cluster.resources.cpu_total} {t("cluster.cores")}</span>
               </div>
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs">
                 <span className="font-mono">RAM:</span>
-                <span>{resourceInfo?.memoryFree} / {resourceInfo?.memoryTotal}</span>
+                <span>{resourceInfo?.memoryAllocated} / {resourceInfo?.memoryTotal}</span>
               </div>
             </>
           ) : clusterRefreshFailed ? (
@@ -193,19 +193,18 @@ export default function ClusterPage() {
         <div className="bg-zinc-900/40 border border-zinc-800 p-5 rounded-xl backdrop-blur-sm flex flex-col justify-between h-full">
           <div className="flex items-center gap-2 text-emerald-400 mb-2">
             <Activity className="w-4 h-4" />
-            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.availableGpus")}</span>
+            <span className="text-sm font-bold uppercase tracking-wider">{t("cluster.allocatedGpus")}</span>
           </div>
           {cluster ? (
             <>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-3xl font-bold text-white">{resourceInfo?.gpuFree}</span>
+                <span className="text-3xl font-bold text-white">{resourceInfo?.gpuAllocated}</span>
                 <span className="text-zinc-500 text-sm">/ {cluster.resources.total}</span>
               </div>
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs font-mono">
                 <Server className="w-3 h-3" />
                 {cluster.resources.gpu_model}
               </div>
-              <p className="mt-1 text-xs text-zinc-500">{t("cluster.resourcesGpuAllocated", { count: resourceInfo?.gpuAllocated ?? t("jobResources.unknown") })}</p>
             </>
           ) : clusterRefreshFailed ? (
             <div className="text-3xl font-bold text-zinc-500">{t("jobResources.unknown")}</div>

@@ -43,66 +43,72 @@ const snapshot = {
 
 test("cluster resource numbers keep binary units and allocation semantics", () => {
   const view = presentClusterResources(snapshot, t);
-  assert.equal(view.cpuFree, "64");
-  assert.equal(view.gpuFree, "4");
+  assert.equal(view.cpuAllocated, "64");
   assert.equal(view.gpuAllocated, "2");
-  assert.equal(view.memoryFree, "250 GiB");
+  assert.equal(view.memoryAllocated, "250 GiB");
   assert.equal(view.memoryTotal, "500 GiB");
 });
 
 test("local allocation-untracked capacity never appears fully free", () => {
   const view = presentClusterResources({ ...snapshot, accounting_scope: "local", allocation_tracked: false, cpu_free: 128, free: 8, mem_free_mb: 512000 }, t);
-  assert.equal(view.cpuFree, "Unknown");
-  assert.equal(view.gpuFree, "Unknown");
+  assert.equal(view.cpuAllocated, "Unknown");
   assert.equal(view.gpuAllocated, "Unknown");
-  assert.equal(view.memoryFree, "Unknown");
+  assert.equal(view.memoryAllocated, "Unknown");
   assert.equal(view.memoryTotal, "500 GiB");
 });
 
-test("unavailable capacity preserves lower-bound free counts without changing totals", () => {
-  const view = presentClusterResources({ ...snapshot, free_is_lower_bound: true, unavailable_cpus: 32, unavailable_gpus: 2, unavailable_mem_mb: 128000 }, t);
-  assert.equal(view.cpuFree, "≥ 64");
-  assert.equal(view.gpuFree, "≥ 4");
-  assert.equal(view.memoryFree, "≥ 250 GiB");
+test("node allocations replace bounds even when unschedulable capacity overlaps", () => {
+  const view = presentClusterResources({ ...snapshot, gpu_used: 6, cpu_used: 96, mem_used_mb: 384000, free: 0, free_is_lower_bound: true, unavailable_cpus: 32, unavailable_gpus: 4, unavailable_mem_mb: 128000 }, t);
+  assert.equal(view.cpuAllocated, "96");
+  assert.equal(view.gpuAllocated, "6");
+  assert.equal(view.memoryAllocated, "375 GiB");
   assert.equal(view.memoryTotal, "500 GiB");
 });
 
 test("backend stale data and a failed frontend refresh both mark retained values stale", () => {
   for (const view of [presentClusterResources({ ...snapshot, is_stale: true }, t), presentClusterResources(snapshot, t, true)]) {
     assert.equal(view.stale, true);
-    assert.equal(view.cpuFree, "64");
-    assert.equal(view.memoryFree, "250 GiB");
+    assert.equal(view.cpuAllocated, "64");
+    assert.equal(view.memoryAllocated, "250 GiB");
   }
 });
 
-test("cross-boundary whole-job allocations are shown as upper bounds", () => {
+test("old cross-boundary bounds are not presented as exact allocations", () => {
   const view = presentClusterResources({ ...snapshot, usage_is_upper_bound: true, free_is_lower_bound: true }, t);
-  assert.equal(view.gpuAllocated, "≤ 2");
-  assert.equal(view.gpuFree, "≥ 4");
+  assert.equal(view.gpuAllocated, "Unknown");
+  assert.equal(view.cpuAllocated, "Unknown");
 });
 
-test("inferred allocation uses approximate values instead of strict cross-pool bounds", () => {
+test("old inferred allocation stays unknown without adding UI qualifiers", () => {
   const view = presentClusterResources({ ...snapshot, allocation_inferred: true, usage_is_upper_bound: true, free_is_lower_bound: true }, t);
-  assert.equal(view.gpuAllocated, "≈ 2");
-  assert.equal(view.gpuFree, "≈ 4");
-  assert.equal(view.cpuFree, "≈ 64");
-  assert.equal(view.memoryFree, "≈ 250 GiB");
+  assert.equal(view.gpuAllocated, "Unknown");
+  assert.equal(view.cpuAllocated, "Unknown");
+  assert.equal(view.memoryAllocated, "Unknown");
   assert.equal(view.memoryTotal, "500 GiB");
 });
 
 test("old API values remain readable without freshness and accounting metadata", () => {
   const { observed_at, is_stale, allocation_tracked, accounting_scope, ...old } = snapshot;
   const view = presentClusterResources(old, t);
-  assert.equal(view.cpuFree, "64");
-  assert.equal(view.gpuFree, "4");
+  assert.equal(view.cpuAllocated, "64");
+  assert.equal(view.gpuAllocated, "2");
   assert.equal(view.memoryTotal, "500 GiB");
 });
 
 test("unknown resource values have Chinese translations", () => {
   const view = presentClusterResources({ ...snapshot, allocation_tracked: false }, translate("zh"));
-  assert.equal(view.cpuFree, "未知");
-  assert.equal(view.gpuFree, "未知");
-  assert.equal(view.memoryFree, "未知");
+  assert.equal(view.cpuAllocated, "未知");
+  assert.equal(view.gpuAllocated, "未知");
+  assert.equal(view.memoryAllocated, "未知");
+});
+
+test("nullable node dimensions preserve other known allocations", () => {
+  const view = presentClusterResources({ ...snapshot, allocation_tracked: false, cpu_used: null, gpu_used: 2, mem_used_mb: 256000 }, t);
+  assert.equal(view.cpuAllocated, "Unknown");
+  assert.equal(view.gpuAllocated, "2");
+  assert.equal(view.memoryAllocated, "250 GiB");
+  assert.equal(t("cluster.allocatedCpuMem"), "Allocated CPUs / Memory");
+  assert.equal(translate("zh")("cluster.allocatedGpus"), "已分配 GPU");
 });
 
 test("system series names identify devices and ranks without exposing telemetry metadata", () => {

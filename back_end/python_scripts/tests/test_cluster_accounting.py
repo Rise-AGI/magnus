@@ -194,6 +194,96 @@ class AllocationTests(unittest.TestCase):
         self.assertEqual(self.manager.check_job_status("123"), "COMPLETED")
 
 
+class ClusterCardAccountingTests(unittest.TestCase):
+    def setUp(self):
+        self.module = load_queries()
+        self.manager = self.module._ResourceQueryMixin()
+        source = SERVER / "routers" / "cluster.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        definition = next(node for node in tree.body if getattr(node, "name", None) == "_cluster_resource_totals")
+        namespace = {}
+        exec(compile(ast.Module(body=[definition], type_ignores=[]), str(source), "exec"), namespace)
+        self.totals = namespace["_cluster_resource_totals"]
+
+    def snapshot(self, nodes):
+        self.manager._transport = FakeTransport(nodes, [])
+        return self.manager.get_node_snapshot(_raise_on_error=True)
+
+    def test_draining_allocations_are_counted_once(self):
+        snapshot = self.snapshot(
+            "NodeName=one State=MIXED+DRAIN CPUTot=16 RealMemory=65536 Gres=gpu:a100:4 AllocTRES=cpu=12,mem=32G,gres/gpu=3\n"
+            "NodeName=two State=IDLE CPUTot=16 RealMemory=65536 Gres=gpu:a100:4 GresUsed=gpu:a100:0(IDX:N/A) CPUAlloc=0 AllocMem=0 AllocTRES=\n"
+        )
+        self.assertEqual(snapshot.unavailable_gpus, 4)
+        result = self.totals(snapshot)
+        self.assertEqual((result["gpu_used"], result["free"], result["total"]), (3, 5, 8))
+        self.assertEqual((result["cpu_used"], result["cpu_free"], result["cpu_total"]), (12, 20, 32))
+        self.assertEqual((result["mem_used_mb"], result["mem_free_mb"]), (32768, 98304))
+        self.assertIs(result["allocation_tracked"], True)
+
+    def test_unknown_dimension_does_not_hide_known_dimensions_or_become_zero(self):
+        snapshot = self.snapshot(
+            "NodeName=one State=MIXED CPUTot=16 RealMemory=65536 Gres=gpu:a100:4 AllocTRES=cpu=4,mem=16G,gres/gpu=2\n"
+            "NodeName=two State=IDLE CPUTot=16 RealMemory=65536 Gres=gpu:a100:4 GresUsed=gpu:a100:0(IDX:N/A) AllocMem=0 AllocTRES=\n"
+        )
+        result = self.totals(snapshot)
+        self.assertIsNone(result["cpu_used"])
+        self.assertEqual(result["gpu_used"], 2)
+        self.assertEqual(result["mem_used_mb"], 16384)
+        self.assertIs(result["allocation_tracked"], False)
+
+    def test_reserved_idle_capacity_is_not_misreported_as_allocated(self):
+        snapshot = self.snapshot("NodeName=one State=RESERVED CPUTot=16 RealMemory=65536 Gres=gpu:a100:4 GresUsed=gpu:a100:0(IDX:N/A) CPUAlloc=0 AllocMem=0 AllocTRES=")
+        result = self.totals(snapshot)
+        self.assertEqual((result["gpu_used"], result["cpu_used"], result["mem_used_mb"]), (0, 0, 0))
+        self.assertEqual((result["free"], result["cpu_free"], result["mem_free_mb"]), (4, 16, 65536))
+        self.assertFalse(snapshot.nodes[0].schedulable)
+
+    def test_empty_node_observation_is_unknown_not_fully_free(self):
+        result = self.totals(self.module.NodeSnapshot(8, 128, 65536))
+        self.assertIsNone(result["gpu_used"])
+        self.assertIsNone(result["cpu_used"])
+        self.assertIsNone(result["mem_used_mb"])
+        self.assertIs(result["allocation_tracked"], False)
+
+    def test_gres_used_counts_busy_gpus_without_gpu_tres_accounting(self):
+        snapshot = self.snapshot(
+            "NodeName=one State=MIXED CPUTot=16 RealMemory=65536 Gres=gpu:a100:4 "
+            "GresUsed=gpu:a100:2(IDX:0,2) AllocTRES=cpu=8,mem=16G"
+        )
+        self.assertIn("--details", self.manager._transport.commands[0])
+        result = self.totals(snapshot)
+        self.assertEqual(result["gpu_used"], 2)
+        self.assertIs(result["allocation_tracked"], True)
+
+    def test_untyped_gres_used_preserves_null_model_placeholder(self):
+        snapshot = self.snapshot(
+            "NodeName=one State=ALLOCATED CPUTot=40 RealMemory=321200 Gres=gpu:4 "
+            "GresUsed=gpu:(null):4(IDX:0-3) AllocTRES=cpu=40,mem=321200M,gres/gpu=4"
+        )
+        result = self.totals(snapshot)
+        self.assertEqual((result["gpu_used"], result["free"]), (4, 0))
+        self.assertIs(result["allocation_tracked"], True)
+
+    def test_missing_gpu_evidence_is_unknown_while_other_dimensions_are_known(self):
+        snapshot = self.snapshot(
+            "NodeName=one State=MIXED CPUTot=16 RealMemory=65536 Gres=gpu:a100:4 "
+            "AllocTRES=cpu=8,mem=16G"
+        )
+        result = self.totals(snapshot)
+        self.assertIsNone(result["gpu_used"])
+        self.assertEqual((result["cpu_used"], result["mem_used_mb"]), (8, 16384))
+        self.assertIs(result["allocation_tracked"], False)
+
+    def test_explicit_zero_gpu_tres_and_gpu_less_nodes_are_known_zero(self):
+        for resources in ("Gres=gpu:a100:4 AllocTRES=cpu=8,mem=16G,gres/gpu=0", "Gres=(null) AllocTRES=cpu=8,mem=16G"):
+            with self.subTest(resources=resources):
+                snapshot = self.snapshot("NodeName=one State=MIXED CPUTot=16 RealMemory=65536 " + resources)
+                result = self.totals(snapshot)
+                self.assertEqual(result["gpu_used"], 0)
+                self.assertIs(result["allocation_tracked"], True)
+
+
 class CacheAndHistoryTests(unittest.TestCase):
     def test_cluster_query_failure_is_503_before_returning_fake_free_resources(self):
         path = SERVER / "routers" / "cluster.py"

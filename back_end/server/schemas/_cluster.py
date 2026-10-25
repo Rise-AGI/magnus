@@ -17,6 +17,9 @@ class ClusterResources(BaseModel):
     cpu_free: int
     mem_total_mb: int
     mem_free_mb: int
+    gpu_used: Optional[int] = None
+    cpu_used: Optional[int] = None
+    mem_used_mb: Optional[int] = None
     observed_at: Optional[datetime] = None
     is_stale: bool = False
     free_is_lower_bound: bool = False

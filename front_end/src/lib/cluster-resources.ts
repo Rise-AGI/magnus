@@ -11,6 +11,9 @@ export interface ClusterResources {
   cpu_free: number;
   mem_total_mb: number;
   mem_free_mb: number;
+  gpu_used?: number | null;
+  cpu_used?: number | null;
+  mem_used_mb?: number | null;
   observed_at?: string | null;
   is_stale?: boolean;
   free_is_lower_bound?: boolean;
@@ -31,16 +34,20 @@ export function presentClusterResources(
 ) {
   const stale = refreshFailed || resources.is_stale === true;
   const tracked = resources.allocation_tracked !== false;
-  const lowerBound = tracked && resources.free_is_lower_bound === true;
-  const inferred = tracked && resources.allocation_inferred === true;
+  const oldFreeIsExact = tracked && !resources.free_is_lower_bound && !resources.allocation_inferred;
+  const oldUsageIsExact = tracked && !resources.usage_is_upper_bound && !resources.allocation_inferred;
   const unknown = t("jobResources.unknown");
-  const prefix = inferred ? "≈ " : lowerBound ? "≥ " : "";
+  const cpu = resources.cpu_used !== undefined ? resources.cpu_used
+    : oldFreeIsExact ? Math.max(0, resources.cpu_total - resources.cpu_free) : null;
+  const gpu = resources.gpu_used !== undefined ? resources.gpu_used
+    : oldUsageIsExact ? resources.used : null;
+  const memory = resources.mem_used_mb !== undefined ? resources.mem_used_mb
+    : oldFreeIsExact ? Math.max(0, resources.mem_total_mb - resources.mem_free_mb) : null;
   return {
     stale,
-    cpuFree: tracked ? `${prefix}${resources.cpu_free}` : unknown,
-    gpuFree: tracked ? `${prefix}${resources.free}` : unknown,
-    gpuAllocated: tracked ? `${inferred ? "≈ " : resources.usage_is_upper_bound ? "≤ " : ""}${resources.used}` : unknown,
-    memoryFree: tracked ? `${prefix}${formatResourceMemory(resources.mem_free_mb * 1024 ** 2)}` : unknown,
+    cpuAllocated: cpu == null ? unknown : `${cpu}`,
+    gpuAllocated: gpu == null ? unknown : `${gpu}`,
+    memoryAllocated: memory == null ? unknown : formatResourceMemory(memory * 1024 ** 2),
     memoryTotal: formatResourceMemory(resources.mem_total_mb * 1024 ** 2),
   };
 }

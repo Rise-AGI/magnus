@@ -118,7 +118,8 @@ def _parse_gpu_resources(
     """Read GPU counts from GRES or named TRES without interpreting device IDs.
 
     Slurm annotates each GRES with ``(S:0-1)`` or ``(IDX:0,2)``. Strip those
-    groups before splitting commas/colons. TRES uses ``gres/gpu[:type]=N``;
+    groups before splitting commas/colons, preserving the ``(null)`` type
+    placeholder in detailed GresUsed. TRES uses ``gres/gpu[:type]=N``;
     GRES/tres_per_node uses ``[gres/]gpu[:type]:N``. Other resources, including
     gpumem/gpuutil, are not GPU counts. Preserve the untyped entry separately:
     in allocated TRES it is the aggregate, not an additional allocation.
@@ -126,7 +127,7 @@ def _parse_gpu_resources(
     if not resources:
         return []
     entries = []
-    for item in re.sub(r"\([^)]*\)", "", resources).split(","):
+    for item in re.sub(r"\((?!null\))[^)]*\)", "", resources).split(","):
         parts = item.strip().replace("=", ":").split(":")
         if (
             len(parts) not in (2, 3)
@@ -135,7 +136,7 @@ def _parse_gpu_resources(
             or (len(parts) == 3 and not parts[1])
         ):
             continue
-        model = parts[1].lower() if len(parts) == 3 else None
+        model = parts[1].lower() if len(parts) == 3 and parts[1] != "(null)" else None
         entries.append((model, int(parts[-1])))
     return entries
 
@@ -188,7 +189,7 @@ def _gpu_source_valid(
         return True
     if not isinstance(resources, str):
         return False
-    for token in re.sub(r"\([^)]*\)", "", resources).split(","):
+    for token in re.sub(r"\((?!null\))[^)]*\)", "", resources).split(","):
         if re.match(r"^(?:gres/)?gpu(?::|=|$)", token.strip()) and not _parse_gpu_resources(token):
             return False
     return True
@@ -418,9 +419,10 @@ class NodeCapacity:
 class NodeSnapshot:
     """Configured capacity and the portion unavailable for immediate placement.
 
-    Usage comes from held job allocations: node CPUAlloc/AllocMem can clear
-    before completing jobs release their resources. Per-node capacities exclude
-    reserved CPU/memory; top-level totals retain configured inventory.
+    Node allocation describes Slurm's current node accounting. Scheduling also
+    checks held job allocations: CPUAlloc/AllocMem can clear during CG.
+    Per-node capacities exclude reserved CPU/memory; top-level totals retain
+    configured inventory.
     """
 
     total_gpus: int
@@ -506,9 +508,8 @@ class _ResourceQueryMixin:
     ) -> NodeSnapshot:
         """Read a deduplicated node inventory for a union of partitions.
 
-        Configured totals include offline nodes. Unavailable dimensions expose
-        that distinction; subtracting them as well as job usage gives a safe
-        lower bound when a draining node still has running allocations.
+        Configured totals include offline nodes. Allocation and admission
+        restrictions are separate: a draining node can still hold running jobs.
         """
         partitions = list(dict.fromkeys(
             name.strip()
@@ -517,7 +518,7 @@ class _ResourceQueryMixin:
         ))
         try:
             result = self._transport.run(
-                ["scontrol", "show", "node", "--oneliner", "--future"],
+                ["scontrol", "show", "node", "--oneliner", "--future", "--details"],
                 check = True,
                 timeout = 30,
             )
@@ -555,9 +556,22 @@ class _ResourceQueryMixin:
                 gpus = _gpu_totals_by_type(parsed_gpus, "unknown")
                 state = fields.get("State", "UNKNOWN")
                 allocated = fields.get("AllocTRES")
-                if not _gpu_source_valid(allocated):
+                gres_used = fields.get("GresUsed")
+                if not _gpu_source_valid(allocated) or not _gpu_source_valid(gres_used):
                     raise ValueError(f"Node {name} has invalid allocated GPU data")
-                allocated_gpus = _job_gpu_allocation({"tres_alloc_str": allocated}, "unknown")[0] if allocated is not None else None
+                # GPU TRES accounting is optional; omission cannot prove zero usage.
+                if _parse_gpu_resources(gres_used):
+                    allocated_gpus = _job_gpu_allocation(
+                        {"tres_alloc_str": gres_used},
+                        "unknown",
+                    )[0]
+                elif _parse_gpu_resources(allocated):
+                    allocated_gpus = _job_gpu_allocation(
+                        {"tres_alloc_str": allocated},
+                        "unknown",
+                    )[0]
+                else:
+                    allocated_gpus = None if any(gpus.values()) else 0
                 allocated_cpus = _parse_tres_int(allocated, "cpu")
                 allocated_memory = _parse_tres_mem_mb(allocated or "")
                 if allocated_cpus is None and fields.get("CPUAlloc", "").isdecimal():
