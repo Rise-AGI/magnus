@@ -93,6 +93,7 @@ const translations = {
   "cluster.newJob": { zh: "新建任务", en: "New Job" },
   "cluster.myActiveJobs": { zh: "我负责的活跃任务", en: "Active Jobs I Oversee" },
   "cluster.noActiveJobs": { zh: "暂无活跃任务。", en: "No active jobs." },
+  "cluster.loadFailed": { zh: "加载失败", en: "Could not load jobs" },
   "cluster.availableGpus": { zh: "可用 GPU", en: "Available GPUs" },
   "cluster.availableCpuMem": { zh: "CPU / 内存", en: "CPUs / Memory" },
   "cluster.cores": { zh: "核心", en: "cores" },

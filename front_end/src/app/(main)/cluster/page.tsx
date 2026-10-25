@@ -35,6 +35,8 @@ export default function ClusterPage() {
   const [totalMyJobs, setTotalMyJobs] = useState(0);
   const [loading, setLoading] = useState(true);
   const [clusterRefreshFailed, setClusterRefreshFailed] = useState(false);
+  const [loadedPages, setLoadedPages] = useState({ my: "", running: "", pending: "" });
+  const [settledRequestKey, setSettledRequestKey] = useState("");
   const fetchRequest = useRef<{ key: string; active: boolean } | null>(null);
 
   // Each panel keeps its page in the URL under its own prefix so the three
@@ -46,8 +48,13 @@ export default function ClusterPage() {
   const { page: pendingPage, pageSize: pendingSize, setPage: setPendingPage, setPageSize: setPendingSize } =
     useUrlPagination({ prefix: "pending", defaultPageSize: 5 });
 
+  const myKey = `${myPage}/${mySize}`;
+  const runningKey = `${runningPage}/${runningSize}`;
+  const pendingKey = `${pendingPage}/${pendingSize}`;
+  const requestKey = `${myKey}/${runningKey}/${pendingKey}`;
+
   const fetchData = useCallback(async (isBackground = false) => {
-    const key = [myPage, mySize, runningPage, runningSize, pendingPage, pendingSize].join("/");
+    const key = requestKey;
     if (fetchRequest.current?.key === key && fetchRequest.current.active) return;
     const request = { key, active: true };
     fetchRequest.current = request;
@@ -120,6 +127,11 @@ export default function ClusterPage() {
         setTotalMyJobs(myJobsData.length);
       }
 
+      setLoadedPages(previous => ({
+        my: myJobsData && (myJobsData.items || Array.isArray(myJobsData)) ? myKey : previous.my,
+        running: clusterData ? runningKey : previous.running,
+        pending: clusterData ? pendingKey : previous.pending,
+      }));
       if (clusterData) setCluster(clusterData);
     } catch (e) {
       if (request !== fetchRequest.current) return;
@@ -127,9 +139,12 @@ export default function ClusterPage() {
       setClusterRefreshFailed(true);
     } finally {
       request.active = false;
-      if (request === fetchRequest.current) setLoading(false);
+      if (request === fetchRequest.current) {
+        setSettledRequestKey(key);
+        setLoading(false);
+      }
     }
-  }, [myPage, mySize, runningPage, runningSize, pendingPage, pendingSize]);
+  }, [myPage, mySize, runningPage, runningSize, pendingPage, pendingSize, myKey, runningKey, pendingKey, requestKey]);
 
   const {
     drawerProps,
@@ -144,6 +159,10 @@ export default function ClusterPage() {
   usePolling(() => fetchData(true), POLL_INTERVAL);
 
   const resourceInfo = cluster ? presentClusterResources(cluster.resources, t, clusterRefreshFailed) : null;
+  const waitingForPage = loading || settledRequestKey !== requestKey;
+  const myPageReady = loadedPages.my === myKey;
+  const runningPageReady = loadedPages.running === runningKey;
+  const pendingPageReady = loadedPages.pending === pendingKey;
 
   return (
     <div className="pb-20 relative min-h-[calc(100vh-8rem)]">
@@ -258,11 +277,11 @@ export default function ClusterPage() {
 
           <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <JobTable
-              jobs={activeJobs}
-              loading={loading && activeJobs.length === 0}
+              jobs={myPageReady ? activeJobs : []}
+              loading={!myPageReady && waitingForPage}
               onClone={handleCloneJob}
               onTerminate={onClickTerminate}
-              emptyMessage={t("cluster.noActiveJobs")}
+              emptyMessage={myPageReady ? t("cluster.noActiveJobs") : t("cluster.loadFailed")}
               className="border-none min-h-[200px]"
             />
             {totalMyJobs > 0 && (
@@ -289,11 +308,11 @@ export default function ClusterPage() {
           </h2>
           <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <JobTable
-              jobs={cluster?.running_jobs || []}
-              loading={loading && !cluster}
+              jobs={runningPageReady ? cluster?.running_jobs || [] : []}
+              loading={!runningPageReady && waitingForPage}
               onClone={handleCloneJob}
               onTerminate={onClickTerminate}
-              emptyMessage={clusterRefreshFailed && !cluster ? t("jobResources.unknown") : t("cluster.noRunningJobs")}
+              emptyMessage={runningPageReady ? t("cluster.noRunningJobs") : t("cluster.loadFailed")}
               className="border-none min-h-[175px]"
             />
             {(cluster?.total_running || 0) > 0 && (
@@ -320,11 +339,11 @@ export default function ClusterPage() {
           </h2>
           <div className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden">
             <JobTable
-              jobs={cluster?.pending_jobs || []}
-              loading={loading && !cluster}
+              jobs={pendingPageReady ? cluster?.pending_jobs || [] : []}
+              loading={!pendingPageReady && waitingForPage}
               onClone={handleCloneJob}
               onTerminate={onClickTerminate}
-              emptyMessage={clusterRefreshFailed && !cluster ? t("jobResources.unknown") : t("cluster.queueEmpty")}
+              emptyMessage={pendingPageReady ? t("cluster.queueEmpty") : t("cluster.loadFailed")}
               className="border-none min-h-[175px]"
             />
             {(cluster?.total_pending || 0) > 0 && (

@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -36,8 +36,6 @@ export function useUrlPagination(
   const pageKey = `${prefix}page`;
   const sizeKey = `${prefix}page_size`;
 
-  const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const pageRaw = Number(searchParams.get(pageKey));
@@ -48,15 +46,17 @@ export function useUrlPagination(
 
   const setParams = useCallback(
     (patch: Record<string, string | number | null>) => {
-      const params = new URLSearchParams(window.location.search);
+      const url = new URL(window.location.href);
+      const params = url.searchParams;
       for (const [key, value] of Object.entries(patch)) {
         if (value === null || value === "") params.delete(key);
         else params.set(key, String(value));
       }
-      const qs = params.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      // These lists fetch on the client; a route transition would delay feedback
+      // behind an unnecessary RSC request. Next syncs native history with its hooks.
+      window.history.replaceState(null, "", url);
     },
-    [router, pathname],
+    [],
   );
 
   const setPage = useCallback(
