@@ -181,11 +181,13 @@ export default function ClusterPage() {
         html { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
-      <ExecutionTargetSelect value={executionTarget} onChange={selectTarget} className="mb-6 max-w-xs" />
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">{t("nav.cluster")}</h1>
-          <p className="text-zinc-500 text-sm mt-1">{t("cluster.welcome", { name: currentUser?.name || "" })}</p>
+      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">{t("nav.cluster")}</h1>
+            <p className="text-zinc-500 text-sm mt-1">{t("cluster.welcome", { name: currentUser?.name || "" })}</p>
+          </div>
+          <ExecutionTargetSelect value={executionTarget} onChange={selectTarget} className="w-full max-w-xs sm:w-64" />
         </div>
         <button
           onClick={handleNewJob}
