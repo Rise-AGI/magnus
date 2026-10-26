@@ -1,6 +1,8 @@
 """Execution identities and isolated configuration views for one Magnus site."""
 from copy import deepcopy
 from dataclasses import dataclass
+import os
+import posixpath
 import re
 from typing import Any, Callable
 
@@ -39,6 +41,18 @@ class ExecutionTarget:
         if transport["mode"] == "ssh":
             return transport["ssh"]["remote_root"]
         return self.config["server"]["root"]
+
+    @property
+    def image_cache_key(
+        self,
+    ) -> tuple[str, ...]:
+        transport = self.config["transport"]
+        if transport["mode"] == "ssh":
+            ssh = transport["ssh"]
+            # Partition targets can share a directory even through different
+            # control sockets. Reclamation must use that directory's identity.
+            return ("ssh", ssh["host"], ssh["user"], posixpath.normpath(self.remote_root))
+        return ("local", os.path.normcase(os.path.abspath(self.remote_root)))
 
 
 def execution_targets(

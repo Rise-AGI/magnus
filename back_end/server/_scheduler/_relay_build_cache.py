@@ -9,6 +9,7 @@ import threading
 from sqlalchemy import or_
 
 from .._execution_targets import ExecutionTarget
+from .._magnus_config import configured_execution_targets
 from .._size_utils import _parse_size_string
 from .._slurm_manager._transport import _Transport
 from ..database import SessionLocal
@@ -18,7 +19,7 @@ from ..models import Job, JobStatus
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 # Scheduler submission runs in worker threads. Keep the DB protection snapshot,
 # remote reclamation and entire transfer in one critical section.
-_STAGING_LOCKS: dict[str, threading.Lock] = {}
+_STAGING_LOCKS: dict[tuple[str, ...], threading.Lock] = {}
 _STAGING_LOCKS_GUARD = threading.Lock()
 _RECEIVER_PATH = Path(__file__).with_name("_relay_build_receiver.py")
 
@@ -47,12 +48,18 @@ def stage_built_sif(
     )
     config = target.config["execution"]["image_build"]
     timeout = int(config["timeout_seconds"])
+    cache_key = target.image_cache_key
+    sharing_targets = [
+        candidate
+        for candidate in configured_execution_targets.values()
+        if candidate.image_cache_key == cache_key
+    ]
     with _STAGING_LOCKS_GUARD:
-        staging_lock = _STAGING_LOCKS.setdefault(target.id, threading.Lock())
+        staging_lock = _STAGING_LOCKS.setdefault(cache_key, threading.Lock())
     with staging_lock:
         with SessionLocal() as db:
             records = db.query(Job.id, Job.build_result, Job.slurm_job_id).filter(
-                target.job_filter(Job),
+                or_(*(candidate.job_filter(Job) for candidate in sharing_targets)),
                 Job.build_result.isnot(None),
                 or_(
                     Job.status.notin_([JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED]),

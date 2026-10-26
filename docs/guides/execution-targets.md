@@ -95,12 +95,20 @@ arguments are keyword-only and do not change existing positional calls. Explicit
 target selection checks server capabilities before submission so an old server
 cannot silently ignore the field. SDK source changes do not imply a PyPI release.
 
-Slurm IDs are scoped by target in reconciliation, cancellation, resource matching,
-snapshots and remote cache protection. Each scheduler worker has at most one
+Slurm IDs are scoped by target in reconciliation, cancellation, resource matching
+and snapshots. Each scheduler worker has at most one
 reconciliation and one submission pass in flight. Slow remote I/O on one target
 does not block another. Local workspace reclamation remains site-wide and protects
 in-flight work from every target. Cluster query caches and authentication locks
 are independent per target/control socket.
+
+Targets for partitions of the same cluster may inherit the same transport and
+remote root. Remote built-image cache locking and protection cover all targets
+using the same SSH host, account and normalized root, including legacy Jobs and
+Jobs still releasing resources. Different control sockets do not split that
+cache. Configure a single canonical host name and root for a shared directory;
+Magnus does not resolve equivalent host aliases or remote directory symlinks.
+Independent remote caches retain independent transfer locks and protection sets.
 
 ## Official access clients and renewal
 
