@@ -15,7 +15,7 @@ from ..schemas import ClusterStatsResponse, JobListItem, JobResourceSummary, Pag
 from .._job_resources import allocated_job_resources, resource_mode_for_execution
 from .auth import get_current_user
 from .._magnus_config import magnus_config, is_local_mode, configured_execution_targets
-from .._execution_targets import select_execution_target
+from .._execution_targets import ExecutionTarget, select_execution_target
 from .._slurm_manager import SlurmManager
 from .._slurm_manager._resource_query import resource_partitions
 
@@ -162,6 +162,16 @@ def _scheduler_sort_key(job):
     return (p_score, -job.created_at.timestamp())
 
 
+def _prefer_target(
+    jobs: list,
+    target: ExecutionTarget,
+) -> None:
+    jobs.sort(key=lambda job: not (
+        job.execution_target == target.id
+        or (target.is_default and job.execution_target is None)
+    ))
+
+
 def _resolve_target(
     target_id: str | None,
 ):
@@ -270,12 +280,18 @@ def get_cluster_stats(
 
     running_slurm_ids = [task["id"] for task in all_slurm_tasks]
 
-    # --- 2. 数据库元数据匹配 ---
+    # Partitions of one controller share Slurm IDs; independent controllers do
+    # not. Match only jobs reached through the selected Slurm connection.
+    connected_targets = [
+        candidate
+        for candidate in configured_execution_targets.values()
+        if candidate.slurm_connection_key == target.slurm_connection_key
+    ]
     magnus_jobs_orm = []
     if running_slurm_ids:
         magnus_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
-            target.job_filter(models.Job),
-            models.Job.slurm_job_id.in_(running_slurm_ids)
+            or_(*(candidate.job_filter(models.Job) for candidate in connected_targets)),
+            models.Job.slurm_job_id.in_(running_slurm_ids),
         ).all()
 
     magnus_job_map = {job.slurm_job_id: job for job in magnus_jobs_orm}
@@ -287,18 +303,14 @@ def get_cluster_stats(
         slurm_id = task["id"]
 
         if slurm_id in magnus_job_map:
-            # Case A: Magnus 任务。直接用 DB 真实 status，不强制改写为 RUNNING：
-            # slurm_job_id 持有 ⇔ SLURM 端仍占资源 (见 models/_job.py docstring)，
-            # 而 SLURM 端占资源 ≠ "用户视角下还在跑"——TERMINATED / PAUSED 状态
-            # 的 job 在 SLURM CG (COMPLETING) 阶段也持有 slurm_job_id，强制改成
-            # RUNNING 会让用户看到"我刚 cancel 的 job 仍在 RUNNING 30-60s"，比
-            # 老 bug "显示成 external" 体感更怪。让真实 status 透传，前端可以
-            # 据此呈现 "Terminated (releasing)" 等复合语义。
+            # Cancellation/preemption stays visible while Slurm releases the
+            # allocation; a live row must not revive the DB lifecycle state.
             job_orm = magnus_job_map[slurm_id]
+            job_target = select_execution_target(configured_execution_targets, job_orm.execution_target)
             job_resp = JobListItem.model_validate(job_orm)
             job_resp.resource_summary = JobResourceSummary(**allocated_job_resources(
                 task,
-                mode = resource_mode_for_execution(config["execution"]),
+                mode = resource_mode_for_execution(job_target.config["execution"]),
             ))
             all_running_jobs.append(job_resp)
 
@@ -356,7 +368,13 @@ def get_cluster_stats(
             )
             all_running_jobs.append(mock_job)
 
-    # --- 4. 排序 & 资源计算 (基于全量数据) ---
+    observed_job_ids = {job.id for job in magnus_jobs_orm}
+    other_running = db.query(models.Job).options(*models.job_list_load_options()).filter(
+        models.Job.status == JobStatus.RUNNING,
+        ~models.Job.id.in_(observed_job_ids),
+    ).all()
+    all_running_jobs.extend(JobListItem.model_validate(job) for job in other_running)
+
     magnus_group = [j for j in all_running_jobs if j.job_type != JobType.EXTERNAL]
     external_group = [j for j in all_running_jobs if j.job_type == JobType.EXTERNAL]
 
@@ -364,6 +382,7 @@ def get_cluster_stats(
     # 是 aware，否则缺 start_time 的 job 一参与排序就 aware/naive 相比抛 TypeError。
     _epoch_start = datetime.min.replace(tzinfo=timezone.utc)
     magnus_group.sort(key=lambda x: x.start_time or _epoch_start, reverse=True)
+    _prefer_target(magnus_group, target)
     external_group.sort(key=lambda x: x.start_time or _epoch_start, reverse=True)
 
     sorted_all_running = magnus_group + external_group
@@ -372,26 +391,15 @@ def get_cluster_stats(
     total_running = len(sorted_all_running)
     paginated_running = sorted_all_running[running_skip : running_skip + running_limit]
 
-    # --- 6. Pending Jobs 处理与分页 ---
-    # 排序：Pending/Queued/Paused 按调度优先级，Preparing 在最后
-    # 排除已在 SLURM 中运行的 job，避免因状态延迟导致同一 job 同时出现在两列
-    # NOTE: `NULL NOT IN (...)` 在 SQL 里结果是 NULL 而非 TRUE，会把 slurm_job_id 为
-    # NULL 的行（未提交到 SLURM 的 PENDING/PREPARING 任务）静默过滤掉；用 or_ 显式
-    # 放行 NULL，这些任务显然不可能已在 SLURM 中运行。
-    running_job_ids = {job.slurm_job_id for job in magnus_jobs_orm}
-    not_running_in_slurm = (
-        or_(models.Job.slurm_job_id.is_(None), ~models.Job.slurm_job_id.in_(running_job_ids))
-        if running_job_ids else None
-    )
+    # Magnus IDs, unlike Slurm IDs, are unique across independent controllers.
+    not_running_in_slurm = ~models.Job.id.in_(observed_job_ids)
     pending_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
-            target.job_filter(models.Job),
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
-        *([not_running_in_slurm] if not_running_in_slurm is not None else []),
+        not_running_in_slurm,
     ).all()
     preparing_jobs_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
-            target.job_filter(models.Job),
         models.Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
-        *([not_running_in_slurm] if not_running_in_slurm is not None else []),
+        not_running_in_slurm,
     ).all()
 
     # Pending/Queued/Paused 按调度器排序
@@ -401,6 +409,7 @@ def get_cluster_stats(
 
     # 合并：Pending 在前，Preparing 在后
     all_pending_jobs_orm = pending_jobs_orm + preparing_jobs_orm
+    _prefer_target(all_pending_jobs_orm, target)
 
     total_pending = len(all_pending_jobs_orm)
     paginated_pending_orm = all_pending_jobs_orm[pending_skip : pending_skip + pending_limit]
@@ -454,19 +463,16 @@ def get_my_active_jobs(
 
     # 获取 Running 任务
     running_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
-        target.job_filter(models.Job),
         models.Job.user_id.in_(user_ids),
         models.Job.status == JobStatus.RUNNING,
     ).order_by(models.Job.start_time.desc()).all()
 
     # 获取排队任务
     queued_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
-        target.job_filter(models.Job),
         models.Job.user_id.in_(user_ids),
         models.Job.status.in_([JobStatus.PENDING, JobStatus.QUEUED, JobStatus.PAUSED]),
     ).all()
     preparing_orm = db.query(models.Job).options(*models.job_list_load_options()).filter(
-        target.job_filter(models.Job),
         models.Job.user_id.in_(user_ids),
         models.Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
     ).all()
@@ -478,6 +484,7 @@ def get_my_active_jobs(
 
     # 合并全量列表：Running > Pending/Queued/Paused > Preparing
     all_jobs_orm = running_orm + queued_orm + preparing_orm
+    _prefer_target(all_jobs_orm, target)
 
     # 计算总数与切片 (Pagination)
     total_count = len(all_jobs_orm)

@@ -25,7 +25,7 @@ findFetch(source);
 assert.ok(callback, "Production cluster fetch callback must exist");
 const compiled = ts.transpileModule(`
 export function createFetchData(bindings: any) {
-  const { executionTarget, EXECUTION_TARGETS, setLoadedClusterTarget, client, console, fetchRequest, myPage, mySize, runningPage, runningSize,
+  const { executionTarget, DEFAULT_EXECUTION_TARGET, EXECUTION_TARGETS, setLoadedClusterTarget, client, console, fetchRequest, myPage, mySize, runningPage, runningSize,
     pendingPage, pendingSize, setLoading, setClusterRefreshFailed, setActiveJobs,
     setTotalMyJobs, setCluster, setLoadedPages, setSettledRequestKey } = bindings;
   ${["myKey", "runningKey", "pendingKey", "requestKey"].map(name => `const ${pageDeclarations.get(name)};`).join("\n")}
@@ -47,7 +47,7 @@ function harness() {
   const state = { loading: true, cluster: null, stale: false, activeJobs: [], totalMyJobs: 0,
     loadedPages: { my: "", running: "", pending: "" }, settledRequestKey: "" };
   const bindings = {
-    executionTarget: "default", EXECUTION_TARGETS: [{id: "default"}, {id: "second"}],
+    executionTarget: "default", DEFAULT_EXECUTION_TARGET: "default", EXECUTION_TARGETS: [{id: "default"}, {id: "second"}],
     setLoadedClusterTarget(value) { state.loadedClusterTarget = value; },
     console: { warn() {}, error() {} },
     fetchRequest: { current: null },
@@ -212,4 +212,40 @@ test("target changes scope both requests and reject late responses from another 
   assert.equal(h.state.loadedClusterTarget, "second");
   assert.equal(h.view({ executionTarget: "default" })[1].loading, true);
   assert.deepEqual(h.view({ executionTarget: "default" })[1].jobs, []);
+});
+
+
+test("cross-cluster Slurm collisions cannot advance another Magnus job", async () => {
+  const h = harness();
+  const request = h.target("second")();
+  h.calls[0].resolve({ items: [
+    { id: "pending", execution_target: "second", slurm_job_id: "42", status: "Pending" },
+    { id: "releasing", execution_target: "second", slurm_job_id: "43", status: "Paused", is_releasing: true },
+    { id: "actual", execution_target: "default", slurm_job_id: "42", status: "Preparing" },
+  ], total: 3 });
+  h.calls[1].resolve({ resources: {}, running_jobs: [
+    { id: "actual", execution_target: "default", slurm_job_id: "42", job_type: "A2" },
+    { id: "42 (slurm)", execution_target: "second", slurm_job_id: "42", job_type: "N/A" },
+    { id: "releasing", execution_target: "second", slurm_job_id: "43", job_type: "A2" },
+  ], pending_jobs: [] });
+  await request;
+  assert.deepEqual(h.state.activeJobs.map(job => [job.id, job.status]), [
+    ["pending", "Pending"], ["releasing", "Paused"], ["actual", "Running"],
+  ]);
+});
+
+test("legacy jobs retain default-target preference and stale snapshots cannot promote them", async () => {
+  const h = harness();
+  const request = h.target("default")();
+  h.calls[0].resolve({ items: [
+    { id: "legacy", execution_target: null, status: "Building" },
+    { id: "elsewhere", execution_target: "second", status: "Running" },
+  ], total: 2 });
+  h.calls[1].resolve({ resources: { is_stale: true }, running_jobs: [
+    { id: "legacy", job_type: "A2" },
+  ], pending_jobs: [] });
+  await request;
+  assert.deepEqual(h.state.activeJobs.map(job => [job.id, job.status]), [
+    ["legacy", "Building"], ["elsewhere", "Running"],
+  ]);
 });

@@ -96,31 +96,24 @@ export default function ClusterPage() {
       if (myJobsResult.status === "rejected") console.warn("Failed to fetch active jobs", myJobsResult.reason);
       if (clusterResult.status === "rejected") console.warn("Failed to fetch cluster stats", clusterResult.reason);
 
-      // 跨 panel 状态归一：cluster.running_jobs 走 SLURM 实时视图，my-active 走 DB；
-      // scheduler 还没把 DB 推到 RUNNING 时，同一 job 会以 SLURM=Running、DB=Pending/Preparing
-      // 的形态同时出现在两个 panel。两次 fetch 同一前端轮询里完成，时间窗口几乎重合，
-      // 用 cluster.running 的 slurm_job_id 集合反向覆盖 my-active 状态即可消除矛盾。
-      // 注意：inflight release (is_releasing) 的 job 不能反向覆盖——它的 slurm_id 在
-      // squeue 里只是 SLURM CG 收尾未释放，magnus DB 已经标 TERMINATED/PAUSED 是真相，
-      // 强制改 Running 会让用户看到自己刚 cancel 的 job 又"复活"。
-      const slurmRunningIds = new Set<string>(
+      // Slurm IDs can collide across clusters; only a Magnus ID identifies
+      // the same Job in both panels. Stale snapshots cannot advance its state.
+      const runningMagnusIds = new Set<string>(
         ((clusterData?.resources?.is_stale ? [] : clusterData?.running_jobs ?? []) as Job[])
-          .map(job => job.slurm_job_id)
-          .filter((id): id is string => Boolean(id)),
+          .filter(job => job.job_type !== "N/A")
+          .map(job => job.id),
       );
 
       const reconcileMyActive = (jobs: Job[]): Job[] => {
         const reconciled = jobs.map(job =>
-          job.slurm_job_id
-          && slurmRunningIds.has(job.slurm_job_id)
+          runningMagnusIds.has(job.id)
           && job.status !== "Running"
           && !job.is_releasing
             ? { ...job, status: "Running" }
             : job
         );
-        // 与 server `running_orm + queued_orm + preparing_orm` 一致的桶序：
-        // Running 先、Pending/Paused 次之、Preparing 最后。Array.sort 在 ES2019
-        // 起稳定，桶内保持 server 给的原始顺序。
+        // Keep the server's target grouping; stable sorting retains priority
+        // and FIFO order within each lifecycle bucket.
         const bucketOrder: Record<string, number> = {
           "Running": 0,
           "Pending": 1,
@@ -128,8 +121,11 @@ export default function ClusterPage() {
           "Preparing": 2,
           "Building": 2,
         };
+        const targetOrder = (job: Job) =>
+          (job.execution_target ?? DEFAULT_EXECUTION_TARGET) === executionTarget ? 0 : 1;
         return reconciled.sort(
-          (a, b) => (bucketOrder[a.status] ?? 99) - (bucketOrder[b.status] ?? 99)
+          (a, b) => targetOrder(a) - targetOrder(b)
+            || (bucketOrder[a.status] ?? 99) - (bucketOrder[b.status] ?? 99)
         );
       };
 

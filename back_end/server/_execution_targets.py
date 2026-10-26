@@ -43,6 +43,16 @@ class ExecutionTarget:
         return self.config["server"]["root"]
 
     @property
+    def slurm_connection_key(
+        self,
+    ) -> tuple[str, ...]:
+        transport = self.config["transport"]
+        if transport["mode"] == "ssh":
+            ssh = transport["ssh"]
+            return ("ssh", ssh["host"], ssh["user"], os.path.normcase(os.path.abspath(ssh["control_path"])))
+        return ("local",)
+
+    @property
     def image_cache_key(
         self,
     ) -> tuple[str, ...]:

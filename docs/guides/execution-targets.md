@@ -70,6 +70,12 @@ still does not support the existing local service proxy.
 
 The Job drawer and Cluster page show a selector only on sites with multiple
 targets. Job clones and clipboard payloads retain their execution target.
+Cluster task lists include Magnus Jobs from every target. My active Jobs still
+follow the current user's reporting hierarchy. The selected target sorts first,
+then the existing lifecycle, priority and time order applies before pagination.
+External Slurm tasks and resource cards cover only the selected node pool; Magnus
+running rows precede external rows. Only the selected Slurm connection is queried
+live; other Magnus Jobs use their scheduler-synchronized database state.
 
 ```python
 targets = client.get_execution_targets()
@@ -95,8 +101,10 @@ arguments are keyword-only and do not change existing positional calls. Explicit
 target selection checks server capabilities before submission so an old server
 cannot silently ignore the field. SDK source changes do not imply a PyPI release.
 
-Slurm IDs are scoped by target in reconciliation, cancellation, resource matching
-and snapshots. Each scheduler worker has at most one
+Slurm IDs are scoped by target in reconciliation, cancellation and snapshots.
+Cluster matching groups partition targets that share a configured SSH host,
+account and control socket (or the local controller). Independent controllers'
+Slurm IDs never identify the same Magnus Job. Each scheduler worker has at most one
 reconciliation and one submission pass in flight. Slow remote I/O on one target
 does not block another. Local workspace reclamation remains site-wide and protects
 in-flight work from every target. Cluster query caches and authentication locks

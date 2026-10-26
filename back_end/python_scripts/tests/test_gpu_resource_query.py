@@ -221,10 +221,10 @@ class ClusterGpuTests(unittest.TestCase):
         route = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "get_cluster_stats")
         route.decorator_list = []
         job = SimpleNamespace(
-            slurm_job_id="123", job_type="A2", gpu_count=2, node_count=3,
+            id="magnus-123", execution_target=None, slurm_job_id="123", job_type="A2", gpu_count=2, node_count=3,
             start_time=datetime.now(timezone.utc),
         )
-        results = iter([[job], [], []])
+        results = iter([[job], [], [], []])
         query = SimpleNamespace()
         query.options = lambda *args: query
         query.filter = lambda *args: query
@@ -239,18 +239,22 @@ class ClusterGpuTests(unittest.TestCase):
         config = {"execution": {"backend": "slurm"}, "cluster": {"scheduling": {"mode": "authoritative"}, "gpus": [
             {"label": "RTX 5090"}, {"label": "A100"}, {"label": "A100"},
         ]}, "server": {"scheduler": {"cluster_stats_cache_ttl": 0}}}
+        target = SimpleNamespace(id="default", name="test", config=config, is_default=True,
+                                 slurm_connection_key=("local",), job_filter=lambda model: True)
         namespace = {
+            "configured_execution_targets": {"default": target},
+            "select_execution_target": lambda targets, target_id: target,
             "magnus_config": config, "is_local_mode": False, "SlurmManager": lambda **kwargs: manager,
             "_cached_slurm_view": lambda key, ttl, producer: producer(), "_node_name": "test",
-            "models": SimpleNamespace(Job=SimpleNamespace(slurm_job_id=Field(), status=Field()), job_list_load_options=lambda: []),
+            "models": SimpleNamespace(Job=SimpleNamespace(id=Field(), slurm_job_id=Field(), status=Field()), job_list_load_options=lambda: []),
             "JobListItem": SimpleNamespace(model_validate=lambda value: value),
             "JobType": SimpleNamespace(EXTERNAL="external"),
-            "JobStatus": SimpleNamespace(PENDING=1, QUEUED=2, PAUSED=3, PREPARING=4, BUILDING=5),
+            "JobStatus": SimpleNamespace(RUNNING=0, PENDING=1, QUEUED=2, PAUSED=3, PREPARING=4, BUILDING=5),
             "Depends": lambda dependency: None, "database": SimpleNamespace(get_db=None), "get_current_user": None,
             "datetime": datetime, "timezone": timezone, "or_": lambda *args: None,
             "_scheduler_sort_key": lambda value: 0,
             "resource_partitions": lambda config: [],
-            "_resolve_target": lambda target_id: SimpleNamespace(id="default", name="test", config=config, job_filter=lambda model: True),
+            "_resolve_target": lambda target_id: target,
             "time": time,
         }
         from test_job_resources import load_resources
@@ -258,7 +262,8 @@ class ClusterGpuTests(unittest.TestCase):
         namespace["JobResourceSummary"] = lambda **values: SimpleNamespace(**values)
         producer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_query_cluster_view")
         totals = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_cluster_resource_totals")
-        isolated = ast.Module(body=[totals, producer, route], type_ignores=[])
+        preference = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_prefer_target")
+        isolated = ast.Module(body=[totals, producer, preference, route], type_ignores=[])
         exec(compile(isolated, str(source), "exec", flags=__future__.annotations.compiler_flag), namespace)
         return namespace["get_cluster_stats"](db=SimpleNamespace(query=lambda *args: query))
 

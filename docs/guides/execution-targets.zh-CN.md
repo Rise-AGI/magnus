@@ -59,6 +59,10 @@ execution:
 ## 提交与查看
 
 多集群站点在 Job drawer 和 Cluster 页面显示选择器。克隆和剪贴板配置保留目标。
+Cluster 的任务列表包含所有目标上的 Magnus Job；“我负责的活跃任务”仍按当前用户
+及下属筛选。分页前先排选中目标，再保留原有状态、优先级和时间排序。
+外部 Slurm 任务和资源卡只覆盖选中节点池；运行列表中 Magnus Job 仍排在外部任务前。
+页面只实时查询选中的 Slurm 连接，其他 Magnus Job 使用调度器同步到数据库的状态。
 
 ```python
 targets = client.get_execution_targets()
@@ -82,7 +86,9 @@ magnus submit --task-name example --entry-command 'python main.py' --execution-t
 参数不变；显式选目标前会检查服务端能力，避免旧服务端悄悄忽略这个字段。源码更新
 不代表已发布 PyPI 版本。
 
-状态同步、取消、资源匹配与快照按目标区分 Slurm ID。每个调度 worker
+状态同步、取消与快照按目标区分 Slurm ID。Cluster 匹配会合并使用同一 SSH host、
+账号和 control socket（或本地控制器）的分区目标；独立控制器上的同号 Slurm Job
+不会被认成同一个 Magnus Job。每个调度 worker
 最多同时有一个同步轮次和一个提交轮次；一个目标的慢远端 I/O 不阻塞其他目标。
 本地工作区回收仍按全站预算运行，并保护所有目标的在途工作。Cluster 查询缓存和
 认证锁分别按目标、control socket 隔离。
