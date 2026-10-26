@@ -11,6 +11,7 @@ from .._slurm_manager._ssh_auto_connect import remaining_timeout
 
 
 SMALL_FILE_BYTES = 8 * 1024 * 1024
+BULK_PRIORITY_BURST = 3
 
 # Compatible with the Python 3.6 supplied by older HPC login nodes. Known,
 # published tokens are immutable; avoid reopening every old checkpoint manifest.
@@ -46,6 +47,7 @@ for token in names[start:] + names[:start]:
         info = os.lstat(metadata)
         if not stat.S_ISREG(info.st_mode) or info.st_size > 65536:
             raise ValueError('Invalid metadata')
+        published_ns = info.st_mtime_ns
         with open(metadata, encoding='utf-8') as f:
             meta = json.loads(f.read(65537))
         stored = meta.get('storage_filename', meta.get('filename'))
@@ -54,7 +56,7 @@ for token in names[start:] + names[:start]:
         info = os.lstat(os.path.join(directory, stored))
         if not stat.S_ISREG(info.st_mode):
             raise ValueError('Invalid payload')
-        records[token] = {'metadata': meta, 'size': info.st_size}
+        records[token] = {'metadata': meta, 'size': info.st_size, 'published_ns': published_ns}
     except Exception:
         errors.append(token)
 print(json.dumps({'records': records, 'errors': errors, 'incomplete': incomplete,
@@ -70,6 +72,7 @@ class _Drop:
     metadata: dict
     digest: str
     size: int
+    published_ns: int
     retry_after: float = 0
 
 
@@ -82,6 +85,8 @@ class _JobTransfers:
     cursor: str = ""
     logs_pending: bool = False
     logs_retry_after: float = 0
+    logs_yield_to_payload: bool = False
+    bulk_bypasses: int = 0
     ack_pending: bool = False
 
 
@@ -172,14 +177,20 @@ class CustodyRelay:
                         },
                         digest = digest,
                         size = size,
+                        published_ns = record['published_ns'],
                     )
                     state.failed.pop(token, None)
                     if len(state.pending) > 256:
                         # The remote publication remains the queue of record.
-                        # Evict bulky descriptors, not the ability to discover a
-                        # later small checkpoint; the cursor revisits them later.
+                        # Publication order survives descriptor eviction and
+                        # restart, unlike the order of discovery in this cache.
+                        oldest_bulk = min(
+                            (item for item in state.pending.values() if item.size > SMALL_FILE_BYTES),
+                            key = lambda item: (item.published_ns, item.token),
+                            default = None,
+                        )
                         evicted = max(
-                            (item for item in state.pending.values() if item.token not in state.inflight),
+                            (item for item in state.pending.values() if item.token not in state.inflight and item is not oldest_bulk),
                             key = lambda item: item.size,
                         )
                         del state.pending[evicted.token]
@@ -281,9 +292,32 @@ class CustodyRelay:
     ) -> None:
         state = self._state(job_id)
         with state.lock:
-            logs_due = state.logs_pending and state.logs_retry_after <= monotonic()
-            drop = next((drop for drop in state.pending.values() if drop.size > SMALL_FILE_BYTES and drop.retry_after <= monotonic()), None)
-        if logs_due and not self._cancel.is_set():
+            if self._cancel.is_set():
+                return
+            now = monotonic()
+            eligible = [
+                drop for drop in state.pending.values()
+                if drop.size > SMALL_FILE_BYTES and drop.retry_after <= now and drop.token not in state.inflight
+            ]
+            logs_due = state.logs_pending and state.logs_retry_after <= now
+            transfer_logs = logs_due and (not eligible or not state.logs_yield_to_payload)
+            drop = None
+            if transfer_logs:
+                state.logs_yield_to_payload = True
+            elif eligible:
+                # Absolute age priority would put an entire old cache ahead of
+                # a new result again. Bound bypasses instead of draining it FIFO.
+                oldest = min(
+                    eligible,
+                    key = lambda item: (item.published_ns, item.token),
+                )
+                drop = oldest if state.bulk_bypasses >= BULK_PRIORITY_BURST else min(
+                    eligible,
+                    key = lambda item: item.size,
+                )
+                state.bulk_bypasses = 0 if drop is oldest else state.bulk_bypasses + 1
+                state.logs_yield_to_payload = False
+        if transfer_logs:
             try:
                 self.transfer_logs(
                     job_id,

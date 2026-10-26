@@ -99,6 +99,44 @@ class ArtifactRecoveryTests(unittest.IsolatedAsyncioTestCase):
             release.set()
             await actor.shutdown_artifact_recovery()
 
+    async def test_bulk_jobs_take_single_file_turns_without_overlap(self):
+        namespace = load_recovery()
+        actor = self.actor(namespace, lambda job, external: 30)
+        entered = {job: threading.Event() for job in ('a', 'b', 'c')}
+        release = {job: threading.Event() for job in entered}
+        calls = []
+
+        def bulk(job):
+            calls.append(job)
+            entered[job].set()
+            if not release[job].wait(5):
+                raise TimeoutError('test did not release the transfer')
+
+        actor._custody_relay = SimpleNamespace(
+            bulk_job_ids=lambda: set(entered), transfer_bulk=bulk,
+            cancel_transfers=lambda: [event.set() for event in release.values()],
+        )
+        try:
+            actor._schedule_artifact_recovery({'a': '1', 'b': '2'})
+            self.assertTrue(await asyncio.to_thread(entered['a'].wait, 1))
+            self.assertFalse(entered['b'].is_set())
+            actor._schedule_artifact_recovery({'a': '1', 'b': '2', 'c': '3'})
+            release['a'].set()
+            await asyncio.wait_for(actor._custody_bulk_tasks['a'], 1)
+            self.assertTrue(await asyncio.to_thread(entered['b'].wait, 1))
+            actor._schedule_artifact_recovery({'a': '1', 'b': '2', 'c': '3'})
+            self.assertFalse(entered['c'].is_set())
+            release['b'].set()
+            self.assertTrue(await asyncio.to_thread(entered['c'].wait, 1))
+            self.assertEqual(calls, ['a', 'b', 'c'])
+            release['c'].set()
+            await asyncio.wait_for(asyncio.gather(*actor._custody_bulk_tasks.values()), 1)
+            self.assertEqual(calls, ['a', 'b', 'c', 'a'])
+        finally:
+            for event in release.values():
+                event.set()
+            await actor.shutdown_artifact_recovery()
+
     async def test_slow_submission_is_single_flight_and_shutdown_joins_it(self):
         namespace = load_recovery()
         path = SERVER / "_scheduler/_decisions.py"

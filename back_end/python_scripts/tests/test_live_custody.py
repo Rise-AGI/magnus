@@ -54,7 +54,7 @@ class LiveCustodyTests(unittest.TestCase):
         )
 
     def publish(self, suffix='a', data=b'result', **metadata):
-        token = 'relay-' + suffix * 32
+        token = 'relay-' + (f'{suffix:032x}' if isinstance(suffix, int) else suffix * 32)
         directory = self.remote / '.magnus_custody_drop' / token
         directory.mkdir(parents=True)
         (directory / 'payload').write_bytes(data)
@@ -67,6 +67,121 @@ class LiveCustodyTests(unittest.TestCase):
 
     def poll(self):
         return self.relay.poll(JOB, time.monotonic() + 5)
+
+    def publish_sized(
+        self,
+        suffix,
+        size,
+    ):
+        token = self.publish(suffix)
+        directory = self.remote / '.magnus_custody_drop' / token
+        with (directory / 'payload').open('wb') as payload:
+            payload.truncate(size)
+        path = directory / 'meta.json'
+        metadata = json.loads(path.read_text())
+        metadata['size_bytes'] = size
+        path.write_text(json.dumps(metadata))
+        return token
+
+    def test_medium_result_overtakes_queued_cache_without_interrupting_receive(self):
+        active = self.publish_sized('a', 16 * 1024 * 1024)
+        self.assertFalse(self.poll())
+        started, release = threading.Event(), threading.Event()
+        original = self.transport.fetch_bounded
+
+        def receive(remote, local, **kwargs):
+            if active in remote:
+                started.set()
+                self.assertTrue(release.wait(5))
+            original(remote, local, **kwargs)
+
+        self.transport.fetch_bounded = receive
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            transfer = pool.submit(self.relay.transfer_bulk, JOB)
+            try:
+                self.assertTrue(started.wait(3))
+                cache = self.publish_sized('b', 12 * 1024 * 1024)
+                result = self.publish_sized('c', 9 * 1024 * 1024)
+                self.assertFalse(self.poll())
+                self.assertFalse(transfer.done())
+                self.assertEqual(self.manager.get_file_status(result), 'unknown')
+            finally:
+                release.set()
+            transfer.result(timeout=3)
+        self.relay.transfer_bulk(JOB)
+        self.assertEqual(self.manager.get_file_status(result), 'ready')
+        self.assertEqual(self.manager.get_file_status(cache), 'unknown')
+        self.relay.transfer_bulk(JOB)
+        self.assertTrue(self.poll())
+        self.assertEqual([path.parent.name for path in self.transport.fetches], [active, result, cache])
+
+    def test_continuous_smaller_arrivals_leave_a_turn_for_the_oldest_file(self):
+        oldest = self.publish_sized('a', 24 * 1024 * 1024)
+        self.assertFalse(self.poll())
+        arrivals = []
+        for suffix in ('b', 'c', 'd', 'e'):
+            arrivals.append(self.publish_sized(suffix, 9 * 1024 * 1024))
+            self.assertFalse(self.poll())
+            self.relay.transfer_bulk(JOB)
+        self.assertEqual(self.manager.get_file_status(oldest), 'ready')
+        self.assertEqual(self.manager.get_file_status(arrivals[-1]), 'unknown')
+        self.relay.transfer_bulk(JOB)
+        self.assertTrue(self.poll())
+        self.assertEqual([path.parent.name for path in self.transport.fetches], [*arrivals[:3], oldest, arrivals[-1]])
+
+    def test_failed_preferred_file_backs_off_while_other_files_progress(self):
+        cache = self.publish_sized('a', 12 * 1024 * 1024)
+        result = self.publish_sized('b', 9 * 1024 * 1024)
+        self.assertFalse(self.poll())
+        source = self.remote / '.magnus_custody_drop' / result / 'payload'
+        self.transport.failed_path = source
+        with self.assertLogs('custody-stage-test', level='WARNING'):
+            self.relay.transfer_bulk(JOB)
+        self.relay.transfer_bulk(JOB)
+        self.assertTrue(source.is_file())
+        self.assertEqual(self.manager.get_file_status(cache), 'ready')
+        self.assertEqual(self.manager.get_file_status(result), 'unknown')
+        self.assertEqual(self.manager._current_size, 12 * 1024 * 1024)
+        self.assertEqual([path.parent.name for path in self.transport.fetches], [result, cache])
+
+    def test_restart_reorders_remaining_bulk_without_fetching_completed_files(self):
+        complete = self.publish_sized('a', 16 * 1024 * 1024)
+        self.assertFalse(self.poll())
+        self.relay.transfer_bulk(JOB)
+        cache = self.publish_sized('b', 12 * 1024 * 1024)
+        result = self.publish_sized('c', 9 * 1024 * 1024)
+        self.assertFalse(self.poll())
+        self.manager.shutdown()
+        self.manager = self.manager_namespace['FileCustodyManager']()
+        self.relay = self.make_relay()
+        self.assertFalse(self.poll())
+        self.relay.transfer_bulk(JOB)
+        self.assertEqual(self.manager.get_file_status(complete), 'ready')
+        self.assertEqual(self.manager.get_file_status(result), 'ready')
+        self.assertEqual(self.manager.get_file_status(cache), 'unknown')
+        self.assertEqual([path.parent.name for path in self.transport.fetches], [complete, result])
+
+    def test_failing_final_logs_yield_to_a_ready_bulk_result(self):
+        result = self.publish_sized('a', 9 * 1024 * 1024)
+        self.assertFalse(self.poll())
+        attempts = []
+
+        def logs(job, **kwargs):
+            attempts.append(job)
+            raise TimeoutError('log receive exhausted its budget')
+
+        self.relay.transfer_logs = logs
+        self.assertFalse(self.relay.request_final_logs(JOB))
+        with self.assertLogs('custody-stage-test', level='WARNING'):
+            self.relay.transfer_bulk(JOB)
+        with patch.dict(self.staging, {'monotonic': lambda: time.monotonic() + 61}):
+            self.relay.transfer_bulk(JOB)
+            self.assertEqual(attempts, [JOB])
+            self.assertEqual(self.manager.get_file_status(result), 'ready')
+            with self.assertLogs('custody-stage-test', level='WARNING'):
+                self.relay.transfer_bulk(JOB)
+        self.assertEqual(attempts, [JOB, JOB])
+        self.assertFalse(self.relay.request_final_logs(JOB))
 
     def test_runtime_restart_and_terminal_ttl_preserve_claims(self):
         token = self.publish()
@@ -115,11 +230,29 @@ class LiveCustodyTests(unittest.TestCase):
         for _ in range(4):
             self.assertFalse(self.poll())
         self.assertEqual(len(self.relay._state(JOB).pending), 256)
+        oldest = next(iter(self.relay._state(JOB).pending))
         small = self.publish("f", b"new diagnostic")
         self.assertFalse(self.poll())
         self.assertEqual(self.manager.get_file_status(small), "ready")
         self.assertLessEqual(len(self.relay._state(JOB).pending), 256)
+        self.assertIn(oldest, self.relay._state(JOB).pending)
         self.assertEqual(len(self.transport.fetches), 1)
+
+    def test_evicted_old_publication_regains_its_turn_under_continuous_arrivals(self):
+        self.manager._max_size = 128 * 1024 * 1024
+        oldest = [self.publish_sized(number, 16 * 1024 * 1024) for number in range(2)]
+        for number in range(2, 256):
+            self.publish_sized(number, 9 * 1024 * 1024)
+        for _ in range(4):
+            self.assertFalse(self.poll())
+        for number in range(256, 264):
+            self.publish_sized(number, 9 * 1024 * 1024)
+            self.assertFalse(self.poll())
+            if number == 256:
+                self.assertNotIn(oldest[1], self.relay._state(JOB).pending)
+            self.assertLessEqual(len(self.relay._state(JOB).pending), 256)
+            self.relay.transfer_bulk(JOB)
+        self.assertTrue(all(self.manager.get_file_status(token) == 'ready' for token in oldest))
 
     def test_final_logs_keep_full_budget_and_do_not_block_new_checkpoints(self):
         started, release = threading.Event(), threading.Event()
