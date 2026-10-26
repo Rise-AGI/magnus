@@ -21,6 +21,10 @@ def load_staging():
     path = SERVER / "_scheduler" / "_staging.py"
     namespace = {"remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
     namespace.update({name: value for name, value in runpy.run_path(str(SERVER / "_custody_receipts.py")).items() if not name.startswith("__")})
+    relay_path = SERVER / "_scheduler" / "_custody_relay.py"
+    relay = ast.parse(relay_path.read_text())
+    relay.body = [node for node in relay.body if not isinstance(node, ast.ImportFrom) or not node.level]
+    exec(compile(relay, str(relay_path), "exec"), namespace)
     tree = ast.parse(path.read_text(encoding="utf-8"))
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
     exec(compile(tree, str(path), "exec"), namespace)
@@ -37,6 +41,8 @@ class FileTransport:
         self.fail_cleanup = False
 
     def run(self, command, **kwargs):
+        if "input" in kwargs:
+            return subprocess.run(command, input=kwargs["input"], capture_output=True, text=True, check=True, timeout=kwargs.get("timeout", 10))
         if command[:2] == ["python3", "-c"] and "remove_job_path(sys.argv[1])" in command[2]:
             if self.fail_cleanup:
                 return SimpleNamespace(returncode=1, stderr="cleanup failed")
@@ -48,12 +54,17 @@ class FileTransport:
         entries = sorted(os.listdir(path)) if path.exists() else None
         return SimpleNamespace(returncode=0, stdout=json.dumps(entries))
 
-    def fetch(self, remote, local, *, timeout=None):
+    def fetch(self, remote, local, *, timeout=None, cancel_event=None):
         self.fetches.append(Path(remote))
         if Path(remote) == self.failed_path:
             Path(local).write_bytes(b"partial transfer")
             raise OSError("transport interrupted")
         shutil.copyfile(remote, local)
+
+    def fetch_bounded(self, remote, local, *, size, timeout, cancel_event=None):
+        self.fetch(remote, local, timeout=timeout)
+        if Path(local).stat().st_size != size:
+            raise ValueError("size changed")
 
     def push(self, local, remote):
         shutil.copyfile(local, remote)
@@ -71,7 +82,13 @@ class CustodyStageOutTests(unittest.TestCase):
         self.stored = {}
         self.calls = []
         self.failed_token = None
-        self.namespace["file_custody_manager"] = SimpleNamespace(store_file=self.store)
+        self.imports = {}
+        self.namespace["file_custody_manager"] = SimpleNamespace(
+            store_file=self.store,
+            import_receipt=lambda job, token: self.imports.get(token),
+            acknowledge_import=lambda job, token, digest: self.imports.pop(token, None),
+            acknowledge_receipts=lambda job, receipts: None,
+        )
         self.scheduler = self.make_scheduler()
 
     def make_scheduler(self):
@@ -79,14 +96,30 @@ class CustodyStageOutTests(unittest.TestCase):
         scheduler.slurm_manager = SimpleNamespace(transport=self.transport)
         scheduler._remote_job_working_table = lambda job: str(self.remote)
         scheduler._local_job_working_table = lambda job: str(self.local)
+        scheduler._custody_relay = self.namespace["CustodyRelay"](
+            self.transport, self.namespace["file_custody_manager"],
+            scheduler._local_job_working_table, scheduler._remote_job_working_table,
+            self.namespace["_validate_custody_metadata"], self.namespace["logger"], 900,
+            transfer_logs=scheduler._stage_out_logs,
+        )
         return scheduler
+
+    def final_pass(self, scheduler=None):
+        scheduler = scheduler or self.scheduler
+        scheduler._stage_out_final("job")
+        scheduler._custody_relay.transfer_bulk("job")
+        return scheduler._stage_out_final("job")
 
     def store(self, **kwargs):
         token = kwargs["explicit_token"]
         self.calls.append(token)
         if token == self.failed_token:
             raise RuntimeError("custody temporarily full")
-        self.stored[token] = (kwargs["filename"], kwargs["file_obj"].read())
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
+            path = Path(directory) / "received"
+            kwargs["receive"](path)
+            self.stored[token] = (kwargs["filename"], path.read_bytes())
+        self.imports[token] = kwargs["source_digest"]
         return token
 
     def entry(self, suffix, *, legacy=False, content=b"artifact", metadata=True):
@@ -102,7 +135,7 @@ class CustodyStageOutTests(unittest.TestCase):
             (path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
         return token, path, meta
 
-    def test_final_pass_budget_is_shared_and_keeps_receipts_for_completed_entries(self):
+    def test_polling_budget_stops_before_another_payload(self):
         first, _, _ = self.entry("a")
         second, _, _ = self.entry("b")
         now = [100.0]
@@ -113,11 +146,10 @@ class CustodyStageOutTests(unittest.TestCase):
         def fetch(remote, local, *, timeout=None):
             budgets.append(timeout)
             original(remote, local, timeout=timeout)
-            now[0] += 2
+            now[0] += 6
         self.transport.fetch = fetch
-        with self.assertLogs("custody-stage-test", level="WARNING"):
-            self.assertFalse(self.scheduler._stage_out_custody("job", deadline=105))
-        self.assertEqual(budgets, [5, 3, 1])
+        self.assertFalse(self.scheduler._stage_out_custody("job", deadline=105))
+        self.assertEqual(budgets, [5])
         self.assertIn(first, self.stored)
         self.assertNotIn(second, self.stored)
         self.assertTrue(self.remote.is_dir())
@@ -150,16 +182,16 @@ class CustodyStageOutTests(unittest.TestCase):
         with self.assertLogs("custody-stage-test", level="WARNING"):
             self.assertFalse(self.scheduler._stage_out_custody("job"))
         self.failed_token = None
+        self.scheduler = self.make_scheduler()
         self.assertTrue(self.scheduler._stage_out_custody("job"))
         self.assertEqual(self.calls, [first, second, first])
 
-    def test_token_metadata_change_is_not_silently_accepted(self):
+    def test_published_token_is_never_reimported_from_mutated_remote_metadata(self):
         token, path, meta = self.entry("a")
         self.assertTrue(self.scheduler._stage_out_custody("job"))
         meta["max_downloads"] = 200
         (path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
-        with self.assertLogs("custody-stage-test", level="WARNING"):
-            self.assertFalse(self.scheduler._stage_out_custody("job"))
+        self.assertTrue(self.scheduler._stage_out_custody("job"))
         self.assertEqual(self.calls, [token])
 
     def test_hidden_partial_is_preserved_without_fetch_or_poisoning_other_entries(self):
@@ -167,8 +199,7 @@ class CustodyStageOutTests(unittest.TestCase):
         partial = self.remote / ".magnus_custody_drop" / ".partial-interrupted"
         partial.mkdir()
         (partial / "payload").write_bytes(b"partial")
-        with self.assertLogs("custody-stage-test", level="WARNING"):
-            self.assertFalse(self.scheduler._stage_out_custody("job"))
+        self.assertFalse(self.scheduler._stage_out_custody("job"))
         self.assertEqual(self.calls, [token])
         self.assertTrue(partial.exists())
         self.assertFalse(any(".partial-interrupted" in path.parts for path in self.transport.fetches))
@@ -188,12 +219,13 @@ class CustodyStageOutTests(unittest.TestCase):
         self.transport.failed_path = path / "payload"
         with self.assertLogs("custody-stage-test", level="WARNING"):
             self.assertFalse(self.scheduler._stage_out_custody("job"))
-        self.assertFalse(self.calls)
-        self.assertEqual((path / "payload").read_bytes(), b"artifact")
-        self.assertEqual(list((self.local / ".magnus_custody_drop").iterdir()), [])
-        self.transport.failed_path = None
-        self.assertTrue(self.scheduler._stage_out_custody("job"))
         self.assertEqual(self.calls, [token])
+        self.assertEqual((path / "payload").read_bytes(), b"artifact")
+        self.assertFalse((self.local / ".magnus_custody_drop").exists())
+        self.transport.failed_path = None
+        self.scheduler = self.make_scheduler()
+        self.assertTrue(self.scheduler._stage_out_custody("job"))
+        self.assertEqual(self.calls, [token, token])
 
     def test_completed_logs_are_not_downloaded_again_while_custody_is_pending(self):
         self.entry("a", metadata=False)
@@ -201,8 +233,8 @@ class CustodyStageOutTests(unittest.TestCase):
         log.parent.mkdir()
         log.write_bytes(b"complete log")
         with self.assertLogs("custody-stage-test", level="WARNING"):
-            self.assertFalse(self.scheduler._stage_out_final("job"))
-            self.assertFalse(self.make_scheduler()._stage_out_final("job"))
+            self.assertFalse(self.final_pass())
+            self.assertFalse(self.final_pass(self.make_scheduler()))
         self.assertEqual(self.transport.fetches.count(log), 1)
         self.assertEqual((self.local / "slurm" / "output.txt").read_bytes(), b"complete log")
 
@@ -213,10 +245,11 @@ class CustodyStageOutTests(unittest.TestCase):
         log.write_bytes(b"complete log")
         self.transport.failed_path = log
         with self.assertLogs("custody-stage-test", level="WARNING"):
-            self.assertFalse(self.scheduler._stage_out_final("job"))
+            self.assertFalse(self.final_pass())
         self.assertEqual(self.calls, [token])
         self.transport.failed_path = None
-        self.assertTrue(self.scheduler._stage_out_final("job"))
+        self.scheduler = self.make_scheduler()
+        self.assertTrue(self.final_pass())
         self.assertEqual(self.calls, [token])
 
     def test_marker_fetch_is_independent_of_broken_custody(self):
@@ -224,6 +257,24 @@ class CustodyStageOutTests(unittest.TestCase):
         (self.remote / ".magnus_success").write_text("success", encoding="utf-8")
         self.scheduler._stage_out_markers("job")
         self.assertEqual((self.local / ".magnus_success").read_text(), "success")
+
+    def test_final_log_discovery_has_short_queries_but_full_payload_budget(self):
+        log = self.remote / "slurm" / "output.txt"
+        log.parent.mkdir(parents=True)
+        log.write_bytes(b"log")
+        queries, payloads = [], []
+        run, fetch = self.transport.run, self.transport.fetch
+        def query(command, **kwargs):
+            queries.append(kwargs["timeout"])
+            return run(command, **kwargs)
+        def receive(remote, local, **kwargs):
+            payloads.append(kwargs["timeout"])
+            return fetch(remote, local, **kwargs)
+        self.transport.run = query
+        self.transport.fetch = receive
+        self.scheduler._stage_out_logs("job", timeout=900)
+        self.assertTrue(all(value <= 30 for value in queries))
+        self.assertGreater(payloads[0], 890)
 
     def test_bad_metadata_never_escapes_the_entry(self):
         for invalid in ("../other", "..\\other", "meta.json"):
@@ -246,13 +297,13 @@ class CustodyStageOutTests(unittest.TestCase):
         self.local.mkdir()
         (self.local / ".magnus_custody_receipts.json").write_text("{corrupt", encoding="utf-8")
         with self.assertLogs("custody-stage-test", level="WARNING"):
-            self.assertFalse(self.scheduler._stage_out_final("job"))
+            self.assertFalse(self.final_pass())
         self.assertFalse(self.calls)
         self.assertTrue(self.remote.exists())
 
     def test_new_attempt_fetches_new_logs_but_keeps_receipt_history(self):
         token, _, _ = self.entry("a")
-        self.assertTrue(self.scheduler._stage_out_final("job"))
+        self.assertTrue(self.final_pass())
         wrapper = self.root / "wrapper.py"
         wrapper.write_text("pass", encoding="utf-8")
         self.scheduler._stage_in_job("job", str(wrapper))
@@ -261,7 +312,7 @@ class CustodyStageOutTests(unittest.TestCase):
         self.assertIn(token, ledger["entries"])
         log = self.remote / "slurm" / "output.txt"
         log.write_bytes(b"new attempt log")
-        self.assertTrue(self.scheduler._stage_out_final("job"))
+        self.assertTrue(self.final_pass())
         self.assertEqual((self.local / "slurm" / "output.txt").read_bytes(), b"new attempt log")
         self.assertEqual(self.calls, [token])
 
@@ -285,7 +336,7 @@ class CustodyStageOutTests(unittest.TestCase):
     def test_empty_drop_and_local_execution_complete_without_side_effects(self):
         self.assertTrue(self.scheduler._stage_out_custody("job"))
         self.transport.is_remote = False
-        self.assertTrue(self.scheduler._stage_out_final("job"))
+        self.assertTrue(self.final_pass())
         self.assertFalse(self.local.exists())
 
     def test_remote_cleanup_failure_is_not_reported_as_complete(self):

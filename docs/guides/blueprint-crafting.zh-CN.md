@@ -288,7 +288,7 @@ test -n "$SECRET" || exit 1
 echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
 ```
 
-文件代管沿用 `magnus-secret` 协议。普通 secret 会受 TTL、下载次数和后端重启影响。HTTP 上传每次使用一个请求，公网网关限制仍然适用。离线 relay 任务先暂存成果，由控制器导入后才可取回。完整约定见 [SDK 文件传输指南](sdk-and-cli.zh-CN.md#custody_file---代管文件)。
+文件代管沿用 `magnus-secret` 协议。已完成上传的 secret 可跨后端重启使用，原有 TTL 和下载次数限制保持。HTTP 上传每次使用一个请求，公网网关限制仍然适用。离线 relay 任务原子发布快照后，由控制器在运行中增量导入；Job 成果的 TTL 从任务整体执行结束后起算，更晚导入的文件从就绪时起算，提前领取照常计次。完整约定见 [SDK 文件传输指南](sdk-and-cli.zh-CN.md#custody_file---代管文件)。
 
 当前 Web 端不会执行任意 shell，只会识别安全白名单形式的 `magnus receive ...`，并映射成浏览器下载。
 

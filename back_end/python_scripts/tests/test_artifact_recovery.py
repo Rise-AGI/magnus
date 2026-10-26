@@ -29,10 +29,38 @@ class ArtifactRecoveryTests(unittest.IsolatedAsyncioTestCase):
     def actor(self, namespace, work, slots=4):
         actor = namespace["_ArtifactRecoveryMixin"]()
         actor._artifact_recovery_tasks = {}
+        actor._custody_bulk_tasks = {}
+        actor._custody_bulk_slots = asyncio.Semaphore(1)
+        actor._custody_relay = SimpleNamespace(bulk_job_ids=lambda: set(), cancel_transfers=lambda: None)
         actor._artifact_retry_after = {}
         actor._artifact_recovery_slots = asyncio.Semaphore(slots)
         actor._recover_job_artifacts = work
         return actor
+
+    async def test_bulk_lane_does_not_block_polling_and_shutdown_cancels_it(self):
+        namespace = load_recovery()
+        started, stop, observed = threading.Event(), threading.Event(), threading.Event()
+        actor = self.actor(namespace, lambda job, external: (observed.set() or 30), slots=1)
+        calls = []
+        def bulk(job):
+            calls.append(job)
+            started.set()
+            stop.wait(5)
+        actor._custody_relay = SimpleNamespace(
+            bulk_job_ids=lambda: {"job"}, transfer_bulk=bulk, cancel_transfers=stop.set,
+        )
+        try:
+            actor._schedule_artifact_recovery({"job": "42"})
+            self.assertTrue(await asyncio.to_thread(started.wait, 1))
+            self.assertTrue(await asyncio.to_thread(observed.wait, 1))
+            actor._schedule_artifact_recovery({"job": "42"})
+            self.assertEqual(calls, ["job"])
+            await asyncio.wait_for(actor.shutdown_artifact_recovery(), 1)
+            self.assertTrue(stop.is_set())
+            self.assertEqual(actor._custody_bulk_tasks, {})
+        finally:
+            stop.set()
+            await actor.shutdown_artifact_recovery()
 
     async def test_stalled_job_does_not_hold_tick_or_duplicate_its_worker(self):
         namespace = load_recovery()

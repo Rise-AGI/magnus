@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
+    from ._custody_relay import CustodyRelay
     from sqlalchemy.orm import Session
     from .._docker_manager import DockerManager
     from .._slurm_manager import SlurmManager
@@ -52,6 +53,9 @@ class _SchedulerProtocol:
     _finalization_retry_after: Dict[str, float]
     _artifact_recovery_tasks: Dict[str, asyncio.Task[int]]
     _artifact_recovery_slots: asyncio.Semaphore
+    _custody_relay: CustodyRelay
+    _custody_bulk_slots: asyncio.Semaphore
+    _custody_bulk_tasks: Dict[str, asyncio.Task]
     _artifact_retry_after: Dict[str, float]
     _submission_task: Optional[asyncio.Task]
     _submitting_jobs: set[str]
@@ -71,6 +75,10 @@ class _SchedulerProtocol:
         job_id: str,
         slurm_job_id: str | None,
     ) -> int: ...
+    async def _transfer_custody_bulk(
+        self,
+        job_id: str,
+    ) -> None: ...
     def _recover_job_artifacts(
         self,
         job_id: str,
@@ -166,6 +174,7 @@ class _SchedulerProtocol:
         job_id: str,
         *,
         timeout: float = 30,
+        cancel_event: threading.Event | None = None,
     ) -> None: ...
     def _stage_out_markers(self, job_id: str) -> None: ...
     def _stage_out_final(self, job_id: str) -> bool: ...

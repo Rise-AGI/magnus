@@ -19,7 +19,7 @@ import re
 import json
 import shutil
 import tempfile
-import hashlib
+import threading
 from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING
@@ -167,13 +167,18 @@ def _remote_optional_entries(
     path: str,
     *,
     timeout: float = 30,
+    cancel_event: threading.Event | None = None,
 ) -> list[str]:
     # Shell test/ls exit codes conflate absence with permissions or SSH failure.
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Artifact discovery cancelled")
     result = transport.run(
         ["python3", "-c", _OPTIONAL_DIRECTORY_LIST, path],
         check = True,
-        timeout = timeout,
+        timeout = min(timeout, 30),
     )
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Artifact discovery cancelled")
     if result.returncode != 0:
         raise RuntimeError("Remote artifact directory query failed")
     entries = json.loads(result.stdout)
@@ -190,6 +195,7 @@ def _fetch_artifact_file(
     local_path: str,
     *,
     timeout: float = 30,
+    cancel_event: threading.Event | None = None,
 ) -> None:
     parent = os.path.dirname(local_path)
     os.makedirs(parent, exist_ok=True)
@@ -200,6 +206,7 @@ def _fetch_artifact_file(
             remote_path,
             temporary,
             timeout = timeout,
+            **({"cancel_event": cancel_event} if cancel_event is not None else {}),
         )
         os.replace(temporary, local_path)
     finally:
@@ -453,6 +460,7 @@ class _StagingMixin(_StagingMixinBase):
         job_id: str,
         *,
         timeout: float = 30,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         if not self._is_remote_execution():
             return
@@ -465,17 +473,20 @@ class _StagingMixin(_StagingMixinBase):
             transport,
             f"{remote_table}/slurm",
             timeout = remaining_timeout(deadline),
+            cancel_event = cancel_event,
         ):
             _fetch_artifact_file(
                 transport,
                 f"{remote_table}/slurm/output.txt",
                 f"{local_table}/slurm/output.txt",
                 timeout = remaining_timeout(deadline),
+                cancel_event = cancel_event,
             )
         for name in _remote_optional_entries(
             transport,
             f"{remote_table}/metrics",
             timeout = remaining_timeout(deadline),
+            cancel_event = cancel_event,
         ):
             if not _is_safe_leaf(name):
                 raise ValueError("Invalid remote metric filename")
@@ -484,6 +495,7 @@ class _StagingMixin(_StagingMixinBase):
                 f"{remote_table}/metrics/{name}",
                 f"{local_table}/metrics/{name}",
                 timeout = remaining_timeout(deadline),
+                cancel_event = cancel_event,
             )
 
     def _stage_out_markers(
@@ -517,23 +529,18 @@ class _StagingMixin(_StagingMixinBase):
     ) -> bool:
         if not self._is_remote_execution():
             return True
-        deadline = monotonic() + self.config["transport"]["ssh"].get("transfer_timeout_seconds", 900)
         complete = True
-        local_table = self._local_job_working_table(job_id)
         try:
-            receipts = _read_custody_receipts(local_table)
-            if not receipts["logs_complete"]:
-                self._stage_out_logs(job_id, timeout=remaining_timeout(deadline))
-                receipts["logs_complete"] = True
-                _write_custody_receipts(local_table, receipts)
-        except Exception:
-            logger.warning("Job %s final log transfer is pending", job_id, exc_info=True)
-            complete = False
-        try:
-            if not self._stage_out_custody(job_id, deadline=deadline):
+            if not self._stage_out_custody(job_id):
                 complete = False
         except Exception:
             logger.warning("Job %s custody transfer is pending", job_id, exc_info=True)
+            complete = False
+        try:
+            if not self._custody_relay.request_final_logs(job_id):
+                complete = False
+        except Exception:
+            logger.warning("Job %s final log transfer is pending", job_id, exc_info=True)
             complete = False
         return complete
 
@@ -545,76 +552,7 @@ class _StagingMixin(_StagingMixinBase):
     ) -> bool:
         if not self._is_remote_execution():
             return True
-        assert self.slurm_manager is not None
-        if deadline is None:
-            deadline = monotonic() + self.config["transport"]["ssh"].get("transfer_timeout_seconds", 900)
-        transport = self.slurm_manager.transport
-        remote_drop = f"{self._remote_job_working_table(job_id)}/{_CUSTODY_DROP_SUBDIR}"
-        local_table = self._local_job_working_table(job_id)
-        local_drop = os.path.join(local_table, _CUSTODY_DROP_SUBDIR)
-        receipts = _read_custody_receipts(local_table)
-        complete = True
-        for token in _remote_optional_entries(
-            transport,
-            remote_drop,
-            timeout = remaining_timeout(deadline, 30),
-        ):
-            if not _RELAY_TOKEN_RE.fullmatch(token):
-                # An interrupted writer's hidden directory is evidence, not a
-                # publishable receipt. Do not let it erase other completed drops.
-                complete = False
-                logger.warning("Job %s has an unpublished custody entry", job_id)
-                continue
-            if monotonic() >= deadline:
-                return False
-            try:
-                os.makedirs(local_drop, exist_ok=True)
-                with tempfile.TemporaryDirectory(prefix=".stage-out-", dir=local_drop) as temporary:
-                    metadata_path = os.path.join(temporary, "meta.json")
-                    transport.fetch(
-                        f"{remote_drop}/{token}/meta.json",
-                        metadata_path,
-                        timeout = remaining_timeout(deadline, 30),
-                    )
-                    with open(metadata_path, encoding="utf-8") as metadata:
-                        meta = json.load(metadata)
-                    filename, stored_name = _validate_custody_metadata(meta, token)
-                    digest = hashlib.sha256(
-                        json.dumps(meta, sort_keys=True, separators=(",", ":")).encode("utf-8")
-                    ).hexdigest()
-                    previous = receipts["entries"].get(token)
-                    if previous is not None:
-                        if previous != digest:
-                            raise ValueError("Custody token metadata changed after registration")
-                        continue
-                    payload_path = os.path.join(temporary, "payload")
-                    transport.fetch(
-                        f"{remote_drop}/{token}/{stored_name}",
-                        payload_path,
-                        timeout = remaining_timeout(deadline),
-                    )
-                    expected_size = meta.get("size_bytes")
-                    if expected_size is not None and os.path.getsize(payload_path) != expected_size:
-                        raise ValueError("Remote custody payload size does not match metadata")
-                    if meta.get("is_directory", False) and os.path.getsize(payload_path) == 0:
-                        raise ValueError("Remote custody archive is empty")
-                    with open(payload_path, "rb") as file_obj:
-                        file_custody_manager.store_file(
-                            filename = filename,
-                            file_obj = file_obj,
-                            expire_minutes = meta.get("expire_minutes"),
-                            is_directory = meta.get("is_directory", False),
-                            max_downloads = meta.get("max_downloads"),
-                            explicit_token = token,
-                        )
-                    # A consumed or expired token must never gain a fresh TTL or
-                    # download budget just because another drop still needs retry.
-                    receipts["entries"][token] = digest
-                    _write_custody_receipts(local_table, receipts)
-            except Exception as error:
-                complete = False
-                logger.warning("Job %s custody entry remains pending (%s)", job_id, type(error).__name__)
-        return complete
+        return self._custody_relay.poll(job_id, deadline or monotonic() + 30)
 
     def _cleanup_remote_job(self, job_id: str) -> None:
         """删除远端 job 工作区（marker / 日志 / metrics 已在 _stage_out_final 拉回本机，

@@ -27,6 +27,8 @@ def load_manager():
     namespace = runpy.run_path(str(CUSTODY / "_types.py"))
     namespace.update(runpy.run_path(str(CUSTODY / "_word_list.py")))
     namespace.update(runpy.run_path(str(SERVER / "_size_utils.py")))
+    namespace.update(runpy.run_path(str(CUSTODY / "_index.py")))
+    namespace.update(runpy.run_path(str(SERVER / "_custody_receipts.py")))
     namespace.update({
         "logger": logging.getLogger("custody_lifecycle_test"),
         "is_disk_full_oserror": lambda error: error.errno in (errno.ENOSPC, errno.EDQUOT),
@@ -80,7 +82,8 @@ class CustodyLifecycleTests(unittest.TestCase):
     def assert_empty(self):
         self.assertEqual(self.manager._entries, {})
         self.assertEqual(self.manager._current_size, 0)
-        self.assertEqual(list(self.manager._storage_root.iterdir()), [])
+        self.assertEqual(list(self.manager._storage_root.glob("*/*")), [])
+        self.assertEqual(self.manager._index.load(), {})
 
     def test_mkdir_failure_releases_slot_and_budget(self):
         with patch.object(Path, "mkdir", side_effect=PermissionError("denied")):

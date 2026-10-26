@@ -49,7 +49,7 @@ class CustodyStatusTests(unittest.TestCase):
         def get_user(authorization: str = Header(default="")):
             if authorization != "Bearer test":
                 raise HTTPException(status_code=401)
-            return object()
+            return SimpleNamespace(name="test", id="owner")
 
         namespace = {
             **receipts,
@@ -134,13 +134,58 @@ class CustodyStatusTests(unittest.TestCase):
         self.assertEqual(self.query().json(), {"status": "unavailable", "job_transfers_pending": True})
         self.assertEqual(self.manager._entries, {})
 
-    def test_restart_does_not_turn_imported_receipt_into_pending(self):
+    def test_restart_keeps_imported_custody_ready_and_downloadable(self):
         self.store()
         self.register_receipt()
+        self.manager.shutdown()
         restarted = self.namespace["FileCustodyManager"]()
         self.router_namespace["file_custody_manager"] = restarted
-        self.assertEqual(self.query().json()["status"], "unavailable")
-        self.assertEqual(restarted._entries, {})
+        self.assertEqual(self.query().json()["status"], "ready")
+        self.assertEqual(self.http.get(f"/api/files/download/{self.token}").content, b"answer")
+
+    def test_http_upload_retains_secret_and_remaining_claims_after_restart(self):
+        response = self.http.post(
+            "/api/files/upload",
+            headers = {"Authorization": "Bearer test"},
+            files = {"file": ("input.bin", b"scientific input")},
+            data = {"expire_minutes": "60", "max_downloads": "2"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.token = response.json()["file_secret"].removeprefix("magnus-secret:")
+        self.manager.shutdown()
+        for _ in range(2):
+            restored = self.namespace["FileCustodyManager"]()
+            self.router_namespace["file_custody_manager"] = restored
+            self.assertEqual(self.query(None).json()["status"], "ready")
+            self.assertEqual(self.http.get(f"/api/files/download/{self.token}").content, b"scientific input")
+        restored = self.namespace["FileCustodyManager"]()
+        self.router_namespace["file_custody_manager"] = restored
+        self.assertEqual(self.http.get(f"/api/files/download/{self.token}").status_code, 404)
+
+    def test_http_job_upload_requires_owner_and_defers_expiry(self):
+        job_id = "0123456789abcdef"
+        with self.sessions() as db:
+            db.add(Job(id=job_id, status=JobStatus.RUNNING, user_id="owner", slurm_job_id="42"))
+            db.commit()
+        request = {
+            "headers": {"Authorization": "Bearer test"},
+            "files": {"file": ("checkpoint", b"checkpoint")},
+            "data": {"job_id": job_id, "expire_minutes": "5"},
+        }
+        response = self.http.post("/api/files/upload", **request)
+        self.assertEqual(response.status_code, 200)
+        token = response.json()["file_secret"].removeprefix("magnus-secret:")
+        self.assertEqual(self.manager.get_entry(token).expires_at, float("inf"))
+        with self.sessions() as db:
+            db.get(Job, job_id).user_id = "someone-else"
+            db.commit()
+        self.assertEqual(self.http.post("/api/files/upload", **request).status_code, 403)
+        with self.sessions() as db:
+            job = db.get(Job, job_id)
+            job.user_id = "owner"
+            job.status = JobStatus.SUCCESS
+            db.commit()
+        self.assertEqual(self.http.post("/api/files/upload", **request).status_code, 409)
 
     def test_exhausted_active_download_and_expired_entry_are_unavailable(self):
         self.store(max_downloads=1)

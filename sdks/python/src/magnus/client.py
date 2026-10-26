@@ -340,6 +340,14 @@ class MagnusClient:
             return self._drop_file(p, drop_dir, expire_minutes, max_downloads)
 
         data: Dict[str, str] = {"expire_minutes": str(expire_minutes)}
+        job_id = os.environ.get("MAGNUS_JOB_ID")
+        job_address = os.environ.get(ENV_MAGNUS_ADDRESS)
+        job_token = os.environ.get(ENV_MAGNUS_TOKEN)
+        if (
+            job_id and job_address and job_token == self.token
+            and normalize_address(job_address).removesuffix("/api") == self.address
+        ):
+            data["job_id"] = job_id
         if max_downloads is not None:
             data["max_downloads"] = str(max_downloads)
 

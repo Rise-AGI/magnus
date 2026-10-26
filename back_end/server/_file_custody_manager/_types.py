@@ -50,3 +50,5 @@ class CustodyEntry:
     active_readers: int = 0
     delete_pending: bool = False
     deleting: bool = False
+    job_id: Optional[str] = None
+    ttl_seconds: float = 0.0

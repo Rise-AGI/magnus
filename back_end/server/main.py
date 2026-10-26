@@ -629,7 +629,7 @@ async def lifespan(
         logger.info("Scheduler loop stopped.")
 
     await scheduler.shutdown()
-    file_custody_manager.shutdown()
+    await asyncio.to_thread(file_custody_manager.shutdown)
     await resource_manager.builds.shutdown()
 
 

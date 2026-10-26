@@ -23,6 +23,7 @@ import time
 from typing import Dict, List, Optional
 
 from ._ssh_auto_connect import ensure_control_master, remaining_timeout
+from ._file_receive import receive_file
 
 
 def _stop_transfer_process(
@@ -51,6 +52,7 @@ def _run_scp(
     command: List[str],
     *,
     timeout: float,
+    cancel_event: threading.Event | None = None,
 ) -> subprocess.CompletedProcess:
     # A multiplexing master can retain stderr after its client is killed. Do
     # not drain a pipe to EOF on timeout, and reap scp's local SSH child too.
@@ -63,7 +65,16 @@ def _run_scp(
             start_new_session = os.name != "nt",
         ) as process:
             try:
-                process.wait(timeout=timeout)
+                deadline = time.monotonic() + timeout
+                while True:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise InterruptedError("Artifact transfer cancelled")
+                    try:
+                        process.wait(timeout=min(0.1, remaining_timeout(deadline)))
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline:
+                            raise
             except BaseException:
                 _stop_transfer_process(process)
                 raise
@@ -233,6 +244,7 @@ class _Transport:
         local_path: str,
         *,
         timeout: Optional[float] = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         """把执行端 remote_path（文件或目录树）搬回本机 local_path。"""
         raise NotImplementedError
@@ -293,6 +305,7 @@ class _LocalTransport(_Transport):
         local_path: str,
         *,
         timeout: Optional[float] = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         # 同 push：本机执行端与 magnus 同机同盘，没有要搬回的东西。
         return
@@ -468,6 +481,7 @@ class _SshControlMasterTransport(_Transport):
         local_path: str,
         *,
         timeout: Optional[float] = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         local_parent = os.path.dirname(local_path)
         if local_parent:
@@ -476,6 +490,7 @@ class _SshControlMasterTransport(_Transport):
             self._remote_endpoint(remote_path),
             local_path,
             timeout = timeout,
+            cancel_event = cancel_event,
         )
 
     def _remote_endpoint(self, remote_path: str) -> str:
@@ -488,12 +503,50 @@ class _SshControlMasterTransport(_Transport):
         要，本实现不用 -O。"""
         return f"{self._user}@{self._host}:{remote_path}"
 
+    def fetch_bounded(
+        self,
+        remote_path: str,
+        local_path: str,
+        *,
+        size: int,
+        timeout: float,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        deadline = time.monotonic() + timeout
+        self._ensure_socket(deadline=deadline)
+        script = (
+            "import os,stat,sys\n"
+            "p=sys.argv[1]; n=int(sys.argv[2])\n"
+            "s=os.lstat(p)\n"
+            "if not stat.S_ISREG(s.st_mode) or s.st_size != n: raise ValueError('Changed payload')\n"
+            "with open(p,'rb') as f:\n"
+            " while True:\n"
+            "  b=f.read(1048576)\n"
+            "  if not b: break\n"
+            "  sys.stdout.buffer.write(b)\n"
+        )
+        command = [
+            "ssh", "-T", "-n", "-o", "BatchMode=yes", "-o", "ControlMaster=no",
+            "-o", "ProxyCommand=false", "-S", self._control_path,
+            f"{self._user}@{self._host}",
+            " ".join(shlex.quote(value) for value in ["python3", "-c", script, remote_path, str(size)]),
+        ]
+        receive_file(
+            command,
+            local_path,
+            size,
+            remaining_timeout(deadline),
+            _stop_transfer_process,
+            cancel_event,
+        )
+
     def _scp(
         self,
         source: str,
         destination: str,
         *,
         timeout: Optional[float] = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         """骑 ControlMaster socket 跑一次 scp。-r 兼容文件与目录树；socket 已建好，
         BatchMode=yes 让 socket 失效时快失败而非挂起等密码（与 run() 一致）。"""
@@ -518,6 +571,7 @@ class _SshControlMasterTransport(_Transport):
             result = _run_scp(
                 scp_command,
                 timeout = remaining_timeout(deadline),
+                cancel_event = cancel_event,
             )
         except subprocess.TimeoutExpired:
             raise TimeoutError("SCP transfer exceeded its time budget") from None

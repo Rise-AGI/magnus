@@ -21,7 +21,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 def load_transport():
     namespace = {"__name__": __name__}
-    for name in ("_ssh_auto_connect.py", "_transport.py"):
+    for name in ("_ssh_auto_connect.py", "_file_receive.py", "_transport.py"):
         path = SERVER / "_slurm_manager" / name
         tree = ast.parse(path.read_text(encoding="utf-8"))
         tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
@@ -63,7 +63,7 @@ class TransportDeadlineTests(unittest.TestCase):
         def ensure(*args, deadline=None):
             self.assertEqual(deadline, 15)
             clock.now += 2
-        def transfer(command, *, timeout):
+        def transfer(command, *, timeout, cancel_event=None):
             self.assertEqual(timeout, 3)
             raise subprocess.TimeoutExpired(command, timeout)
         namespace["ensure_control_master"] = ensure

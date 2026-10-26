@@ -1,5 +1,6 @@
 # back_end/server/routers/files.py
 import logging
+import re
 from pathlib import Path
 from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response, UploadFile
@@ -70,6 +71,12 @@ def get_file_status(
         try:
             local_table = Path(magnus_config["server"]["root"]) / "workspace" / "jobs" / job.id
             imported = bool(_RELAY_TOKEN_RE.fullmatch(token)) and token in _read_custody_receipts(str(local_table))["entries"]
+            if not imported and _RELAY_TOKEN_RE.fullmatch(token):
+                try:
+                    imported = file_custody_manager.import_receipt(job.id, token) is not None
+                except ValueError:
+                    # Caller-supplied Job context is not proof of token ownership.
+                    pass
         except (OSError, ValueError):
             raise HTTPException(
                 status_code = 503,
@@ -109,6 +116,25 @@ class CustodyFileResponse(FileResponse):
             await file_custody_manager.release_file_async(self._custody_token)
 
 
+def custody_upload_job(
+    job_id: Optional[str] = Form(default=None),
+    db: Session = Depends(database.get_db),
+    user: models.User = Depends(get_current_user),
+) -> Optional[str]:
+    if job_id is None:
+        return None
+    if not re.fullmatch(r"[0-9a-f]{16}", job_id):
+        raise HTTPException(status_code=400, detail="Invalid Job ID")
+    job = db.query(models.Job.user_id, models.Job.status).filter(models.Job.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Custody upload must belong to your Job")
+    if job.status in (models.JobStatus.SUCCESS, models.JobStatus.FAILED, models.JobStatus.TERMINATED):
+        raise HTTPException(status_code=409, detail="Job no longer accepts new custody publications")
+    return job_id
+
+
 @router.post("/files/upload", response_model=FileCustodyResponse)
 async def upload_file(
     file: UploadFile,
@@ -116,6 +142,7 @@ async def upload_file(
     max_downloads: Optional[int] = Form(default=None),
     is_directory: bool = Form(default=False),
     user: models.User = Depends(get_current_user),
+    job_id: Optional[str] = Depends(custody_upload_job),
 )-> FileCustodyResponse:
     max_ttl = magnus_config["server"]["file_custody"]["max_ttl_minutes"]
     if expire_minutes is not None and expire_minutes > max_ttl:
@@ -139,6 +166,7 @@ async def upload_file(
             expire_minutes = expire_minutes,
             is_directory = is_directory,
             max_downloads = max_downloads,
+            job_id = job_id,
         )
     except CustodyLimitError as e:
         raise HTTPException(status_code=429, detail=str(e))
@@ -150,7 +178,7 @@ async def upload_file(
 
 
 @router.get("/files/download/{token}")
-async def download_file(
+def download_file(
     token: str,
 ):
     result = file_custody_manager.get_file_path(token)
@@ -174,5 +202,5 @@ async def download_file(
             headers = headers,
         )
     except BaseException:
-        await file_custody_manager.release_file_async(token)
+        file_custody_manager.release_file(token)
         raise

@@ -288,7 +288,7 @@ test -n "$SECRET" || exit 1
 echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
 ```
 
-Custody uses the existing `magnus-secret` protocol. Ordinary secrets expire by TTL/download count and on backend restart. HTTP uploads are single-request transfers, so public gateway limits still apply. Offline relay jobs stage outputs locally; the controller imports them before the secret can be retrieved. See the [SDK file-transfer guide](sdk-and-cli.md#custody_file---put-a-file-into-custody) for the full contract.
+Custody uses the existing `magnus-secret` protocol. Completed uploads retain their secret across backend restarts, with the original TTL and download limit. HTTP uploads are single-request transfers, so public gateway limits still apply. Offline relay jobs publish complete snapshots, which the controller imports incrementally during execution. A Job output’s TTL starts after the whole Job finishes executing, or from readiness for a later import; early downloads still count. See the [SDK file-transfer guide](sdk-and-cli.md#custody_file---put-a-file-into-custody) for the full contract.
 
 Currently the Web side does not execute arbitrary shell; it only recognizes the safe whitelist form `magnus receive ...` and maps it to a browser download.
 

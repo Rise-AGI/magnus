@@ -32,6 +32,7 @@ class Base(DeclarativeBase):
 class Job(Base):
     __tablename__ = "jobs"
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus))
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     finalization_status: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -149,6 +150,8 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor.slurm_manager = SimpleNamespace(check_job_status=status)
         actor._stage_out_markers = markers
         actor._stage_out_final = final
+        actor._custody_relay = SimpleNamespace(forget=lambda job: None)
+        actor._stage_out_custody = lambda identifier: True
         actor._stage_out_logs = lambda identifier: self.events.append(("logs", identifier))
         actor._cleanup_remote_job = remote_cleanup
         return actor

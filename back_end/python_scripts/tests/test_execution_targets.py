@@ -75,6 +75,8 @@ def coordinator_class(
     targets,
     workers,
 ):
+    for key, worker in workers.items():
+        worker.config = targets[key].config
     path = SERVER / "_scheduler/_coordinator.py"
     tree = ast.parse(path.read_text())
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
@@ -86,6 +88,7 @@ def coordinator_class(
         "_WorkspaceGCMixin": type("GC", (), {"_reclaim_workspace_over_cap": lambda self: None}),
         "_run_blocking_io": asyncio.to_thread,
         "logger": logging.getLogger(__name__),
+        "file_custody_manager": SimpleNamespace(pending_job_ids=lambda: set()),
     }
     exec(compile(tree, str(path), "exec"), namespace)
     return namespace["SchedulerCoordinator"]
@@ -217,6 +220,15 @@ class TargetConfigurationTests(unittest.TestCase):
 
 
 class CoordinatorConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_targets_sharing_a_master_share_both_transfer_limits(self):
+        config = configuration()
+        config["execution"]["targets"]["second"]["transport"]["ssh"]["control_path"] = "first.sock"
+        targets = targets_module.execution_targets(config)
+        workers = {key: SimpleNamespace() for key in targets}
+        coordinator_class(targets, workers)()
+        self.assertIs(workers["first"]._artifact_recovery_slots, workers["second"]._artifact_recovery_slots)
+        self.assertIs(workers["first"]._custody_bulk_slots, workers["second"]._custody_bulk_slots)
+
     async def test_stalled_target_does_not_block_other_target_or_duplicate_passes(self):
         gate = asyncio.Event()
         slow_started = asyncio.Event()

@@ -3,6 +3,7 @@
 import os
 import re
 import json
+import math
 import time
 import shutil
 import random
@@ -10,12 +11,13 @@ import asyncio
 import threading
 from concurrent.futures import CancelledError
 from pathlib import Path
-from typing import Any, Literal, Optional, Dict, Tuple, BinaryIO
+from typing import Any, Callable, Literal, Optional, Dict, Tuple, BinaryIO
 
 from library import is_disk_full_oserror
 
 from .._magnus_config import magnus_config
 from .._size_utils import _parse_size_string
+from .._custody_receipts import _sync_directory
 from . import logger
 from ._types import (
     CustodyEntry,
@@ -24,6 +26,7 @@ from ._types import (
     FileTooLargeError,
 )
 from ._word_list import _PRIMES, _WORDS
+from ._index import CustodyIndex
 
 
 _COPY_CHUNK_SIZE = 64 * 1024
@@ -70,8 +73,7 @@ async def _settle_task(
 class FileCustodyManager:
     """文件托管管理器（进程内单例）。
 
-    ``threading.Lock``：临界区做 dict / 计数 / 极短 syscall，以及永久条目
-    增删时的 manifest dump（需要遍历 ``self._entries``，必须在锁内）；耗时
+    ``threading.Lock``：临界区做 dict / 计数及元数据事务的原子提交；耗时
     I/O（chunked write、rmtree）一律在 lock 外。``shutdown()`` 在进程退出
     阶段同步调用。
 
@@ -92,42 +94,61 @@ class FileCustodyManager:
         self._storage_root = Path(magnus_config["server"]["root"]) / "file_custody"
         self._storage_root.mkdir(parents=True, exist_ok=True)
         self._manifest_path = self._storage_root / "_manifest.json"
+        self._index = CustodyIndex(self._storage_root / "_custody.sqlite3")
 
         self._entries: Dict[str, CustodyEntry] = {}
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
         self._rng = random.SystemRandom()
+        self._closed = False
 
-        # 恢复永久条目，清理非永久残留
         manifest = self._load_manifest()
+        temporary = self._index.load()
+        self._validate_manifest(temporary, temporary=True)
         restored = set()
-        for token, meta in manifest.items():
+        for token, meta in {**manifest, **temporary}.items():
+            if token in manifest and token in temporary:
+                raise ValueError("Conflicting custody manifests; storage left unchanged")
             entry_dir = self._storage_root / token
             file_path = entry_dir / meta["filename"]
-            if file_path.exists():
+            if entry_dir.is_symlink() or file_path.is_symlink():
+                raise ValueError("Symlink in custody manifest; storage left unchanged")
+            permanent = token in manifest
+            expiry = float("inf") if permanent or meta["expires_at"] is None else meta["expires_at"]
+            limit = None if permanent else meta["max_downloads"]
+            downloads = 0 if permanent else meta["download_count"]
+            if file_path.is_file() and time.time() < expiry and (limit is None or downloads < limit):
                 self._entries[token] = CustodyEntry(
-                    entry_id=token,
-                    file_dir=entry_dir,
-                    original_filename=meta["filename"],
-                    is_directory=meta.get("is_directory", False),
-                    expires_at=float("inf"),
-                    permanent=True,
-                    file_size=file_path.stat().st_size,
+                    entry_id = token,
+                    file_dir = entry_dir,
+                    original_filename = meta["filename"],
+                    is_directory = meta.get("is_directory", False),
+                    expires_at = expiry,
+                    permanent = permanent,
+                    max_downloads = limit,
+                    download_count = downloads,
+                    file_size = file_path.stat().st_size,
+                    job_id = meta.get("job_id"),
+                    ttl_seconds = meta.get("ttl_seconds", 0),
                 )
                 restored.add(token)
-                logger.info(f"Restored permanent custody entry: {token}")
 
-        # 清理不在 manifest 中的旧目录
+        # Do not reclaim anything until both manifests have been validated.
+        # A damaged index must never turn all accepted uploads into orphans.
         for child in self._storage_root.iterdir():
             if child.is_dir() and child.name not in restored:
-                shutil.rmtree(child, ignore_errors=True)
-                logger.info(f"Cleaned up stale custody dir: {child.name}")
+                if child.is_symlink():
+                    child.unlink()
+                else:
+                    shutil.rmtree(child)
 
-        # 同步 manifest（移除磁盘已丢失的条目）
-        if set(manifest.keys()) != restored:
+        if set(manifest) != restored.intersection(manifest):
             self._save_manifest()
+        for token in set(temporary) - restored:
+            self._index.remove(token)
 
         self._current_size = sum(e.file_size for e in self._entries.values())
+        logger.info("Restored %d custody entries", len(self._entries))
 
     def _generate_token(self) -> str:
         for _ in range(64):
@@ -139,14 +160,62 @@ class FileCustodyManager:
         raise RuntimeError("Failed to generate unique token after 64 attempts")
 
     def _load_manifest(self) -> Dict[str, Dict[str, Any]]:
-        if not self._manifest_path.exists():
-            return {}
+        return self._read_manifest(
+            self._manifest_path,
+            temporary = False,
+        )
+
+    @staticmethod
+    def _read_manifest(
+        path: Path,
+        temporary: bool,
+    ) -> Dict[str, Dict[str, Any]]:
         try:
-            with open(self._manifest_path) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            logger.warning("Corrupt manifest file, starting fresh.")
+            with path.open(encoding="utf-8") as source:
+                data = json.load(source)
+        except FileNotFoundError:
             return {}
+        except (ValueError, OSError):
+            raise ValueError("Cannot read custody manifest; storage left unchanged") from None
+        FileCustodyManager._validate_manifest(data, temporary)
+        return data
+
+    @staticmethod
+    def _validate_manifest(
+        data: dict,
+        temporary: bool,
+    ) -> None:
+        try:
+            if not isinstance(data, dict):
+                raise ValueError()
+            for token, meta in data.items():
+                if (
+                    not isinstance(token, str)
+                    or not re.fullmatch(r"[0-9A-Za-z_-]+", token)
+                    or not isinstance(meta, dict)
+                    or not isinstance(meta["filename"], str)
+                    or meta["filename"] != _sanitize_filename(meta["filename"])
+                    or not isinstance(meta.get("is_directory", False), bool)
+                ):
+                    raise ValueError()
+                if temporary and (
+                    (meta["expires_at"] is not None and (
+                        type(meta["expires_at"]) not in (int, float)
+                        or not math.isfinite(meta["expires_at"])
+                    ))
+                    or (meta["expires_at"] is None and not meta.get("job_id"))
+                    or (meta.get("job_id") is not None and not re.fullmatch(r"[0-9a-f]{16}", meta["job_id"]))
+                    or type(meta["ttl_seconds"]) not in (int, float)
+                    or not math.isfinite(meta["ttl_seconds"])
+                    or type(meta["download_count"]) is not int
+                    or meta["download_count"] < 0
+                    or (meta["max_downloads"] is not None and (
+                        type(meta["max_downloads"]) is not int or meta["max_downloads"] < 1
+                    ))
+                ):
+                    raise ValueError()
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise ValueError("Invalid custody manifest; storage left unchanged") from None
 
     def _save_manifest(self) -> None:
         data: Dict[str, Dict[str, Any]] = {}
@@ -156,11 +225,91 @@ class FileCustodyManager:
                     "filename": entry.original_filename,
                     "is_directory": entry.is_directory,
                 }
-        tmp = self._manifest_path.with_suffix(".tmp")
+        self._write_manifest(
+            self._manifest_path,
+            data,
+        )
+
+    @staticmethod
+    def _entry_metadata(
+        entry: CustodyEntry,
+    ) -> dict:
+        return {
+            "filename": entry.original_filename,
+            "is_directory": entry.is_directory,
+            "expires_at": None if math.isinf(entry.expires_at) else entry.expires_at,
+            "max_downloads": entry.max_downloads,
+            "download_count": entry.download_count,
+            "job_id": entry.job_id,
+            "ttl_seconds": entry.ttl_seconds,
+        }
+
+    def pending_job_ids(
+        self,
+    ) -> set[str]:
+        with self._lock:
+            return {
+                entry.job_id for entry in self._entries.values()
+                if entry.job_id and not entry.writing and math.isinf(entry.expires_at)
+                and not entry.delete_pending
+            }
+
+    def finish_job(
+        self,
+        job_id: str,
+    ) -> None:
+        with self._lock:
+            now = time.time()
+            for entry in self._entries.values():
+                if entry.job_id != job_id or entry.delete_pending or entry.writing or not math.isinf(entry.expires_at):
+                    continue
+                previous = entry.expires_at
+                entry.expires_at = now + entry.ttl_seconds
+                try:
+                    self._index.save(entry.entry_id, self._entry_metadata(entry))
+                except BaseException:
+                    entry.expires_at = previous
+                    raise
+
+    def import_receipt(
+        self,
+        job_id: str,
+        token: str,
+    ) -> str | None:
+        with self._lock:
+            return self._index.receipt(job_id, token)
+
+    def acknowledge_import(
+        self,
+        job_id: str,
+        token: str,
+        digest: str,
+    ) -> None:
+        with self._lock:
+            self._index.acknowledge(job_id, token, digest)
+
+    def acknowledge_receipts(
+        self,
+        job_id: str,
+        receipts: dict[str, str],
+    ) -> None:
+        with self._lock:
+            self._index.acknowledge_receipts(job_id, receipts)
+
+    @staticmethod
+    def _write_manifest(
+        path: Path,
+        data: Dict[str, Any],
+    ) -> None:
+        tmp = path.with_suffix(".tmp")
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp, self._manifest_path)
+            descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
+                json.dump(data, destination, allow_nan=False)
+                destination.flush()
+                os.fsync(destination.fileno())
+            os.replace(tmp, path)
+            _sync_directory(path.parent)
         except BaseException:
             try:
                 tmp.unlink(missing_ok=True)
@@ -171,13 +320,18 @@ class FileCustodyManager:
     def store_file(
         self,
         filename: str,
-        file_obj: BinaryIO,
+        file_obj: BinaryIO | None,
         expire_minutes: Optional[int] = None,
         is_directory: bool = False,
         max_downloads: Optional[int] = None,
         permanent: bool = False,
         explicit_token: Optional[str] = None,
         cancel_event: Optional[threading.Event] = None,
+        *,
+        job_id: str | None = None,
+        source_digest: str | None = None,
+        expected_size: int | None = None,
+        receive: Callable[[Path], None] | None = None,
     ) -> str:
         # Sanitize at the entry point so all callers are protected centrally
         # rather than each one needing to remember `os.path.basename`.
@@ -188,7 +342,16 @@ class FileCustodyManager:
         # token that isn't the SDK's exact relay shape so it can't traverse out of the
         # storage root. None (the HTTP path) skips this and uses _generate_token.
         if explicit_token is not None and not _RELAY_TOKEN_RE.match(explicit_token):
-            raise ValueError(f"invalid explicit custody token: {explicit_token!r}")
+            raise ValueError("invalid explicit custody token")
+        if max_downloads is not None and (type(max_downloads) is not int or max_downloads < 1):
+            raise ValueError("max_downloads must be a positive integer")
+
+        if job_id is not None and (permanent or not re.fullmatch(r"[0-9a-f]{16}", job_id)):
+            raise ValueError("Invalid custody Job association")
+        if source_digest is not None and (not job_id or not explicit_token or not re.fullmatch(r"[0-9a-f]{64}", source_digest)):
+            raise ValueError("Invalid custody import receipt")
+        if receive is not None and (type(expected_size) is not int or expected_size < 0):
+            raise ValueError("A bounded receive requires the exact payload size")
 
         # permanent 条目由服务端内部代码控制（如头像），不受 max_ttl 限制
         if not permanent:
@@ -198,6 +361,14 @@ class FileCustodyManager:
 
         # 先占位再写文件，避免并发请求绕过 _max_processes 限制
         with self._changed:
+            if self._closed:
+                raise RuntimeError("File custody is shutting down")
+            if source_digest is not None:
+                previous = self._index.receipt(job_id, explicit_token)
+                if previous is not None:
+                    if previous != source_digest:
+                        raise ValueError("Custody import identity changed")
+                    return explicit_token
             # explicit_token：远端无网执行时 SDK 离线生成的 relay token，由 host 侧
             # staging 把暂存产物按它注册进 custody。重复注册（同一 drop 被多次拉回）
             # 幂等返回，不重写、不重复计数。explicit_token=None 时走原 _generate_token
@@ -208,13 +379,20 @@ class FileCustodyManager:
                     self._changed.wait(timeout=0.1)
                     if cancel_event is not None and cancel_event.is_set():
                         raise CancelledError()
+                    if self._closed:
+                        raise RuntimeError("File custody is shutting down")
                     continue
                 if existing.delete_pending:
                     raise CustodyStorageFullError()
+                if source_digest is not None and existing.job_id != job_id:
+                    raise ValueError("Custody token belongs to another Job")
                 return explicit_token
             if len(self._entries) >= self._max_processes:
                 raise CustodyLimitError(self._max_processes)
-            if self._current_size >= self._max_size:
+            reservation = expected_size if receive is not None else 0
+            if self._max_file_size is not None and reservation > self._max_file_size:
+                raise FileTooLargeError(filename, self._max_file_size)
+            if self._current_size >= self._max_size or self._current_size + reservation > self._max_size:
                 raise CustodyStorageFullError()
             entry_id = explicit_token if explicit_token is not None else self._generate_token()
             placeholder = CustodyEntry(
@@ -226,35 +404,50 @@ class FileCustodyManager:
                 permanent = permanent,
                 max_downloads = max_downloads,
                 writing = True,
+                file_size = reservation,
+                job_id = job_id,
+                ttl_seconds = 0 if permanent else expire_minutes * 60,
             )
             self._entries[entry_id] = placeholder
+            self._current_size += reservation
 
         file_dir = placeholder.file_dir
         file_path = file_dir / filename
         try:
             file_dir.mkdir(parents=True, exist_ok=True)
-            with open(file_path, "wb") as f:
-                written = 0
-                while True:
-                    if cancel_event is not None and cancel_event.is_set():
-                        raise CancelledError()
-                    chunk = file_obj.read(_COPY_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    written += len(chunk)
-                    if self._max_file_size is not None and written > self._max_file_size:
-                        raise FileTooLargeError(filename, self._max_file_size)
-                    # Charge bytes before writing, including all concurrent uploads.
-                    # Failed writes retain the reservation until their files are gone.
-                    with self._lock:
-                        if placeholder.delete_pending:
+            if receive is not None:
+                receive(file_path)
+                if file_path.stat().st_size != expected_size:
+                    raise ValueError("Custody payload size changed during transfer")
+                with file_path.open("r+b") as destination:
+                    os.fsync(destination.fileno())
+            else:
+                assert file_obj is not None
+                with open(file_path, "wb") as f:
+                    written = 0
+                    while True:
+                        if cancel_event is not None and cancel_event.is_set():
                             raise CancelledError()
-                        if self._current_size + len(chunk) > self._max_size:
-                            raise CustodyStorageFullError()
-                        self._current_size += len(chunk)
-                        placeholder.file_size += len(chunk)
-                    f.write(chunk)
-
+                        chunk = file_obj.read(_COPY_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if self._max_file_size is not None and written > self._max_file_size:
+                            raise FileTooLargeError(filename, self._max_file_size)
+                        # Charge bytes before writing, including all concurrent uploads.
+                        # Failed writes retain the reservation until their files are gone.
+                        with self._lock:
+                            if placeholder.delete_pending:
+                                raise CancelledError()
+                            if self._current_size + len(chunk) > self._max_size:
+                                raise CustodyStorageFullError()
+                            self._current_size += len(chunk)
+                            placeholder.file_size += len(chunk)
+                        f.write(chunk)
+                    f.flush()
+                    os.fsync(f.fileno())
+            _sync_directory(file_dir)
+            _sync_directory(self._storage_root)
             with self._changed:
                 if placeholder.delete_pending or (cancel_event is not None and cancel_event.is_set()):
                     raise CancelledError()
@@ -264,7 +457,13 @@ class FileCustodyManager:
                     self._save_manifest()
                 else:
                     assert expire_minutes is not None
-                    placeholder.expires_at = time.time() + expire_minutes * 60
+                    if placeholder.expires_at == 0.0:
+                        placeholder.expires_at = float("inf") if job_id else time.time() + placeholder.ttl_seconds
+                    self._index.save(
+                        entry_id,
+                        self._entry_metadata(placeholder),
+                        receipt = (job_id, source_digest) if source_digest is not None else None,
+                    )
                 self._changed.notify_all()
         except BaseException as error:
             with self._changed:
@@ -282,7 +481,7 @@ class FileCustodyManager:
                 raise CustodyStorageFullError() from error
             raise
 
-        logger.info(f"File custody stored: {entry_id}, filename={filename}, permanent={permanent}")
+        logger.info("File custody stored: bytes=%d, permanent=%s", placeholder.file_size, permanent)
         return entry_id
 
     async def store_file_async(
@@ -293,6 +492,8 @@ class FileCustodyManager:
         is_directory: bool = False,
         max_downloads: Optional[int] = None,
         permanent: bool = False,
+        *,
+        job_id: str | None = None,
     ) -> str:
         cancel_event = threading.Event()
         task = asyncio.create_task(asyncio.to_thread(
@@ -304,6 +505,7 @@ class FileCustodyManager:
             max_downloads = max_downloads,
             permanent = permanent,
             cancel_event = cancel_event,
+            job_id = job_id,
         ))
         try:
             return await asyncio.shield(task)
@@ -372,9 +574,17 @@ class FileCustodyManager:
             file_path = entry.file_dir / entry.original_filename
             if not file_path.exists():
                 return None
-            entry.active_readers += 1
             if count_download:
                 entry.download_count += 1
+                if not entry.permanent:
+                    try:
+                        # Commit the claim before exposing bytes, including the
+                        # final claim whose reader may outlive graceful shutdown.
+                        self._index.save(token, self._entry_metadata(entry))
+                    except BaseException:
+                        entry.download_count -= 1
+                        raise
+            entry.active_readers += 1
             exhausted = entry.max_downloads is not None and entry.download_count >= entry.max_downloads
         return (file_path, entry.original_filename, entry.is_directory, exhausted)
 
@@ -431,6 +641,8 @@ class FileCustodyManager:
             # a reader. A restart must not restore an already replaced avatar.
             if entry.permanent and not entry.writing and entry.expires_at > 0.0:
                 self._save_manifest()
+            elif not entry.permanent and not entry.writing and entry.expires_at > 0.0:
+                self._index.remove(token)
             if entry.writing or entry.active_readers or entry.deleting:
                 return
             entry.deleting = True
@@ -445,13 +657,13 @@ class FileCustodyManager:
             with self._changed:
                 entry.deleting = False
                 self._changed.notify_all()
-            logger.warning("Cannot remove custody entry %s; cleanup will retry", token, exc_info=True)
+            logger.warning("Cannot remove custody payload; cleanup will retry")
             return
         with self._changed:
             self._entries.pop(token)
             self._current_size -= entry.file_size
             self._changed.notify_all()
-        logger.info(f"File custody purged: {token}")
+        logger.info("File custody payload purged")
 
     def cleanup_expired(
         self,
@@ -471,7 +683,7 @@ class FileCustodyManager:
                     expected_entry = entry,
                 )
             except OSError:
-                logger.warning("Custody cleanup failed for %s; will retry", token, exc_info=True)
+                logger.warning("Custody cleanup failed; will retry")
 
     async def cleanup_loop(self) -> None:
         logger.info("File custody cleanup loop started.")
@@ -480,12 +692,11 @@ class FileCustodyManager:
             await asyncio.to_thread(self.cleanup_expired)
 
     def shutdown(self) -> None:
-        with self._lock:
-            ephemeral = [e for e in self._entries.values() if not e.permanent]
-        for entry in ephemeral:
-            self.delete_entry(
-                entry.entry_id,
-                expected_entry = entry,
-            )
-        logger.info(f"Shutting down file custody manager ({len(ephemeral)} ephemeral entries retired, "
-                     f"{len(self._entries)} permanent entries preserved)...")
+        with self._changed:
+            self._closed = True
+            for entry in self._entries.values():
+                if entry.writing:
+                    entry.delete_pending = True
+            self._changed.notify_all()
+        self.cleanup_expired()
+        logger.info("File custody shut down; completed entries retain their original limits")

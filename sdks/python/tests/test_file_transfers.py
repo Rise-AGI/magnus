@@ -114,6 +114,39 @@ class ErrorTests(unittest.TestCase):
                 client._post_file_with_retry("data.bin", io.BytesIO(b"DATA"), {}, 1)
 
 
+class JobUploadTests(unittest.TestCase):
+    def test_only_the_current_jobs_site_gets_its_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "output"
+            path.write_bytes(b"published")
+            for site, token, expected in (
+                ("https://producer.invalid", "job-owner", True),
+                ("https://another.invalid", "job-owner", False),
+                ("https://producer.invalid", "another-user", False),
+            ):
+                with self.subTest(site=site, token=token):
+                    client = client_module.MagnusClient.__new__(client_module.MagnusClient)
+                    client.address = site
+                    client.token = token
+                    requests = []
+                    def post(filename, source, data, timeout):
+                        requests.append((source.read(), data))
+                        return httpx.Response(200, json={"file_secret": "magnus-secret:example"})
+                    client._post_file_with_retry = post
+                    with patch.dict(os.environ, {
+                        "MAGNUS_ADDRESS": "https://producer.invalid/api",
+                        "MAGNUS_JOB_ID": "0123456789abcdef",
+                        "MAGNUS_TOKEN": "job-owner",
+                        "MAGNUS_CUSTODY_DROP_DIR": "",
+                    }):
+                        self.assertEqual(client._upload_file(str(path)), "magnus-secret:example")
+                    self.assertEqual(requests[0][0], b"published")
+                    self.assertEqual("job_id" in requests[0][1], expected)
+            with patch.dict(os.environ, {"MAGNUS_JOB_ID": "", "MAGNUS_ADDRESS": "", "MAGNUS_CUSTODY_DROP_DIR": ""}):
+                client._upload_file(str(path))
+            self.assertNotIn("job_id", requests[-1][1])
+
+
 class DownloadTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

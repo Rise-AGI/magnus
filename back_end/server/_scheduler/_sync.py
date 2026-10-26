@@ -410,8 +410,11 @@ class _SyncMixin(_SyncMixinBase):
             self._finalize_slurm_job(job_id, slurm_job_id, finalization_status)
             return 60
         if status in (JobStatus.QUEUED, JobStatus.RUNNING):
-            self._stage_out_logs(job_id)
-        return 0
+            try:
+                self._stage_out_custody(job_id)
+            finally:
+                self._stage_out_logs(job_id)
+        return 30
 
     def _finalize_slurm_job(
         self,
@@ -448,6 +451,7 @@ class _SyncMixin(_SyncMixinBase):
             return
         if self._clean_up_working_table(job_id) is not True:
             return
+        self._custody_relay.forget(job_id)
         with SessionLocal() as db:
             changed = self._job_query(db, Job).filter(
                 Job.id == job_id,

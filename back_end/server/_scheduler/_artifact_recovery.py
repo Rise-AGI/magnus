@@ -46,6 +46,22 @@ class _ArtifactRecoveryMixin(_ArtifactRecoveryMixinBase):
                 self._recover_artifacts_in_slot(job_id, slurm_job_id),
             )
 
+        for job_id, task in list(self._custody_bulk_tasks.items()):
+            if task.done():
+                del self._custody_bulk_tasks[job_id]
+                if not task.cancelled() and task.exception() is not None:
+                    logger.warning("Job %s custody bulk worker failed", job_id)
+        for job_id in sorted(self._custody_relay.bulk_job_ids()):
+            if job_id in candidates and job_id not in self._custody_bulk_tasks:
+                self._custody_bulk_tasks[job_id] = asyncio.create_task(self._transfer_custody_bulk(job_id))
+
+    async def _transfer_custody_bulk(
+        self,
+        job_id: str,
+    ) -> None:
+        async with self._custody_bulk_slots:
+            await _run_blocking_io(self._custody_relay.transfer_bulk, job_id)
+
     async def _recover_artifacts_in_slot(
         self,
         job_id: str,
@@ -61,9 +77,11 @@ class _ArtifactRecoveryMixin(_ArtifactRecoveryMixinBase):
     async def shutdown_artifact_recovery(
         self,
     ) -> None:
-        tasks = list(self._artifact_recovery_tasks.values())
+        self._custody_relay.cancel_transfers()
+        tasks = [*self._artifact_recovery_tasks.values(), *self._custody_bulk_tasks.values()]
         for task in tasks:
             task.cancel()
         # Cancellation joins an active filesystem worker before custody closes.
         await asyncio.gather(*tasks, return_exceptions=True)
         self._artifact_recovery_tasks.clear()
+        self._custody_bulk_tasks.clear()

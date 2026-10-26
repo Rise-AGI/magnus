@@ -18,7 +18,9 @@ from ._submit import _SubmitMixin
 from ._decisions import _DecisionsMixin
 from ._resources import _ResourcesMixin
 from ._job_lifecycle import _JobLifecycleMixin
-from ._staging import _StagingMixin
+from ._staging import _StagingMixin, _validate_custody_metadata
+from ._custody_relay import CustodyRelay
+from .._file_custody_manager import file_custody_manager
 from ._artifact_recovery import _ArtifactRecoveryMixin
 
 
@@ -83,7 +85,19 @@ class MagnusScheduler(
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
         self._finalization_retry_after: Dict[str, float] = {}
         self._artifact_recovery_tasks: Dict[str, asyncio.Task[int]] = {}
-        self._artifact_recovery_slots = asyncio.Semaphore(4)
+        self._artifact_recovery_slots = asyncio.Semaphore(2)
+        self._custody_bulk_slots = asyncio.Semaphore(1)
+        self._custody_bulk_tasks: Dict[str, asyncio.Task] = {}
+        self._custody_relay = CustodyRelay(
+            transport = self.slurm_manager.transport if self.slurm_manager is not None else None,
+            custody = file_custody_manager,
+            local_table = self._local_job_working_table,
+            remote_table = self._remote_job_working_table,
+            validate_metadata = _validate_custody_metadata,
+            logger = logger,
+            transfer_timeout = self.config.get("transport", {}).get("ssh", {}).get("transfer_timeout_seconds", 900),
+            transfer_logs = self._stage_out_logs,
+        )
         self._artifact_retry_after: Dict[str, float] = {}
         self._submission_task: Optional[asyncio.Task] = None
         self._submitting_jobs: set[str] = set()

@@ -99,9 +99,20 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 
 当 `ephemeral_root` 拆到独立盘时，`{ephemeral}/` 由后端账户创建，而 job 可能以别的 OS 用户运行，因此提交阶段给该目录授予与 working table 在仓库准备阶段相同的 runner + 后端账户 ACL（共享 `setfacl` helper）——runner 需在此创建 overlay / apptainer tmp，后端需在 cleanup 时回收它们。
 
-**cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。它是 keep-whitelist：只保留 `slurm/`、`metrics/`、`.magnus_result`、`.magnus_action`，working table 下其余一切都删——包括用户写进 workspace bind mount 的任意文件（例如直接把 checkpoint / 输出堆进 `$MAGNUS_HOME/workspace` 而不走 `file_custody` / `.magnus_result`）。`ephemeral_root` 拆分时独立的 `{ephemeral}/` 目录整体删除。
+**cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。它是 keep-whitelist：只保留 `slurm/`、`metrics/`、`.magnus_result`、`.magnus_action`、`.magnus_custody_receipts.json`，working table 下其余一切都删——包括用户写进 workspace bind mount 的任意文件（例如直接把 checkpoint / 输出堆进 `$MAGNUS_HOME/workspace` 而不走 `file_custody` / `.magnus_result`）。`ephemeral_root` 拆分时独立的 `{ephemeral}/` 目录整体删除。
 
 保留下来的产物（`slurm/`、`metrics/`、marker）还受一个跨-job 的总量上限约束：`server.scheduler.workspace_size_cap` 限定 `workspace/jobs` 的总大小，低频调度 janitor（`_reclaim_workspace_over_cap`）在终态总量超限时按 mtime 从最旧的终态 job 目录起整目录淘汰——绝不碰活跃 job，且只删磁盘产物（DB job 记录保留）。
+
+
+### Custody 运行中回传
+
+SSH tenant 的 SDK 把完整载荷与 `meta.json` 写入隐藏暂存目录，再原子改名为 `relay-<uuid>`；仅发布后的条目可导入。控制器在后台增量发现，保留旧版缺少 `storage_filename` / `size_bytes` 的元数据兼容。已登记的 token 不再读取远端文件，不能修改其元数据来更新内容或下载次数；新快照使用新 token。
+
+临时 custody 的载荷、TTL、次数和导入身份保存在本地目录与 `_custody.sqlite3`。发布和导入身份在同一事务提交；即使在写 Job 回执之前被领完并重启，也不会重复导入。Job 回执持久化后才移除临时导入保护记录。读取领取先持久化计次再交出文件句柄，实际读取完成前保留磁盘占用；停止服务保留完整条目、取消未完成的接收并回收子进程。旧 permanent 登记格式保持不变。
+
+运行中的 Job 成果暂不倒计时；调度器确认整个执行终止后启动 TTL，暂停与取消请求本身不触发。尚在回传的文件就绪后获得完整 TTL，已开始的期限不再延长。不能以全量回传完成作为起算条件，否则容量用尽时回传和过期会互等。未关联 Job 的上传仍从发布起算。HTTP 可选 `job_id` 只接受所属用户的活跃 Job，新版 SDK 在站点与凭据均匹配时自动传递 Job ID。
+
+每条 SSH ControlMaster 链路共享两个发现/小文件/日志 worker 与一个大文件/终态日志 worker（载荷阈值 8 MiB）；各 Job 同一 token 只有一个接收者。目录发现和小文件有短时预算，大文件和终态完整日志使用配置中的传输预算；有界发现队列使用游标轮转并优先保留小文件，失败大包不能令目录扫描停下来。先预留总量/单文件容量，再有界接收到 custody，不另存一份完整 staging 副本。未导入的远端内容和收尾状态保留，直到传输成功；运行中回传不改变计算代码或调度决策，也不遍历未通过 custody 发布的任意结果目录。
 
 ## 信号与终止
 

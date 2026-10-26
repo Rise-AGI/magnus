@@ -10,8 +10,22 @@ _CUSTODY_RECEIPTS_FILE = ".magnus_custody_receipts.json"
 _RELAY_TOKEN_RE = re.compile(r"relay-[0-9a-f]{32}\Z")
 
 
+def _sync_directory(
+    directory: str | Path,
+) -> None:
+    if os.name != "posix":
+        return
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _read_custody_receipts(
     local_table: str,
+    *,
+    durable: bool = False,
 ) -> dict:
     path = Path(local_table) / _CUSTODY_RECEIPTS_FILE
     try:
@@ -32,6 +46,10 @@ def _read_custody_receipts(
         )
     ):
         raise ValueError("Invalid custody registration receipts")
+    if durable:
+        # A failed directory sync can leave a rename visible. Confirm it before
+        # retiring the independent import guard or deleting the remote source.
+        _sync_directory(path.parent)
     return receipts
 
 
@@ -47,6 +65,7 @@ def _write_custody_receipts(
             destination.flush()
             os.fsync(destination.fileno())
         os.replace(temporary, os.path.join(local_table, _CUSTODY_RECEIPTS_FILE))
+        _sync_directory(local_table)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
