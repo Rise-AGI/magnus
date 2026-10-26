@@ -99,17 +99,13 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 Job.slurm_job_id.is_(None),
                 Job.finalization_status.is_(None),
             ).all()
-            for job in paused_jobs:
-                changed = self._job_query(db, Job).filter(
-                    Job.id == job.id,
-                    Job.status == JobStatus.PAUSED,
-                    Job.slurm_job_id.is_(None),
-                    Job.finalization_status.is_(None),
-                ).update({Job.status: JobStatus.PREPARING}, synchronize_session=False)
+        for job in paused_jobs:
+            try:
+                changed = await _run_blocking_io(self._resume_paused_job, job.id)
                 if changed:
                     logger.info(f"Job {job.id} re-entering preparation after preemption")
-            if paused_jobs:
-                db.commit()
+            except Exception as error:
+                logger.warning("Job %s preemption recovery pending (%s)", job.id, type(error).__name__)
 
         self._queue_pending_submission()
 

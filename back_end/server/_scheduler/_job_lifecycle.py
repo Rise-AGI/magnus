@@ -1,5 +1,7 @@
 # back_end/server/_scheduler/_job_lifecycle.py
 import os
+import shutil
+import tempfile
 import traceback
 from typing import TYPE_CHECKING, Optional
 from .._workspace_cleanup import remove_job_path
@@ -33,6 +35,56 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
         marker_path = f"{magnus_workspace_path}/jobs/{job_id}/.magnus_success"
         with open(marker_path, "w") as f:
             f.write("success")
+
+    def _resume_paused_job(
+        self,
+        job_id: str,
+    ) -> bool:
+        with SessionLocal() as db:
+            changed = self._job_query(db, Job).filter(
+                Job.id == job_id,
+                Job.status == JobStatus.PAUSED,
+                Job.slurm_job_id.is_(None),
+                Job.finalization_status.is_(None),
+            ).update({
+                Job.status: JobStatus.PREPARING,
+                Job.result: None,
+                Job.action: None,
+            }, synchronize_session=False)
+            if not changed:
+                return False
+            table = f"{magnus_workspace_path}/jobs/{job_id}"
+            os.makedirs(table, exist_ok=True)
+            prefix = ".magnus-output-reset-"
+            if any(name.startswith(prefix) for name in os.listdir(table)):
+                raise RuntimeError("Previous output reset needs recovery before resumption")
+            backup = tempfile.mkdtemp(prefix=prefix, dir=table)
+            moved = []
+            try:
+                # Renames stay on the same filesystem and retain the previous
+                # output until both marker reset and the DB transition succeed.
+                for name in (".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom"):
+                    try:
+                        os.replace(os.path.join(table, name), os.path.join(backup, name))
+                    except FileNotFoundError:
+                        continue
+                    moved.append(name)
+                self._init_job_working_dir(table)
+                db.commit()
+            except BaseException:
+                for name in reversed(moved):
+                    try:
+                        os.replace(os.path.join(backup, name), os.path.join(table, name))
+                    except OSError:
+                        logger.error("Job %s prior output retained for recovery in %s", job_id, backup)
+                if not os.listdir(backup):
+                    os.rmdir(backup)
+                raise
+        try:
+            shutil.rmtree(backup)
+        except OSError:
+            logger.warning("Job %s prior output reset backup awaits workspace cleanup", job_id)
+        return True
 
     def _finalize_completed_job(
         self,
@@ -91,7 +143,7 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
             # old fixed delete-list silently let accumulate forever.
             if os.path.isdir(job_working_table):
                 for entry in os.listdir(job_working_table):
-                    if entry not in _WORKING_TABLE_KEEP:
+                    if entry not in _WORKING_TABLE_KEEP and not entry.startswith(".magnus-output-reset-"):
                         path = os.path.join(job_working_table, entry)
                         if os.path.islink(path):
                             os.unlink(path)

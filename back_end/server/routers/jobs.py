@@ -143,20 +143,26 @@ def _read_marker_file(path: str, max_size: int)-> str:
         return f"<Error reading file: {str(e)}>"
 
 
-def _resolve_marker_field(job: models.Job, attr_name: str)-> Optional[str]:
-    """Resolve a lazy marker field: if value equals sentinel `.magnus_{attr_name}`,
-    read the marker file from the job workspace; missing file or None value -> None."""
+def _resolve_marker_field(
+    job: models.Job,
+    attr_name: str,
+) -> Optional[str]:
     value = getattr(job, attr_name)
-    if value is None:
-        return None
     sentinel = f".magnus_{attr_name}"
-    if value != sentinel:
+    # Failed and cancelled executions can publish useful output. Keep their
+    # scheduler diagnostic in the DB while resolving user output independently.
+    if value != sentinel and job.status not in (
+        JobStatus.SUCCESS,
+        JobStatus.FAILED,
+        JobStatus.TERMINATED,
+        JobStatus.PAUSED,
+    ):
         return value
     workspace = magnus_config['server']['root']
     path = f"{workspace}/workspace/jobs/{job.id}/{sentinel}"
-    if not os.path.exists(path):
-        return None
-    return _read_marker_file(path, MAX_MARKER_PREVIEW_SIZE)
+    if os.path.isfile(path):
+        return _read_marker_file(path, MAX_MARKER_PREVIEW_SIZE)
+    return None if value == sentinel else value
 
 
 @router.post(
@@ -290,19 +296,10 @@ def get_job_detail(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    workspace = magnus_config['server']['root']
-
-    # Lazy-read result
-    if job.result == ".magnus_result":
-        result_path = f"{workspace}/workspace/jobs/{job.id}/.magnus_result"
-        job.result = _read_marker_file(result_path, MAX_MARKER_PREVIEW_SIZE)
-
-    # Lazy-read action
-    if job.action == ".magnus_action":
-        action_path = f"{workspace}/workspace/jobs/{job.id}/.magnus_action"
-        job.action = _read_marker_file(action_path, MAX_MARKER_PREVIEW_SIZE)
-
-    return job
+    response = JobResponse.model_validate(job)
+    response.result = _resolve_marker_field(job, "result")
+    response.action = _resolve_marker_field(job, "action")
+    return response
 
 
 @router.get("/jobs/{job_id}/result")

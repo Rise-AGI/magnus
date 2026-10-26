@@ -101,6 +101,12 @@ apptainer 返回 0 时写 `.magnus_success` 标记。finally 块中清理 overla
 
 **cleanup** 指 `_clean_up_working_table()`，在 job 结束（SUCCESS/FAILED/TERMINATED/PAUSED）时调用。它是 keep-whitelist：只保留 `slurm/`、`metrics/`、`.magnus_result`、`.magnus_action`、`.magnus_custody_receipts.json`，working table 下其余一切都删——包括用户写进 workspace bind mount 的任意文件（例如直接把 checkpoint / 输出堆进 `$MAGNUS_HOME/workspace` 而不走 `file_custody` / `.magnus_result`）。`ephemeral_root` 拆分时独立的 `{ephemeral}/` 目录整体删除。
 
+上述执行结束状态的详情、result/action 接口优先读取保留的用户 marker，不依赖数据库是否保存结果 sentinel 或调度诊断。文件不存在时退回原内联值（sentinel 指向的文件缺失则返回 null）；活跃执行仍只按已有 sentinel 读取。读取不修改 ORM 字段或任务状态。SSH 取消/抢占在正常终态分类前已设置状态，因此在产物恢复阶段补取 marker；取回失败阻止清理，并可在服务重启后重试。
+
+自动恢复只在上一轮回传完成后开始新尝试。`Paused` → `Preparing` 的条件更新提交前，先清除旧 result/action 字段和执行 marker，避免本轮准备失败时返回上一轮结果。marker 重置失败则保持暂停、等待重试；并发取消不能被恢复操作覆盖。
+
+重置先把旧 marker 重命名到 Job 内的 `.magnus-output-reset-*` 目录，转换失败时恢复原文件。中断或恢复失败留下的目录不会被普通工作区清理删除，并会阻止自动恢复，等待维护取回；整个工作区仍受原有总量淘汰上限约束。转换成功后删除临时备份。
+
 保留下来的产物（`slurm/`、`metrics/`、marker）还受一个跨-job 的总量上限约束：`server.scheduler.workspace_size_cap` 限定 `workspace/jobs` 的总大小，低频调度 janitor（`_reclaim_workspace_over_cap`）在终态总量超限时按 mtime 从最旧的终态 job 目录起整目录淘汰——绝不碰活跃 job，且只删磁盘产物（DB job 记录保留）。
 
 

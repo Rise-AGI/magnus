@@ -407,6 +407,10 @@ class _SyncMixin(_SyncMixinBase):
             # Classification owns marker reads. Bulk recovery must not race it.
             if status in (JobStatus.QUEUED, JobStatus.RUNNING):
                 return 0
+            # Cancellation/preemption sets status before Slurm exits, bypassing
+            # classification's marker read. Recover these files before cleanup.
+            if status in (JobStatus.TERMINATED, JobStatus.PAUSED):
+                self._stage_out_markers(job_id)
             self._finalize_slurm_job(job_id, slurm_job_id, finalization_status)
             return 60
         if status in (JobStatus.QUEUED, JobStatus.RUNNING):

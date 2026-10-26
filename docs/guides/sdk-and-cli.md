@@ -915,6 +915,10 @@ These two conventions are essentially just **marker files in the Job working dir
 
 When the scheduler starts a job, it injects these two paths into the container's environment variables. During job execution, the user script is responsible for writing them; the backend does not proactively parse their business semantics, only lazily reads and returns their content in the Job API.
 
+After an execution ends, Job detail and the result/action endpoints expose any retained user-written marker, including for `Failed`, `Terminated`, and `Paused` jobs. This does not change the execution status. Without a marker, existing inline results (including scheduler failure messages) and null values keep their previous meaning. Scheduler diagnostics remain in the database; reading user output does not overwrite them. SSH cancellation/preemption also retrieves these markers before reclaiming the remote workspace and retains the workspace if retrieval fails.
+
+Existing SDK versions can read these endpoints without an upgrade. `run_job` and `run_blueprint` still raise `ExecutionError` on failure/termination and do not automatically execute the failed job's action; use the Job ID with `get_job_result` / `get_job_action` to inspect its outputs. A custody receipt remains subject to its separate readiness, expiry, and download-count rules.
+
 In other words:
 
 - The backend **does not auto-download artifacts**

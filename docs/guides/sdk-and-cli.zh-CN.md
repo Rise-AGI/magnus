@@ -915,6 +915,10 @@ echo "magnus receive $SECRET --output ./checkpoint-1200" > "$MAGNUS_ACTION"
 
 调度器在启动任务时会把这两个路径注入到容器环境变量中。任务执行时，用户脚本负责写入它们；后端不会主动解析业务语义，只会在 Job API 中惰性读取并返回其内容。
 
+执行结束后，Job 详情及 result/action 接口会返回保留的用户 marker，包括 `Failed`、`Terminated` 和 `Paused` 的任务；读取结果不改变执行状态。没有对应文件时，原有内联结果（包括调度器失败说明）和 null 保持原义。调度诊断保留在数据库，读取用户结果不会覆盖它。SSH 任务被取消或抢占后，也会先取回这些 marker，再回收远端工作区；取回失败则保留现场重试。
+
+现有 SDK 无需升级即可读取这些接口。`run_job` 和 `run_blueprint` 对失败/终止仍抛出 `ExecutionError`，也不会自动执行失败任务的 action；可用 Job ID 调用 `get_job_result` / `get_job_action` 检查产物。结果中的 custody 回执仍遵循独立的就绪、期限与领取次数规则。
+
 也就是说：
 
 - 后端**不会自动下载产物**

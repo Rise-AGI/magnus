@@ -87,6 +87,10 @@ class _SchedulerProtocol:
 
     # === _job_lifecycle.py ===
     def _write_success_marker(self, job_id: str) -> None: ...
+    def _resume_paused_job(
+        self,
+        job_id: str,
+    ) -> bool: ...
     def _finalize_completed_job(
         self,
         job: "Job",

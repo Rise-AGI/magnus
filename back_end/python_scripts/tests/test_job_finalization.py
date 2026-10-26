@@ -317,6 +317,49 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
 
+    def test_failed_executions_retain_user_outputs_and_scheduler_diagnostic(
+        self,
+    ):
+        for observed in ("FAILED", "TIMEOUT", "CANCELLED", "COMPLETED"):
+            with self.subTest(observed=observed):
+                table = self.add_job(observed, observed=observed)
+                (table / ".magnus_result").write_text('{"exit_code":1}')
+                (table / ".magnus_action").write_text("echo recover checkpoint")
+                self.sync()
+                self.assertEqual(self.state(observed)[:3], (JobStatus.FAILED, None, None))
+                self.assertTrue(self.state(observed)[3])
+                self.assertEqual((table / ".magnus_result").read_text(), '{"exit_code":1}')
+                self.assertEqual((table / ".magnus_action").read_text(), "echo recover checkpoint")
+                self.assertFalse((table / "repository").exists())
+
+    def test_cancelled_marker_failure_retains_workspace_and_retries_after_restart(
+        self,
+    ):
+        for status in (JobStatus.PAUSED, JobStatus.TERMINATED):
+            with self.subTest(status=status):
+                identifier = status.value
+                table = self.add_job(identifier, status=status, observed="CANCELLED")
+                self.marker_failure.add(identifier)
+                self.scheduler._sync_reality_slurm()
+                with self.assertRaisesRegex(RuntimeError, "marker transport unavailable"):
+                    self.scheduler._recover_job_artifacts(identifier, f"slurm-{identifier}")
+                self.assertEqual(self.state(identifier)[:3], (status, f"slurm-{identifier}", "CANCELLED"))
+                self.assertTrue((table / "repository" / "checkpoint").exists())
+                self.assertFalse(any(event[0] == "cleanup" and event[1] == identifier for event in self.events))
+                self.marker_failure.remove(identifier)
+
+                def receive(job_id):
+                    destination = self.root / "jobs" / job_id
+                    (destination / ".magnus_result").write_text("checkpoint")
+                    (destination / ".magnus_action").write_text("echo recover")
+
+                self.marker_hook = receive
+                self.statuses.clear()
+                self.sync(self.new_scheduler())
+                self.assertEqual(self.state(identifier)[:3], (status, None, None))
+                self.assertEqual((table / ".magnus_result").read_text(), "checkpoint")
+                self.assertEqual((table / ".magnus_action").read_text(), "echo recover")
+
     def test_termination_during_staging_waits_for_submission_worker_cleanup(self):
         table = self.add_job(status=JobStatus.PENDING)
         with self.sessions() as db:
@@ -455,8 +498,8 @@ class SlurmFinalizationTests(unittest.TestCase):
             job.finalization_status = "FAILED"
             db.commit()
         namespace = dict(self.namespace, asyncio=asyncio)
-        async def run(function):
-            function()
+        async def run(function, *args):
+            return function(*args)
         namespace["_run_blocking_io"] = run
         decisions = load_method("_scheduler/_decisions.py", "_make_decisions", namespace)
         actor = SimpleNamespace(
@@ -464,7 +507,9 @@ class SlurmFinalizationTests(unittest.TestCase):
             preparing_jobs={},
             _preparing_jobs_lock=threading.Lock(),
             _queue_pending_submission=lambda: None,
+            _resume_paused_job=self.scheduler._resume_paused_job,
         )
+        self.scheduler._init_job_working_dir = lambda path: None
         asyncio.run(decisions(actor))
         self.assertEqual(self.state()[0], JobStatus.PAUSED)
         with self.sessions() as db:
@@ -472,6 +517,101 @@ class SlurmFinalizationTests(unittest.TestCase):
             db.commit()
         asyncio.run(decisions(actor))
         self.assertEqual(self.state()[0], JobStatus.PREPARING)
+
+    def test_resumed_attempt_cannot_return_previous_markers_after_preparation_fails(
+        self,
+    ):
+        table = self.add_job(status=JobStatus.PAUSED)
+        for marker in (".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom"):
+            (table / marker).write_text("previous attempt")
+        with self.sessions() as db:
+            job = db.get(Job, "job")
+            job.slurm_job_id = None
+            job.result = "previous inline result"
+            job.action = "previous inline action"
+            db.commit()
+        initialize = load_method("_scheduler/_submit.py", "_init_job_working_dir", self.namespace)
+        self.namespace["guarantee_file_exist"] = lambda path, **kwargs: Path(path).mkdir(parents=True, exist_ok=True)
+        self.scheduler._init_job_working_dir = lambda path: initialize(self.scheduler, path)
+        self.assertTrue(self.scheduler._resume_paused_job("job"))
+        self.assertEqual(self.state(), (JobStatus.PREPARING, None, None, None))
+        with self.sessions() as db:
+            job = db.get(Job, "job")
+            self.assertIsNone(job.action)
+            job.status = JobStatus.FAILED
+            job.result = "new preparation failure"
+            db.commit()
+        self.scheduler._clean_up_working_table("job")
+        self.assertEqual(self.state()[3], "new preparation failure")
+        self.assertFalse(any((table / marker).exists() for marker in (".magnus_result", ".magnus_action")))
+
+    def test_failed_or_cancelled_resume_does_not_start_another_attempt(
+        self,
+    ):
+        table = self.add_job(status=JobStatus.PAUSED)
+        (table / ".magnus_result").write_text("previous attempt")
+        with self.sessions() as db:
+            db.get(Job, "job").slurm_job_id = None
+            db.commit()
+        def fail(path):
+            raise OSError("cannot clear prior output")
+        self.scheduler._init_job_working_dir = fail
+        with self.assertRaises(OSError):
+            self.scheduler._resume_paused_job("job")
+        self.assertEqual(self.state()[0], JobStatus.PAUSED)
+        self.assertEqual((table / ".magnus_result").read_text(), "previous attempt")
+        with self.sessions() as db:
+            db.get(Job, "job").status = JobStatus.TERMINATED
+            db.commit()
+        self.scheduler._init_job_working_dir = lambda path: self.fail("cancelled job lost its output")
+        self.assertFalse(self.scheduler._resume_paused_job("job"))
+        self.assertEqual(self.state()[0], JobStatus.TERMINATED)
+        self.assertEqual((table / ".magnus_result").read_text(), "previous attempt")
+
+    def test_partial_marker_reset_failure_restores_previous_outputs(
+        self,
+    ):
+        table = self.add_job(status=JobStatus.PAUSED)
+        names = (".magnus_success", ".magnus_result", ".magnus_action", ".magnus_oom")
+        for name in names:
+            (table / name).write_text(name)
+        with self.sessions() as db:
+            db.get(Job, "job").slurm_job_id = None
+            db.commit()
+        replace = os.replace
+
+        def fail_later(source, destination):
+            if Path(source) == table / ".magnus_action":
+                raise OSError("injected move failure after result was moved")
+            return replace(source, destination)
+
+        self.scheduler._init_job_working_dir = lambda path: None
+        with patch.object(os, "replace", side_effect=fail_later), self.assertRaises(OSError):
+            self.scheduler._resume_paused_job("job")
+        self.assertEqual(self.state()[0], JobStatus.PAUSED)
+        for name in names:
+            self.assertEqual((table / name).read_text(), name)
+        self.assertEqual(list(table.glob(".magnus-output-reset-*")), [])
+
+    def test_interrupted_marker_reset_keeps_backup_and_blocks_new_attempt(
+        self,
+    ):
+        table = self.add_job(status=JobStatus.PAUSED)
+        backup = table / ".magnus-output-reset-interrupted"
+        backup.mkdir()
+        (backup / ".magnus_result").write_text("retained output")
+        with self.sessions() as db:
+            db.get(Job, "job").slurm_job_id = None
+            db.commit()
+        with self.assertRaisesRegex(RuntimeError, "needs recovery"):
+            self.scheduler._resume_paused_job("job")
+        self.assertEqual(self.state()[0], JobStatus.PAUSED)
+        self.assertEqual((backup / ".magnus_result").read_text(), "retained output")
+        with self.sessions() as db:
+            db.get(Job, "job").status = JobStatus.TERMINATED
+            db.commit()
+        self.scheduler._clean_up_working_table("job")
+        self.assertEqual((backup / ".magnus_result").read_text(), "retained output")
 
     def test_build_pin_release_rechecks_submission_ownership_after_candidate_snapshot(self):
         self.add_job(status=JobStatus.PENDING)
@@ -570,6 +710,39 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.scheduler._recover_job_artifacts("job", None)
         self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
         self.assertFalse((table / "repository").exists())
+
+    def test_docker_failure_and_timeout_keep_markers_and_failure_state(
+        self,
+    ):
+        self.scheduler._docker_log_cursors = {}
+        self.scheduler._dump_docker_logs = lambda *args, **kwargs: "cursor"
+        self.scheduler._docker_job_timed_out = lambda job: True
+        for status, observed, oom in (
+            (JobStatus.QUEUED, "FAILED", False),
+            (JobStatus.RUNNING, "FAILED", True),
+            (JobStatus.RUNNING, "UNKNOWN", False),
+            (JobStatus.RUNNING, "RUNNING", False),
+        ):
+            with self.subTest(status=status, observed=observed, oom=oom):
+                identifier = f"docker-{status.value}-{observed}"
+                table = self.add_job(identifier, status=status)
+                (table / ".magnus_result").write_text("partial result")
+                (table / ".magnus_action").write_text("echo recover")
+                self.scheduler.docker_manager = SimpleNamespace(
+                    check_container_status=lambda name: observed,
+                    get_termination_info=lambda name: {"oom_killed": oom},
+                    stop_container=lambda name: None,
+                    remove_container=lambda name: None,
+                )
+                with patch.object(Job, "time_limit", 1, create=True):
+                    self.scheduler._sync_reality_docker()
+                self.assertEqual(self.state(identifier)[:3], (JobStatus.FAILED, None, None))
+                self.assertTrue(self.state(identifier)[3])
+                self.assertEqual((table / ".magnus_result").read_text(), "partial result")
+                self.assertEqual((table / ".magnus_action").read_text(), "echo recover")
+                self.assertFalse((table / "repository").exists())
+                if oom:
+                    self.assertIn("Out of memory", self.state(identifier)[3])
 
     def test_docker_completion_keeps_existing_local_cleanup_behavior(self):
         table = self.add_job(status=JobStatus.QUEUED)

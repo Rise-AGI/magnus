@@ -101,6 +101,12 @@ When `ephemeral_root` is split onto a separate disk, `{ephemeral}/` is created b
 
 **cleanup** refers to `_clean_up_working_table()`, called when the job ends (SUCCESS/FAILED/TERMINATED/PAUSED). It is a keep-whitelist: only `slurm/`, `metrics/`, `.magnus_result`, `.magnus_action` and `.magnus_custody_receipts.json` survive; everything else under the working table is removed — including anything the user wrote into the workspace bind mount (e.g. checkpoints or outputs dumped straight into `$MAGNUS_HOME/workspace` instead of going through `file_custody` / `.magnus_result`). The separate `{ephemeral}/` dir is dropped wholesale when `ephemeral_root` is split out.
 
+For these ended execution states, detail/result/action reads prefer retained user marker files, independently of the database's result sentinel or scheduler diagnostic. Missing files fall back to the inline database value (a missing sentinel target returns null); active attempts retain the existing sentinel-only behavior. Reads do not mutate ORM fields or change status. SSH cancellation/preemption retrieves markers during artifact recovery, since its status was already set before normal terminal classification; failed retrieval prevents cleanup and remains retryable across a restart.
+
+Automatic resumption starts a new attempt only after prior recovery finishes. The conditional `Paused` → `Preparing` transition clears old result/action values and execution markers before committing; a preparation failure must not expose the previous attempt's output. Marker reset failure leaves the job paused for retry, and a concurrent cancellation cannot be overwritten by resumption.
+
+Reset first renames the old markers into a Job-local `.magnus-output-reset-*` directory, restoring them if the transition fails. An interrupted reset or failed restoration retains this directory through ordinary workspace cleanup and blocks automatic resumption for maintenance recovery; it is still subject to the normal whole-workspace retention cap. Successful transitions remove the temporary backup.
+
 The retained artifacts (`slurm/`, `metrics/`, markers) are additionally subject to a cross-job size cap: `server.scheduler.workspace_size_cap` bounds the total size of `workspace/jobs`, and a low-frequency scheduler janitor (`_reclaim_workspace_over_cap`) evicts whole terminal-job directories oldest-first by mtime once the terminal total exceeds it — active jobs are never touched, and only on-disk artifacts are removed (DB job records are kept).
 
 
