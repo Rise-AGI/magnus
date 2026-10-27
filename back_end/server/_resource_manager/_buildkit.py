@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ._helpers import _run_blocking_io as blocking_io
+from ._build_progress import write_json
 
 
 class ImageBuildError(RuntimeError):
@@ -127,7 +128,11 @@ async def run_command(
     """
     marker = process_directory / "process.json" if process_directory else None
     if marker:
-        await blocking_io(marker.write_text, json.dumps({"state": "spawning"}), encoding="utf-8")
+        await blocking_io(
+            write_json,
+            marker,
+            {"state": "spawning"},
+        )
     # Keep process creation alive until we obtain its handle. Cancelling spawn
     # itself can reap only the parent, leaving Apptainer helpers in its group.
     spawning = asyncio.create_task(asyncio.create_subprocess_exec(
@@ -195,7 +200,11 @@ async def run_command(
         except Exception:
             # A failed spawn acquired no process; the original error propagates.
             if marker:
-                await blocking_io(marker.write_text, json.dumps({"state": "idle"}), encoding="utf-8")
+                await blocking_io(
+                    write_json,
+                    marker,
+                    {"state": "idle"},
+                )
             return
 
         assert process.stdout is not None and process.stderr is not None
@@ -222,7 +231,11 @@ async def run_command(
                 drain_task.cancel()
             await asyncio.gather(*drains, return_exceptions=True)
         if marker:
-            await blocking_io(marker.write_text, json.dumps({"state": "idle"}), encoding="utf-8")
+            await blocking_io(
+                write_json,
+                marker,
+                {"state": "idle"},
+            )
 
     try:
         process = await asyncio.shield(spawning)
@@ -233,15 +246,19 @@ async def run_command(
         ])
         if marker:
             await blocking_io(
-                marker.write_text,
-                json.dumps({"state": "running", "pid": process.pid}),
-                encoding="utf-8",
+                write_json,
+                marker,
+                {"state": "running", "pid": process.pid},
             )
         async with asyncio.timeout(timeout):
             await asyncio.gather(*readers)
             await process.wait()
         if marker:
-            await blocking_io(marker.write_text, json.dumps({"state": "idle"}), encoding="utf-8")
+            await blocking_io(
+                write_json,
+                marker,
+                {"state": "idle"},
+            )
     except BaseException:
         # Cleanup runs to completion even if callers cancel this operation again.
         cleanup = asyncio.create_task(cleanup_command())

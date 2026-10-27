@@ -547,12 +547,38 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.manager._recover_scratch())
         self.assertTrue(self.directory.exists())
         self.assertTrue(incoming.exists())
-        with patch.object(self.module, "_process_exists", return_value=False):
+        with (
+            patch.object(self.module, "_process_exists", return_value=False),
+            patch.object(self.module, "_process_group_exists", return_value=False),
+        ):
             self.assertFalse(self.manager._recover_scratch())
         async with self.manager.maintenance_lock:
             await self.manager._remove_orphans()
         self.assertFalse(self.directory.exists())
         self.assertFalse(incoming.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX build process groups")
+    async def test_recovery_waits_for_writers_after_group_leader_exits(self):
+        (self.directory / "process.json").write_text(json.dumps({"state": "running", "pid": 42}))
+        with (
+            patch.object(self.module, "_process_exists", return_value=False),
+            patch.object(self.module, "_process_group_exists", return_value=True),
+        ):
+            self.assertTrue(self.manager._recover_scratch())
+        self.assertTrue(self.directory.exists())
+        with (
+            patch.object(self.module, "_process_exists", return_value=False),
+            patch.object(self.module, "_process_group_exists", return_value=False),
+        ):
+            self.assertFalse(self.manager._recover_scratch())
+        self.assertFalse(self.directory.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX build process groups")
+    async def test_group_probe_preserves_inaccessible_processes(self):
+        with patch.object(self.module.os, "killpg", side_effect=PermissionError):
+            self.assertTrue(self.module._process_group_exists(42))
+        with patch.object(self.module.os, "killpg", side_effect=ProcessLookupError):
+            self.assertFalse(self.module._process_group_exists(42))
 
     @unittest.skipUnless(os.name == "nt", "Windows junction semantics")
     async def test_private_scratch_rejects_precreated_junction(self):

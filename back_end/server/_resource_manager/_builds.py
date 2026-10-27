@@ -113,6 +113,21 @@ def _process_exists(
         kernel.CloseHandle(handle)
 
 
+def _process_group_exists(
+    process_group: int,
+) -> bool:
+    try:
+        os.killpg(
+            process_group,
+            0,
+        )
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _prepare_scratch_root(
     directory: Path,
 ) -> Path:
@@ -577,7 +592,9 @@ class ImageBuildManager:
                     pid = int(lease["pid"])
                     if pid <= 0:
                         raise ValueError("Invalid process identifier")
-                    if _process_exists(pid):
+                    # run_command starts a POSIX session: its PID also names
+                    # the group whose writers can outlive the recorded leader.
+                    if _process_exists(pid) or (os.name == "posix" and _process_group_exists(pid)):
                         waiting = True
                         continue
             except (ValueError, KeyError, OSError) as error:

@@ -8,6 +8,7 @@ import importlib.util
 import json
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -19,7 +20,11 @@ from unittest.mock import patch
 
 
 SOURCE = pathlib.Path(__file__).resolve().parents[2] / "server" / "_resource_manager"
-PACKAGE = "isolated_build_diagnostics"
+ROOT_PACKAGE = "isolated_build_diagnostics"
+root_package = types.ModuleType(ROOT_PACKAGE)
+root_package.__path__ = [str(SOURCE.parent)]
+sys.modules[ROOT_PACKAGE] = root_package
+PACKAGE = f"{ROOT_PACKAGE}._resource_manager"
 package = types.ModuleType(PACKAGE)
 package.__path__ = [str(SOURCE)]
 sys.modules[PACKAGE] = package
@@ -316,6 +321,44 @@ class UsageTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PipeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_abrupt_lease_write_keeps_previous_complete_record(self):
+        child = """
+import asyncio
+import os
+from pathlib import Path
+import sys
+sys.path.insert(0, sys.argv[2])
+from test_build_diagnostics import buildkit
+original_write = Path.write_text
+
+def interrupted_write(path, *arguments, **keywords):
+    if 'process.json' in path.name:
+        with path.open('w') as stream:
+            stream.write('{')
+            stream.flush()
+            os._exit(77)
+    return original_write(path, *arguments, **keywords)
+
+Path.write_text = interrupted_write
+asyncio.run(buildkit.run_command(
+    [sys.executable, '-I', '-c', 'pass'],
+    process_directory=Path(sys.argv[1]),
+))
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            marker = directory / "process.json"
+            marker.write_text('{"state": "idle"}', encoding="utf-8")
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, "-I", "-c", child, temporary, str(pathlib.Path(__file__).parent)],
+                capture_output=True,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 77, result.stderr.decode())
+            self.assertEqual(json.loads(marker.read_text()), {"state": "idle"})
+            self.assertTrue(list(directory.glob(".process.json.*.tmp")))
+
     async def test_split_rawjson_and_partial_utf8(self):
         progress = progress_module.BuildProgress()
         event = (log_event("\u4e2d".encode()) + "\n").encode()

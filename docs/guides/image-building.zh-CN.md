@@ -65,7 +65,7 @@ TCP worker 使用配置的 TLS 文件。站点凭据不进入 Dockerfile、Job �
 
 Rootless 限制宿主权限，但不自动提供网络隔离。RootlessKit 默认共享宿主网络，构建中的 `RUN` 可以访问宿主 loopback 和局域网；需要隔离时另选受支持的网络驱动，并核验其 DNS、出口和软件源访问。参见 [BuildKit rootless 部署说明](https://github.com/moby/buildkit/blob/master/docs/rootless.md)。
 
-后端重启后，资源准备会等待已知的遗留构建进程退出，再清理其临时目录，等待上限为 `timeout_seconds`。进程租约不完整，或另一个后端仍在使用同一根目录时，需要运维检查；Magnus 不会删除无法确认归属的临时目录。
+后端重启后，资源准备会等待已知的遗留构建进程退出，再清理其临时目录，等待上限为 `timeout_seconds`。POSIX 上还会检查记录的进程组，组长退出后仍有子进程存活时继续保留目录。进程租约以原子替换更新，写入中断会保留上一份完整记录。进程租约不完整、启动中断且尚未建立进程身份，或另一个后端仍在使用同一根目录时，需要运维检查；Magnus 不会删除无法确认归属的临时目录。
 
 可选的 `scratch_root` 为构建导出和 SIF 转换指定绝对路径的父目录。Magnus 在其下创建按站点区分的子目录，多个实例可共用父目录而不共享临时数据或恢复状态。省略时保留 `server.ephemeral_root/image_build_tmp`。子目录必须由后端账号私有控制，不允许符号链接或 junction；父目录权限必须防止其他用户替换它，POSIX 支持 `/dev/shm` 这样的 root 所有且带 sticky bit 的目录。Windows 检查所有者与 ACL，不静默修改现有权限。切换位置时，初始化仍会检查原默认目录内未完成的操作，再处理遗留数据；从一个自定义目录切到另一个前，应先让原目录中的操作结束。
 
