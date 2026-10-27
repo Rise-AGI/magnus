@@ -93,6 +93,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.final_hook = None
         self.namespace = {
             "__name__": __name__,
+            "threading": threading,
             "open_protocol_file": open_protocol_file,
             "SessionLocal": self.sessions,
             "Session": object,
@@ -124,6 +125,8 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor._test_artifact_retry = {}
         actor._preparing_jobs_lock = threading.Lock()
         actor._submitting_jobs = set()
+        actor._submission_cancel_events = {}
+        actor._submission_stopping = False
         def status(identifier):
             self.events.append(("query", identifier))
             result = self.statuses[identifier]
@@ -377,11 +380,13 @@ class SlurmFinalizationTests(unittest.TestCase):
             self.assertEqual(actor._submitting_jobs, {"job"})
             with self.sessions() as other:
                 terminate(actor, other, other.get(Job, "job"))
+            self.assertTrue(actor._submission_cancel_events["job"].is_set())
             self.assertTrue((table / "repository" / "checkpoint").exists())
             self.assertFalse(actor._clean_up_working_table("job"))
         actor._submit_to_slurm = staging
         submit(actor, ["job"])
         self.assertEqual(actor._submitting_jobs, set())
+        self.assertEqual(actor._submission_cancel_events, {})
         self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, "CLEANUP"))
         self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
@@ -626,6 +631,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         released = []
         def begin_submission_before_terminal_query():
             actor._submitting_jobs.add("job")
+            actor._submission_cancel_events["job"] = threading.Event()
             with self.sessions() as db:
                 db.get(Job, "job").status = JobStatus.TERMINATED
                 db.commit()

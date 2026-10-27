@@ -175,6 +175,7 @@ class JobResourceIntegrationTests(unittest.TestCase):
             normalize_per_cpu_resources=lambda value, **kwargs: None,
             validate_cluster_limits=lambda value, **kwargs: None,
             enforce_field_size_limits=lambda *args: None,
+            lock_user_for_write=lambda db, user_id: None,
         )
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
         db = SimpleNamespace(add=lambda value: None, commit=lambda: None, refresh=lambda value: None)
@@ -210,9 +211,9 @@ class JobResourceIntegrationTests(unittest.TestCase):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         route = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "get_cluster_stats")
         route.decorator_list = []
-        job = SimpleNamespace(**self.fields(slurm_job_id="native", resource_mode="slurm_per_cpu"))
+        job = SimpleNamespace(**self.fields(slurm_job_id="native", resource_mode="slurm_per_cpu", execution_target=None))
         pending = SimpleNamespace(**self.fields(id="pending", status="Pending"))
-        results = iter([[job], [pending], []])
+        results = iter([[job], [], [pending], []])
         query = SimpleNamespace()
         query.options = lambda *args: query
         query.filter = lambda *args: query
@@ -236,16 +237,26 @@ class JobResourceIntegrationTests(unittest.TestCase):
             _node_name="test",
             _gpu_model="test",
             timezone=timezone,
-            models=SimpleNamespace(Job=SimpleNamespace(slurm_job_id=Field(), status=Field()), job_list_load_options=lambda: []),
+            models=SimpleNamespace(Job=SimpleNamespace(id=Field(), slurm_job_id=Field(), status=Field()), job_list_load_options=lambda: []),
             Depends=lambda dependency: None,
             database=SimpleNamespace(get_db=None),
             get_current_user=None,
             or_=lambda *args: None,
             _scheduler_sort_key=lambda value: 0,
+            _prefer_target=lambda jobs, target: None,
             resource_partitions=lambda config: [],
             _resolve_target=lambda target_id: SimpleNamespace(id="default", name="test", config=self.config, job_filter=lambda model: True),
             time=time,
             validate_allocation_visibility=load_queries().validate_allocation_visibility,
+        )
+        target = SimpleNamespace(
+            id="default", name="test", config=self.config,
+            job_filter=lambda model: True, slurm_connection_key="local",
+        )
+        namespace.update(
+            _resolve_target=lambda target_id: target,
+            configured_execution_targets={"default": target},
+            select_execution_target=lambda targets, target_id: target,
         )
         producer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_query_cluster_view")
         totals = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_cluster_resource_totals")

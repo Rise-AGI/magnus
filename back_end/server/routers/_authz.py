@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .. import models
+from .._user_lifecycle import lock_user_for_write
 from .._magnus_config import is_admin_user
 from .users import _is_ancestor
 
@@ -68,12 +69,15 @@ def assert_valid_transfer_target(
     target = db.query(models.User).filter(models.User.id == new_owner_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="Target user not found")
-    if is_admin_user(current_user):
-        return target
-    if new_owner_id == current_user.id:
-        return target
-    if _is_ancestor(db, current_user.id, new_owner_id):
-        return target
+    if (
+        is_admin_user(current_user)
+        or new_owner_id == current_user.id
+        or _is_ancestor(db, current_user.id, new_owner_id)
+    ):
+        return lock_user_for_write(
+            db,
+            new_owner_id,
+        )
     raise HTTPException(
         status_code=403,
         detail="Target must be yourself or your subordinate",

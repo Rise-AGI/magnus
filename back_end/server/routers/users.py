@@ -10,6 +10,7 @@ from sqlalchemy import func
 
 from .. import database
 from .. import models
+from .._user_lifecycle import lock_user_for_write, assert_user_unreferenced
 from ..schemas import (
     UserInfo,
     UserDetail,
@@ -352,9 +353,10 @@ def create_agent(
     current_user: models.User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """招募 AI Agent（当前用户为 parent，消耗 1 席位，headcount=0）。"""
-    # 排他锁防并发超发；人类编制无限（headcount=None）不受限
-    parent = db.query(models.User).filter(models.User.id == current_user.id).with_for_update().first()
-    assert parent is not None
+    parent = lock_user_for_write(
+        db,
+        current_user.id,
+    )
     if parent.headcount is not None:
         occupied = _get_occupied_headcount(db, parent.id)
         available = parent.headcount - occupied
@@ -405,29 +407,20 @@ def delete_user(
     if not _can_manage(current_user, target, db):
         raise HTTPException(status_code=403, detail="Permission denied")
 
-    # 检查是否有下属
-    child_count = db.query(func.count()).filter(models.User.parent_id == user_id).scalar()
-    if child_count and child_count > 0:
-        raise HTTPException(status_code=400, detail="Cannot delete user with subordinates")
-
-    # 清理头像永久文件
+    target = lock_user_for_write(
+        db,
+        user_id,
+    )
+    assert_user_unreferenced(db, user_id)
     avatar_url = target.avatar_url or ""
-    if "/api/files/download/" in avatar_url:
-        old_token = avatar_url.rsplit("/", 1)[-1]
-        file_custody_manager.delete_entry(old_token)
-
-    # Snapshot the trust token before delete so we can evict it from the in-
-    # process auth cache. get_current_user fails closed for deleted users on
-    # the next DB lookup, so this isn't a security gap — but a stale cache
-    # entry keeps mapping a now-deleted user_id for up to AUTH_CACHE_TTL,
-    # wasting one DB query per auth attempt during that window and leaving
-    # the dict slightly grown for no reason.
     deleted_token = target.token
 
     db.delete(target)
     db.commit()
 
     evict_token_from_cache(deleted_token)
+    if "/api/files/download/" in avatar_url:
+        file_custody_manager.delete_entry(avatar_url.rsplit("/", 1)[-1])
 
     logger.info(f"User {current_user.id} ({current_user.name}) deleted agent {user_id}")
 

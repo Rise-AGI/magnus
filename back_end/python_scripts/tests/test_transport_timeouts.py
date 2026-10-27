@@ -9,6 +9,7 @@ import tempfile
 import hashlib
 import sys
 import time
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -30,6 +31,54 @@ def load_transport():
 
 
 class TransportDeadlineTests(unittest.TestCase):
+    def test_cancelled_scp_and_stream_reap_only_their_transfer(self):
+        namespace = load_transport()
+        independent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(independent.wait)
+        self.addCleanup(independent.kill)
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            source.write_bytes(b"x" * 2**20)
+            for stream in (False, True):
+                with self.subTest(stream=stream):
+                    cancelled = threading.Event()
+                    children = []
+                    original = subprocess.Popen
+                    def capture(*args, **kwargs):
+                        child = original(*args, **kwargs)
+                        children.append(child)
+                        return child
+                    timer = threading.Timer(0.1, cancelled.set)
+                    started = time.monotonic()
+                    timer.start()
+                    try:
+                        with patch.object(subprocess, "Popen", capture), self.assertRaises(InterruptedError):
+                            command = [sys.executable, "-c", "import time; time.sleep(30)"]
+                            if stream:
+                                namespace["_stream_file_to_command"](
+                                    command, str(source), prefix=b"header", timeout=30,
+                                    cancel_event=cancelled,
+                                )
+                            else:
+                                namespace["_run_scp"](command, timeout=30, cancel_event=cancelled)
+                    finally:
+                        timer.join()
+                    self.assertLess(time.monotonic() - started, 3)
+                    self.assertEqual(len(children), 1)
+                    self.assertIsNotNone(children[0].poll())
+                    self.assertIsNone(independent.poll())
+
+    def test_cancelled_upload_never_probes_shared_master(self):
+        namespace = load_transport()
+        cancelled = threading.Event()
+        cancelled.set()
+        actor = namespace["_SshControlMasterTransport"]("socket", "host", "user", auto_connect={})
+        actor._ensure_socket = lambda **kwargs: self.fail("cancelled upload probes master")
+        with self.assertRaises(InterruptedError):
+            actor.push("local", "remote", cancel_event=cancelled)
+        with self.assertRaises(InterruptedError):
+            actor.run_with_file_input(["receiver"], "local", prefix=b"", timeout=10, cancel_event=cancelled)
+
     def test_local_timeout_reaps_actual_child(self):
         namespace = load_transport()
         transport = namespace["_LocalTransport"]()

@@ -15,7 +15,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 class SchedulerCancellationTests(unittest.IsolatedAsyncioTestCase):
     async def test_tick_joins_worker_before_propagating_repeated_cancellation(self):
         namespace = {"asyncio": asyncio, "logger": logging.getLogger(__name__)}
-        for relative, method in (("_resource_manager/_helpers.py", "_run_blocking_io"), ("_scheduler/_core.py", "tick")):
+        for relative, method in (("_blocking_io.py", "_run_blocking_io"), ("_scheduler/_core.py", "tick")):
             source = SERVER / relative
             tree = ast.parse(source.read_text(encoding="utf-8"))
             function = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == method)

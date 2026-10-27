@@ -10,10 +10,12 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
+from .._blocking_io import _run_blocking_io
 from sqlalchemy.orm import Session, joinedload
 
 from .. import database
 from .. import models
+from .._user_lifecycle import lock_user_for_write
 from ..schemas import (
     CachedImageCreate,
     CachedImageResponse,
@@ -240,13 +242,13 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
 
 # ─── 共享逻辑 ────────────────────────────────────────────────────
 
-async def _begin_pull(
+def _prepare_pull(
     db: Session,
     uri: str,
     current_user: models.User,
     is_refresh: bool,
     image_id: Optional[int] = None,
-) -> CachedImageResponse:
+) -> tuple[CachedImageResponse, bool]:
     """
     预热和刷新共用的 check-set-commit-fire 流程。
     在调用方持有 _uri_locks[uri] 的前提下执行，保证同一 URI 不会并发穿透。
@@ -287,8 +289,7 @@ async def _begin_pull(
             db.commit()
             db.refresh(existing)
             resp = CachedImageResponse.model_validate(existing)
-            asyncio.create_task(_do_pull(existing.id, uri, is_refresh=False))
-            return resp
+            return resp, False
 
         if existing:
             existing.status = "refreshing"
@@ -302,6 +303,10 @@ async def _begin_pull(
                 user_id=current_user.id,
                 status="pulling",
             )
+            lock_user_for_write(
+                db,
+                current_user.id,
+            )
             db.add(img)
 
         try:
@@ -313,11 +318,38 @@ async def _begin_pull(
         db.refresh(img)
 
     resp = CachedImageResponse.model_validate(img)
-    asyncio.create_task(_do_pull(img.id, uri, is_refresh=force_pull))
-    return resp
+    return resp, force_pull
 
 
 # ─── 路由 ───────────────────────────────────────────────────────
+
+async def _begin_pull(
+    db: Session,
+    uri: str,
+    current_user: models.User,
+    is_refresh: bool,
+    image_id: Optional[int] = None,
+) -> CachedImageResponse:
+    loop = asyncio.get_running_loop()
+
+    def prepare_and_schedule():
+        response, refresh = _prepare_pull(
+            db,
+            uri,
+            current_user,
+            is_refresh,
+            image_id,
+        )
+        # A disconnected requester must not leave a committed "pulling" record
+        # without its worker. Scheduling belongs to the joined transaction work.
+        loop.call_soon_threadsafe(
+            lambda: asyncio.create_task(_do_pull(response.id, uri, is_refresh=refresh)),
+        )
+        return response
+
+    return await _run_blocking_io(prepare_and_schedule)
+
+
 
 @router.get("/images", response_model=PagedCachedImageResponse)
 def list_images(

@@ -309,6 +309,11 @@ class _SubmitMixin(_SubmitMixinBase):
             # 进远端 dropin，让 in-job `magnus receive` 读盘而非打 HTTP（download 侧的离线通道，
             # 对称于上传侧的 drop + _stage_out_custody）。本机执行下 no-op。
             self._stage_in_custody(job_id, job.entry_command, system_entry_command)
+            self._submission_cancel_event(job_id)
+        except InterruptedError:
+            # User cancellation already owns TERMINATED; shutdown leaves the
+            # pending Job retryable. Transfer workers have reaped their children.
+            return False
         except Exception as error:
             logger.error(f"Failed to stage Job {job.id} to remote site: {error}")
             self._fail_job_before_submission(

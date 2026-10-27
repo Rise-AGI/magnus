@@ -5,10 +5,12 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from .._blocking_io import _run_blocking_io
 
 from .. import models
-from ..schemas import UserInfo, MessageResponse
+from ..schemas import UserInfo, MessageResponse, MessageCreate
+from .chat import _create_message_record
 from ..database import SessionLocal
 from .._chat_manager import chat_manager
 from .._jwt_signer import jwt_signer
@@ -19,6 +21,24 @@ ws_router = APIRouter()
 # 速率限制：每用户每分钟最多 60 条消息
 _RATE_LIMIT = 60
 _rate_buckets: Dict[str, List[datetime]] = defaultdict(list)
+
+
+def _record_websocket_message(
+    user_id: str,
+    conversation_id: str,
+    content: str,
+    message_type: models.MessageType,
+) -> MessageResponse:
+    with SessionLocal() as db:
+        sender = db.query(models.User).filter(models.User.id == user_id).first()
+        if sender is None:
+            raise HTTPException(status_code=401, detail="User no longer exists")
+        return _create_message_record(
+            conversation_id,
+            MessageCreate(content=content, message_type=message_type),
+            db,
+            sender,
+        )
 
 
 def _check_rate_limit(user_id: str) -> bool:
@@ -128,49 +148,17 @@ async def ws_chat(websocket: WebSocket) -> None:
                         await websocket.send_json({"type": "error", "detail": "Image content must be an internal upload URL"})
                         continue
 
-                with SessionLocal() as db:
-                    member = (
-                        db.query(models.ConversationMember)
-                        .filter(
-                            models.ConversationMember.conversation_id == conversation_id,
-                            models.ConversationMember.user_id == user_id,
-                        )
-                        .first()
+                try:
+                    resp = await _run_blocking_io(
+                        _record_websocket_message,
+                        user_id,
+                        conversation_id,
+                        content,
+                        message_type,
                     )
-                    if not member:
-                        await websocket.send_json({"type": "error", "detail": "Not a member of this conversation"})
-                        continue
-
-                    msg = models.Message(
-                        conversation_id=conversation_id,
-                        sender_id=user_id,
-                        content=content,
-                        message_type=message_type,
-                    )
-                    db.add(msg)
-
-                    conv = db.query(models.Conversation).filter(models.Conversation.id == conversation_id).first()
-                    if conv:
-                        conv.updated_at = datetime.now(timezone.utc)
-
-                    db.commit()
-                    db.refresh(msg)
-
-                    sender = db.query(models.User).filter(models.User.id == user_id).first()
-                    resp = MessageResponse(
-                        id=msg.id,
-                        conversation_id=msg.conversation_id,
-                        sender_id=msg.sender_id,
-                        content=msg.content,
-                        message_type=msg.message_type,
-                        created_at=msg.created_at,
-                        sender=UserInfo(
-                            id=sender.id,
-                            name=sender.name,
-                            avatar_url=sender.avatar_url,
-                            email=sender.email,
-                        ) if sender else None,
-                    )
+                except HTTPException as error:
+                    await websocket.send_json({"type": "error", "detail": error.detail})
+                    continue
 
                 event = {
                     "type": "new_message",

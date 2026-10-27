@@ -9,6 +9,7 @@ from sqlalchemy import or_, case
 
 from .. import database
 from .. import models
+from .._user_lifecycle import lock_user_for_write
 from pydantic import BaseModel
 
 from ..schemas import (
@@ -139,6 +140,10 @@ def create_blueprint(
     db_bp = models.Blueprint(
         **bp.model_dump(),
         user_id = current_user.id,
+    )
+    lock_user_for_write(
+        db,
+        current_user.id,
     )
     db.add(db_bp)
     db.commit()
@@ -428,6 +433,10 @@ def save_blueprint_preference(
     serialized_params = serialize_json(pref_update.cached_params)
     enforce_field_size_limits({"cached_params": serialized_params}, "blueprint preference")
 
+    lock_user_for_write(
+        db,
+        current_user.id,
+    )
     if pref: # Update
         pref.blueprint_hash = current_hash
         pref.cached_params = serialized_params

@@ -10,6 +10,8 @@ from sqlalchemy import func
 
 from .. import database
 from .. import models
+from .._user_lifecycle import lock_user_for_write
+from .._blocking_io import _run_blocking_io
 from ..schemas import (
     UserInfo,
     ConversationCreate,
@@ -132,6 +134,12 @@ def create_conversation(
     member_users = db.query(models.User).filter(models.User.id.in_(body.member_ids)).all()
     if len(member_users) != len(body.member_ids):
         raise HTTPException(status_code=400, detail="Some member IDs are invalid")
+
+    for user_id in sorted({current_user.id, *body.member_ids}):
+        lock_user_for_write(
+            db,
+            user_id,
+        )
 
     conv = models.Conversation(
         type=body.type,
@@ -413,6 +421,32 @@ async def add_member(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> ConversationMemberResponse:
+    response = await _run_blocking_io(
+        _add_member_record,
+        conversation_id,
+        body,
+        db,
+        current_user,
+    )
+    chat_manager.add_user_to_conversation(body.user_id, conversation_id)
+    await chat_manager.broadcast_to_conversation(
+        conversation_id,
+        {
+            "type": "member_added",
+            "conversation_id": conversation_id,
+            "user_id": body.user_id,
+            "user_name": response.user.name,
+        },
+    )
+    return response
+
+
+def _add_member_record(
+    conversation_id: str,
+    body: AddMemberRequest,
+    db: Session,
+    current_user: models.User,
+) -> ConversationMemberResponse:
     conv = db.query(models.Conversation).filter(models.Conversation.id == conversation_id).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -441,22 +475,14 @@ async def add_member(
         user_id=body.user_id,
         role="member",
     )
+    lock_user_for_write(
+        db,
+        body.user_id,
+    )
     db.add(m)
     conv.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(m)
-
-    chat_manager.add_user_to_conversation(body.user_id, conversation_id)
-
-    await chat_manager.broadcast_to_conversation(
-        conversation_id,
-        {
-            "type": "member_added",
-            "conversation_id": conversation_id,
-            "user_id": body.user_id,
-            "user_name": target_user.name,
-        },
-    )
 
     return ConversationMemberResponse(
         user_id=m.user_id,
@@ -602,6 +628,32 @@ async def send_message(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> MessageResponse:
+    resp = await _run_blocking_io(
+        _create_message_record,
+        conversation_id,
+        body,
+        db,
+        current_user,
+    )
+    # 广播给所有成员（含发送者的其他设备），前端通过 id dedup 去重
+    await chat_manager.broadcast_to_conversation(
+        conversation_id,
+        {
+            "type": "new_message",
+            "conversation_id": conversation_id,
+            "message": resp.model_dump(mode="json"),
+        },
+    )
+
+    return resp
+
+
+def _create_message_record(
+    conversation_id: str,
+    body: MessageCreate,
+    db: Session,
+    current_user: models.User,
+) -> MessageResponse:
     if not body.content.strip():
         raise HTTPException(status_code=400, detail="Message content cannot be empty")
     if len(body.content) > 10000:
@@ -617,6 +669,10 @@ async def send_message(
 
     _ensure_member(db, conversation_id, current_user.id)
 
+    lock_user_for_write(
+        db,
+        current_user.id,
+    )
     msg = models.Message(
         conversation_id=conversation_id,
         sender_id=current_user.id,
@@ -641,16 +697,6 @@ async def send_message(
             avatar_url=current_user.avatar_url,
             email=current_user.email,
         ),
-    )
-
-    # 广播给所有成员（含发送者的其他设备），前端通过 id dedup 去重
-    await chat_manager.broadcast_to_conversation(
-        conversation_id,
-        {
-            "type": "new_message",
-            "conversation_id": conversation_id,
-            "message": resp.model_dump(mode="json"),
-        },
     )
 
     return resp

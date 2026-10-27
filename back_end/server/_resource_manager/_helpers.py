@@ -1,44 +1,12 @@
 # back_end/server/_resource_manager/_helpers.py
 """Resource-manager 内部的取消安全 I/O、命名规范化与目录操作。"""
 import hashlib
-import asyncio
 import os
 import re
 import shutil
 import stat
 import sys
-from collections.abc import Callable
-
-
-async def _run_blocking_io(
-    function: Callable,
-    *arguments,
-    **keywords,
-):
-    """Keep filesystem workers joined before a cancelled caller releases ownership.
-
-    Cancelling an asyncio waiter cannot stop its thread. Shield the operation,
-    then finish joining it despite repeated cancellation before propagating the
-    original cancellation. Cleanup may only remove its destination afterwards.
-    """
-    task = asyncio.create_task(asyncio.to_thread(
-        function,
-        *arguments,
-        **keywords,
-    ))
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        while not task.done():
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError:
-                continue
-            except Exception:
-                break
-        if not task.cancelled():
-            task.exception()
-        raise
+from .._blocking_io import _run_blocking_io
 
 
 def _get_dir_size(path: str) -> int:

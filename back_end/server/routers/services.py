@@ -18,6 +18,7 @@ from sqlalchemy import or_, case
 from .. import database
 from ..database import SessionLocal
 from .. import models
+from .._user_lifecycle import lock_user_for_write
 from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceListItem, ServiceCreate, PagedServiceResponse, TransferRequest
 from .._service_manager import service_manager, service_job_released
@@ -223,6 +224,10 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
                 system_entry_command = service.system_entry_command,
             )
 
+            lock_user_for_write(
+                db,
+                service.owner_id,
+            )
             db.add(new_job)
             db.flush()
 
@@ -341,6 +346,10 @@ def create_service(
         owner_id = current_user.id,
         last_activity_time = datetime.now(timezone.utc),
         updated_at = datetime.now(timezone.utc),
+    )
+    lock_user_for_write(
+        db,
+        current_user.id,
     )
     db.add(new_service)
     db.commit()

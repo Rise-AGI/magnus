@@ -36,6 +36,7 @@ from . import (
 )
 from ._relay_build_cache import stage_built_sif
 from .._slurm_manager._ssh_auto_connect import remaining_timeout
+from .._slurm_manager._transport import check_transfer_cancelled
 
 # Directory (inside the job working tree) where the in-container SDK drops custody
 # uploads on no-network remote execution, paired with the SDK's MAGNUS_CUSTODY_DROP_DIR.
@@ -300,6 +301,15 @@ class _StagingMixin(_StagingMixinBase):
             shim.write(_MAGNUS_CLI_SHIM)
         os.chmod(shim_path, 0o755)
 
+    def _submission_cancel_event(
+        self,
+        job_id: str,
+    ) -> threading.Event | None:
+        with self._preparing_jobs_lock:
+            event = self._submission_cancel_events.get(job_id)
+        check_transfer_cancelled(event)
+        return event
+
     def _stage_in_job(self, job_id: str, wrapper_local_path: str) -> None:
         """在远端建好 job 工作区骨架并推送本机生成的 wrapper.py。
 
@@ -314,6 +324,7 @@ class _StagingMixin(_StagingMixinBase):
         if receipts["logs_complete"]:
             receipts["logs_complete"] = False
             _write_custody_receipts(local_table, receipts)
+        cancel_event = self._submission_cancel_event(job_id)
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
         for subdir in ("slurm", "metrics"):
@@ -326,15 +337,37 @@ class _StagingMixin(_StagingMixinBase):
                     f"failed to create remote job dir {remote_table}/{subdir} "
                     f"(rc={made.returncode}): {made.stderr.strip()}"
                 )
-        transport.push(wrapper_local_path, f"{remote_table}/wrapper.py")
+        transport.push(
+            wrapper_local_path,
+            f"{remote_table}/wrapper.py",
+            cancel_event=cancel_event,
+        )
         # 平台 SDK 已由 _provision_platform_sdk 落在本机工作区的 .magnus_sdk，推到远端
         # （本机执行下它已在 workspace bind 里，无需推）。
         local_sdk = os.path.join(self._local_job_working_table(job_id), _PLATFORM_SDK_SUBDIR)
         if os.path.isdir(local_sdk):
-            transport.push(local_sdk, f"{remote_table}/{_PLATFORM_SDK_SUBDIR}")
+            remote_sdk = f"{remote_table}/{_PLATFORM_SDK_SUBDIR}"
+            # A restarted Pending attempt may have a partial directory; scp -r
+            # into it would nest the complete SDK below the broken outer tree.
+            check_transfer_cancelled(cancel_event)
+            transport.run(
+                ["rm", "-rf", remote_sdk],
+                timeout=30,
+                check=True,
+            )
+            transport.push(
+                local_sdk,
+                remote_sdk,
+                cancel_event=cancel_event,
+            )
             # scp 不保模式位，远端 bash `magnus` shim 的 +x 须显式补回，否则 PATH 上
             # 这个 shim 不可执行、bash 链路 hijack 失效。
-            transport.run(["chmod", "+x", f"{remote_table}/{_PLATFORM_SDK_SUBDIR}/bin/magnus"])
+            check_transfer_cancelled(cancel_event)
+            transport.run(
+                ["chmod", "+x", f"{remote_table}/{_PLATFORM_SDK_SUBDIR}/bin/magnus"],
+                timeout=30,
+                check=True,
+            )
 
     def _stage_in_resources(
         self,
@@ -359,6 +392,7 @@ class _StagingMixin(_StagingMixinBase):
         assert self.slurm_manager is not None
         if self.config["transport"]["ssh"]["resource_staging"] != "relay":
             return
+        cancel_event = self._submission_cancel_event(job_id)
         transport = self.slurm_manager.transport
 
         if build_digest is not None:
@@ -368,28 +402,43 @@ class _StagingMixin(_StagingMixinBase):
                 build_digest,
                 job_id = job_id,
                 target = self.target,
+                cancel_event = cancel_event,
             )
         else:
             remote_sif_path = (
                 f"{self.remote_container_cache_path}/{os.path.basename(local_sif_path)}"
             )
-            already_cached = transport.run(["test", "-f", remote_sif_path])
+            already_cached = transport.run(["test", "-f", remote_sif_path], timeout=30)
             if already_cached.returncode != 0:
                 staged_sif_path = f"{remote_sif_path}.partial.{job_id}"
-                transport.push(local_sif_path, staged_sif_path)
-                promoted = transport.run(["mv", "-f", staged_sif_path, remote_sif_path])
-                if promoted.returncode != 0:
-                    raise RuntimeError(
-                        f"failed to promote staged SIF {staged_sif_path} -> {remote_sif_path} "
-                        f"(rc={promoted.returncode}): {promoted.stderr.strip()}"
+                try:
+                    transport.push(
+                        local_sif_path,
+                        staged_sif_path,
+                        cancel_event=cancel_event,
                     )
+                    check_transfer_cancelled(cancel_event)
+                    promoted = transport.run(["mv", "-f", staged_sif_path, remote_sif_path], timeout=30)
+                    if promoted.returncode != 0:
+                        raise RuntimeError(f"Failed to promote staged SIF (rc={promoted.returncode})")
+                except BaseException:
+                    try:
+                        transport.run(["rm", "-f", staged_sif_path], timeout=30, check=True)
+                    except Exception:
+                        logger.warning("Interrupted image upload could not be removed for Job %s", job_id)
+                    raise
 
         # 仓库是目录：scp -r 落进一个**已存在**的同名目录会嵌套（remote/repository/
         # repository）。unique job-id + pause 时清远端使它通常不预存在，这里仍先 rm -rf
         # 清一遍兜底，保证 scp 把仓库落在 remote_repo_dir 本身。
         remote_repo_dir = f"{self._remote_job_working_table(job_id)}/repository"
-        transport.run(["rm", "-rf", remote_repo_dir])
-        transport.push(local_repo_dir, remote_repo_dir)
+        check_transfer_cancelled(cancel_event)
+        transport.run(["rm", "-rf", remote_repo_dir], timeout=30, check=True)
+        transport.push(
+            local_repo_dir,
+            remote_repo_dir,
+            cancel_event=cancel_event,
+        )
 
     def _stage_in_custody(self, job_id: str, *command_sources: str) -> None:
         """把 job 的 entry_command 引用的 custody 文件预先 stage 进远端 job 工作区的 dropin
@@ -415,10 +464,12 @@ class _StagingMixin(_StagingMixinBase):
                 tokens.update(_FILE_SECRET_RE.findall(source))
         if not tokens:
             return
+        cancel_event = self._submission_cancel_event(job_id)
         transport = self.slurm_manager.transport
         remote_dropin = f"{self._remote_job_working_table(job_id)}/{_CUSTODY_DROPIN_SUBDIR}"
         local_dropin = os.path.join(self._local_job_working_table(job_id), _CUSTODY_DROPIN_SUBDIR)
         for token in tokens:
+            check_transfer_cancelled(cancel_event)
             acquired = file_custody_manager.acquire_file(
                 token,
                 count_download = False,
@@ -441,7 +492,11 @@ class _StagingMixin(_StagingMixinBase):
                         f"failed to create remote dropin dir {remote_entry} "
                         f"(rc={made.returncode}): {made.stderr.strip()}"
                     )
-                transport.push(str(file_path), f"{remote_entry}/payload")
+                transport.push(
+                    str(file_path),
+                    f"{remote_entry}/payload",
+                    cancel_event=cancel_event,
+                )
                 # meta.json follows the SDK's offline drop-dir format.
                 local_entry = os.path.join(local_dropin, token)
                 os.makedirs(local_entry, exist_ok=True)
@@ -456,7 +511,11 @@ class _StagingMixin(_StagingMixinBase):
                         },
                         meta_file,
                     )
-                transport.push(meta_path, f"{remote_entry}/meta.json")
+                transport.push(
+                    meta_path,
+                    f"{remote_entry}/meta.json",
+                    cancel_event=cancel_event,
+                )
             finally:
                 file_custody_manager.release_file(token)
 

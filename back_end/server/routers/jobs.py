@@ -20,6 +20,7 @@ from sqlalchemy import or_
 
 from .. import database
 from .. import models
+from .._user_lifecycle import lock_user_for_write
 from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
 from .._magnus_config import magnus_config, is_admin_user, is_local_mode, apply_cluster_defaults, normalize_per_cpu_resources, validate_cluster_limits
@@ -123,6 +124,10 @@ def create_job(
         status = JobStatus.PREPARING,
     )
 
+    lock_user_for_write(
+        db,
+        user_id,
+    )
     db.add(db_job)
     db.commit()
     db.refresh(db_job)

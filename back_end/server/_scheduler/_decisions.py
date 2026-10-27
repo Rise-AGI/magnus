@@ -6,6 +6,7 @@ the priority head's current free resources; more complex placement is left to
 SLURM one head at a time, without aggregate-only preemption or backfill.
 """
 import asyncio
+import threading
 from typing import TYPE_CHECKING, List, Tuple
 
 from sqlalchemy.orm import Session
@@ -130,6 +131,10 @@ class _DecisionsMixin(_DecisionsMixinBase):
     async def shutdown_submission(
         self,
     ) -> None:
+        with self._preparing_jobs_lock:
+            self._submission_stopping = True
+            for event in self._submission_cancel_events.values():
+                event.set()
         if self._submission_task is not None:
             self._submission_task.cancel()
             await asyncio.gather(self._submission_task, return_exceptions=True)
@@ -263,7 +268,10 @@ class _DecisionsMixin(_DecisionsMixinBase):
         with SessionLocal() as db:
             for job_id in job_ids:
                 with self._preparing_jobs_lock:
+                    if self._submission_stopping:
+                        break
                     self._submitting_jobs.add(job_id)
+                    self._submission_cancel_events[job_id] = threading.Event()
                 try:
                     job = self._job_query(db, Job).filter(Job.id == job_id).first()
                     if job is None:
@@ -285,6 +293,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
                     finally:
                         with self._preparing_jobs_lock:
                             self._submitting_jobs.discard(job_id)
+                            self._submission_cancel_events.pop(job_id, None)
 
     def _compute_cluster_resources(
         self,

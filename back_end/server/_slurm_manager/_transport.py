@@ -26,6 +26,29 @@ from ._ssh_auto_connect import ensure_control_master, remaining_timeout
 from ._file_receive import receive_file
 
 
+def check_transfer_cancelled(
+    cancel_event: threading.Event | None,
+) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Job staging cancelled")
+
+
+def _wait_transfer(
+    process: subprocess.Popen,
+    timeout: float,
+    cancel_event: threading.Event | None,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        check_transfer_cancelled(cancel_event)
+        try:
+            process.wait(timeout=min(0.1, remaining_timeout(deadline)))
+            return
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                raise
+
+
 def _run_command(
     command: List[str],
     *,
@@ -102,6 +125,7 @@ def _run_scp(
 ) -> subprocess.CompletedProcess:
     # A multiplexing master can retain stderr after its client is killed. Do
     # not drain a pipe to EOF on timeout, and reap scp's local SSH child too.
+    check_transfer_cancelled(cancel_event)
     with tempfile.TemporaryFile() as errors:
         with subprocess.Popen(
             command,
@@ -111,16 +135,7 @@ def _run_scp(
             start_new_session = os.name != "nt",
         ) as process:
             try:
-                deadline = time.monotonic() + timeout
-                while True:
-                    if cancel_event is not None and cancel_event.is_set():
-                        raise InterruptedError("Artifact transfer cancelled")
-                    try:
-                        process.wait(timeout=min(0.1, remaining_timeout(deadline)))
-                        break
-                    except subprocess.TimeoutExpired:
-                        if time.monotonic() >= deadline:
-                            raise
+                _wait_transfer(process, timeout, cancel_event)
             except BaseException:
                 _stop_transfer_process(process)
                 raise
@@ -141,12 +156,14 @@ def _stream_file_to_command(
     *,
     prefix: bytes,
     timeout: float,
+    cancel_event: threading.Event | None = None,
 ) -> subprocess.CompletedProcess:
     """Send a small header and a binary file without buffering the file in RAM.
 
     Separate readers drain bounded output tails while the writer feeds stdin;
     this also supports Windows anonymous pipes and early receiver cache hits.
     """
+    check_transfer_cancelled(cancel_event)
     with open(local_path, "rb") as source:
         process = subprocess.Popen(
             command,
@@ -214,7 +231,7 @@ def _stream_file_to_command(
                 os.set_blocking(stream.fileno(), False)
             for thread in threads:
                 thread.start()
-            process.wait(timeout=timeout)
+            _wait_transfer(process, timeout, cancel_event)
         except BaseException:
             stop.set()
             _stop_transfer_process(process)
@@ -269,6 +286,7 @@ class _Transport:
         remote_path: str,
         *,
         timeout: Optional[float] = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         """把本机 local_path（文件或目录树）搬到执行端的 remote_path。"""
         raise NotImplementedError
@@ -280,6 +298,7 @@ class _Transport:
         *,
         prefix: bytes = b"",
         timeout: float,
+        cancel_event: threading.Event | None = None,
     ) -> subprocess.CompletedProcess:
         """Run a command receiving a binary file after an optional stdin header."""
         raise NotImplementedError
@@ -328,6 +347,7 @@ class _LocalTransport(_Transport):
         remote_path: str,
         *,
         timeout: Optional[float] = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         # 本机执行：调用方把远端路径映射回同一个本地路径，工作区本就在原地，无需搬运。
         return
@@ -339,12 +359,14 @@ class _LocalTransport(_Transport):
         *,
         prefix: bytes = b"",
         timeout: float,
+        cancel_event: threading.Event | None = None,
     ) -> subprocess.CompletedProcess:
         return _stream_file_to_command(
             command,
             local_path,
             prefix=prefix,
             timeout=timeout,
+            cancel_event=cancel_event,
         )
 
     def fetch(
@@ -491,9 +513,12 @@ class _SshControlMasterTransport(_Transport):
         *,
         prefix: bytes = b"",
         timeout: float,
+        cancel_event: threading.Event | None = None,
     ) -> subprocess.CompletedProcess:
         deadline = time.monotonic() + timeout
+        check_transfer_cancelled(cancel_event)
         self._ensure_socket(deadline=deadline)
+        check_transfer_cancelled(cancel_event)
         ssh_command = [
             "ssh",
             "-T",
@@ -513,6 +538,7 @@ class _SshControlMasterTransport(_Transport):
             local_path,
             prefix=prefix,
             timeout=remaining_timeout(deadline),
+            cancel_event=cancel_event,
         )
 
     def push(
@@ -521,9 +547,11 @@ class _SshControlMasterTransport(_Transport):
         remote_path: str,
         *,
         timeout: Optional[float] = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         # 先在远端建好 remote_path 的父目录，scp 才能把条目落在 remote_path 本身
         # （scp 不会替你建中间目录）。父目录经 run() 骑同一条 socket 创建。
+        check_transfer_cancelled(cancel_event)
         remote_parent = posixpath.dirname(remote_path)
         deadline = time.monotonic() + (self.transfer_timeout_seconds if timeout is None else timeout)
         if remote_parent:
@@ -540,6 +568,7 @@ class _SshControlMasterTransport(_Transport):
             local_path,
             self._remote_endpoint(remote_path),
             timeout = remaining_timeout(deadline),
+            cancel_event = cancel_event,
         )
 
     def fetch(
@@ -618,7 +647,9 @@ class _SshControlMasterTransport(_Transport):
         """骑 ControlMaster socket 跑一次 scp。-r 兼容文件与目录树；socket 已建好，
         BatchMode=yes 让 socket 失效时快失败而非挂起等密码（与 run() 一致）。"""
         deadline = time.monotonic() + (self.transfer_timeout_seconds if timeout is None else timeout)
+        check_transfer_cancelled(cancel_event)
         self._ensure_socket(deadline=deadline)
+        check_transfer_cancelled(cancel_event)
         scp_command = [
             "scp",
             "-r",

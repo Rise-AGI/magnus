@@ -101,6 +101,8 @@ class MagnusScheduler(
         self._artifact_retry_after: Dict[str, float] = {}
         self._submission_task: Optional[asyncio.Task] = None
         self._submitting_jobs: set[str] = set()
+        self._submission_cancel_events: dict[str, threading.Event] = {}
+        self._submission_stopping = False
 
     async def tick(self):
         if not self.enabled:
@@ -206,6 +208,8 @@ class MagnusScheduler(
         with self._preparing_jobs_lock:
             preparing_task = self.preparing_jobs.get(job.id)
             submitting = job.id in self._submitting_jobs
+            if submitting:
+                self._submission_cancel_events[job.id].set()
         if submitting:
             return
         if preparing_task is not None and not preparing_task.done() and self._loop is not None:

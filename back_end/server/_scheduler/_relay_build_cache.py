@@ -11,7 +11,7 @@ from sqlalchemy import or_
 from .._execution_targets import ExecutionTarget
 from .._magnus_config import configured_execution_targets
 from .._size_utils import _parse_size_string
-from .._slurm_manager._transport import _Transport
+from .._slurm_manager._transport import _Transport, check_transfer_cancelled
 from ..database import SessionLocal
 from ..models import Job, JobStatus
 
@@ -41,6 +41,7 @@ def stage_built_sif(
     *,
     job_id: str,
     target: ExecutionTarget,
+    cancel_event: threading.Event | None = None,
 ) -> None:
     remote_path = remote_built_sif_path(
         digest,
@@ -56,7 +57,11 @@ def stage_built_sif(
     ]
     with _STAGING_LOCKS_GUARD:
         staging_lock = _STAGING_LOCKS.setdefault(cache_key, threading.Lock())
-    with staging_lock:
+    check_transfer_cancelled(cancel_event)
+    while not staging_lock.acquire(timeout=0.1):
+        check_transfer_cancelled(cancel_event)
+    try:
+        check_transfer_cancelled(cancel_event)
         with SessionLocal() as db:
             records = db.query(Job.id, Job.build_result, Job.slurm_job_id).filter(
                 or_(*(candidate.job_filter(Job) for candidate in sharing_targets)),
@@ -98,6 +103,9 @@ def stage_built_sif(
             local_path,
             prefix=metadata,
             timeout=timeout + 10,
+            cancel_event=cancel_event,
         )
         if result.returncode != 0:
             raise RuntimeError(f"Remote built image preparation failed: {result.stderr.strip()[:4096]}")
+    finally:
+        staging_lock.release()

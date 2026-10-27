@@ -19,6 +19,7 @@ from openai import OpenAI
 
 from .. import database
 from .. import models
+from .._user_lifecycle import lock_user_for_write
 from ..schemas import (
     ExplorerSessionCreate,
     ExplorerSessionResponse,
@@ -310,6 +311,10 @@ def create_session(
     session = models.ExplorerSession(
         user_id=current_user.id,
         title=data.title or "New Session",
+    )
+    lock_user_for_write(
+        db,
+        current_user.id,
     )
     db.add(session)
     db.commit()

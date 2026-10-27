@@ -18,6 +18,7 @@ from sqlalchemy import or_, case, func
 
 from .. import database
 from .. import models
+from .._user_lifecycle import lock_user_for_write
 from ..schemas import (
     SkillCreate,
     SkillFileCreate,
@@ -151,6 +152,10 @@ def create_skill(
         title=skill.title,
         description=skill.description,
         user_id=current_user.id,
+    )
+    lock_user_for_write(
+        db,
+        current_user.id,
     )
     db.add(db_skill)
     try:

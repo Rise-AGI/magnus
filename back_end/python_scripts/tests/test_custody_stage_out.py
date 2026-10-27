@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 import runpy
@@ -20,7 +21,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 def load_staging():
     path = SERVER / "_scheduler" / "_staging.py"
-    namespace = {"replace_protocol_file": protocol.replace_protocol_file, "remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
+    namespace = {"replace_protocol_file": protocol.replace_protocol_file, "check_transfer_cancelled": load_transport()["check_transfer_cancelled"], "remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
     namespace.update({name: value for name, value in runpy.run_path(str(SERVER / "_custody_receipts.py")).items() if not name.startswith("__")})
     relay_path = SERVER / "_scheduler" / "_custody_relay.py"
     relay = ast.parse(relay_path.read_text())
@@ -67,7 +68,7 @@ class FileTransport:
         if Path(local).stat().st_size != size:
             raise ValueError("size changed")
 
-    def push(self, local, remote):
+    def push(self, local, remote, *, cancel_event=None):
         shutil.copyfile(local, remote)
 
 
@@ -96,6 +97,8 @@ class CustodyStageOutTests(unittest.TestCase):
 
     def make_scheduler(self):
         scheduler = self.namespace["_StagingMixin"]()
+        scheduler._preparing_jobs_lock = threading.Lock()
+        scheduler._submission_cancel_events = {}
         scheduler.slurm_manager = SimpleNamespace(transport=self.transport)
         scheduler._remote_job_working_table = lambda job: str(self.remote)
         scheduler._local_job_working_table = lambda job: str(self.local)
@@ -319,6 +322,33 @@ class CustodyStageOutTests(unittest.TestCase):
         self.assertEqual((self.local / "slurm" / "output.txt").read_bytes(), b"new attempt log")
         self.assertEqual(self.calls, [token])
 
+    @unittest.skipUnless(shutil.which("scp"), "local scp executable required")
+    def test_retried_sdk_upload_replaces_partial_directory_without_nesting(self):
+        sdk_name = self.namespace["_PLATFORM_SDK_SUBDIR"]
+        sdk = self.local / sdk_name
+        (sdk / "bin").mkdir(parents=True)
+        (sdk / "bin/magnus").write_text("#!/bin/sh\nexit 0\n")
+        (sdk / "client.py").write_text("complete = True\n")
+        remote_sdk = self.remote / sdk_name
+        remote_sdk.mkdir(parents=True)
+        (remote_sdk / "old-partial").write_bytes(b"partial")
+        wrapper = self.root / "wrapper.py"
+        wrapper.write_text("pass")
+        original_run = self.transport.run
+        def run(command, **kwargs):
+            if command[0] in {"rm", "chmod"}:
+                return subprocess.run(command, timeout=2, check=kwargs.get("check", False))
+            return original_run(command, **kwargs)
+        self.transport.run = run
+        self.transport.push = lambda local, remote, **kwargs: subprocess.run(
+            ["scp", "-r", local, remote], check=True, capture_output=True, timeout=2,
+        )
+        self.scheduler._stage_in_job("job", str(wrapper))
+        self.assertEqual((remote_sdk / "client.py").read_bytes(), (sdk / "client.py").read_bytes())
+        self.assertFalse((remote_sdk / sdk_name).exists())
+        self.assertFalse((remote_sdk / "old-partial").exists())
+        self.assertTrue(os.access(remote_sdk / "bin/magnus", os.X_OK))
+
     def test_stage_in_keeps_manifest_separate_from_payload_named_meta_json(self):
         source = self.root / "user.json"
         source.write_bytes(b'{"user": true}')
@@ -335,6 +365,33 @@ class CustodyStageOutTests(unittest.TestCase):
         self.assertEqual(metadata["storage_filename"], "payload")
         self.assertEqual((entry / "payload").read_bytes(), source.read_bytes())
         self.assertEqual(released, [token])
+
+    def test_cancelled_input_releases_lease_before_return_and_skips_metadata(self):
+        source = self.root / "input"
+        source.write_bytes(b"input")
+        cancelled = threading.Event()
+        self.scheduler._submission_cancel_events["job"] = cancelled
+        acquired, released, pushed = [], [], []
+        def acquire(token, **kwargs):
+            acquired.append(token)
+            return source, "input", False, 5
+        def push(local, remote, *, cancel_event=None):
+            self.assertIs(cancel_event, cancelled)
+            self.assertEqual(released, [])
+            pushed.append(remote)
+            cancelled.set()
+            self.namespace["check_transfer_cancelled"](cancel_event)
+        self.namespace["file_custody_manager"] = SimpleNamespace(
+            acquire_file=acquire, release_file=released.append,
+        )
+        self.transport.push = push
+        command = " ".join("magnus-secret:relay-" + letter * 32 for letter in "ab")
+        with self.assertRaises(InterruptedError):
+            self.scheduler._stage_in_custody("job", command)
+        self.assertEqual(len(acquired), 1)
+        self.assertEqual(released, acquired)
+        self.assertEqual(len(pushed), 1)
+        self.assertTrue(pushed[0].endswith("/payload"))
 
     def test_empty_drop_and_local_execution_complete_without_side_effects(self):
         self.assertTrue(self.scheduler._stage_out_custody("job"))

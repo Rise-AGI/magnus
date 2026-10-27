@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from types import SimpleNamespace
 import unittest
 
@@ -17,6 +18,7 @@ from sqlalchemy import String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from test_execution_targets import SERVER, targets_module
+from test_transport_timeouts import load_transport
 
 
 class Base(DeclarativeBase):
@@ -72,6 +74,7 @@ class RelayCacheTests(unittest.TestCase):
         tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
         self.module = {
             "__file__": str(path),
+            "check_transfer_cancelled": load_transport()["check_transfer_cancelled"],
             "configured_execution_targets": self.targets,
             "SessionLocal": lambda: Session(self.engine),
             "Job": Job,
@@ -122,6 +125,7 @@ class RelayCacheTests(unittest.TestCase):
             *,
             prefix,
             timeout,
+            cancel_event=None,
         ):
             request = json.loads(prefix)
             self.assertEqual(set(request["protected"]), {checksum(active), checksum(legacy), checksum(releasing)})
@@ -137,6 +141,28 @@ class RelayCacheTests(unittest.TestCase):
         for content in (active, legacy, releasing, self.incoming.read_bytes()):
             self.assertEqual((cache / (checksum(content)[7:] + ".sif")).read_bytes(), content)
         self.assertFalse((cache / (checksum(old)[7:] + ".sif")).exists())
+
+    def test_cancel_while_waiting_preserves_other_jobs_cache_lock(self):
+        target = self.targets["default"]
+        cache_key = target.image_cache_key
+        lock = threading.Lock()
+        lock.acquire()
+        self.module["_STAGING_LOCKS"][cache_key] = lock
+        cancelled = threading.Event()
+        timer = threading.Timer(0.05, cancelled.set)
+        timer.start()
+        started = time.monotonic()
+        try:
+            with self.assertRaises(InterruptedError):
+                self.module["stage_built_sif"](
+                    SimpleNamespace(), str(self.incoming), checksum(self.incoming.read_bytes()),
+                    job_id="submission", target=target, cancel_event=cancelled,
+                )
+            self.assertTrue(lock.locked())
+            self.assertLess(time.monotonic() - started, 1)
+        finally:
+            timer.join()
+            lock.release()
 
     def test_shared_snapshot_and_transfer_serialize_but_independent_cache_can_progress(self):
         entered = threading.Event()

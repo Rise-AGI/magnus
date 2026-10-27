@@ -64,7 +64,7 @@ def load_coordinator():
     module._prepare_windows_scratch_root = windows_security.prepare_private_directory
     for filename, selected in (
         (SERVER / "_size_utils.py", {"_parse_size_string"}),
-        (SERVER / "_resource_manager/_helpers.py", {"_run_blocking_io"}),
+        (SERVER / "_blocking_io.py", {"_run_blocking_io"}),
         (SERVER / "_resource_manager/_builds.py", None),
     ):
         tree = ast.parse(filename.read_text(encoding="utf-8"), filename=str(filename))

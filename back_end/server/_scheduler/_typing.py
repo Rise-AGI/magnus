@@ -59,6 +59,13 @@ class _SchedulerProtocol:
     _artifact_retry_after: Dict[str, float]
     _submission_task: Optional[asyncio.Task]
     _submitting_jobs: set[str]
+    _submission_cancel_events: dict[str, threading.Event]
+    _submission_stopping: bool
+
+    def _submission_cancel_event(
+        self,
+        job_id: str,
+    ) -> threading.Event | None: ...
 
     def _job_query(self, db: "Session", *entities) -> Any: ...
     def inflight_job_ids(self) -> set[str]: ...

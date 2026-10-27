@@ -562,3 +562,18 @@ Host-side result, log and metric I/O uses regular files beneath the Job root. Ru
 Service proxy authentication is consumed by Magnus: Bearer Authorization, the `token` query parameter and `token`/`access_token` cookies are not forwarded to user applications. Business cookies and repeated query parameters are preserved; upstream redirects are returned to the client. This credential boundary is not origin isolation for arbitrary Service HTML.
 
 Service updates preserve ownership; explicit transfer remains the ownership-changing operation. A stopped Service retains its Job and port while preparation, submission or an external allocation is still active. Deletion can return 409 until release; an unconfirmed stop returns 503 without losing the association. Late submission replies preserve a concurrent termination, retain the external ID and request cancellation; reconciliation retries unconfirmed cancellation. An externally accepted submission whose ID was never received still requires separate reconciliation.
+
+
+## Staging cancellation and user ownership
+
+Terminating a Job during remote input staging cancels that Job's SCP or binary
+stream, then joins its transfer workers and releases custody leases before the
+workspace becomes reclaimable. It does not close the shared SSH master or cancel
+other Jobs. Control commands keep bounded timeouts. A server shutdown cancels and
+drains staging while leaving unsubmitted Jobs Pending for the next start.
+
+Deleting an agent with existing records, including completed Job history, returns
+409. Magnus does not erase history or detach its owner. Creating or transferring
+owned records reserves the user in the same database transaction, so a request
+that authenticated before deletion cannot create an orphan afterward. Empty
+agents remain deletable; no client upgrade or database migration is required.

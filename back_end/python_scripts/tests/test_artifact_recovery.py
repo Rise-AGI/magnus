@@ -13,10 +13,10 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 def load_recovery():
     namespace = {"__name__": __name__, "logger": logging.getLogger(__name__)}
-    for relative in ("_resource_manager/_helpers.py", "_scheduler/_artifact_recovery.py"):
+    for relative in ("_blocking_io.py", "_scheduler/_artifact_recovery.py"):
         path = SERVER / relative
         tree = ast.parse(path.read_text())
-        if relative.endswith("_helpers.py"):
+        if relative.endswith("_blocking_io.py"):
             tree.body = [node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "_run_blocking_io"]
             namespace["asyncio"] = asyncio
         else:
@@ -149,7 +149,15 @@ class ArtifactRecoveryTests(unittest.IsolatedAsyncioTestCase):
             calls.append("submit")
             started.set()
             release.wait(5)
-        actor = SimpleNamespace(_submission_task=None, _schedule_pending_jobs=submit)
+        actor = SimpleNamespace(
+            _submission_task=None,
+            _schedule_pending_jobs=submit,
+            _preparing_jobs_lock=threading.Lock(),
+            _submission_cancel_events={},
+            _submission_stopping=False,
+        )
+        cancelled = threading.Event()
+        actor._submission_cancel_events["job"] = cancelled
         try:
             namespace["_queue_pending_submission"](actor)
             self.assertTrue(await asyncio.to_thread(started.wait, 1))
@@ -158,6 +166,8 @@ class ArtifactRecoveryTests(unittest.IsolatedAsyncioTestCase):
             shutdown = asyncio.create_task(namespace["shutdown_submission"](actor))
             await asyncio.sleep(0.02)
             self.assertFalse(shutdown.done())
+            self.assertTrue(cancelled.is_set())
+            self.assertTrue(actor._submission_stopping)
             release.set()
             await asyncio.wait_for(shutdown, 1)
             self.assertIsNone(actor._submission_task)
