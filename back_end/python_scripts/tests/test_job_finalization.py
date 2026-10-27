@@ -5,12 +5,14 @@ import ast
 import asyncio
 from datetime import datetime, timezone
 import logging
+import importlib.util
+import sys
 import os
 from pathlib import Path
 import shutil
 import tempfile
 import threading
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 from test_protocol_files import open_protocol_file
@@ -85,6 +87,8 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.sessions = sessionmaker(bind=self.engine, autoflush=False)
         self.events = []
         self.statuses = {}
+        self.release_overrides = {}
+        self.release_checks = []
         self.marker_failure = set()
         self.transfer_failure = set()
         self.cleanup_failure = set()
@@ -152,7 +156,14 @@ class SlurmFinalizationTests(unittest.TestCase):
             self.events.append(("cleanup", identifier))
             if identifier in self.cleanup_failure:
                 raise RuntimeError("remote filesystem unavailable")
-        actor.slurm_manager = SimpleNamespace(check_job_status=status)
+        def observe(identifier):
+            self.release_checks.append(identifier)
+            result = self.statuses.get(identifier, "UNKNOWN")
+            if isinstance(result, Exception):
+                raise result
+            released = self.release_overrides.get(identifier, result in {"FAILED", "COMPLETED", "CANCELLED", "TIMEOUT"})
+            return SimpleNamespace(status=result, allocation_released=released)
+        actor.slurm_manager = SimpleNamespace(check_job_status=status, observe_job=observe)
         actor._stage_out_markers = markers
         actor._stage_out_final = final
         actor._custody_relay = SimpleNamespace(forget=lambda job: None)
@@ -224,12 +235,13 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.assertEqual(self.state("other")[:3], (JobStatus.FAILED, None, None))
         self.assertFalse((other / "repository").exists())
 
-    def test_restart_retries_without_requerying_expired_slurm_accounting(self):
+    def test_restart_rechecks_release_without_reclassifying_terminal_execution(self):
         table = self.add_job()
         self.transfer_failure.add("job")
         self.sync()
         self.transfer_failure.clear()
         self.statuses.clear()
+        self.release_overrides["slurm-job"] = True
         self.events.clear()
         self.sync(self.new_scheduler())
         self.assertFalse(any(event[0] == "query" for event in self.events))
@@ -264,6 +276,88 @@ class SlurmFinalizationTests(unittest.TestCase):
             self.assertTrue((table / "repository").exists())
         self.assertFalse(any(event[0] == "cleanup" for event in self.events))
 
+    def test_cleanup_imports_runtime_dependencies_without_injected_globals(self):
+        table = self.add_job(status=JobStatus.FAILED)
+        with self.sessions() as db:
+            db.get(Job, "job").finalization_status = "CLEANUP"
+            db.commit()
+        root_name = "isolated_finalization_import"
+        root = ModuleType(root_name)
+        root.__path__ = [str(SERVER)]
+        package = ModuleType(f"{root_name}._scheduler")
+        package.__path__ = [str(SERVER / "_scheduler")]
+        package.logger = self.namespace["logger"]
+        package.magnus_workspace_path = str(self.root)
+        package.magnus_ephemeral_workspace_path = str(self.root)
+        modules = {root_name: root, package.__name__: package}
+        for name, values in {
+            "_magnus_config": {"is_local_mode": False},
+            "_protocol_files": {"open_protocol_file": open_protocol_file},
+            "_workspace_cleanup": {"remove_job_path": remove},
+            "database": {"SessionLocal": self.sessions},
+            "models": {"Job": Job, "JobStatus": JobStatus},
+        }.items():
+            dependency = ModuleType(f"{root_name}.{name}")
+            vars(dependency).update(values)
+            modules[dependency.__name__] = dependency
+        spec = importlib.util.spec_from_file_location(
+            f"{package.__name__}._job_lifecycle",
+            SERVER / "_scheduler" / "_job_lifecycle.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        modules[spec.name] = module
+        with patch.dict(sys.modules, modules):
+            spec.loader.exec_module(module)
+            actor = module._JobLifecycleMixin()
+            actor._preparing_jobs_lock = threading.Lock()
+            actor._submitting_jobs = set()
+            observed = SimpleNamespace(allocation_released=False)
+            actor.slurm_manager = SimpleNamespace(observe_job=lambda identifier: observed)
+            actor._cleanup_remote_job = lambda identifier: None
+            self.assertFalse(actor._clean_up_working_table("job"))
+            self.assertTrue((table / "repository" / "checkpoint").exists())
+            observed.allocation_released = True
+            self.assertTrue(actor._clean_up_working_table("job"))
+            self.assertFalse((table / "repository").exists())
+
+    def test_terminal_execution_still_holds_allocation_and_incremental_outputs(self):
+        table = self.add_job()
+        self.release_overrides["slurm-job"] = False
+        self.scheduler._stage_out_custody = lambda identifier: self.events.append(("incremental", identifier))
+        self.sync()
+        self.assertEqual(self.state()[:3], (JobStatus.FAILED, "slurm-job", "FAILED"))
+        self.assertTrue((table / "repository" / "checkpoint").exists())
+        self.assertIn(("incremental", "job"), self.events)
+        self.assertIn(("logs", "job"), self.events)
+        self.assertFalse(any(event[0] in {"transfer", "cleanup"} for event in self.events))
+        self.release_overrides["slurm-job"] = True
+        self.sync(self.new_scheduler())
+        self.assertEqual(self.state()[:3], (JobStatus.FAILED, None, None))
+        self.assertFalse((table / "repository").exists())
+
+    def test_durable_cleanup_waits_when_allocation_is_held_or_unknown_after_restart(self):
+        table = self.add_job(status=JobStatus.FAILED)
+        with self.sessions() as db:
+            db.get(Job, "job").finalization_status = "CLEANUP"
+            db.commit()
+        for state in ("RUNNING", "PENDING", "UNKNOWN"):
+            with self.subTest(state=state):
+                self.statuses["slurm-job"] = state
+                self.sync(self.new_scheduler())
+                self.assertEqual(self.state()[:3], (JobStatus.FAILED, "slurm-job", "CLEANUP"))
+                self.assertTrue((table / "repository" / "checkpoint").exists())
+        self.statuses["slurm-job"] = "COMPLETED"
+        self.sync(self.new_scheduler())
+        self.assertEqual(self.state()[:3], (JobStatus.FAILED, None, None))
+
+    def test_cleanup_rechecks_release_after_final_transfer(self):
+        table = self.add_job()
+        self.final_hook = lambda identifier: self.release_overrides.update({"slurm-job": False})
+        self.sync()
+        self.assertEqual(self.state()[:3], (JobStatus.FAILED, "slurm-job", "CLEANUP"))
+        self.assertTrue((table / "repository" / "checkpoint").exists())
+        self.assertFalse(any(event[0] == "cleanup" for event in self.events))
+
     def test_success_marker_wins_over_cancel_and_completion_without_marker_fails(self):
         self.add_job("success", observed="CANCELLED")
         self.add_job("missing", status=JobStatus.QUEUED, observed="COMPLETED")
@@ -282,6 +376,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.assertTrue((table / "repository").exists())
         self.marker_failure.clear()
         self.statuses.clear()
+        self.release_overrides["slurm-job"] = True
         self.success.add("job")
         self.sync(self.new_scheduler())
         self.assertEqual(self.state()[:3], (JobStatus.SUCCESS, None, None))
@@ -360,6 +455,7 @@ class SlurmFinalizationTests(unittest.TestCase):
 
                 self.marker_hook = receive
                 self.statuses.clear()
+                self.release_overrides[f"slurm-{identifier}"] = True
                 self.sync(self.new_scheduler())
                 self.assertEqual(self.state(identifier)[:3], (status, None, None))
                 self.assertEqual((table / ".magnus_result").read_text(), "checkpoint")

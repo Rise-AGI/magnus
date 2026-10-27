@@ -139,17 +139,17 @@ class JobListItem(BaseModel):
     @computed_field
     @property
     def is_releasing(self) -> bool:
-        """Cancellation/preemption is awaiting release or final artifact transfer.
+        """A terminal or paused Job still owns an external lifecycle binding.
 
-        A transfer retry may outlast Slurm allocation; this lifecycle flag must
-        not be used as evidence of resource occupancy.
-
-        在后端这里集中派生避免前端 / SDK 各处重复 ``status × slurm_job_id`` 推断
-        而漏掉某个 surface（review 里已经踩过 4 处遗漏）。前端直接读这个字段做
-        UX 决策（badge 显示 "Releasing"、隐藏重复终结按钮等）。Docker (local)
-        模式下 terminate_job 立即清 slurm_job_id，所以这里恒为 ``False``。
+        Artifact recovery can outlast the allocation, so this does not measure
+        resource usage. Docker clears its binding after synchronous removal.
         """
-        return self.slurm_job_id is not None and self.status in (JobStatus.TERMINATED, JobStatus.PAUSED)
+        return self.slurm_job_id is not None and self.status in (
+            JobStatus.TERMINATED,
+            JobStatus.PAUSED,
+            JobStatus.SUCCESS,
+            JobStatus.FAILED,
+        )
 
 
 class JobResponse(JobListItem):

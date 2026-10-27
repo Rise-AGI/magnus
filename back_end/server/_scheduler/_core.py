@@ -1,6 +1,7 @@
 # back_end/server/_scheduler/_core.py
 import asyncio
 import threading
+from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from typing import Dict, Optional
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from ..models import Job, JobStatus
 from ..database import SessionLocal
 from .._resource_manager import resource_manager
 from .._resource_manager._helpers import _run_blocking_io
+from .._lifecycle import cancel_background_tasks
 from .._slurm_manager import SlurmManager
 from .._docker_manager import DockerManager
 from .._magnus_config import is_local_mode, configured_execution_targets
@@ -140,13 +142,17 @@ class MagnusScheduler(
     async def shutdown(
         self,
     ) -> None:
-        await self.shutdown_submission()
-        await self.shutdown_artifact_recovery()
+        async with AsyncExitStack() as cleanup:
+            cleanup.push_async_callback(self._shutdown_preparing_jobs)
+            cleanup.push_async_callback(self.shutdown_artifact_recovery)
+            cleanup.push_async_callback(self.shutdown_submission)
+
+    async def _shutdown_preparing_jobs(
+        self,
+    ) -> None:
         with self._preparing_jobs_lock:
             tasks = list(self.preparing_jobs.values())
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await cancel_background_tasks(tasks)
 
     def terminate_job(self, db: Session, job: Job) -> None:
         """API endpoint for user-initiated job termination"""
@@ -218,7 +224,10 @@ class MagnusScheduler(
                 # The task may finish between the thread's observation and this
                 # callback. In that case cancellation is a no-op; still clean up.
                 if preparing_task.done():
-                    cleanup = asyncio.create_task(asyncio.to_thread(self._clean_up_working_table, job_id))
+                    cleanup = asyncio.create_task(_run_blocking_io(
+                        self._clean_up_working_table,
+                        job_id,
+                    ))
                     with self._preparing_jobs_lock:
                         self.preparing_jobs[job_id] = cleanup
                 else:

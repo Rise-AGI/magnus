@@ -208,7 +208,7 @@ class MetricCoverageTests(unittest.TestCase):
             "magnus_config": {"server": {"root": "/unused"}},
             "_read_cpu_usage_usec": lambda pid: 15000000,
             "_read_memory_used_bytes": lambda pid: 4096,
-            "open": writer,
+            "open_protocol_file": lambda *args: writer(),
         }
         exec(compile(tree, str(source), "exec"), namespace)
         collector = namespace["DockerMetricsCollector"]()

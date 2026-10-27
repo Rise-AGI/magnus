@@ -15,6 +15,7 @@ from typing import Any, Callable, Literal, Optional, Dict, Tuple, BinaryIO
 
 from library import is_disk_full_oserror
 
+from .._blocking_io import _run_blocking_io
 from .._magnus_config import magnus_config
 from .._size_utils import _parse_size_string
 from .._custody_receipts import _sync_directory
@@ -689,7 +690,7 @@ class FileCustodyManager:
         logger.info("File custody cleanup loop started.")
         while True:
             await asyncio.sleep(30)
-            await asyncio.to_thread(self.cleanup_expired)
+            await _run_blocking_io(self.cleanup_expired)
 
     def shutdown(self) -> None:
         with self._changed:

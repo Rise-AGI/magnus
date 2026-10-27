@@ -33,7 +33,7 @@ class StageOutTests(unittest.TestCase):
         (self.root / "jobs").mkdir()
         self.transport = ArtifactTransport()
         self.scheduler = self.namespace["_StagingMixin"]()
-        self.scheduler.slurm_manager = SimpleNamespace(transport=self.transport, check_job_status=lambda identifier: "COMPLETED")
+        self.scheduler.slurm_manager = SimpleNamespace(transport=self.transport, check_job_status=lambda identifier: "COMPLETED", observe_job=lambda identifier: SimpleNamespace(allocation_released=True))
         self.scheduler._remote_job_working_table = lambda job: str(self.root / "remote" / job)
         self.scheduler._local_job_working_table = lambda job: str(self.root / "jobs" / job)
         manager_namespace = load_manager()

@@ -444,6 +444,15 @@ class _SyncMixin(_SyncMixinBase):
         slurm_job_id: str,
         real_status: str,
     ) -> None:
+        assert self.slurm_manager is not None
+        if not self.slurm_manager.observe_job(slurm_job_id).allocation_released:
+            # Epilog/requeue cleanup can still hold the workspace after the
+            # execution outcome is known. Do not freeze logs or final receipts.
+            try:
+                self._stage_out_custody(job_id)
+            finally:
+                self._stage_out_logs(job_id)
+            return
         if self._stage_out_final(job_id) is not True:
             return
         with SessionLocal() as db:

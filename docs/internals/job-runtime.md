@@ -36,6 +36,10 @@ SSH artifact recovery runs separately from status reconciliation and admission, 
 
 Admission and submission also run as a single background pass, so a stalled upload cannot suspend status reconciliation or start overlapping resource decisions. Failures before submission persist a terminal result before cleanup; cleanup retries independently, including Jobs that never received a SLURM ID.
 
+Slurm execution outcome and allocation release are tracked separately. For `COMPLETING`, Magnus uses the structured base state and flags from `scontrol --json` when available: confirmed terminal execution may become Success/Failed while the external binding and `is_releasing` remain. Requeue cleanup is not a failed execution. Older parsers that expose only a flattened state, unsupported queries and ambiguous states retain the existing conservative behavior. See [Slurm state codes](https://slurm.schedmd.com/job_state_codes.html). Workspace removal, image-pin release and final artifact/log sealing wait for confirmed allocation release; incremental custody and logs continue while waiting. `is_releasing` includes terminal and paused Jobs with an external binding and is not a resource-usage measurement.
+
+Backend startup failure and shutdown both unwind registered resources. All background loops and their blocking filesystem workers are joined before the scheduler, custody and build managers close. Failure in one shutdown does not skip the others; repeated cancellation does not detach their teardown. This covers cooperative application shutdown, not `SIGKILL` or power loss, which continue to use durable recovery records.
+
 ## wrapper.py: three-layer structure
 
 `_build_wrapper_content()` in `_scheduler/_wrapper_template.py` generates `wrapper.py`, which is the actual entry point executed by SLURM. The wrapper contains three nested layers:

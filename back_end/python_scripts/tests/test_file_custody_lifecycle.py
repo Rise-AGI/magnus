@@ -27,6 +27,7 @@ def load_manager():
     namespace = runpy.run_path(str(CUSTODY / "_types.py"))
     namespace.update(runpy.run_path(str(CUSTODY / "_word_list.py")))
     namespace.update(runpy.run_path(str(SERVER / "_size_utils.py")))
+    namespace.update(runpy.run_path(str(SERVER / "_blocking_io.py")))
     namespace.update(runpy.run_path(str(CUSTODY / "_index.py")))
     namespace.update(runpy.run_path(str(SERVER / "_custody_receipts.py")))
     namespace.update({
@@ -222,6 +223,7 @@ class CustodyLifecycleTests(unittest.TestCase):
             "file_custody_manager": self.manager,
             "_FILE_SECRET_RE": re.compile(r"magnus-secret:([0-9A-Za-z_-]+)"),
             "_CUSTODY_DROPIN_SUBDIR": ".magnus_custody_dropin",
+            "check_transfer_cancelled": lambda event: self.assertIsNone(event),
             "os": os,
             "json": json,
             "logger": self.namespace["logger"],
@@ -229,7 +231,7 @@ class CustodyLifecycleTests(unittest.TestCase):
         exec(compile(ast.Module(body=[method], type_ignores=[]), "_stage_in_custody", "exec"), namespace)
         token = self.store(max_downloads=1)
 
-        def failed_push(source, destination):
+        def failed_push(source, destination, *, cancel_event=None):
             self.assertTrue(Path(source).is_file())
             self.assertEqual(self.manager._entries[token].active_readers, 1)
             self.manager.delete_entry(token)
@@ -238,6 +240,7 @@ class CustodyLifecycleTests(unittest.TestCase):
 
         scheduler = SimpleNamespace(
             _is_remote_execution=lambda: True,
+            _submission_cancel_event=lambda job_id: None,
             _remote_job_working_table=lambda job_id: "/remote/job",
             _local_job_working_table=lambda job_id: self.temp.name,
             slurm_manager=SimpleNamespace(transport=SimpleNamespace(

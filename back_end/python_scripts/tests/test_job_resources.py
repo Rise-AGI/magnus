@@ -132,6 +132,15 @@ class JobResourceIntegrationTests(unittest.TestCase):
         values.update(overrides)
         return values
 
+    def test_terminal_jobs_keep_release_flag_until_external_binding_is_cleared(self):
+        for state in ("Failed", "Success", "Terminated", "Paused", "Running", "Pending"):
+            for binding in (None, "123"):
+                with self.subTest(state=state, binding=binding):
+                    job = self.namespace["JobListItem"](**self.fields(status=state, slurm_job_id=binding))
+                    expected = binding is not None and state in {"Failed", "Success", "Terminated", "Paused"}
+                    self.assertEqual(job.is_releasing, expected)
+                    self.assertEqual(job.model_dump()["is_releasing"], expected)
+
     def test_legacy_inference_and_snapshot_survive_config_changes(self):
         schema = self.namespace["JobListItem"]
         legacy = schema(**self.fields())

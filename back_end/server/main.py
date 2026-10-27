@@ -24,6 +24,8 @@ from ._metrics_collector import DockerMetricsCollector
 from ._resource_manager import resource_manager
 from .routers.images import recover_stuck_images
 from ._feishu_client import feishu_client
+from ._blocking_io import _run_blocking_io
+from ._lifecycle import cancel_background_tasks, lifespan_resources
 
 
 class EndpointFilter(logging.Filter):
@@ -545,92 +547,78 @@ async def run_scheduler_loop(
 
 @asynccontextmanager
 async def lifespan(
-    app: FastAPI
+    app: FastAPI,
 ):
-    
-    thread_pool_size = 200
-    
-    # 调整 asyncio 默认线程池 (影响 await asyncio.to_thread)
-    loop = asyncio.get_running_loop()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=thread_pool_size)
-    loop.set_default_executor(executor)
-    # 调整 AnyIO 默认限流器 (影响 FastAPI 的 def 路由)
-    limiter = anyio.to_thread.current_default_thread_limiter() # type: ignore
-    limiter.total_tokens = thread_pool_size
-    
-    # 镜像恢复：清理上次异常退出遗留的 .tmp 和卡在 pulling/refreshing 的记录
-    recover_stuck_images()
+    async with lifespan_resources() as cleanup:
+        cleanup.push_async_callback(resource_manager.builds.shutdown)
+        cleanup.push_async_callback(
+            _run_blocking_io,
+            file_custody_manager.shutdown,
+        )
+        cleanup.push_async_callback(scheduler.shutdown)
 
-    # Restore cache protection before any new preparation or cache collection.
-    with SessionLocal() as db:
-        rows = db.query(models.Job.id, models.Job.build_result, models.Job.execution_target).filter(
-            models.Job.build_result.isnot(None),
-            (models.Job.status.in_([
-                models.JobStatus.PREPARING,
-                models.JobStatus.BUILDING,
-                models.JobStatus.PENDING,
-                models.JobStatus.QUEUED,
-                models.JobStatus.RUNNING,
-                models.JobStatus.PAUSED,
-            ]) | models.Job.slurm_job_id.isnot(None)),
-        ).all()
-        pins = {job_id: json.loads(result) for job_id, result, _ in rows}
-        active_targets = db.query(models.Job.execution_target).filter(
-            models.Job.status.notin_([models.JobStatus.SUCCESS, models.JobStatus.FAILED, models.JobStatus.TERMINATED])
-            | models.Job.slurm_job_id.isnot(None)
-            | models.Job.finalization_status.isnot(None),
-        ).distinct().all()
-        for (target_id,) in active_targets:
-            scheduler.for_target(target_id)
-    resource_manager.builds.restore_pins(pins)
-    scheduler.restore_pins([(job_id, target_id) for job_id, _, target_id in rows])
+        thread_pool_size = 200
 
-    scheduler_task = asyncio.create_task(run_scheduler_loop())
-    service_manager_task = asyncio.create_task(service_manager.start_background_loop())
-    file_custody_task = asyncio.create_task(file_custody_manager.cleanup_loop())
+        # 调整 asyncio 默认线程池 (影响 await asyncio.to_thread)
+        loop = asyncio.get_running_loop()
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=thread_pool_size)
+        loop.set_default_executor(executor)
+        # 调整 AnyIO 默认限流器 (影响 FastAPI 的 def 路由)
+        limiter = anyio.to_thread.current_default_thread_limiter() # type: ignore
+        limiter.total_tokens = thread_pool_size
 
-    # Docker mode: host-side system-metrics collector (cgroup + nvidia-smi).
-    # Mirrors the in-container _metrics_sidecar that wrapper.py runs in SLURM mode.
-    docker_metrics_collector: Optional[DockerMetricsCollector] = None
-    if is_local_mode:
-        docker_metrics_collector = DockerMetricsCollector()
-        docker_metrics_collector.start()
+        # 镜像恢复：清理上次异常退出遗留的 .tmp 和卡在 pulling/refreshing 的记录
+        recover_stuck_images()
 
-    # 用户信息刷新：本地模式跳过，HPC 模式首次同步执行（quick fail），然后启动后台循环
-    user_refresh_task = None
-    if not is_local_auth:
-        refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]
-        if refresh_interval > 0:
-            await _refresh_all_user_info()
-            user_refresh_task = asyncio.create_task(_run_user_info_refresh_loop())
+        # Restore cache protection before any new preparation or cache collection.
+        with SessionLocal() as db:
+            rows = db.query(models.Job.id, models.Job.build_result, models.Job.execution_target).filter(
+                models.Job.build_result.isnot(None),
+                (models.Job.status.in_([
+                    models.JobStatus.PREPARING,
+                    models.JobStatus.BUILDING,
+                    models.JobStatus.PENDING,
+                    models.JobStatus.QUEUED,
+                    models.JobStatus.RUNNING,
+                    models.JobStatus.PAUSED,
+                ]) | models.Job.slurm_job_id.isnot(None)),
+            ).all()
+            pins = {job_id: json.loads(result) for job_id, result, _ in rows}
+            active_targets = db.query(models.Job.execution_target).filter(
+                models.Job.status.notin_([models.JobStatus.SUCCESS, models.JobStatus.FAILED, models.JobStatus.TERMINATED])
+                | models.Job.slurm_job_id.isnot(None)
+                | models.Job.finalization_status.isnot(None),
+            ).distinct().all()
+            for (target_id,) in active_targets:
+                scheduler.for_target(target_id)
+        resource_manager.builds.restore_pins(pins)
+        scheduler.restore_pins([(job_id, target_id) for job_id, _, target_id in rows])
+
+        if is_local_mode:
+            collector = DockerMetricsCollector()
+            cleanup.push_async_callback(collector.stop)
+            collector.start()
+
+        tasks = []
+        cleanup.push_async_callback(
+            cancel_background_tasks,
+            tasks,
+        )
+        tasks.append(asyncio.create_task(run_scheduler_loop()))
+        tasks.append(asyncio.create_task(service_manager.start_background_loop()))
+        tasks.append(asyncio.create_task(file_custody_manager.cleanup_loop()))
+
+        if not is_local_auth:
+            refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]
+            if refresh_interval > 0:
+                await _refresh_all_user_info()
+                tasks.append(asyncio.create_task(_run_user_info_refresh_loop()))
+            else:
+                logger.info("用户信息刷新已禁用 (refresh_interval = 0)")
         else:
-            logger.info("用户信息刷新已禁用 (refresh_interval = 0)")
-    else:
-        logger.info("🏠 本地认证模式：跳过飞书用户信息刷新")
+            logger.info("🏠 本地认证模式：跳过飞书用户信息刷新")
 
-    yield
-
-    logger.info("Shutting down...")
-
-    scheduler_task.cancel()
-    service_manager_task.cancel()
-    file_custody_task.cancel()
-    if user_refresh_task:
-        user_refresh_task.cancel()
-    if docker_metrics_collector is not None:
-        await docker_metrics_collector.stop()
-    try:
-        await scheduler_task
-        await service_manager_task
-        await file_custody_task
-        if user_refresh_task:
-            await user_refresh_task
-    except asyncio.CancelledError:
-        logger.info("Scheduler loop stopped.")
-
-    await scheduler.shutdown()
-    await asyncio.to_thread(file_custody_manager.shutdown)
-    await resource_manager.builds.shutdown()
+        yield
 
 
 app = FastAPI(

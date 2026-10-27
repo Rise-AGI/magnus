@@ -90,6 +90,8 @@ def coordinator_class(
         "logger": logging.getLogger(__name__),
         "file_custody_manager": SimpleNamespace(pending_job_ids=lambda: set()),
     }
+    lifecycle = SERVER / "_lifecycle.py"
+    exec(compile(lifecycle.read_text(), str(lifecycle), "exec"), namespace)
     exec(compile(tree, str(path), "exec"), namespace)
     return namespace["SchedulerCoordinator"]
 

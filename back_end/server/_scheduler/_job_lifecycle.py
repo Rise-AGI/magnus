@@ -8,6 +8,7 @@ from .._protocol_files import open_protocol_file
 from .._workspace_cleanup import remove_job_path
 from ..database import SessionLocal
 from ..models import Job, JobStatus
+from .._magnus_config import is_local_mode
 from . import logger, magnus_workspace_path, magnus_ephemeral_workspace_path
 
 if TYPE_CHECKING:
@@ -133,9 +134,16 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
         job_ephemeral_table = f"{magnus_ephemeral_workspace_path}/jobs/{job_id}"
         try:
             with SessionLocal() as db:
-                pending = db.query(Job.finalization_status).filter(Job.id == job_id).first()
+                pending = db.query(
+                    Job.finalization_status,
+                    Job.slurm_job_id,
+                ).filter(Job.id == job_id).first()
             if pending and pending[0] not in (None, "CLEANUP"):
                 return False
+            if pending and pending[1] is not None and not is_local_mode:
+                assert self.slurm_manager is not None
+                if not self.slurm_manager.observe_job(pending[1]).allocation_released:
+                    return False
             # Keep-whitelist: remove everything under the working table except the
             # protocol artifacts. This also reclaims anything the user wrote into the
             # workspace bind mount (e.g. checkpoints / outputs dumped straight into

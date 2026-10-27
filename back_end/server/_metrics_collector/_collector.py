@@ -9,6 +9,7 @@ import socket
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from .._blocking_io import _run_blocking_io
 from .._magnus_config import magnus_config
 from ..database import SessionLocal
 from ..models import Job, JobStatus
@@ -80,7 +81,7 @@ class DockerMetricsCollector:
         try:
             while True:
                 try:
-                    await asyncio.to_thread(self._tick)
+                    await _run_blocking_io(self._tick)
                 except Exception as error:
                     logger.warning(f"Docker metrics tick failed: {error}")
                 await asyncio.sleep(_SAMPLE_INTERVAL_SECONDS)

@@ -1,4 +1,5 @@
 """Slurm controller eviction and accounting must not masquerade as transport failure."""
+import json
 import subprocess
 from types import SimpleNamespace
 import unittest
@@ -84,7 +85,7 @@ class SlurmTerminalLookupTests(unittest.TestCase):
 
     def test_visible_live_or_terminal_controller_record_does_not_query_history(self):
         cases = {
-            "RUNNING": "RUNNING", "COMPLETING": "RUNNING", "SUSPENDED": "RUNNING",
+            "RUNNING": "RUNNING", "SUSPENDED": "RUNNING",
             "STOPPED": "RUNNING", "POWER_UP_NODE": "RUNNING", "STAGE_OUT": "RUNNING",
             "PENDING": "PENDING", "REQUEUED": "PENDING", "REQUEUE_HOLD": "PENDING",
             "SPECIAL_EXIT": "PENDING", "COMPLETED": "COMPLETED", "FAILED": "FAILED",
@@ -95,6 +96,66 @@ class SlurmTerminalLookupTests(unittest.TestCase):
             with self.subTest(state=state):
                 self.assertEqual(self.check(response(state + "\n")), expected)
                 self.assertEqual(len(self.manager._transport.calls), 1)
+
+    def completing_observation(self, states, **overrides):
+        payload = {"jobs": [{"job_id": 15796634, "job_state": states, **overrides}]}
+        self.manager._transport = QueryTransport([response("COMPLETING"), response(json.dumps(payload))])
+        return self.manager.observe_job("15796634")
+
+    def test_structured_terminal_base_does_not_imply_allocation_release(self):
+        for base in ("FAILED", "TIMEOUT", "CANCELLED", "COMPLETED", "NODE_FAIL"):
+            with self.subTest(base=base):
+                observation = self.completing_observation([base, "COMPLETING"])
+                self.assertEqual(observation.status, "COMPLETED" if base == "COMPLETED" else "FAILED")
+                self.assertFalse(observation.allocation_released)
+                commands = [command for command, _ in self.manager._transport.calls]
+                self.assertIn("scontrol", commands[1])
+                self.assertIn("--json", commands[1])
+                self.assertFalse(any("sacct" in command for command in commands))
+
+    def test_requeue_cleanup_is_not_the_old_failed_allocation(self):
+        observation = self.completing_observation(["PENDING", "COMPLETING"])
+        self.assertEqual(observation.status, "PENDING")
+        self.assertFalse(observation.allocation_released)
+        for states in (["PREEMPTED", "COMPLETING"], ["FAILED", "COMPLETING", "REQUEUED"]):
+            observation = self.completing_observation(states)
+            self.assertEqual(observation.status, "UNKNOWN")
+            self.assertFalse(observation.allocation_released)
+
+    def test_flattened_conflicting_and_unknown_controller_states_retain_ownership(self):
+        for states in (
+            "COMPLETING", ["COMPLETING"], [], ["FAILED", "PENDING", "COMPLETING"],
+            ["FAILED", "FUTURE_FLAG"], ["FAILED", None], None,
+        ):
+            with self.subTest(states=states):
+                observation = self.completing_observation(states)
+                self.assertEqual(observation.status, "RUNNING")
+                self.assertFalse(observation.allocation_released)
+        self.assertFalse(self.completing_observation(["FAILED"], job_id=123).allocation_released)
+
+    def test_failed_or_unsupported_structured_query_keeps_legacy_completing_semantics(self):
+        for result in (
+            response(returncode=1, stderr="unrecognized option --json"),
+            response("not json"), response('{"jobs": [], "errors": ["query failed"]}'),
+            response('{"jobs": [{"job_id": 15796634, "job_state": ["FAILED"]}]}', stderr="partial"),
+            subprocess.TimeoutExpired("scontrol", 1),
+        ):
+            self.manager._transport = QueryTransport([response("COMPLETING"), result])
+            observed = self.manager.observe_job("15796634")
+            self.assertEqual((observed.status, observed.allocation_released), ("RUNNING", False))
+
+    def test_release_requires_unflagged_terminal_or_controller_eviction(self):
+        for state, released in (("FAILED", True), ("COMPLETED", True), ("PENDING", False), ("UNKNOWN", False)):
+            self.manager._transport = QueryTransport([response(state)])
+            self.assertEqual(self.manager.observe_job("15796634").allocation_released, released)
+        self.assertTrue(self.completing_observation(["FAILED"]).allocation_released)
+        self.manager._transport = QueryTransport([self.evicted(), response(allocation())])
+        self.assertTrue(self.manager.observe_job("15796634").allocation_released)
+
+    def test_structured_query_shares_controller_deadline(self):
+        with patch.object(self.module.time, "monotonic", side_effect=[100.0, 100.0, 127.5]):
+            self.assertEqual(self.completing_observation(["FAILED", "COMPLETING"]).status, "FAILED")
+        self.assertEqual([kwargs["timeout"] for _, kwargs in self.manager._transport.calls], [30.0, 2.5])
 
     def test_unknown_or_conflicting_live_states_do_not_release_ownership(self):
         for output in ("COMPLETED\nRUNNING\n", "UNKNOWN_FUTURE_STATE\n", "FAILED+COMPLETING"):

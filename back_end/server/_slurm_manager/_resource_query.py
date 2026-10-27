@@ -49,6 +49,62 @@ def _slurm_lifecycle_state(
     return "UNKNOWN"
 
 
+@dataclass(frozen=True)
+class SlurmJobObservation:
+    status: str = "UNKNOWN"
+    allocation_released: bool = False
+
+
+def _controller_job_observation(
+    output: str,
+    slurm_job_id: str,
+) -> Optional[SlurmJobObservation]:
+    """Only structured base states distinguish failure from requeue cleanup.
+
+    Older data parsers flatten PENDING|COMPLETING and FAILED|COMPLETING to
+    the same string. Even matching accounting Submit times cannot disambiguate
+    them: Slurm resets Submit only after the requeue epilog finishes.
+    """
+    try:
+        data = json.loads(output)
+        if not isinstance(data, dict) or data.get("errors"):
+            return None
+        jobs = data.get("jobs")
+        if not isinstance(jobs, list) or len(jobs) != 1:
+            return None
+        job = jobs[0]
+        if not isinstance(job, dict) or str(job.get("job_id")) != slurm_job_id:
+            return None
+        states = job.get("job_state")
+        if not isinstance(states, list) or not all(isinstance(state, str) for state in states):
+            return None
+        states = set(states)
+        base_states = states & {
+            "BOOT_FAIL", "CANCELLED", "COMPLETED", "DEADLINE", "FAILED", "NODE_FAIL",
+            "OUT_OF_MEMORY", "PENDING", "PREEMPTED", "RUNNING", "SUSPENDED", "TIMEOUT",
+        }
+        known_flags = {
+            "COMPLETING", "CONFIGURING", "EXPEDITING", "LAUNCH_FAILED", "POWER_UP_NODE",
+            "RECONFIG_FAIL", "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD", "RESIZING",
+            "RESV_DEL_HOLD", "REVOKED", "SIGNALING", "SPECIAL_EXIT", "STAGE_OUT",
+            "STOPPED", "UPDATE_DB",
+        }
+        if len(base_states) != 1 or states - base_states - known_flags:
+            return None
+        base = base_states.pop()
+        if base == "PREEMPTED" or states & {
+            "REQUEUED", "REQUEUE_FED", "REQUEUE_HOLD", "REVOKED", "SPECIAL_EXIT",
+        }:
+            return SlurmJobObservation()
+        status = _slurm_lifecycle_state(base)
+        return SlurmJobObservation(
+            status=status,
+            allocation_released=status in {"COMPLETED", "FAILED"} and states == {base},
+        )
+    except (ValueError, TypeError):
+        return None
+
+
 def _accounting_job_status(
     output: str,
     slurm_job_id: str,
@@ -490,7 +546,7 @@ class _ResourceQueryMixin:
             # 步骤 2：squeue 解析 RUNNING + COMPLETING 任务的 GPU 申请总和得到当前总占用。
             # COMPLETING (CG) 阶段 SLURM 物理上仍把 GPU 算 Alloc 不释放给新 job，
             # 必须计入 used，否则 cluster snapshot 的 slurm_used_gpus 会在 epilog
-            # 跑期间瞬时低估，跟 check_job_status (CG → RUNNING) 的语义错位。
+            # 跑期间瞬时低估，与仍未释放的 allocation 所有权错位。
             # Use the same whole-job allocation as cluster display/backfill.
             # squeue %b only reports per-node requests and misses --gpus jobs.
             total_allocated = sum(
@@ -688,13 +744,13 @@ class _ResourceQueryMixin:
             "slurm_used_gpus": alloc,
         }
 
-    def check_job_status(
+    def observe_job(
         self,
         slurm_job_id: str,
-    ) -> str:
-        """Prefer controller state, consulting accounting only after eviction."""
+    ) -> SlurmJobObservation:
+        """Keep execution outcome separate from allocation ownership."""
         if not isinstance(slurm_job_id, str) or not re.fullmatch(r"[0-9]+", slurm_job_id):
-            return "UNKNOWN"
+            return SlurmJobObservation()
         deadline = time.monotonic() + 30
         command = [
             "env",
@@ -725,20 +781,29 @@ class _ResourceQueryMixin:
             )
             if (returncode != 0 or error) and not evicted:
                 logger.warning(f"Failed to query Slurm job {slurm_job_id}: exit {returncode}")
-                return "UNKNOWN"
+                return SlurmJobObservation()
             if state:
                 states = set(state.splitlines())
                 if len(states) != 1:
-                    return "UNKNOWN"
+                    return SlurmJobObservation()
                 visible_state = states.pop()
                 # PREEMPTED may still transition back to PENDING under REQUEUE.
                 if visible_state in {"PREEMPTED", "PR"}:
-                    return "UNKNOWN"
-                return _slurm_lifecycle_state(visible_state)
+                    return SlurmJobObservation()
+                if visible_state in {"CG", "COMPLETING"}:
+                    return self._observe_completing_job(
+                        slurm_job_id,
+                        deadline=deadline,
+                    )
+                status = _slurm_lifecycle_state(visible_state)
+                return SlurmJobObservation(
+                    status=status,
+                    allocation_released=status in {"COMPLETED", "FAILED"},
+                )
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return "UNKNOWN"
+                return SlurmJobObservation()
             result = self._transport.run(
                 [
                     "env",
@@ -760,20 +825,64 @@ class _ResourceQueryMixin:
             returncode = getattr(result, "returncode", 0)
             error = getattr(result, "stderr", "").strip()
             if returncode == 1 and not result.stdout.strip() and error.lower() == "slurm accounting storage is disabled":
-                return "COMPLETED"
+                return SlurmJobObservation(
+                    status="COMPLETED",
+                    allocation_released=True,
+                )
             if returncode != 0 or error:
                 logger.warning(f"Failed to query Slurm accounting for job {slurm_job_id}: exit {returncode}")
-                return "UNKNOWN"
+                return SlurmJobObservation()
             status = _accounting_job_status(result.stdout, slurm_job_id)
             if status is not None:
-                return status
+                return SlurmJobObservation(
+                    status=status,
+                    allocation_released=status in {"COMPLETED", "FAILED"},
+                )
             # Retain the successful-empty controller contract on legacy sites.
             # An invalid-ID error plus empty accounting can instead be DB lag.
-            return "UNKNOWN" if evicted else "COMPLETED"
+            if evicted:
+                return SlurmJobObservation()
+            return SlurmJobObservation(
+                status="COMPLETED",
+                allocation_released=True,
+            )
 
         except Exception as error:
             logger.error(f"Failed to check job status {slurm_job_id}: {error}")
-            return "UNKNOWN"
+            return SlurmJobObservation()
+
+    def _observe_completing_job(
+        self,
+        slurm_job_id: str,
+        *,
+        deadline: float,
+    ) -> SlurmJobObservation:
+        fallback = SlurmJobObservation(
+            status="RUNNING",
+            allocation_released=False,
+        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return fallback
+        try:
+            result = self._transport.run(
+                ["env", "LC_ALL=C", "scontrol", "--json", "show", "job", slurm_job_id],
+                timeout=remaining,
+            )
+            if getattr(result, "returncode", 0) != 0 or getattr(result, "stderr", "").strip():
+                return fallback
+            return _controller_job_observation(
+                result.stdout,
+                slurm_job_id,
+            ) or fallback
+        except Exception:
+            return fallback
+
+    def check_job_status(
+        self,
+        slurm_job_id: str,
+    ) -> str:
+        return self.observe_job(slurm_job_id).status
 
     def get_all_running_tasks(
         self,

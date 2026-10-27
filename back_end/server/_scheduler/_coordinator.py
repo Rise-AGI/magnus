@@ -7,6 +7,7 @@ from .._execution_targets import select_execution_target
 from .._magnus_config import configured_execution_targets
 from .._resource_manager._helpers import _run_blocking_io
 from .._file_custody_manager import file_custody_manager
+from .._lifecycle import cancel_background_tasks, join_background_tasks
 from ..database import SessionLocal
 from ..models import Job, JobStatus
 from . import logger
@@ -118,7 +119,9 @@ class SchedulerCoordinator(_WorkspaceGCMixin):
             tasks.append(self._gc_task)
         if self._custody_task is not None:
             tasks.append(self._custody_task)
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        await asyncio.gather(*(worker.shutdown() for worker in self.workers.values()))
+        try:
+            await cancel_background_tasks(tasks)
+        finally:
+            await join_background_tasks([
+                asyncio.create_task(worker.shutdown()) for worker in self.workers.values()
+            ])
