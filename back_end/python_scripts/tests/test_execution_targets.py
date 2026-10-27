@@ -117,6 +117,15 @@ class TargetConfigurationTests(unittest.TestCase):
         validate(config)
         targets = targets_module.execution_targets(config, validate=validate)
         self.assertEqual(targets["second"].config["transport"]["ssh"]["auto_connect"]["timeout_seconds"], 45)
+        self.assertIsNone(targets["second"].config["transport"]["ssh"]["shell_init"])
+        remote["shell_init"] = "/etc/profile.d/site.sh"
+        initialized = targets_module.execution_targets(config, validate=validate)
+        self.assertEqual(initialized["second"].config["transport"]["ssh"]["shell_init"], "/etc/profile.d/site.sh")
+        for value in ("", "relative.sh", "/bad\x00path", True, ["/etc/profile"]):
+            remote["shell_init"] = value
+            with self.subTest(shell_init=value), self.assertRaises((TypeError, ValueError)):
+                targets_module.execution_targets(config, validate=validate)
+        remote["shell_init"] = None
         self.assertIsNone(targets["second"].config["execution"]["slurm"]["module_init"])
         default = targets_module.select_execution_target(targets, None)
         self.assertEqual(default.config["execution"]["container_image_mode"], "native")

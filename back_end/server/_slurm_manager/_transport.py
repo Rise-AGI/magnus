@@ -324,8 +324,8 @@ class _SshControlMasterTransport(_Transport):
     - 环境注入：只把调用方相对本进程 os.environ **新增或改写** 的变量（即
       submit / kill 路径显式附加的 MAGNUS_RUNNER / MAGNUS_TOKEN）经
       `env KEY=VAL ... cmd` 前缀带到远端。本进程自身的 os.environ（本机 PATH 等）
-      不外泄 —— 远端登录 shell 自带正确的 PATH / module 环境，用本机环境覆盖远端
-      反而错（两侧路径不同）。env 为 None（只读查询）时不加任何前缀。
+      不外泄。SSH 命令默认不加载登录初始化；站点需要的环境由 shell_init 显式加载，
+      不用本机 PATH 等覆盖远端。env 为 None（只读查询）时不加任何前缀。
     - stdin：input 非 None 时（如 sbatch 从 stdin 读 batch script）转发到远端命令；
       为 None 时加 -n 让 ssh 从 /dev/null 取 stdin，杜绝吞掉本进程 stdin（历史踩坑：
       裸 ssh 不加 -n 会吃掉后续输入看似卡死）。
@@ -342,6 +342,7 @@ class _SshControlMasterTransport(_Transport):
         user: str,
         auto_connect: Optional[Dict] = None,
         transfer_timeout_seconds: float = 900,
+        shell_init: Optional[str] = None,
     ) -> None:
         self._control_path = control_path
         self._host = host
@@ -351,6 +352,22 @@ class _SshControlMasterTransport(_Transport):
         # 确保 socket 活着、失效时用密码 + TOTP 无人值守重建。
         self._auto_connect = auto_connect
         self.transfer_timeout_seconds = transfer_timeout_seconds
+        self._shell_init = shell_init
+
+    def _remote_command(
+        self,
+        command: List[str],
+    ) -> str:
+        rendered = shlex.join(command)
+        if self._shell_init is None:
+            return rendered
+        # Startup scripts must not consume sbatch/binary input or contaminate
+        # scheduler output and downloaded bytes with login banners.
+        script = (
+            f"source {shlex.quote(self._shell_init)} </dev/null 1>&2 || exit $?\n"
+            f"exec {rendered}"
+        )
+        return shlex.join(["bash", "-c", script])
 
     def _ensure_socket(
         self,
@@ -389,7 +406,7 @@ class _SshControlMasterTransport(_Transport):
                 remote_tokens.append("env")
                 remote_tokens.extend(injected)
         remote_tokens.extend(command)
-        remote_command = " ".join(shlex.quote(token) for token in remote_tokens)
+        remote_command = self._remote_command(remote_tokens)
 
         ssh_command = [
             "ssh",
@@ -439,7 +456,7 @@ class _SshControlMasterTransport(_Transport):
             "-S",
             self._control_path,
             f"{self._user}@{self._host}",
-            " ".join(shlex.quote(token) for token in command),
+            self._remote_command(command),
         ]
         return _stream_file_to_command(
             ssh_command,
@@ -529,7 +546,7 @@ class _SshControlMasterTransport(_Transport):
             "ssh", "-T", "-n", "-o", "BatchMode=yes", "-o", "ControlMaster=no",
             "-o", "ProxyCommand=false", "-S", self._control_path,
             f"{self._user}@{self._host}",
-            " ".join(shlex.quote(value) for value in ["python3", "-c", script, remote_path, str(size)]),
+            self._remote_command(["python3", "-c", script, remote_path, str(size)]),
         ]
         receive_file(
             command,
@@ -595,5 +612,6 @@ def build_transport(transport_config: Dict) -> _Transport:
             user = ssh["user"],
             auto_connect = ssh.get("auto_connect"),
             transfer_timeout_seconds = ssh.get("transfer_timeout_seconds", 900),
+            shell_init = ssh.get("shell_init"),
         )
     return _LocalTransport()

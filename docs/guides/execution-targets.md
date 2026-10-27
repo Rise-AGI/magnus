@@ -165,3 +165,16 @@ For module-based runtimes, `execution.slurm.module_init` optionally names the
 shell initialization file to source before `module_loads`. Both initialization
 and module-load failures stop submission execution before the wrapper starts.
 With no module settings, the original batch environment is unchanged.
+
+Some clusters also require login-node initialization before submitting a Job,
+for example to export the identity information used on compute nodes. SSH command
+sessions do not automatically run login profiles. Set the optional
+`transport.ssh.shell_init` to the absolute path of the provider's initialization
+script. Magnus sources it with Bash before each remote command, including `sbatch`,
+queries and streamed file operations; exported variables reach Slurm through its
+normal environment inheritance. An initialization failure stops that command.
+The script receives no stdin, and its stdout is redirected to stderr to preserve
+batch input, scheduler output and binary transfers. It must be noninteractive and
+finish within the operation's existing timeout. This administrator-owned setting
+does not change SSH authentication or SFTP/SCP sessions. Omit it to retain the
+existing behavior; `module_init` still runs separately inside the batch Job.

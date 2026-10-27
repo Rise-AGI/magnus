@@ -169,6 +169,12 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         _check_key(ssh, "control_path", str)
         _check_key(ssh, "host", str)
         _check_key(ssh, "user", str)
+        ssh.setdefault("shell_init", None)
+        _check_key(ssh, "shell_init", str, nullable=True)
+        if ssh["shell_init"] is not None and (
+            not ssh["shell_init"].startswith("/") or "\x00" in ssh["shell_init"]
+        ):
+            raise ValueError("transport.ssh.shell_init must be an absolute remote script path")
         # remote_root：远程站点上 magnus 搬运 job 工作区 / wrapper / 产物的根目录
         # （典型落远端共享盘，如 Lustre）。transport=ssh 意味着 SLURM 在异机、与 magnus 无
         # 共享盘，job 工作区必须落远端，故 remote_root 必填 —— 启动即 fail-fast，
@@ -253,7 +259,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
                 )
         _warn_extra_keys(
             ssh,
-            {"control_path", "host", "user", "remote_root", "resource_staging", "auto_connect", "transfer_timeout_seconds"},
+            {"control_path", "host", "user", "remote_root", "resource_staging", "auto_connect", "transfer_timeout_seconds", "shell_init"},
             "transport.ssh",
         )
     _warn_extra_keys(transport, {"mode", "ssh"}, "transport")

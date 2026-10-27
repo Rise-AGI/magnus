@@ -138,3 +138,12 @@ SSH/SCP 只复用既有 master；socket 消失时不会回落到另一条连接�
 使用 module 的环境可以设置 `execution.slurm.module_init`，在 `module_loads`
 之前 source 指定初始化脚本。初始化或 module 加载失败时，在启动 wrapper 之前
 退出。没有 module 设置时保持原有 batch 环境。
+
+部分集群还要求在登录节点提交 Job 前初始化环境，例如导出计算节点识别用户所需的
+身份信息。SSH 命令会话不会自动加载登录配置；可选的 `transport.ssh.shell_init`
+指定服务商初始化脚本的远端绝对路径。Magnus 在每次远端命令前用 Bash source
+该脚本，覆盖 `sbatch`、查询和流式文件操作；导出的变量经 Slurm 正常继承到作业。
+初始化失败时不执行命令。脚本不接收 stdin，stdout 重定向到 stderr，避免吞掉
+batch 输入或污染调度器输出及二进制传输。脚本必须非交互，并在当前操作的既有
+超时预算内完成。此项由管理员配置，不改变 SSH 认证或 SFTP/SCP 会话；省略时
+保持原有行为。`module_init` 仍单独在 batch Job 内执行。
