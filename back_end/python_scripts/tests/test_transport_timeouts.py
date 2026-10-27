@@ -199,7 +199,8 @@ class TransportDeadlineTests(unittest.TestCase):
     def test_ordinary_command_default_has_no_new_timeout(self):
         namespace = load_transport()
         calls = []
-        namespace["subprocess"] = SimpleNamespace(run=lambda *args, **kwargs: calls.append(kwargs) or object())
+        namespace["subprocess"] = SimpleNamespace(**vars(subprocess))
+        namespace["subprocess"].run = lambda *args, **kwargs: calls.append(kwargs) or subprocess.CompletedProcess(args[0], 0, "", "")
         namespace["_LocalTransport"]().run(["sbatch"], input="script")
         namespace["_SshControlMasterTransport"]("socket", "host", "user").run(["scancel", "123"])
         self.assertEqual([call["timeout"] for call in calls], [None, None])

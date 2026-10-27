@@ -23,6 +23,7 @@ import threading
 from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING
+from .._protocol_files import replace_protocol_file
 from .._file_custody_manager import file_custody_manager
 from .._custody_receipts import (
     _RELAY_TOKEN_RE,
@@ -197,9 +198,8 @@ def _fetch_artifact_file(
     timeout: float = 30,
     cancel_event: threading.Event | None = None,
 ) -> None:
-    parent = os.path.dirname(local_path)
-    os.makedirs(parent, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=".stage-out-", dir=parent)
+    # Receive outside the Job-owned tree, then publish through its anchored fd.
+    descriptor, temporary = tempfile.mkstemp(prefix=".stage-out-", dir=magnus_workspace_path)
     os.close(descriptor)
     try:
         transport.fetch(
@@ -208,7 +208,12 @@ def _fetch_artifact_file(
             timeout = timeout,
             **({"cancel_event": cancel_event} if cancel_event is not None else {}),
         )
-        os.replace(temporary, local_path)
+        root = os.path.join(magnus_workspace_path, "jobs")
+        replace_protocol_file(
+            root,
+            os.path.relpath(local_path, root),
+            temporary,
+        )
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)

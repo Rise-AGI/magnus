@@ -4,6 +4,7 @@ import subprocess
 from datetime import datetime, timezone
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Dict, Optional
+from .._protocol_files import open_protocol_file
 from ..database import SessionLocal
 from ..models import Job, JobStatus, ClusterSnapshot
 from .._magnus_config import is_local_mode
@@ -85,7 +86,6 @@ class _SyncMixin(_SyncMixinBase):
 
     def _dump_docker_logs(self, job_id: str, container_name: str, since: Optional[str] = None) -> Optional[str]:
         # 与 SLURM 模式的 sbatch --output 共用同一文件，让 jobs.py 读端点不必按模式分支。
-        log_path = f"{magnus_workspace_path}/jobs/{job_id}/slurm/output.txt"
         # Capture cursor BEFORE fetching logs to avoid missing lines emitted during the call.
         # Microsecond precision (RFC 3339 with %f) drastically narrows the duplicate window
         # vs second precision: docker logs --since is inclusive, so saving a floor-to-second
@@ -111,9 +111,9 @@ class _SyncMixin(_SyncMixinBase):
             if result.stderr:
                 output += result.stderr
             if output:
-                mode = "a" if since else "w"
-                with open(log_path, mode, encoding="utf-8") as f:
-                    f.write(output)
+                mode = "ab" if since else "wb"
+                with open_protocol_file(f"{magnus_workspace_path}/jobs", f"{job_id}/slurm/output.txt", mode) as stream:
+                    stream.write(output.encode("utf-8"))
             return new_cursor
         except Exception as error:
             logger.warning(f"Failed to dump Docker logs for {job_id}: {error}")
@@ -150,6 +150,7 @@ class _SyncMixin(_SyncMixinBase):
                 (job.id, job.status)
                 for job in self._job_query(db, Job).filter(
                     Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])
+                    | ((Job.status == JobStatus.TERMINATED) & Job.slurm_job_id.is_not(None))
                 ).all()
             ]
 
@@ -188,6 +189,10 @@ class _SyncMixin(_SyncMixinBase):
                     real_status = info["status"]
                     container_name = info["container_name"]
 
+                    if job.status == JobStatus.TERMINATED:
+                        self.terminate_job(db, job)
+                        continue
+
                     if job.status == JobStatus.QUEUED:
                         if real_status == "RUNNING":
                             job.status = JobStatus.RUNNING
@@ -195,8 +200,8 @@ class _SyncMixin(_SyncMixinBase):
                             logger.info(f"Job {job.id} started running in Docker")
                         elif real_status == "COMPLETED":
                             self._write_success_marker(job.id)
-                            self._finalize_completed_job(job)
                             self.docker_manager.remove_container(container_name)
+                            self._finalize_completed_job(job)
                             self._docker_log_cursors.pop(job_id, None)
                         elif real_status == "FAILED":
                             logger.warning(f"Job {job.id} failed in Docker")
@@ -206,29 +211,29 @@ class _SyncMixin(_SyncMixinBase):
                                 job.result = self._format_oom_message(job.memory_demand)
                             else:
                                 job.result = "Container exited with non-zero status while starting"
-                            job.slurm_job_id = None
                             self.docker_manager.remove_container(container_name)
+                            job.slurm_job_id = None
                             self._clean_up_working_table(job.id)
                             self._docker_log_cursors.pop(job_id, None)
-                        elif real_status in ["UNKNOWN"]:
+                        elif real_status in ["MISSING"]:
                             logger.warning(f"Job {job.id} container not found while QUEUED")
                             job.status = JobStatus.FAILED
                             job.result = "Container disappeared while queued (may have been removed externally)"
-                            job.slurm_job_id = None
                             self.docker_manager.remove_container(container_name)
+                            job.slurm_job_id = None
                             self._clean_up_working_table(job.id)
                             self._docker_log_cursors.pop(job_id, None)
 
                     elif job.status == JobStatus.RUNNING:
                         if real_status == "COMPLETED":
                             self._write_success_marker(job.id)
-                            self._finalize_completed_job(job)
                             self.docker_manager.remove_container(container_name)
+                            self._finalize_completed_job(job)
                             self._docker_log_cursors.pop(job_id, None)
-                        elif real_status in ["FAILED", "UNKNOWN"]:
+                        elif real_status in ["FAILED", "MISSING"]:
                             logger.warning(f"Job {job.id} failed in Docker (Status: {real_status})")
                             job.status = JobStatus.FAILED
-                            # UNKNOWN means the container is gone; OOMKilled is only meaningful
+                            # MISSING means the container is gone; OOMKilled is only meaningful
                             # for FAILED (exited non-zero), so only consult inspect there.
                             term_info = (
                                 self.docker_manager.get_termination_info(container_name)
@@ -238,25 +243,25 @@ class _SyncMixin(_SyncMixinBase):
                                 job.result = self._format_oom_message(job.memory_demand)
                             else:
                                 job.result = f"Container {real_status} during execution"
-                            job.slurm_job_id = None
                             self.docker_manager.remove_container(container_name)
+                            job.slurm_job_id = None
                             self._clean_up_working_table(job.id)
                             self._docker_log_cursors.pop(job_id, None)
                         elif real_status == "RUNNING" and self._docker_job_timed_out(job):
                             # 对偶 SLURM 的 --time：容器仍在跑但超出 time_limit → kill + FAILED。
                             logger.warning(f"Job {job.id} exceeded time_limit ({job.time_limit} min), terminating")
+                            self.docker_manager.stop_container(container_name)
+                            self.docker_manager.remove_container(container_name)
                             job.status = JobStatus.FAILED
                             job.result = f"Job exceeded its time limit ({job.time_limit} min)"
                             job.slurm_job_id = None
-                            self.docker_manager.stop_container(container_name)
-                            self.docker_manager.remove_container(container_name)
                             self._clean_up_working_table(job.id)
                             self._docker_log_cursors.pop(job_id, None)
 
+                    db.commit()
                 except Exception as error:
+                    db.rollback()
                     logger.error(f"Failed to sync Docker job {job_id}: {error}")
-
-            db.commit()
 
     def _sync_reality_slurm(
         self,
@@ -326,6 +331,8 @@ class _SyncMixin(_SyncMixinBase):
                     if self._classify_slurm_job(job_id, slurm_job_id, real_status):
                         artifact_candidates[job_id] = slurm_job_id
                         self._finalization_retry_after.pop(job_id, None)
+                elif original_status == JobStatus.TERMINATED:
+                    artifact_candidates[job_id] = slurm_job_id
             except Exception as error:
                 self._finalization_retry_after[job_id] = monotonic() + 60
                 logger.warning("Job %s synchronization incomplete; retaining workspace (%s)", job_id, type(error).__name__)
@@ -413,6 +420,17 @@ class _SyncMixin(_SyncMixinBase):
                 self._stage_out_markers(job_id)
             self._finalize_slurm_job(job_id, slurm_job_id, finalization_status)
             return 60
+        if status == JobStatus.TERMINATED and slurm_job_id is not None:
+            with SessionLocal() as db:
+                job = self._job_query(db, Job).filter(
+                    Job.id == job_id,
+                    Job.status == JobStatus.TERMINATED,
+                    Job.slurm_job_id == slurm_job_id,
+                    Job.finalization_status.is_(None),
+                ).first()
+                if job is not None:
+                    self.terminate_job(db, job)
+            return 30
         if status in (JobStatus.QUEUED, JobStatus.RUNNING):
             try:
                 self._stage_out_custody(job_id)

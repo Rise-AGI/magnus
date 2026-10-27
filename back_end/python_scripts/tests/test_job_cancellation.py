@@ -100,7 +100,7 @@ class JobCancellationTests(unittest.TestCase):
                     _clean_up_working_table=lambda value: cleanups.append(value),
                 )
                 job = SimpleNamespace(id="job", status="Running", slurm_job_id="123", finalization_status=None, runner="user", user=SimpleNamespace(token="private-token"))
-                db = SimpleNamespace(commit=lambda: commits.append(True))
+                db = SimpleNamespace(commit=lambda: commits.append(True), refresh=lambda job: None)
                 if accepted:
                     terminate(actor, db, job)
                     self.assertEqual(job.status, "Terminated")

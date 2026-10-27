@@ -13,6 +13,18 @@ from ._scheduler import scheduler
 logger = logging.getLogger(__name__)
 
 
+def service_job_released(
+    job,
+) -> bool:
+    if job is None:
+        return True
+    return (
+        job.status in (JobStatus.FAILED, JobStatus.TERMINATED, JobStatus.SUCCESS)
+        and job.slurm_job_id is None
+        and job.id not in scheduler.inflight_job_ids()
+    )
+
+
 class ServiceManager:
     def __init__(self):
         self._running = False
@@ -35,7 +47,7 @@ class ServiceManager:
 
     def _sync_logic(self):
         with SessionLocal() as db:
-            active_services = db.query(Service).filter(Service.is_active == True).all()
+            active_services = db.query(Service).filter(Service.current_job_id.is_not(None)).all()
             now = datetime.now(timezone.utc)
 
             for service in active_services:
@@ -45,13 +57,15 @@ class ServiceManager:
                 job = service.current_job
                 
                 # 情况 1：Job 已经挂了/结束了，清理僵尸状态
-                if not job or job.status in [JobStatus.FAILED, JobStatus.TERMINATED, JobStatus.SUCCESS]:
+                if service_job_released(job):
                     service.current_job_id = None
                     service.assigned_port = None
                     db.add(service)
                     continue
 
-                # 情况 2：Job 正在运行或等待，检查是否需要 Scale Down
+                if not service.is_active:
+                    continue
+
                 if job.status in [JobStatus.PENDING, JobStatus.PAUSED, JobStatus.PREPARING, JobStatus.BUILDING]:
                     # Anti-Starvation
                     service.last_activity_time = now
@@ -66,9 +80,9 @@ class ServiceManager:
                         logger.info(f"Service {service.id} idle for {idle_duration:.0f}s. Scaling to zero.")
                         scheduler.terminate_job(db, job)
                         
-                        # Scale Down 时立即解除关联
-                        service.current_job_id = None
-                        service.assigned_port = None
+                        if service_job_released(job):
+                            service.current_job_id = None
+                            service.assigned_port = None
                         db.add(service)
 
             db.commit()

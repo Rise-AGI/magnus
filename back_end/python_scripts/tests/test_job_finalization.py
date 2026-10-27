@@ -13,6 +13,7 @@ import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from test_protocol_files import open_protocol_file
 
 from sqlalchemy import DateTime, Enum, String, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -92,6 +93,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.final_hook = None
         self.namespace = {
             "__name__": __name__,
+            "open_protocol_file": open_protocol_file,
             "SessionLocal": self.sessions,
             "Session": object,
             "Job": Job,
@@ -720,7 +722,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         for status, observed, oom in (
             (JobStatus.QUEUED, "FAILED", False),
             (JobStatus.RUNNING, "FAILED", True),
-            (JobStatus.RUNNING, "UNKNOWN", False),
+            (JobStatus.RUNNING, "MISSING", False),
             (JobStatus.RUNNING, "RUNNING", False),
         ):
             with self.subTest(status=status, observed=observed, oom=oom):
@@ -743,6 +745,36 @@ class SlurmFinalizationTests(unittest.TestCase):
                 self.assertFalse((table / "repository").exists())
                 if oom:
                     self.assertIn("Out of memory", self.state(identifier)[3])
+
+    def test_cancelled_pending_allocation_is_a_retry_candidate(self):
+        self.add_job(status=JobStatus.TERMINATED, observed="PENDING")
+        cancellations = []
+        self.scheduler.terminate_job = lambda db, job: cancellations.append(job.slurm_job_id)
+        for _ in range(3):
+            candidates = self.scheduler._sync_reality_slurm()
+            self.assertEqual(candidates, {"job": "slurm-job"})
+            self.assertEqual(self.scheduler._recover_job_artifacts("job", "slurm-job"), 30)
+        self.assertEqual(cancellations, ["slurm-job"] * 3)
+        self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, "slurm-job", None))
+
+    def test_unknown_docker_state_or_failed_removal_retains_allocation_and_workspace(self):
+        table = self.add_job(status=JobStatus.RUNNING)
+        self.scheduler._docker_log_cursors = {}
+        self.scheduler._dump_docker_logs = lambda *args, **kwargs: "cursor"
+        self.scheduler._docker_job_timed_out = lambda job: True
+        for observed in ("UNKNOWN", "FAILED", "COMPLETED", "RUNNING"):
+            def reject(*args):
+                raise RuntimeError("daemon unavailable")
+            self.scheduler.docker_manager = SimpleNamespace(
+                check_container_status=lambda name: observed,
+                get_termination_info=lambda name: {"oom_killed": False},
+                stop_container=reject,
+                remove_container=reject,
+            )
+            with self.subTest(observed=observed), patch.object(Job, "time_limit", 1, create=True):
+                self.scheduler._sync_reality_docker()
+                self.assertEqual(self.state()[:3], (JobStatus.RUNNING, "slurm-job", None))
+                self.assertTrue((table / "repository").exists())
 
     def test_docker_completion_keeps_existing_local_cleanup_behavior(self):
         table = self.add_job(status=JobStatus.QUEUED)

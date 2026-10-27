@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import traceback
 from typing import TYPE_CHECKING, Optional
+from .._protocol_files import open_protocol_file
 from .._workspace_cleanup import remove_job_path
 from ..database import SessionLocal
 from ..models import Job, JobStatus
@@ -32,9 +33,8 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
 
     def _write_success_marker(self, job_id: str) -> None:
         """Write success marker from the host side (symmetric with HPC wrapper.py behavior)."""
-        marker_path = f"{magnus_workspace_path}/jobs/{job_id}/.magnus_success"
-        with open(marker_path, "w") as f:
-            f.write("success")
+        with open_protocol_file(f"{magnus_workspace_path}/jobs", f"{job_id}/.magnus_success", "wb") as stream:
+            stream.write(b"success")
 
     def _resume_paused_job(
         self,

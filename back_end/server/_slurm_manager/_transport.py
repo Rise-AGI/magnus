@@ -26,6 +26,52 @@ from ._ssh_auto_connect import ensure_control_master, remaining_timeout
 from ._file_receive import receive_file
 
 
+def _run_command(
+    command: List[str],
+    *,
+    public_command: List[str],
+    check: bool,
+    secrets: tuple[str, ...] = (),
+    **kwargs,
+) -> subprocess.CompletedProcess:
+    def redact(
+        value,
+    ):
+        if value is None:
+            return None
+        for secret in secrets:
+            if not secret:
+                continue
+            for encoded in (secret, shlex.quote(secret)):
+                if isinstance(value, bytes):
+                    value = value.replace(encoded.encode(), b"[redacted]")
+                else:
+                    value = value.replace(encoded, "[redacted]")
+        return value
+
+    # SSH embeds the environment in argv. Never expose that expanded command
+    # through a subprocess exception or a CompletedProcess subsequently checked.
+    try:
+        result = subprocess.run(command, check=False, **kwargs)
+    except subprocess.TimeoutExpired as error:
+        raise subprocess.TimeoutExpired(
+            public_command,
+            error.timeout,
+            output=redact(error.output),
+            stderr=redact(error.stderr),
+        ) from None
+    result.args = public_command
+    result.stderr = redact(result.stderr)
+    if check and result.returncode:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            public_command,
+            output=redact(result.stdout),
+            stderr=result.stderr,
+        ) from None
+    return result
+
+
 def _stop_transfer_process(
     process: subprocess.Popen,
 ) -> None:
@@ -264,8 +310,10 @@ class _LocalTransport(_Transport):
         env: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None,
     ) -> subprocess.CompletedProcess:
-        return subprocess.run(
+        return _run_command(
             command,
+            public_command = command,
+            secrets = ((env or {}).get("MAGNUS_TOKEN", ""),),
             input = input,
             capture_output = True,
             text = True,
@@ -425,8 +473,10 @@ class _SshControlMasterTransport(_Transport):
         ssh_command.append(f"{self._user}@{self._host}")
         ssh_command.append(remote_command)
 
-        return subprocess.run(
+        return _run_command(
             ssh_command,
+            public_command = command,
+            secrets = ((env or {}).get("MAGNUS_TOKEN", ""),),
             input = input,
             capture_output = True,
             text = True,

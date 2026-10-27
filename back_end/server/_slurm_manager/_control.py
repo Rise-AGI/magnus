@@ -2,6 +2,7 @@
 """SLURM 任务提交与终止：sbatch / scancel 包装。"""
 import os
 import shlex
+import subprocess
 from typing import Dict, Optional
 
 from .._job_resources import resolve_job_resource_target
@@ -145,12 +146,24 @@ class _ControlMixin:
         gpu_info = f"{gpu_type}:{gpus}" if (gpu_type and gpus > 0) else f"{gpus}"
         logger.info(f"🚀 Submitting '{job_name}' to SLURM queue (GPUs: {gpu_info})...")
 
-        result = self._transport.run(
-            command,
-            input = script_content,
-            check = True,
-            env = env,
-        )
+        try:
+            result = self._transport.run(
+                command,
+                input = script_content,
+                check = True,
+                env = env,
+            )
+        except subprocess.CalledProcessError as error:
+            detail = (error.stderr or "").strip()
+            if token:
+                detail = detail.replace(token, "[redacted]")
+            raise RuntimeError(
+                f"Slurm rejected submission (exit {error.returncode}): {detail[-4096:] or 'no diagnostic returned'}"
+            ) from None
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Slurm submission timed out; acceptance is unknown") from None
+        except OSError as error:
+            raise RuntimeError(f"Slurm submission transport failed ({type(error).__name__})") from None
 
         job_id = result.stdout.strip()
         logger.info(f"✅ Job '{job_name}' queued in SLURM (ID: {job_id})")

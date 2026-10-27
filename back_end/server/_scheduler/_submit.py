@@ -109,6 +109,40 @@ class _SubmitMixin(_SubmitMixinBase):
         }, synchronize_session=False)
         db.commit()
 
+    def _record_submission(
+        self,
+        db: Session,
+        job: Job,
+        external_id: str,
+    ) -> bool:
+        job_id = job.id
+        db.rollback()
+        changed = self._job_query(db, Job).filter(
+            Job.id == job_id,
+            Job.status == JobStatus.PENDING,
+            Job.slurm_job_id.is_(None),
+        ).update({
+            Job.status: JobStatus.QUEUED,
+            Job.slurm_job_id: external_id,
+        }, synchronize_session=False)
+        if not changed:
+            # Cancellation can precede the scheduler's reply. Keep its ID even
+            # when cancellation fails so reconciliation can retry safely.
+            self._job_query(db, Job).filter(
+                Job.id == job_id,
+                Job.slurm_job_id.is_(None),
+            ).update({Job.slurm_job_id: external_id}, synchronize_session=False)
+        db.commit()
+        db.refresh(job)
+        if job.status == JobStatus.TERMINATED:
+            try:
+                self.terminate_job(db, job)
+            except Exception as error:
+                db.rollback()
+                logger.warning("Late execution %s cancellation awaits retry (%s)", external_id, type(error).__name__)
+            return False
+        return bool(changed)
+
     def _built_environment_ready(
         self,
         db: Session,
@@ -313,20 +347,12 @@ class _SubmitMixin(_SubmitMixinBase):
                 token = job.user.token if job.user.token is not None else "",
             )
 
-            job.status = JobStatus.QUEUED
-            job.slurm_job_id = slurm_id
-            db.commit()
-
-            logger.info(f"Job {job.id} submitted to SLURM (ID: {slurm_id}, Branch: {job.branch})")
-            return True
-
         except Exception as error:
-            logger.error(f"Job {job.id} submission error: {error}")
-            self._cleanup_remote_job(job_id)
-            job.status = JobStatus.FAILED
-            job.result = f"Job submission to scheduler failed: {error}"
-            db.commit()
+            logger.error("Job %s submission error: %s", job_id, error)
+            self._fail_job_before_submission(db, job_id, f"Job submission to scheduler failed: {error}")
             return False
+
+        return self._record_submission(db, job, slurm_id)
 
     def _submit_to_docker(self, db: Session, job: Job) -> bool:
         """
@@ -419,25 +445,12 @@ class _SubmitMixin(_SubmitMixinBase):
                 network_mode=network_mode,
             )
 
-            job.status = JobStatus.QUEUED
-            job.slurm_job_id = container_name  # 复用字段存储 container name
-            db.commit()
-
-            logger.info(f"Job {job.id} submitted to Docker (container: {container_name})")
-            return True
-
         except Exception as error:
-            logger.error(f"Job {job.id} Docker submission error: {error}\n{traceback.format_exc()}")
-            db.rollback()
-            self._job_query(db, Job).filter(
-                Job.id == job.id,
-                Job.status == JobStatus.PENDING,
-            ).update({
-                Job.status: JobStatus.FAILED,
-                Job.result: f"Docker container launch failed: {error}",
-            }, synchronize_session=False)
-            db.commit()
+            logger.error("Job %s Docker submission error: %s", job.id, error)
+            self._fail_job_before_submission(db, job.id, f"Docker container launch failed: {error}")
             return False
+
+        return self._record_submission(db, job, container_name)
 
     def _extract_bind_mounts_from_system_entry_command(self, system_entry_command: str) -> List[str]:
         """

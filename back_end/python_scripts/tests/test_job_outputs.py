@@ -4,18 +4,20 @@ from __future__ import annotations
 import ast
 from datetime import datetime, timezone
 import os
+import logging
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
-from typing import Optional
+from typing import Optional, Dict, Any
 import unittest
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.testclient import TestClient
-from sqlalchemy import Enum, String, create_engine
+from sqlalchemy import Boolean, Enum, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from test_job_finalization import JobStatus, SERVER
+from test_protocol_files import open_protocol_file
 from test_job_resources import load_schemas
 
 
@@ -26,6 +28,7 @@ class Base(DeclarativeBase):
 class Job(Base):
     __tablename__ = "jobs"
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    has_dockerfile: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus))
     result: Mapped[str | None] = mapped_column(String, nullable=True)
     action: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -76,7 +79,10 @@ class JobOutputTests(unittest.TestCase):
         self.namespace = {
             "__name__": __name__,
             "os": os,
+            "open_protocol_file": open_protocol_file,
             "Optional": Optional,
+            "Dict": Dict,
+            "Any": Any,
             "Session": Session,
             "JobStatus": JobStatus,
             "models": SimpleNamespace(Job=Job, User=object),
@@ -85,15 +91,18 @@ class JobOutputTests(unittest.TestCase):
             "get_current_user": get_user,
             "magnus_config": {"server": {"root": str(self.root)}},
             "MAX_MARKER_PREVIEW_SIZE": 1024 * 1024,
+            "resource_manager": SimpleNamespace(builds=SimpleNamespace(get_log_path=lambda job: self.root / "build_diagnostics" / job / "output.txt")),
             "router": APIRouter(),
             "Depends": Depends,
             "HTTPException": HTTPException,
+            "Query": Query,
+            "logger": logging.getLogger(__name__),
         }
         source = SERVER / "routers" / "jobs.py"
         tree = ast.parse(source.read_text(encoding="utf-8"))
         names = {
             "_read_marker_file", "_resolve_marker_field", "get_job_detail",
-            "get_job_result", "get_job_action",
+            "get_job_result", "get_job_action", "get_job_logs_paginated", "_read_log_page", "_safe_utf8_truncate", "get_job_build_logs",
         }
         tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
         exec(compile(tree, str(source), "exec"), self.namespace)
@@ -147,6 +156,36 @@ class JobOutputTests(unittest.TestCase):
         self.assertEqual(self.get("/result"), result)
         self.assertEqual(self.get("/action"), action)
         return detail
+
+    def test_protocol_links_cannot_expose_host_file_over_http(self):
+        outside = self.root / "host-private"
+        outside.mkdir()
+        (outside / "output.txt").write_text("host-secret-canary")
+        (self.table / ".magnus_result").symlink_to(outside / "output.txt")
+        (self.table / "slurm").symlink_to(outside, target_is_directory=True)
+        self.assertNotIn("host-secret-canary", self.get("/result"))
+        self.assertNotIn("host-secret-canary", self.get("/logs")["logs"])
+
+    def test_build_logs_use_their_own_protected_root(self):
+        path = self.root / "build_diagnostics" / "job" / "output.txt"
+        path.parent.mkdir(parents=True)
+        path.write_text("building image")
+        self.assertEqual(self.get("/build/logs")["logs"], "building image")
+        path.write_text("a" * 300000 + "build done")
+        self.assertTrue(self.get("/build/logs")["logs"].endswith("build done"))
+        path.unlink()
+        secret = self.root / "host-private"
+        secret.write_text("host-secret-canary")
+        path.symlink_to(secret)
+        self.assertNotIn("host-secret-canary", self.get("/build/logs")["logs"])
+
+    def test_log_pagination_remains_bounded(self):
+        (self.table / "slurm").mkdir()
+        (self.table / "slurm" / "output.txt").write_text("a" * 300000 + "last line")
+        last = self.get("/logs")
+        self.assertGreater(last["total_pages"], 1)
+        self.assertLessEqual(len(last["logs"]), 200 * 1024)
+        self.assertTrue(last["logs"].endswith("last line"))
 
     def test_failed_result_is_readable_without_rewriting_diagnostic_or_status(
         self,

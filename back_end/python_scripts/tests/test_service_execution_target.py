@@ -57,6 +57,14 @@ class ServiceTargetUpdateTests(unittest.TestCase):
         request = SimpleNamespace(id="service", execution_target=target, max_concurrency="4", model_fields_set={"execution_target"} if explicit else set(), model_dump=lambda: dict(data))
         return self.update(request, self.db, SimpleNamespace(id="owner"))
 
+    def test_manager_update_preserves_existing_owner(self):
+        request = SimpleNamespace(
+            id="service", execution_target=None, max_concurrency="4",
+            model_fields_set=set(), model_dump=lambda: {"max_concurrency": "4"},
+        )
+        updated = self.update(request, self.db, SimpleNamespace(id="admin"))
+        self.assertEqual(updated.owner_id, "owner")
+
     def test_legacy_update_keeps_nondefault_target(self):
         self.assertEqual(self.save().execution_target, "second")
 

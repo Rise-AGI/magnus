@@ -554,3 +554,11 @@ execution:
 | `configs/magnus_config.yaml` | Configuration source |
 | `docker/magnus-runtime/Dockerfile` | Child Magnus runtime image |
 | `scripts/setup_single_node_slurm.sh` | In-container SLURM bootstrap script |
+
+## Protocol file and Service boundaries
+
+Host-side result, log and metric I/O uses regular files beneath the Job root. Runner-controlled symlinks, junctions, special files and hard links are rejected; completed remote downloads are published atomically. Write protocol markers as ordinary files. This does not restrict the existing project-storage bind-mount contract.
+
+Service proxy authentication is consumed by Magnus: Bearer Authorization, the `token` query parameter and `token`/`access_token` cookies are not forwarded to user applications. Business cookies and repeated query parameters are preserved; upstream redirects are returned to the client. This credential boundary is not origin isolation for arbitrary Service HTML.
+
+Service updates preserve ownership; explicit transfer remains the ownership-changing operation. A stopped Service retains its Job and port while preparation, submission or an external allocation is still active. Deletion can return 409 until release; an unconfirmed stop returns 503 without losing the association. Late submission replies preserve a concurrent termination, retain the external ID and request cancellation; reconciliation retries unconfirmed cancellation. An externally accepted submission whose ID was never received still requires separate reconciliation.

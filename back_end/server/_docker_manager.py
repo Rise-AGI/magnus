@@ -81,9 +81,13 @@ class DockerManager:
             logger.info(f"Container '{container_name}' started (ID: {container_id})")
             return container_id
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.strip()
+            error_msg = (e.stderr or "").strip()
+            token = env_vars.get("MAGNUS_TOKEN")
+            if token:
+                error_msg = error_msg.replace(token, "[redacted]")
+            error_msg = error_msg[-4096:]
             logger.error(f"Docker run failed: {error_msg}")
-            raise DockerError(f"docker run failed: {error_msg}")
+            raise DockerError(f"docker run failed: {error_msg}") from None
 
     def check_container_status(self, container_name: str) -> str:
         # Maps Docker State.Status to Magnus job status constants
@@ -94,7 +98,7 @@ class DockerManager:
                 text=True,
             )
             if result.returncode != 0:
-                return "UNKNOWN"
+                return "MISSING" if self._container_missing(container_name) else "UNKNOWN"
 
             output = result.stdout.strip()
             if ":" not in output:
@@ -160,25 +164,56 @@ class DockerManager:
             pass
         return None
 
-    def stop_container(self, container_name: str, timeout: int = 10) -> None:
-        try:
-            subprocess.run(
-                ["docker", "stop", "-t", str(timeout), container_name],
-                capture_output=True,
-                check=False,
-            )
-        except Exception as e:
-            logger.error(f"docker stop failed for '{container_name}': {e}")
+    def _container_missing(
+        self,
+        container_name: str,
+    ) -> bool:
+        result = subprocess.run(
+            ["docker", "container", "ls", "--all", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode == 0 and container_name not in result.stdout.splitlines()
 
-    def remove_container(self, container_name: str) -> None:
+    def _change_container(
+        self,
+        command: List[str],
+        container_name: str,
+        timeout: int = 30,
+    ) -> None:
         try:
-            subprocess.run(
-                ["docker", "rm", "-f", container_name],
+            result = subprocess.run(
+                command,
                 capture_output=True,
-                check=False,
+                text=True,
+                timeout=timeout,
             )
-        except Exception as e:
-            logger.warning(f"docker rm failed for '{container_name}': {e}")
+            if result.returncode == 0 or self._container_missing(container_name):
+                return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        raise DockerError(f"Docker did not confirm {command[1]} for container {container_name}") from None
+
+    def stop_container(
+        self,
+        container_name: str,
+        timeout: int = 10,
+    ) -> None:
+        self._change_container(
+            ["docker", "stop", "-t", str(timeout), container_name],
+            container_name,
+            timeout=timeout + 30,
+        )
+
+    def remove_container(
+        self,
+        container_name: str,
+    ) -> None:
+        self._change_container(
+            ["docker", "rm", "-f", container_name],
+            container_name,
+        )
 
     def send_signal(self, container_name: str, signal_name: str) -> None:
         """向容器 PID 1 发送指定信号，不终止容器。

@@ -18,6 +18,7 @@ import matplotlib  # noqa: E402
 matplotlib.use("Agg")  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 
+from .._protocol_files import open_protocol_file
 from .. import models
 from .._magnus_config import magnus_config
 from .auth import get_current_user
@@ -36,19 +37,20 @@ def _metrics_dir_for_job(job_id: str) -> str:
 
 def _read_all_points(metrics_dir: str) -> List[Dict[str, Any]]:
     points: List[Dict[str, Any]] = []
+    root = os.path.join(magnus_workspace_path, "jobs")
     pattern = os.path.join(metrics_dir, "*.jsonl")
     for filepath in glob.glob(pattern):
         if not os.path.isfile(filepath):
             continue
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open_protocol_file(root, os.path.relpath(filepath, root)) as f:
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
                     try:
                         points.append(json.loads(line))
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
         except OSError:
             continue

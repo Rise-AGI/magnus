@@ -20,7 +20,8 @@ from ..database import SessionLocal
 from .. import models
 from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceListItem, ServiceCreate, PagedServiceResponse, TransferRequest
-from .._service_manager import service_manager
+from .._service_manager import service_manager, service_job_released
+from .._service_proxy import service_request_headers, service_request_params
 from .._id_registry import assert_id_available
 from .._magnus_config import magnus_config, is_admin_user, apply_cluster_defaults, normalize_per_cpu_resources, validate_cluster_limits
 from .._job_resources import resource_mode_for_execution
@@ -129,19 +130,29 @@ def _shutdown_service_resources_sync(service_id: str, db: Session):
     if service.current_job_id:
         job = db.query(models.Job).filter(models.Job.id == service.current_job_id).first()
         
-        if job and job.status in [JobStatus.PREPARING, JobStatus.BUILDING, JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.PAUSED]:
+        if job and not service_job_released(job):
             try:
                 logger.info(f"Terminating job {job.id} for service {service.id} via Scheduler...")
                 scheduler.terminate_job(db, job)
-            except Exception as e:
-                logger.error(f"Failed to terminate job {job.id} during service shutdown: {e}")
+                if job.status != JobStatus.TERMINATED and not service_job_released(job):
+                    raise RuntimeError("Scheduler did not stop the service job")
+            except Exception as error:
+                logger.error("Service %s shutdown failed (%s)", service.id, type(error).__name__)
+                db.rollback()
+                raise HTTPException(
+                    status_code=503,
+                    detail="Service shutdown was not confirmed; its job and port are retained. Retry shutdown.",
+                ) from None
 
-    # Clean up Service runtime state
+        if not service_job_released(job):
+            return False
+
     service.assigned_port = None
     service.current_job_id = None
     service.last_activity_time = datetime.now(timezone.utc)
     
     db.flush()
+    return True
 
 
 def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
@@ -158,11 +169,9 @@ def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
             raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
         current_job = service.current_job
 
-        should_revive = False
-        if not current_job:
-            should_revive = True
-        elif current_job.status in [JobStatus.FAILED, JobStatus.TERMINATED, JobStatus.SUCCESS]:
-            should_revive = True
+        should_revive = service_job_released(current_job)
+        if current_job and current_job.status in (JobStatus.FAILED, JobStatus.TERMINATED, JobStatus.SUCCESS) and not should_revive:
+            raise HTTPException(status_code=503, detail="Previous service execution is still releasing resources")
 
         # Path A: No restart needed
         if not should_revive:
@@ -316,10 +325,9 @@ def create_service(
 
         for k, v in data.items():
             setattr(existing, k, v)
-        existing.owner_id = current_user.id
         existing.updated_at = datetime.now(timezone.utc)
 
-        if was_active and not will_be_active:
+        if not will_be_active and existing.current_job_id:
             _shutdown_service_resources_sync(existing.id, db)
             logger.info(f"Service {existing.id} toggled OFF, resources cleaned up.")
 
@@ -353,7 +361,10 @@ def delete_service(
 
     assert_can_manage_resource(db, current_user, svc.owner_id, resource_label="service")
 
-    _shutdown_service_resources_sync(service_id, db)
+    if not _shutdown_service_resources_sync(service_id, db):
+        svc.is_active = False
+        db.commit()
+        raise HTTPException(status_code=409, detail="Service execution is still releasing resources; retry deletion")
 
     db.delete(svc)
     db.commit()
@@ -607,25 +618,19 @@ async def proxy_service_request(
             client = httpx.AsyncClient(
                 base_url = f"http://127.0.0.1:{service_snap.assigned_port}",
                 timeout = proxy_timeout,
-                follow_redirects = True,
+                follow_redirects = False,
+                trust_env = False,
             )
 
             try:
                 body = await request.body()
 
-                # 过滤 Host header，让 httpx 根据 base_url 自动设置正确的 Host
-                # 否则当存在 HTTP_PROXY 时，代理会根据错误的 Host 路由请求
-                filtered_headers = [
-                    (k, v) for k, v in request.headers.raw
-                    if k.lower() != b'host'
-                ]
-
                 rp_req = client.build_request(
                     request.method,
                     f"/{path}",
                     content = body,
-                    headers = filtered_headers,
-                    params = request.query_params,
+                    headers = service_request_headers(request),
+                    params = service_request_params(request),
                 )
 
                 await _safe_db_call(_update_activity_standalone, service_id)

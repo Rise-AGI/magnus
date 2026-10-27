@@ -29,11 +29,13 @@ class StageOutTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.namespace["magnus_workspace_path"] = str(self.root)
+        (self.root / "jobs").mkdir()
         self.transport = ArtifactTransport()
         self.scheduler = self.namespace["_StagingMixin"]()
         self.scheduler.slurm_manager = SimpleNamespace(transport=self.transport, check_job_status=lambda identifier: "COMPLETED")
         self.scheduler._remote_job_working_table = lambda job: str(self.root / "remote" / job)
-        self.scheduler._local_job_working_table = lambda job: str(self.root / "local" / job)
+        self.scheduler._local_job_working_table = lambda job: str(self.root / "jobs" / job)
         manager_namespace = load_manager()
         manager_namespace['magnus_config'] = {'server': {
             'root': str(self.root / 'custody'),

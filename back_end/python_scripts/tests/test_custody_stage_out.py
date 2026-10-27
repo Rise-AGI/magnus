@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import unittest
 import runpy
 from test_transport_timeouts import load_transport
+from test_protocol_files import protocol
 from unittest.mock import patch
 
 
@@ -19,7 +20,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 def load_staging():
     path = SERVER / "_scheduler" / "_staging.py"
-    namespace = {"remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
+    namespace = {"replace_protocol_file": protocol.replace_protocol_file, "remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
     namespace.update({name: value for name, value in runpy.run_path(str(SERVER / "_custody_receipts.py")).items() if not name.startswith("__")})
     relay_path = SERVER / "_scheduler" / "_custody_relay.py"
     relay = ast.parse(relay_path.read_text())
@@ -77,7 +78,9 @@ class CustodyStageOutTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.remote = self.root / "remote"
-        self.local = self.root / "local"
+        self.namespace["magnus_workspace_path"] = str(self.root)
+        self.local = self.root / "jobs" / "job"
+        self.local.parent.mkdir()
         self.transport = FileTransport()
         self.stored = {}
         self.calls = []
@@ -294,7 +297,7 @@ class CustodyStageOutTests(unittest.TestCase):
 
     def test_corrupt_receipt_ledger_preserves_workspace_and_does_not_republish(self):
         self.entry("a")
-        self.local.mkdir()
+        self.local.mkdir(parents=True)
         (self.local / ".magnus_custody_receipts.json").write_text("{corrupt", encoding="utf-8")
         with self.assertLogs("custody-stage-test", level="WARNING"):
             self.assertFalse(self.final_pass())

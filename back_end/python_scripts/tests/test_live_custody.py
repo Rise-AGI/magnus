@@ -43,7 +43,9 @@ class LiveCustodyTests(unittest.TestCase):
         self.staging = load_staging()
         self.transport = FileTransport()
         self.remote = self.root / 'remote'
-        self.local = self.root / 'local'
+        self.staging['magnus_workspace_path'] = str(self.root)
+        self.local = self.root / 'jobs' / 'job'
+        self.local.parent.mkdir()
         self.relay = self.make_relay()
 
     def make_relay(self):

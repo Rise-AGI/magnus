@@ -152,6 +152,8 @@ class MagnusScheduler(
             logger.warning("Scheduler disabled, skipping termination logic.")
             return
 
+        db.refresh(job)
+        previous_allocation = job.slurm_job_id
         if job.slurm_job_id and not job.finalization_status:
             if is_local_mode:
                 assert self.docker_manager is not None
@@ -192,6 +194,12 @@ class MagnusScheduler(
         # 路径一致。
         job.start_time = None
         db.commit()
+        db.refresh(job)
+        if previous_allocation is None and job.slurm_job_id is not None:
+            # A submitter may publish its ID while this cancellation commits.
+            # Re-enter with that association instead of cleaning a live workspace.
+            self.terminate_job(db, job)
+            return
         # Persist TERMINATED first: late build/repository completions use a
         # conditional update and cannot resurrect this job as Pending. Retain
         # its task until filesystem workers drain; workspace GC also checks it.

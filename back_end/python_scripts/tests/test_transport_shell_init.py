@@ -147,7 +147,7 @@ class RemoteShellInitializationTests(unittest.TestCase):
 
     def test_unconfigured_transport_keeps_direct_command_and_no_bash_requirement(self):
         commands = []
-        self.namespace["subprocess"].run = lambda command, **kwargs: commands.append(command)
+        self.namespace["subprocess"].run = lambda command, **kwargs: commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")
         transport = self.namespace["build_transport"]({
             "mode": "ssh",
             "ssh": {"control_path": "unused.sock", "host": "unused.invalid", "user": "test"},

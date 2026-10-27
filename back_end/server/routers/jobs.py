@@ -26,6 +26,7 @@ from .._magnus_config import magnus_config, is_admin_user, is_local_mode, apply_
 from .._scheduler import scheduler
 from .._resource_manager import resource_manager
 from .._resource_manager._build_progress import BuildProgress
+from .._protocol_files import open_protocol_file
 from .._job_resources import resource_mode_for_execution
 from .auth import get_current_user
 from library import escape_like
@@ -129,18 +130,22 @@ def create_job(
     return db_job
 
 
-def _read_marker_file(path: str, max_size: int)-> str:
-    """Read a marker file (.magnus_result / .magnus_action), return content or empty string."""
-    if not os.path.exists(path):
-        return ""
+def _read_marker_file(
+    path: str,
+    max_size: int,
+) -> str:
+    root = os.path.join(magnus_config["server"]["root"], "workspace", "jobs")
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read(max_size)
-        if os.path.getsize(path) > max_size:
+        with open_protocol_file(root, os.path.relpath(path, root)) as stream:
+            data = stream.read(max_size + 1)
+        content = data[:max_size].decode("utf-8", errors="replace")
+        if len(data) > max_size:
             content += "\n... (Content truncated, please download full file) ..."
         return content
-    except Exception as e:
-        return f"<Error reading file: {str(e)}>"
+    except FileNotFoundError:
+        return ""
+    except (OSError, ValueError):
+        return "<Error reading protocol file>"
 
 
 def _resolve_marker_field(
@@ -280,7 +285,11 @@ def get_job_build_logs(
     if not job.has_dockerfile:
         raise HTTPException(status_code=404, detail="This job does not use a Dockerfile")
     log_path = resource_manager.builds.get_log_path(job_id)
-    return _read_log_page(str(log_path), page)
+    return _read_log_page(
+        str(log_path),
+        page,
+        root=os.path.join(magnus_config["server"]["root"], "build_diagnostics"),
+    )
 
 
 @router.get(
@@ -378,44 +387,29 @@ def get_job_logs_paginated(
 def _read_log_page(
     log_path: str,
     page: int,
+    *,
+    root: Optional[str] = None,
 ) -> Dict[str, Any]:
     PAGE_SIZE = 200 * 1024
     OVERLAP = 0.3
+    root = root or os.path.join(magnus_config["server"]["root"], "workspace", "jobs")
     try:
-        if not os.path.isfile(log_path):
-            return {"logs": "", "page": 0, "total_pages": 1}
-
-        file_size = os.path.getsize(log_path)
-
-        if file_size == 0:
-            return {"logs": "", "page": 0, "total_pages": 1}
-
-        if file_size <= PAGE_SIZE:
-            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                return {"logs": f.read(), "page": 0, "total_pages": 1}
-
-        step = int(PAGE_SIZE * (1 - OVERLAP))
-        total_pages = max(1, (file_size - PAGE_SIZE) // step + 2)
-
-        if page < 0:
-            page = total_pages - 1
-        page = max(0, min(page, total_pages - 1))
-
-        offset = page * step
-        read_size = min(PAGE_SIZE, file_size - offset)
-
-        with open(log_path, "rb") as f:
-            f.seek(offset)
-            chunk = f.read(read_size)
+        with open_protocol_file(root, os.path.relpath(log_path, root)) as stream:
+            file_size = os.fstat(stream.fileno()).st_size
+            step = int(PAGE_SIZE * (1 - OVERLAP))
+            total_pages = max(1, (file_size - PAGE_SIZE) // step + 2) if file_size > PAGE_SIZE else 1
+            page = total_pages - 1 if page < 0 else min(page, total_pages - 1)
+            offset = page * step
+            stream.seek(offset)
+            chunk = stream.read(min(PAGE_SIZE, max(0, file_size - offset)))
             if offset + len(chunk) < file_size:
                 chunk = _safe_utf8_truncate(chunk)
-
-        content = chunk.decode("utf-8", errors="replace")
-        return {"logs": content, "page": page, "total_pages": total_pages}
-
-    except Exception as e:
-        logger.exception("Error reading job log %s", log_path)
-        return {"logs": f"Error reading logs: {str(e)}", "page": 0, "total_pages": 1}
+        return {"logs": chunk.decode("utf-8", errors="replace"), "page": page, "total_pages": total_pages}
+    except FileNotFoundError:
+        return {"logs": "", "page": 0, "total_pages": 1}
+    except (OSError, ValueError):
+        logger.warning("Refused unreadable Job log %s", log_path)
+        return {"logs": "Error reading job log", "page": 0, "total_pages": 1}
 
 
 @router.post("/jobs/{job_id}/terminate")

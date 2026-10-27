@@ -543,3 +543,11 @@ execution:
 | `configs/magnus_config.yaml` | 配置源 |
 | `docker/magnus-runtime/Dockerfile` | 子 Magnus 运行时镜像 |
 | `scripts/setup_single_node_slurm.sh` | 容器内 SLURM 引导脚本 |
+
+## 协议文件与 Service 边界
+
+宿主侧的结果、日志与指标 I/O 仅访问 Job 根目录内的普通文件，拒绝由 runner 控制的符号链接、junction、特殊文件与硬链接；远端完整下载后原子发布。协议标记应直接写普通文件。这不改变既有项目盘绑定挂载契约。
+
+Service 代理由 Magnus 消费平台认证：Bearer Authorization、`token` 查询参数和 `token`/`access_token` Cookie 不会传给用户应用。业务 Cookie 与重复查询参数保留，上游重定向交给客户端处理。这一凭据边界不等同于任意 Service HTML 的浏览器同源隔离。
+
+Service 普通更新保留所有者，显式 transfer 才改变所有权。停止后，只要准备、提交或外部分配尚未结束，就保留 Job 与端口关联；释放前删除可返回 409，停止未确认则返回 503 并保留关联。提交的迟到回复保留并发终止状态，登记外部 ID 后申请取消；取消未确认由同步重试。外部已受理但未收到 ID 的情形仍需独立对账。

@@ -22,6 +22,7 @@ from ._docker_inspect import (
     _docker_inspect_container_pid,
     _docker_inspect_visible_gpus,
 )
+from .._protocol_files import open_protocol_file
 from ._nvidia_smi import _sample_nvidia_smi
 
 
@@ -211,10 +212,9 @@ class DockerMetricsCollector:
         if not lines:
             return
 
-        metrics_path = f"{self._workspace}/jobs/{job_id}/metrics/system.jsonl"
         try:
-            with open(metrics_path, "a") as f:
-                f.write("\n".join(lines) + "\n")
+            with open_protocol_file(f"{self._workspace}/jobs", f"{job_id}/metrics/system.jsonl", "ab") as stream:
+                stream.write(("\n".join(lines) + "\n").encode("utf-8"))
         except OSError:
             # metrics dir may not exist yet (job tear-down race); skip
             pass
