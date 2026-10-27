@@ -773,7 +773,6 @@ def validate_cluster_limits(
         raise ValueError(f"time_limit={requested_time} exceeds cluster limit ({max_time} min)")
 
     # 多节点上限。max_node_count 默认 1 → 抬高前任何 node_count>1 的提交都被挡下。
-    # tasks_per_node 只要求为正（每节点 rank 数由站点 node 的核数隐式约束）。
     max_node = cluster["max_node_count"]
     requested_nodes = data.get("node_count")
     if requested_nodes is not None and requested_nodes < 1:
@@ -783,6 +782,16 @@ def validate_cluster_limits(
     requested_tasks_per_node = data.get("tasks_per_node")
     if requested_tasks_per_node is not None and requested_tasks_per_node < 1:
         raise ValueError(f"tasks_per_node={requested_tasks_per_node} must be >= 1")
+    if not is_local_mode:
+        tasks_per_node = requested_tasks_per_node or 1
+        node_cpus = data["cpu_count"] * tasks_per_node
+        if node_cpus > max_cpu:
+            raise ValueError(f"CPU request per node={node_cpus} exceeds cluster limit ({max_cpu})")
+        slurm = (config if config is not None else magnus_config).get("execution", {}).get("slurm") or {}
+        # In per_cpu mode memory_demand has been normalized per task; --mem in
+        # explicit mode already denotes the entire node and must not multiply.
+        if slurm.get("mem_mode") == "per_cpu" and requested_mem * tasks_per_node > max_mem:
+            raise ValueError(f"Memory request per node exceeds cluster limit ({max_mem_str})")
     # tasks_per_node > 1 也会激活 wrapper 的 srun / sbatch 的 --ntasks-per-node 多节点路径
     # （激活条件是 node_count>1 OR tasks_per_node>1），故必须同样受 max_node_count 安全阀
     # 约束 —— 否则 max_node_count=1（多节点默认关闭）的站点仍能被 SDK/CLI 用

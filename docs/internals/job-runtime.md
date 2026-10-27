@@ -577,3 +577,15 @@ Deleting an agent with existing records, including completed Job history, return
 owned records reserves the user in the same database transaction, so a request
 that authenticated before deletion cannot create an orphan afterward. Empty
 agents remain deletable; no client upgrade or database migration is required.
+
+
+Service lifecycle decisions are serialized per Service across request workers and
+background reconciliation. A cancelled proxy request waits for any spawn worker
+to finish before releasing its locks. Port allocation reserves SQLite's writer
+before selecting an unused port, and commits the reservation with the new Job.
+External cancellation runs outside that database write transaction.
+
+SLURM limits apply per node: `cpu_count × tasks_per_node` must fit the node CPU
+limit. In `per_cpu` mode the normalized memory per task is also multiplied by
+`tasks_per_node`; explicit `--mem` already describes the node. `node_count` does
+not multiply either per-node limit, and Docker/local accounting is unchanged.

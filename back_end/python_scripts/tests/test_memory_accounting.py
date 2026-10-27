@@ -42,6 +42,40 @@ class MemoryAccountingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "memory_demand=.*exceeds"):
             namespace["validate_cluster_limits"]({"cpu_count": 1, "memory_demand": "1.1M", "gpu_count": 0})
 
+    def test_limits_apply_to_each_node_after_per_cpu_normalization(self):
+        tree = ast.parse((SERVER / "_magnus_config.py").read_text())
+        functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {"normalize_per_cpu_resources", "validate_cluster_limits"}]
+        namespace = dict(NAMESPACE, Dict=dict, Any=object, is_local_mode=False)
+        config = {
+            "cluster": {"max_cpu_count": 64, "max_memory_demand": "256G", "max_time_limit": None, "max_node_count": 4, "gpus": []},
+            "execution": {"slurm": {"mem_mode": "explicit", "mem_per_cpu_mb": 4096}},
+        }
+        namespace["magnus_config"] = config
+        exec(compile(ast.Module(body=functions, type_ignores=[]), "limits", "exec"), namespace)
+        validate = namespace["validate_cluster_limits"]
+        request = {"cpu_count": 1, "memory_demand": "256G", "node_count": 2, "tasks_per_node": 64}
+        validate(request)
+        with self.assertRaisesRegex(ValueError, "CPU request per node"):
+            validate(dict(request, cpu_count=2))
+        validate(dict(request, node_count=None, tasks_per_node=None, cpu_count=64))
+
+        config["execution"]["slurm"]["mem_mode"] = "per_cpu"
+        request["memory_demand"] = "4G"
+        namespace["normalize_per_cpu_resources"](request)
+        validate(request)
+        config["cluster"]["max_memory_demand"] = "128G"
+        with self.assertRaisesRegex(ValueError, "Memory request per node"):
+            validate(request)
+        config["cluster"]["max_memory_demand"] = "512G"
+        request["memory_demand"] = "5G"
+        namespace["normalize_per_cpu_resources"](request)
+        self.assertEqual(request["cpu_count"], 2)
+        with self.assertRaisesRegex(ValueError, "CPU request per node"):
+            validate(request)
+
+        namespace["is_local_mode"] = True
+        validate(request)
+
 
 if __name__ == "__main__":
     unittest.main()

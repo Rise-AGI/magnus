@@ -5,10 +5,13 @@ import random
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
+from sqlalchemy import update
 
 from .database import SessionLocal
 from .models import Service, JobStatus
 from ._scheduler import scheduler
+from ._blocking_io import _run_blocking_io
+from ._service_lifecycle import service_operation
 
 logger = logging.getLogger(__name__)
 
@@ -42,49 +45,42 @@ class ServiceManager:
             await asyncio.sleep(3)
 
     async def _tick(self):
-        # 使用 run_in_executor 避免阻塞 asyncio loop
-        await asyncio.to_thread(self._sync_logic)
+        await _run_blocking_io(self._sync_logic)
 
     def _sync_logic(self):
         with SessionLocal() as db:
-            active_services = db.query(Service).filter(Service.current_job_id.is_not(None)).all()
+            service_ids = db.query(Service.id).filter(Service.current_job_id.is_not(None)).all()
+        for (service_id,) in service_ids:
+            try:
+                self._sync_service(service_id)
+            except Exception as error:
+                logger.warning("Service %s reconciliation failed (%s)", service_id, type(error).__name__)
+
+    def _sync_service(
+        self,
+        service_id: str,
+    ) -> None:
+        with service_operation(service_id), SessionLocal() as db:
+            service = db.query(Service).filter(Service.id == service_id).first()
+            if service is None or service.current_job_id is None:
+                return
+            job = service.current_job
             now = datetime.now(timezone.utc)
-
-            for service in active_services:
-                if not service.current_job_id:
-                    continue
-
-                job = service.current_job
-                
-                # 情况 1：Job 已经挂了/结束了，清理僵尸状态
-                if service_job_released(job):
-                    service.current_job_id = None
-                    service.assigned_port = None
-                    db.add(service)
-                    continue
-
-                if not service.is_active:
-                    continue
-
-                if job.status in [JobStatus.PENDING, JobStatus.PAUSED, JobStatus.PREPARING, JobStatus.BUILDING]:
-                    # Anti-Starvation
-                    service.last_activity_time = now
-                    db.add(service)
-
-                elif job.status == JobStatus.RUNNING:
-                    idle_duration = (now - service.last_activity_time).total_seconds()
-                    idle_limit_seconds = service.idle_timeout * 60
-
-                    # 约定 idle_timeout=0 表示永不 Scale Down
-                    if service.idle_timeout and (idle_duration > idle_limit_seconds):
-                        logger.info(f"Service {service.id} idle for {idle_duration:.0f}s. Scaling to zero.")
-                        scheduler.terminate_job(db, job)
-                        
-                        if service_job_released(job):
-                            service.current_job_id = None
-                            service.assigned_port = None
-                        db.add(service)
-
+            if service_job_released(job):
+                service.current_job_id = None
+                service.assigned_port = None
+            elif not service.is_active:
+                return
+            elif job.status in (JobStatus.PENDING, JobStatus.PAUSED, JobStatus.PREPARING, JobStatus.BUILDING):
+                service.last_activity_time = now
+            elif job.status == JobStatus.RUNNING:
+                idle_duration = (now - service.last_activity_time).total_seconds()
+                if service.idle_timeout and idle_duration > service.idle_timeout * 60:
+                    logger.info("Service %s idle for %.0fs. Scaling to zero.", service.id, idle_duration)
+                    scheduler.terminate_job(db, job)
+                    if service_job_released(job):
+                        service.current_job_id = None
+                        service.assigned_port = None
             db.commit()
 
     def allocate_port(
@@ -92,25 +88,25 @@ class ServiceManager:
         db: Session,
         service: Service,
     )-> int:
-        """
-        为 Service 分配一个可用端口并立即写入数据库。
-        使用 SELECT FOR UPDATE 锁定所有已分配端口的行，防止竞态条件。
-        """
-        # 锁定所有已分配端口的 Service 行，防止并发分配相同端口
-        used_ports = set(
+        # SQLite ignores FOR UPDATE; reserve its writer before reading the port
+        # set. The caller commits this reservation with the new Job association.
+        reserved = db.execute(
+            update(Service).where(Service.id == service.id).values(id=Service.id),
+            execution_options={"synchronize_session": False},
+        )
+        if reserved.rowcount != 1:
+            raise RuntimeError("Service disappeared during port allocation")
+        used_ports = {
             row[0] for row in db.query(Service.assigned_port)
             .filter(Service.assigned_port.is_not(None))
-            .with_for_update()
             .all()
-        )
+        }
 
         for _ in range(100):
             candidate = random.randint(10000, 30000)
             if candidate not in used_ports:
-                # 立即写入数据库，在事务提交前其他请求无法看到这个端口被占用
-                # 但由于 with_for_update 锁，其他请求会等待当前事务完成
                 service.assigned_port = candidate
-                db.flush()  # 立即写入但不提交，保持在同一事务中
+                db.flush()
                 return candidate
 
         raise RuntimeError("Failed to allocate a free port for Service after 100 attempts.")

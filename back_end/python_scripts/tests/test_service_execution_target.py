@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
+import runpy
+from pathlib import Path
 from unittest.mock import Mock
 
 from fastapi import HTTPException
@@ -50,6 +52,7 @@ class ServiceTargetUpdateTests(unittest.TestCase):
             "datetime": datetime,
             "timezone": timezone,
         }
+        namespace["service_operation"] = runpy.run_path(str(Path(__file__).resolve().parents[2] / "server/_service_lifecycle.py"))["service_operation"]
         self.update = load_method("routers/services.py", "create_service", namespace)
 
     def save(self, explicit=False, target=None):

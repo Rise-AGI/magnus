@@ -19,6 +19,8 @@ from .. import database
 from ..database import SessionLocal
 from .. import models
 from .._user_lifecycle import lock_user_for_write
+from .._service_lifecycle import service_operation
+from .._blocking_io import _run_blocking_io
 from ..models import JobStatus, Service
 from ..schemas import ServiceResponse, ServiceListItem, ServiceCreate, PagedServiceResponse, TransferRequest
 from .._service_manager import service_manager, service_job_released
@@ -96,13 +98,17 @@ class ServiceSnapshot(BaseModel):
 
 
 # === [New] Helper for Safe DB Access ===
-async def _safe_db_call(func, *args, **kwargs):
+async def _safe_db_call(
+    func,
+    *args,
+    **kwargs,
+):
     """
     Executes a synchronous DB function within a separate thread,
     protected by the Inner Bulkhead (_auth_db_semaphore).
     """
     async with _auth_db_semaphore:
-        return await asyncio.to_thread(func, *args, **kwargs)
+        return await _run_blocking_io(func, *args, **kwargs)
 
 
 def _get_service_snapshot_standalone(service_id: str)-> ServiceSnapshot:
@@ -122,125 +128,132 @@ def _check_active_status_standalone(service_id: str)-> bool:
         return service.is_active if service else False
 
 
-def _shutdown_service_resources_sync(service_id: str, db: Session):
-    service = db.query(Service).filter(Service.id == service_id).first()
-    if not service:
-        return
-
-    # Delegate to Scheduler to terminate the Job
-    if service.current_job_id:
-        job = db.query(models.Job).filter(models.Job.id == service.current_job_id).first()
-        
-        if job and not service_job_released(job):
-            try:
-                logger.info(f"Terminating job {job.id} for service {service.id} via Scheduler...")
-                scheduler.terminate_job(db, job)
-                if job.status != JobStatus.TERMINATED and not service_job_released(job):
-                    raise RuntimeError("Scheduler did not stop the service job")
-            except Exception as error:
-                logger.error("Service %s shutdown failed (%s)", service.id, type(error).__name__)
-                db.rollback()
-                raise HTTPException(
-                    status_code=503,
-                    detail="Service shutdown was not confirmed; its job and port are retained. Retry shutdown.",
-                ) from None
-
-        if not service_job_released(job):
-            return False
-
-    service.assigned_port = None
-    service.current_job_id = None
-    service.last_activity_time = datetime.now(timezone.utc)
-    
-    db.flush()
-    return True
-
-
-def _try_revive_service_standalone(service_id: str)-> Tuple[str, int]:
-    with SessionLocal() as db:
-        service = db.query(Service).filter(Service.id == service_id).first()
+def _shutdown_service_resources_sync(
+    service_id: str,
+    db: Session,
+):
+    with service_operation(service_id):
+        service = db.query(Service).filter(Service.id == service_id).populate_existing().first()
         if not service:
-            raise HTTPException(status_code=404, detail="Service not found (during revive)")
-        if not service.is_active:
-            raise HTTPException(status_code=503, detail="Service stopped by user (spawn aborted).")
+            return
 
-        target = _resolve_target(service.execution_target)
-        config = target.config
-        if config["transport"]["mode"] == "ssh":
-            raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
-        current_job = service.current_job
+        # Delegate to Scheduler to terminate the Job
+        if service.current_job_id:
+            job = db.query(models.Job).filter(models.Job.id == service.current_job_id).populate_existing().first()
+        
+            if job and not service_job_released(job):
+                try:
+                    logger.info(f"Terminating job {job.id} for service {service.id} via Scheduler...")
+                    scheduler.terminate_job(db, job)
+                    if job.status != JobStatus.TERMINATED and not service_job_released(job):
+                        raise RuntimeError("Scheduler did not stop the service job")
+                except Exception as error:
+                    logger.error("Service %s shutdown failed (%s)", service.id, type(error).__name__)
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Service shutdown was not confirmed; its job and port are retained. Retry shutdown.",
+                    ) from None
 
-        should_revive = service_job_released(current_job)
-        if current_job and current_job.status in (JobStatus.FAILED, JobStatus.TERMINATED, JobStatus.SUCCESS) and not should_revive:
-            raise HTTPException(status_code=503, detail="Previous service execution is still releasing resources")
+            if not service_job_released(job):
+                return False
 
-        # Path A: No restart needed
-        if not should_revive:
-            if current_job is None or service.assigned_port is None:
-                raise HTTPException(status_code=500, detail="State Error: Service active but no job/port.")
-            return current_job.id, service.assigned_port
+        service.assigned_port = None
+        service.current_job_id = None
+        service.last_activity_time = datetime.now(timezone.utc)
+    
+        db.flush()
+        return True
 
-        # Path B: Restart needed
-        try:
-            port = service_manager.allocate_port(db, service)
 
-            env_cmd = "\n".join([
-                f"export MAGNUS_PORT={port}",
-                service.entry_command,
-            ])
+def _try_revive_service_standalone(
+    service_id: str,
+) -> Tuple[str, int]:
+    with service_operation(service_id):
+        with SessionLocal() as db:
+            service = db.query(Service).filter(Service.id == service_id).populate_existing().first()
+            if not service:
+                raise HTTPException(status_code=404, detail="Service not found (during revive)")
+            if not service.is_active:
+                raise HTTPException(status_code=503, detail="Service stopped by user (spawn aborted).")
 
-            # 与 jobs.py / create_service 建 job 的路径对齐：legacy service 行的 cpu_count /
-            # memory_demand 常为 null，直接抄给 job 会落到 SLURM 隐式分配（如 1 核）、且前端不
-            # 显示核数 / 内存。补成集群默认值，per_cpu 站点再归一化为真实分配值。
-            resolved_resources = apply_cluster_defaults({
-                "cpu_count": service.cpu_count,
-                "memory_demand": service.memory_demand,
-            }, config=config)
-            normalize_per_cpu_resources(resolved_resources, config=config)
+            target = _resolve_target(service.execution_target)
+            config = target.config
+            if config["transport"]["mode"] == "ssh":
+                raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
+            current_job = service.current_job
 
-            new_job = models.Job(
-                execution_target = target.id,
-                task_name = service.job_task_name,
-                description = service.job_description,
-                user_id = service.owner_id,
-                namespace = service.namespace,
-                repo_name = service.repo_name,
-                branch = service.branch,
-                commit_sha = service.commit_sha,
-                gpu_count = service.gpu_count,
-                gpu_type = service.gpu_type,
-                cpu_count = resolved_resources["cpu_count"],
-                memory_demand = resolved_resources["memory_demand"],
-                resource_mode = resource_mode_for_execution(config["execution"]),
-                ephemeral_storage = service.ephemeral_storage,
-                runner = service.runner,
-                entry_command = env_cmd,
-                status = JobStatus.PREPARING,
-                job_type = service.job_type,
-                # NOTE: Service.container_image is schema-nullable (models/_service.py: Mapped[str | None]),
-                # and ordinary service jobs still require an image. New services route through apply_cluster_defaults,
-                # but legacy rows predating that helper may still hold NULL — keep this fallback as defense in depth.
-                container_image = service.container_image or config["cluster"]["default_container_image"],
-                system_entry_command = service.system_entry_command,
-            )
+            should_revive = service_job_released(current_job)
+            if current_job and current_job.status in (JobStatus.FAILED, JobStatus.TERMINATED, JobStatus.SUCCESS) and not should_revive:
+                raise HTTPException(status_code=503, detail="Previous service execution is still releasing resources")
 
-            lock_user_for_write(
-                db,
-                service.owner_id,
-            )
-            db.add(new_job)
-            db.flush()
+            # Path A: No restart needed
+            if not should_revive:
+                if current_job is None or service.assigned_port is None:
+                    raise HTTPException(status_code=500, detail="State Error: Service active but no job/port.")
+                return current_job.id, service.assigned_port
 
-            service.current_job_id = new_job.id
-            # assigned_port 已在 allocate_port 中设置
-            db.commit()
+            # Path B: Restart needed
+            try:
+                port = service_manager.allocate_port(db, service)
 
-            logger.info(f"Service {service.id} revived with Job {new_job.id} on port {port}")
-            return new_job.id, port
+                env_cmd = "\n".join([
+                    f"export MAGNUS_PORT={port}",
+                    service.entry_command,
+                ])
 
-        except Exception as e:
-            logger.error(f"Failed to revive service {service.id}: {e}")
-            raise HTTPException(status_code=500, detail=f"Service spawn failed: {e}")
+                # 与 jobs.py / create_service 建 job 的路径对齐：legacy service 行的 cpu_count /
+                # memory_demand 常为 null，直接抄给 job 会落到 SLURM 隐式分配（如 1 核）、且前端不
+                # 显示核数 / 内存。补成集群默认值，per_cpu 站点再归一化为真实分配值。
+                resolved_resources = apply_cluster_defaults({
+                    "cpu_count": service.cpu_count,
+                    "memory_demand": service.memory_demand,
+                }, config=config)
+                normalize_per_cpu_resources(resolved_resources, config=config)
+
+                new_job = models.Job(
+                    execution_target = target.id,
+                    task_name = service.job_task_name,
+                    description = service.job_description,
+                    user_id = service.owner_id,
+                    namespace = service.namespace,
+                    repo_name = service.repo_name,
+                    branch = service.branch,
+                    commit_sha = service.commit_sha,
+                    gpu_count = service.gpu_count,
+                    gpu_type = service.gpu_type,
+                    cpu_count = resolved_resources["cpu_count"],
+                    memory_demand = resolved_resources["memory_demand"],
+                    resource_mode = resource_mode_for_execution(config["execution"]),
+                    ephemeral_storage = service.ephemeral_storage,
+                    runner = service.runner,
+                    entry_command = env_cmd,
+                    status = JobStatus.PREPARING,
+                    job_type = service.job_type,
+                    # NOTE: Service.container_image is schema-nullable (models/_service.py: Mapped[str | None]),
+                    # and ordinary service jobs still require an image. New services route through apply_cluster_defaults,
+                    # but legacy rows predating that helper may still hold NULL — keep this fallback as defense in depth.
+                    container_image = service.container_image or config["cluster"]["default_container_image"],
+                    system_entry_command = service.system_entry_command,
+                )
+
+                lock_user_for_write(
+                    db,
+                    service.owner_id,
+                )
+                db.add(new_job)
+                db.flush()
+
+                service.current_job_id = new_job.id
+                # assigned_port 已在 allocate_port 中设置
+                db.commit()
+
+                logger.info(f"Service {service.id} revived with Job {new_job.id} on port {port}")
+                return new_job.id, port
+
+            except Exception as e:
+                logger.error(f"Failed to revive service {service.id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Service spawn failed: {e}")
 
 
 def _check_socket_sync(host: str, port: int, timeout: float = 0.5)-> bool:
@@ -279,7 +292,6 @@ def _update_activity_standalone(service_id: str):
             db.commit()
 
 
-# === CRUD Routes (Unchanged) ===
 
 @router.post("/services", response_model=ServiceResponse)
 def create_service(
@@ -287,74 +299,74 @@ def create_service(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 )-> models.Service:
-    existing = db.query(Service).filter(Service.id == service_data.id).first()
-    if existing:
-        assert_can_manage_resource(db, current_user, existing.owner_id, resource_label="service")
-    else:
-        assert_id_available(db, service_data.id)
+    with service_operation(service_data.id):
+        existing = db.query(Service).filter(Service.id == service_data.id).populate_existing().first()
+        if existing:
+            assert_can_manage_resource(db, current_user, existing.owner_id, resource_label="service")
+        else:
+            assert_id_available(db, service_data.id)
 
-    target_id = service_data.execution_target
-    if existing and "execution_target" not in service_data.model_fields_set:
-        target_id = existing.execution_target
-    target = _resolve_target(target_id)
-    config = target.config
-    if config["transport"]["mode"] == "ssh":
-        raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
-    if existing and (existing.is_active or existing.current_job_id):
-        if target.id != _resolve_target(existing.execution_target).id:
-            raise HTTPException(status_code=409, detail="Stop the service before changing its execution target")
+        target_id = service_data.execution_target
+        if existing and "execution_target" not in service_data.model_fields_set:
+            target_id = existing.execution_target
+        target = _resolve_target(target_id)
+        config = target.config
+        if config["transport"]["mode"] == "ssh":
+            raise HTTPException(status_code=501, detail=_REMOTE_SERVICES_DETAIL)
+        if existing and (existing.is_active or existing.current_job_id):
+            if target.id != _resolve_target(existing.execution_target).id:
+                raise HTTPException(status_code=409, detail="Stop the service before changing its execution target")
 
-    data = service_data.model_dump()
-    data["execution_target"] = target.id
-    enforce_field_size_limits(data, "service")
+        data = service_data.model_dump()
+        data["execution_target"] = target.id
+        enforce_field_size_limits(data, "service")
 
-    # 所有 Optional 字段填入集群默认值
-    apply_cluster_defaults(data, config=config)
-    # per_cpu 站点把 cpu_count / memory_demand 归一化为真实分配值（与 jobs.py 对齐）
-    normalize_per_cpu_resources(data, config=config)
-    # 与 jobs.py 对齐：超额请求转 HTTP 400，避免通过 service revive 绕过 Job 资源上限
-    try:
-        validate_cluster_limits(data, config=config)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # 所有 Optional 字段填入集群默认值
+        apply_cluster_defaults(data, config=config)
+        # per_cpu 站点把 cpu_count / memory_demand 归一化为真实分配值（与 jobs.py 对齐）
+        normalize_per_cpu_resources(data, config=config)
+        # 与 jobs.py 对齐：超额请求转 HTTP 400，避免通过 service revive 绕过 Job 资源上限
+        try:
+            validate_cluster_limits(data, config=config)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
-    if existing:
-        was_active = existing.is_active
-        will_be_active = data.get("is_active", was_active)
+        if existing:
+            was_active = existing.is_active
+            will_be_active = data.get("is_active", was_active)
 
-        if service_data.max_concurrency != existing.max_concurrency:
-            with _service_semaphores_lock:
-                removed_sem = _service_semaphores.pop(existing.id, None)
-            if removed_sem is not None:
-                logger.info(f"Concurrency limit changed for {existing.id}, semaphore reset.")
+            if service_data.max_concurrency != existing.max_concurrency:
+                with _service_semaphores_lock:
+                    removed_sem = _service_semaphores.pop(existing.id, None)
+                if removed_sem is not None:
+                    logger.info(f"Concurrency limit changed for {existing.id}, semaphore reset.")
 
-        for k, v in data.items():
-            setattr(existing, k, v)
-        existing.updated_at = datetime.now(timezone.utc)
+            if not will_be_active and existing.current_job_id:
+                _shutdown_service_resources_sync(existing.id, db)
 
-        if not will_be_active and existing.current_job_id:
-            _shutdown_service_resources_sync(existing.id, db)
-            logger.info(f"Service {existing.id} toggled OFF, resources cleaned up.")
+            for k, v in data.items():
+                setattr(existing, k, v)
+            existing.updated_at = datetime.now(timezone.utc)
 
+            db.commit()
+            db.refresh(existing)
+            return existing
+
+        data["is_active"] = False
+        new_service = Service(
+            **data,
+            owner_id = current_user.id,
+            last_activity_time = datetime.now(timezone.utc),
+            updated_at = datetime.now(timezone.utc),
+        )
+        lock_user_for_write(
+            db,
+            current_user.id,
+        )
+        db.add(new_service)
         db.commit()
-        db.refresh(existing)
-        return existing
-
-    data["is_active"] = False
-    new_service = Service(
-        **data,
-        owner_id = current_user.id,
-        last_activity_time = datetime.now(timezone.utc),
-        updated_at = datetime.now(timezone.utc),
-    )
-    lock_user_for_write(
-        db,
-        current_user.id,
-    )
-    db.add(new_service)
-    db.commit()
-    db.refresh(new_service)
-    return new_service
+        db.refresh(new_service)
+        return new_service
 
 
 @router.delete("/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -363,23 +375,23 @@ def delete_service(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> None:
-    # ... (Same as original code) ...
-    svc = db.query(Service).filter(Service.id == service_id).first()
-    if not svc:
-        raise HTTPException(status_code=404, detail="Service not found")
+    with service_operation(service_id):
+        svc = db.query(Service).filter(Service.id == service_id).populate_existing().first()
+        if not svc:
+            raise HTTPException(status_code=404, detail="Service not found")
 
-    assert_can_manage_resource(db, current_user, svc.owner_id, resource_label="service")
+        assert_can_manage_resource(db, current_user, svc.owner_id, resource_label="service")
 
-    if not _shutdown_service_resources_sync(service_id, db):
-        svc.is_active = False
+        if not _shutdown_service_resources_sync(service_id, db):
+            svc.is_active = False
+            db.commit()
+            raise HTTPException(status_code=409, detail="Service execution is still releasing resources; retry deletion")
+
+        db.delete(svc)
         db.commit()
-        raise HTTPException(status_code=409, detail="Service execution is still releasing resources; retry deletion")
 
-    db.delete(svc)
-    db.commit()
-
-    with _service_semaphores_lock:
-        _service_semaphores.pop(service_id, None)
+        with _service_semaphores_lock:
+            _service_semaphores.pop(service_id, None)
 
 
 @router.post("/services/{service_id}/transfer", response_model=ServiceResponse)
@@ -389,19 +401,20 @@ def transfer_service(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> models.Service:
-    svc = db.query(Service).filter(Service.id == service_id).first()
-    if not svc:
-        raise HTTPException(status_code=404, detail="Service not found")
+    with service_operation(service_id):
+        svc = db.query(Service).filter(Service.id == service_id).populate_existing().first()
+        if not svc:
+            raise HTTPException(status_code=404, detail="Service not found")
 
-    assert_can_manage_resource(db, current_user, svc.owner_id, resource_label="service")
+        assert_can_manage_resource(db, current_user, svc.owner_id, resource_label="service")
 
-    assert_valid_transfer_target(db, current_user, body.new_owner_id)
+        assert_valid_transfer_target(db, current_user, body.new_owner_id)
 
-    svc.owner_id = body.new_owner_id
-    svc.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(svc)
-    return svc
+        svc.owner_id = body.new_owner_id
+        svc.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(svc)
+        return svc
 
 
 @router.get("/services", response_model=PagedServiceResponse)

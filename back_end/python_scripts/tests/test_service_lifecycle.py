@@ -1,6 +1,7 @@
 """Service associations remain owned until external execution has released."""
 from datetime import datetime, timezone
 import logging
+import runpy
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -46,11 +47,14 @@ class ServiceLifecycleTests(unittest.TestCase):
             "scheduler": self.scheduler, "HTTPException": HTTPException,
             "logger": logging.getLogger(__name__), "datetime": datetime, "timezone": timezone,
             "SessionLocal": self.sessions,
+            "service_operation": runpy.run_path(str(Path(__file__).resolve().parents[2] / "server/_service_lifecycle.py"))["service_operation"],
             "_resolve_target": lambda key: SimpleNamespace(config={"transport": {"mode": "local"}}),
         }
         self.released = load_method("_service_manager.py", "service_job_released", self.namespace)
         self.shutdown = load_method("routers/services.py", "_shutdown_service_resources_sync", self.namespace)
         self.revive = load_method("routers/services.py", "_try_revive_service_standalone", self.namespace)
+        sync = load_method("_service_manager.py", "_sync_service", self.namespace)
+        self.manager = SimpleNamespace(_sync_service=lambda identifier: sync(None, identifier))
         self.tick = load_method("_service_manager.py", "_sync_logic", self.namespace)
 
     def test_shutdown_failure_and_disabled_scheduler_keep_association(self):
@@ -78,17 +82,17 @@ class ServiceLifecycleTests(unittest.TestCase):
         self.service.is_active = False
         self.job.status = JobStatus.TERMINATED
         self.db.commit()
-        self.tick(SimpleNamespace())
+        self.tick(self.manager)
         self.db.refresh(self.service)
         self.assertEqual(self.service.current_job_id, "job")
         self.job.slurm_job_id = None
         self.db.commit()
         self.inflight.add("job")
-        self.tick(SimpleNamespace())
+        self.tick(self.manager)
         self.db.refresh(self.service)
         self.assertEqual(self.service.assigned_port, 12345)
         self.inflight.clear()
-        self.tick(SimpleNamespace())
+        self.tick(self.manager)
         self.db.refresh(self.service)
         self.assertIsNone(self.service.current_job_id)
         self.assertIsNone(self.service.assigned_port)
