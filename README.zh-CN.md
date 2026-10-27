@@ -202,6 +202,7 @@ cd front_end && npm install && npm run dev
 - [Local Mode](docs/guides/local-mode.zh-CN.md) —— 用 Docker 代替 SLURM 在本地运行 Magnus
 - [Dockerfile Jobs](docs/guides/image-building.zh-CN.md) —— 直接从 Job 的 Dockerfile 构建并缓存运行环境
 - [多执行集群](docs/guides/execution-targets.zh-CN.md) —— 多 Slurm 集群与官方客户端 SSH 续期
+- [项目共享盘](docs/guides/project-storage.zh-CN.md) —— 项目挂载、数据复用与 custody 交付约定
 - [Metrics Protocol](docs/guides/metrics.zh-CN.md) —— Jobs 的跨语言指标上报协议
 
 <details>
