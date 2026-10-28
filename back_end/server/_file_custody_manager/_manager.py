@@ -333,6 +333,7 @@ class FileCustodyManager:
         source_digest: str | None = None,
         expected_size: int | None = None,
         receive: Callable[[Path], None] | None = None,
+        upload_id: str | None = None,
     ) -> str:
         # Sanitize at the entry point so all callers are protected centrally
         # rather than each one needing to remember `os.path.basename`.
@@ -353,6 +354,16 @@ class FileCustodyManager:
             raise ValueError("Invalid custody import receipt")
         if receive is not None and (type(expected_size) is not int or expected_size < 0):
             raise ValueError("A bounded receive requires the exact payload size")
+
+        if upload_id is not None:
+            if permanent or explicit_token is not None or not re.fullmatch(r"[0-9a-f]{32}", upload_id):
+                raise ValueError("Invalid upload publication")
+            with self._index.transaction() as db:
+                row = db.execute("SELECT token, state FROM uploads WHERE id=?", (upload_id,)).fetchone()
+            if row is None or row[1] not in {"complete", "finalizing"}:
+                raise ValueError("Upload is not ready for publication")
+            if row[0] is not None:
+                return row[0]
 
         # permanent 条目由服务端内部代码控制（如头像），不受 max_ttl 限制
         if not permanent:
@@ -464,6 +475,7 @@ class FileCustodyManager:
                         entry_id,
                         self._entry_metadata(placeholder),
                         receipt = (job_id, source_digest) if source_digest is not None else None,
+                        upload_id=upload_id,
                     )
                 self._changed.notify_all()
         except BaseException as error:

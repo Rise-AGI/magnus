@@ -13,6 +13,7 @@ import uuid
 
 from fastapi import HTTPException, Request
 from starlette.requests import ClientDisconnect
+from starlette.responses import JSONResponse
 
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,19 @@ class UploadTelemetryMiddleware:
         ):
             await self.app(scope, receive, send)
             return
+        is_tus = path == "/api/files/uploads" or path.startswith("/api/files/uploads/")
+        if is_tus:
+            override = Request(scope).headers.get("x-http-method-override")
+            if override is not None:
+                method = override.upper()
+                if method not in {"GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"}:
+                    await JSONResponse(
+                        {"detail": "Unsupported upload method override"},
+                        status_code=400,
+                        headers={"Tus-Resumable": "1.0.0", "Cache-Control": "no-store"},
+                    )(scope, receive, send)
+                    return
+                scope = {**scope, "method": method}
         trace = UploadTrace(Request(scope).headers)
         scope["magnus.upload_trace"] = trace
         trace.event("headers", method=scope["method"])
@@ -97,6 +111,13 @@ class UploadTelemetryMiddleware:
             if message["type"] == "http.response.start":
                 message = dict(message)
                 headers = [(name, value) for name, value in message.get("headers", []) if name.lower() != b"x-request-id"]
+                if is_tus:
+                    headers = [(name, value) for name, value in headers if name.lower() not in {b"tus-resumable", b"cache-control", b"access-control-expose-headers"}]
+                    headers.extend([
+                        (b"tus-resumable", b"1.0.0"),
+                        (b"cache-control", b"no-store"),
+                        (b"access-control-expose-headers", b"Tus-Resumable,Tus-Version,Tus-Extension,Tus-Max-Size,Tus-Checksum-Algorithm,Upload-Offset,Upload-Length,Upload-Metadata,Upload-Expires,Location,Magnus-Upload-Chunk-Size,X-Request-ID"),
+                    ])
                 message["headers"] = [*headers, (b"x-request-id", trace.request_id.encode("ascii"))]
                 trace.event("response", status=message["status"])
             await send(message)

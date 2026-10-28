@@ -2043,3 +2043,13 @@ Web 界面登录后，点击右上角用户头像，可见 Trust Token（`sk-` �
 旧 custody 上传接口和取件码格式保持兼容，鉴权先于 multipart 解析。管理员可通过 `server.file_custody.receive` 限制同时接收数、整个 HTTP 请求体大小和并发临时文件预留总量；省略限制时保持现有接收行为。接收过程中采样检查 Python 临时文件系统的可用空间下限，不能替其他进程预留磁盘空间。这些预算包含 multipart 包装，不替代 custody 的最终文件大小与总容量限制。
 
 上传诊断通过请求 ID、UTC 时间和已接收请求体字节关联公网代理与后端，不记录文件名、URL 或取件码。客户端断连与上游故障分别记录。当前 SDK 源码仅对确定在请求发送前发生的失败重试旧接口上传；可能已受理后的超时或 5xx 抛出 `UploadOutcomeUnknown`，不再静默重传整包。已安装的旧 SDK 仍保留其原有重试行为。
+
+### 可续传的 custody 上传
+
+当前 SDK 源码会为至少 8 MiB 的归档或文件协商 [tus 1.0](https://tus.io/protocols/resumable-upload)。`custody_file` 调用与返回值不变。单请求最多 4 MiB，校验 SHA-256，并持久保存确认偏移；丢回复时沿用同一创建身份对账，发布与 custody 回执在同一事务提交。小文件仍用 multipart。旧后端明确不支持能力端点时才回退；创建结果不确定后不会另开上传。
+
+后端提供需登录的 `OPTIONS/POST /api/files/uploads` 和 `HEAD/PATCH/GET/DELETE /api/files/uploads/{id}`，支持 tus 创建、校验（`sha1`、`sha256`）、过期和终止。`GET` 另外返回 Magnus 发布状态与最终 `file_secret`；接收满声明长度不代表 custody 已发布。`Upload-Metadata` 支持 `filename`、可选 `sha256` 和 `options`（现有 custody 参数的 base64 JSON）。使用 `Idempotency-Key` 时必须同时提供完整内容的 `sha256`；该键由 SDK 生成为 `<Unix秒>-<32位小写十六进制字符>`，以阻止过期回执被重试复活；同键改变内容或参数返回 409。
+
+未完成上传在 24 小时后过期，与 custody 期限分开。最多 32 个未完成会话（同时受 custody 条目上限约束）、4 个活动分块接收/发布操作、2 个发布线程及 4,096 条临时回执记录。未完成上传的声明总字节受 custody 存储预算限制，使用独立兄弟目录；磁盘需为这份临时预算和既有 custody 本体预留空间。每个分块接收限时 90 秒。完成记录从创建起最多保留 48 小时，重放不会恢复已过期或已领取完的文件；Job 产物仍沿用任务终态起算期限的语义。
+
+首版覆盖同一次 SDK 调用跨 HTTP 断线或后端重启恢复，不自动跨客户端进程退出或目录重新打包续传。服务端已接收的片段保留至过期，新调用属于新上传。安装更新的 SDK 源码才启用该链路；旧 SDK 保持兼容，但不会自动获得续传。本次源码变更不代表 PyPI 发版。

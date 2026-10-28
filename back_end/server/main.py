@@ -23,6 +23,7 @@ from ._file_custody_manager import file_custody_manager
 from ._metrics_collector import DockerMetricsCollector
 from ._resource_manager import resource_manager
 from .routers.images import recover_stuck_images
+from .routers.uploads import upload_store, cleanup_uploads
 from ._feishu_client import feishu_client
 from ._blocking_io import _run_blocking_io
 from ._lifecycle import cancel_background_tasks, lifespan_resources
@@ -557,6 +558,7 @@ async def lifespan(
             _run_blocking_io,
             file_custody_manager.shutdown,
         )
+        cleanup.push_async_callback(_run_blocking_io, upload_store.shutdown)
         cleanup.push_async_callback(scheduler.shutdown)
 
         thread_pool_size = 200
@@ -610,6 +612,7 @@ async def lifespan(
         tasks.append(asyncio.create_task(run_scheduler_loop()))
         tasks.append(asyncio.create_task(service_manager.start_background_loop()))
         tasks.append(asyncio.create_task(file_custody_manager.cleanup_loop()))
+        tasks.append(asyncio.create_task(cleanup_uploads()))
 
         if not is_local_auth:
             refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]

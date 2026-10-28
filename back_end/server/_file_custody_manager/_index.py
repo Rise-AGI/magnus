@@ -48,12 +48,21 @@ class CustodyIndex:
         token: str,
         metadata: dict,
         receipt: tuple[str, str] | None = None,
+        *,
+        upload_id: str | None = None,
     ) -> None:
         with self.transaction() as db:
             db.execute(
                 "INSERT OR REPLACE INTO entries VALUES (?, ?)",
                 (token, json.dumps(metadata, allow_nan=False)),
             )
+            if upload_id is not None:
+                changed = db.execute(
+                    "UPDATE uploads SET state='complete', token=?, error=NULL WHERE id=? AND state='finalizing' AND token IS NULL",
+                    (token, upload_id),
+                ).rowcount
+                if changed != 1:
+                    raise ValueError("Upload publication ownership changed")
             if receipt is not None:
                 # Visibility and import identity commit together. A crash after
                 # the final download must not allow a remote retry to resurrect it.

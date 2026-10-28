@@ -10,6 +10,7 @@ import logging
 import tempfile as _tempfile
 import tarfile as _tarfile
 import httpx
+from ._resumable_upload import resumable_upload
 from typing import Optional, Dict, Any, Union, Literal, List
 from pathlib import Path
 from urllib.parse import quote
@@ -299,6 +300,16 @@ class MagnusClient:
         data: Dict[str, str],
         timeout: float,
     ) -> httpx.Response:
+        resumed = resumable_upload(
+            self.http,
+            filename,
+            file_handle,
+            data,
+            timeout,
+            self._handle_error,
+        )
+        if resumed is not None:
+            return resumed
         last_exc: Optional[Exception] = None
         for attempt in range(self._TRANSFER_MAX_RETRIES):
             try:

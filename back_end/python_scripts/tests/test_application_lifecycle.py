@@ -72,6 +72,12 @@ class ApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
             if "custody" in self.failures:
                 raise RuntimeError("custody")
 
+        def upload_shutdown():
+            self.assertEqual(self.started, self.drained)
+            self.events.append("uploads")
+            if "uploads" in self.failures:
+                raise RuntimeError("uploads")
+
         def recover():
             if "recover" in self.failures:
                 raise ValueError("recover")
@@ -103,6 +109,8 @@ class ApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 cleanup_loop=lambda: background("custody-loop"),
                 shutdown=custody_shutdown,
             ),
+            "upload_store": SimpleNamespace(shutdown=upload_shutdown),
+            "cleanup_uploads": lambda: background("uploads-loop"),
             "run_scheduler_loop": lambda: background("scheduler-loop"),
             "service_manager": SimpleNamespace(start_background_loop=lambda: background("service-loop")),
             "_refresh_all_user_info": refresh,
@@ -115,12 +123,12 @@ class ApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     def assert_shutdown_complete(self):
         self.assertEqual(self.started, self.drained)
-        self.assertEqual(self.events[-3:], ["scheduler", "custody", "builds"])
+        self.assertEqual(self.events[-4:], ["scheduler", "uploads", "custody", "builds"])
 
     async def test_normal_exit_joins_every_background_task(self):
         async with self.lifespan(None):
             await asyncio.sleep(0)
-        self.assertEqual(len(self.started), 4)
+        self.assertEqual(len(self.started), 5)
         self.assert_shutdown_complete()
 
     async def test_startup_failure_before_and_after_background_launch(self):
@@ -140,7 +148,7 @@ class ApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assert_shutdown_complete()
 
     async def test_shutdown_failure_does_not_skip_remaining_components(self):
-        for name in ("scheduler", "custody", "builds"):
+        for name in ("scheduler", "uploads", "custody", "builds"):
             with self.subTest(name=name):
                 self.failures = {name}
                 with self.assertRaisesRegex(RuntimeError, name):
