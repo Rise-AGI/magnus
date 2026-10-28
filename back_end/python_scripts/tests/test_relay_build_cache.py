@@ -4,6 +4,8 @@ from __future__ import annotations
 import ast
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import importlib.util
+import os
 import json
 from pathlib import Path
 import subprocess
@@ -13,6 +15,7 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
@@ -136,12 +139,85 @@ class RelayCacheTests(unittest.TestCase):
                 capture_output=True,
                 timeout=timeout,
             )
-            return SimpleNamespace(returncode=result.returncode, stderr=result.stderr.decode())
+            return SimpleNamespace(returncode=result.returncode, stderr=result.stderr.decode(), stdout=result.stdout.decode())
 
         self.stage("fat", SimpleNamespace(run_with_file_input=receive))
         for content in (active, legacy, releasing, self.incoming.read_bytes()):
             self.assertEqual((cache / (checksum(content)[7:] + ".sif")).read_bytes(), content)
         self.assertFalse((cache / (checksum(old)[7:] + ".sif")).exists())
+
+    def test_verified_remote_signature_is_reused_and_invalidated_by_changes(self):
+        requests = []
+        receipts = []
+        def receive(command, path, **kwargs):
+            requests.append(json.loads(kwargs["prefix"]))
+            result = subprocess.run(
+                [sys.executable, *command[1:]],
+                input=kwargs["prefix"] + Path(path).read_bytes(),
+                capture_output=True,
+                timeout=kwargs["timeout"],
+            )
+            if result.returncode == 0:
+                receipts.append(json.loads(result.stdout))
+            return SimpleNamespace(returncode=result.returncode, stdout=result.stdout.decode(), stderr=result.stderr.decode())
+        transport = SimpleNamespace(run_with_file_input=receive)
+        self.stage("default", transport)
+        self.stage("default", transport)
+        self.assertIsNone(requests[0]["verified_signature"])
+        self.assertEqual(requests[1]["verified_signature"], receipts[0]["signature"])
+        self.assertTrue(receipts[1]["cached"])
+        self.assertEqual(receipts[0]["signature"], receipts[1]["signature"])
+        content = self.incoming.read_bytes()
+        cached = self.root / "container_cache/native_builds" / (checksum(content)[7:] + ".sif")
+        before = cached.stat()
+        cached.chmod(0o644)
+        cached.write_bytes(b"x" * len(content))
+        os.utime(cached, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.stage("default", transport)
+        self.assertFalse(receipts[-1]["cached"])
+        self.assertEqual(cached.read_bytes(), content)
+        self.module["_VERIFIED_IMAGES"].clear()
+        self.stage("default", transport)
+        self.assertIsNone(requests[-1]["verified_signature"])
+        self.assertTrue(receipts[-1]["cached"])
+        memo = self.module["_VERIFIED_IMAGES"][self.targets["default"].image_cache_key]
+        self.assertTrue(memo)
+        failing = SimpleNamespace(run_with_file_input=lambda *a, **k: SimpleNamespace(returncode=1, stderr="interrupted"))
+        with self.assertRaises(RuntimeError):
+            self.stage("default", failing)
+        self.assertFalse(memo)
+
+    def test_signature_fast_path_skips_reads_but_revalidates_replacement_and_links(self):
+        spec = importlib.util.spec_from_file_location("receiver_fixture", SERVER / "_scheduler/_relay_build_receiver.py")
+        receiver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(receiver)
+        content = self.incoming.read_bytes()
+        digest = checksum(content)
+        signature = list(receiver._file_signature(self.incoming.lstat()))
+        with patch.object(Path, "open", side_effect=AssertionError("cache hit read all bytes")):
+            self.assertTrue(receiver._verified_signature(self.incoming, digest, len(content), signature))
+        replacement = self.root / "replacement"
+        replacement.write_bytes(content)
+        replacement.replace(self.incoming)
+        with patch.object(Path, "open", side_effect=AssertionError("full validation required")):
+            with self.assertRaises(AssertionError):
+                receiver._verified_signature(self.incoming, digest, len(content), signature)
+        self.assertTrue(receiver._verified_signature(self.incoming, digest, len(content), signature))
+        link = self.root / "link"
+        link.symlink_to(self.incoming)
+        self.assertFalse(receiver._verified_signature(link, digest, len(content), list(receiver._file_signature(link.lstat()))))
+
+    def test_access_touch_does_not_bless_content_changed_after_verification(self):
+        spec = importlib.util.spec_from_file_location("receiver_race_fixture", SERVER / "_scheduler/_relay_build_receiver.py")
+        receiver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(receiver)
+        content = self.incoming.read_bytes()
+        digest = checksum(content)
+        verified = receiver._verified_signature(self.incoming, digest, len(content))
+        self.incoming.write_bytes(b"x" * len(content))
+        receiver._touch_access(self.incoming)
+        self.assertFalse(receiver._verified_signature(self.incoming, digest, len(content), list(verified)))
+        self.assertNotEqual(receiver._file_signature(self.incoming.lstat()), verified)
 
     def test_cancel_while_waiting_preserves_other_jobs_cache_lock(self):
         target = self.targets["default"]
@@ -184,16 +260,16 @@ class RelayCacheTests(unittest.TestCase):
             entered.set()
             if not release.wait(5):
                 raise TimeoutError("test did not release the first transfer")
-            return SimpleNamespace(returncode=0)
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"signature": [1, 2, self.incoming.stat().st_size, 4, 5]}))
 
         def second():
             threading.current_thread().name = "shared-second"
             second_attempt.set()
-            self.stage("fat", SimpleNamespace(run_with_file_input=lambda *args, **kwargs: SimpleNamespace(returncode=0)))
+            self.stage("fat", SimpleNamespace(run_with_file_input=lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps({"signature": [1, 2, self.incoming.stat().st_size, 4, 5]}))))
 
         def separate(*args, **kwargs):
             independent.set()
-            return SimpleNamespace(returncode=0)
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"signature": [1, 2, self.incoming.stat().st_size, 4, 5]}))
 
         with ThreadPoolExecutor(max_workers=3) as pool:
             first = pool.submit(self.stage, "default", SimpleNamespace(run_with_file_input=hold))

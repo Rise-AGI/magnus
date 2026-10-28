@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import sys
 import time
 import uuid
@@ -20,6 +21,7 @@ import uuid
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _IMAGE = re.compile(r"([0-9a-f]{64})\.sif\Z")
 _PARTIAL = re.compile(r"\.partial-[0-9a-f]{32}\Z")
+_ACCESS = re.compile(r"\.access-([0-9a-f]{64})\Z")
 _CHUNK_SIZE = 1024 * 1024
 
 
@@ -42,18 +44,21 @@ def _file_signature(
     )
 
 
-def _matches_image(
+def _verified_signature(
     path,
     digest,
     expected_size,
+    verified_signature=None,
 ):
     # The remote Python may predate hashlib.file_digest. Keep verification
     # bounded in memory and independent of installed Magnus dependencies.
     try:
-        information = path.stat()
-        if information.st_size != expected_size:
+        information = path.lstat()
+        if not stat.S_ISREG(information.st_mode) or information.st_size != expected_size:
             return False
         signature = _file_signature(information)
+        if verified_signature == list(signature):
+            return signature
         checksum = hashlib.sha256()
         with path.open("rb") as stream:
             if _file_signature(os.fstat(stream.fileno())) != signature:
@@ -65,14 +70,28 @@ def _matches_image(
                 checksum.update(block)
             if _file_signature(os.fstat(stream.fileno())) != signature:
                 return False
-        return (
-            "sha256:" + checksum.hexdigest() == digest
-            and _file_signature(path.stat()) == signature
-        )
+        if "sha256:" + checksum.hexdigest() == digest and _file_signature(path.lstat()) == signature:
+            return signature
+        return None
     except TimeoutError:
         raise
     except OSError:
         return False
+
+
+def _touch_access(
+    image,
+):
+    # Access order must not change the inode metadata used as content identity.
+    # This empty marker affects eviction order only, never integrity decisions.
+    marker = image.with_name(".access-" + image.stem)
+    descriptor = os.open(str(marker), os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("Invalid image access marker")
+        os.utime(descriptor, None)
+    finally:
+        os.close(descriptor)
 
 
 def receive():
@@ -121,6 +140,9 @@ def receive():
         for path in root.iterdir():
             if _PARTIAL.fullmatch(path.name):
                 path.unlink()
+            access = _ACCESS.fullmatch(path.name)
+            if access and not (root / (access[1] + ".sif")).exists():
+                path.unlink()
 
         images = []
         for path in root.iterdir():
@@ -130,10 +152,18 @@ def receive():
             if path.is_symlink() or not path.is_file():
                 raise ValueError("Unexpected entry in the remote image cache")
             information = path.stat()
-            images.append((information.st_mtime, path, information.st_size, "sha256:" + match[1]))
+            marker = path.with_name(".access-" + match[1])
+            accessed_at = marker.lstat().st_mtime if marker.exists() and not marker.is_symlink() else information.st_mtime
+            images.append((accessed_at, path, information.st_size, "sha256:" + match[1]))
 
         destination = root / (digest.split(":")[1] + ".sif")
-        cached = destination.is_file() and _matches_image(destination, digest, size)
+        signature = destination.is_file() and _verified_signature(
+            destination,
+            digest,
+            size,
+            request.get("verified_signature"),
+        )
+        cached = bool(signature)
         if destination.is_file() and not cached and not existing_is_referenced:
             # No other Job references these invalid bytes. Discard them before
             # reserving the replacement so a cache sized for one image can heal.
@@ -150,14 +180,18 @@ def receive():
             if image_digest in protected:
                 continue
             path.unlink()
+            try:
+                path.with_name(".access-" + path.stem).unlink()
+            except FileNotFoundError:
+                pass
             used -= image_size
         if used + incoming_size > budget:
             raise RuntimeError("Remote image cache is full with protected images")
         if shutil.disk_usage(root).free < free_floor + incoming_size:
             raise RuntimeError("Insufficient free disk space for remote image staging")
         if cached:
-            os.utime(str(destination), None)
-            return {"cached": True}
+            _touch_access(destination)
+            return {"cached": True, "signature": list(signature)}
 
         temporary = root / (".partial-" + uuid.uuid4().hex)
         try:
@@ -186,7 +220,11 @@ def receive():
                 os.fsync(directory_fd)
             finally:
                 os.close(directory_fd)
-            return {"cached": False}
+            _touch_access(destination)
+            signature = _verified_signature(destination, digest, size)
+            if not signature:
+                raise ValueError("Published image changed during verification")
+            return {"cached": False, "signature": list(signature)}
         finally:
             if temporary.exists():
                 temporary.unlink()

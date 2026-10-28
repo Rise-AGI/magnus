@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import errno
 import importlib.util
 import json
 import os
@@ -82,6 +83,14 @@ def load_coordinator():
         if selected == {"_run_blocking_io"}:
             module.blocking_io = module._run_blocking_io
     return module
+
+
+def cross_volume_replace(real_replace):
+    def replace(source, destination):
+        if Path(source).name == "image.sif":
+            raise OSError(errno.EXDEV, "test cross-volume staging")
+        return real_replace(source, destination)
+    return replace
 
 
 class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
@@ -232,6 +241,150 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             release_check.set()
             await cached
 
+    async def test_same_volume_import_does_not_copy_a_second_sif(self):
+        self.finish_conversion.set()
+        with patch.object(self.module.shutil, "copyfile", side_effect=AssertionError("redundant SIF copy")):
+            result = await self.import_image()
+        self.assertEqual(Path(result["sif_path"]).read_bytes(), b"SIF bytes")
+        self.assertEqual(self.manager.pins["job"], result["digest"])
+        self.assertFalse((self.directory / "image.sif").exists())
+        self.assertFalse(self.manager.incoming_paths)
+
+    async def test_staging_does_not_mask_non_cross_device_errors(self):
+        source = self.directory / "image.sif"
+        source.write_bytes(b"image")
+        with (
+            patch.object(self.module.os, "replace", side_effect=PermissionError(errno.EACCES, "denied")),
+            patch.object(self.module.shutil, "copyfile") as copy,
+        ):
+            with self.assertRaises(PermissionError):
+                self.module._stage_sif(source, self.manager.root / ".incoming.tmp")
+            copy.assert_not_called()
+        self.assertEqual(source.read_bytes(), b"image")
+
+    async def test_successful_budget_sample_is_shared_only_within_window_and_generation(self):
+        self.manager.client.disk_usage = AsyncMock(return_value=0)
+        await self.manager._ensure_cached_budget()
+        await self.manager._ensure_cached_budget()
+        self.assertEqual(self.manager.client.disk_usage.await_count, 1)
+        self.manager.cached_budget_checked_at -= 4
+        await self.manager._ensure_cached_budget()
+        self.assertEqual(self.manager.client.disk_usage.await_count, 2)
+        self.manager.budget_generation += 1
+        await self.manager._ensure_cached_budget()
+        self.assertEqual(self.manager.client.disk_usage.await_count, 3)
+        self.manager.cached_budget_checked_at -= 4
+        self.manager.client.disk_usage.side_effect = self.module.ImageBuildError("unavailable")
+        with self.assertRaises(self.module.ImageBuildError):
+            await self.manager._ensure_cached_budget()
+        with self.assertRaises(self.module.ImageBuildError):
+            await self.manager._ensure_cached_budget()
+        self.assertEqual(self.manager.cached_budget_generation, -1)
+
+    async def test_repeated_runtime_hits_share_budget_but_not_content_validation(self):
+        for local in (False, True):
+            with self.subTest(local=local):
+                self.module.is_local_mode = local
+                path = self.manager.root / "source"
+                path.write_bytes(b"warm")
+                digest = self.module._hash_file(path)
+                path.rename(self.manager._sif_path(digest))
+                self.manager.results[self.operation.key] = {
+                    "digest": digest, "sif_path": str(self.manager._sif_path(digest)),
+                    "size_bytes": 4, "docker_tag": "tag", "docker_image": digest,
+                }
+                self.module.run_command = AsyncMock(return_value=digest)
+                self.manager._docker_inventory = AsyncMock(return_value={})
+                self.manager.cached_budget_generation = -1
+                self.manager.client.disk_usage = AsyncMock(return_value=0)
+                self.assertIsNotNone(await self.manager._cached_result(self.operation))
+                self.assertIsNotNone(await self.manager._cached_result(self.operation))
+                self.assertEqual(self.manager.client.disk_usage.await_count, 1)
+                if local:
+                    self.assertEqual(self.module.run_command.await_count, 2)
+                else:
+                    self.manager._sif_path(digest).write_bytes(b"bad!")
+                    self.assertIsNone(await self.manager._cached_result(self.operation))
+
+    async def test_fresh_budget_sample_does_not_hide_a_free_space_drop(self):
+        await self.manager._ensure_cached_budget()
+        self.manager.free_floor = 100
+        with patch.object(self.module.shutil, "disk_usage", return_value=types.SimpleNamespace(free=1)):
+            with self.assertRaises(self.module._CacheBudgetError):
+                await self.manager._ensure_cached_budget()
+        self.assertEqual(self.manager.cached_budget_generation, -1)
+
+    async def test_older_success_cannot_overwrite_newer_failed_budget_check(self):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+        async def usage():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                entered.set()
+                await release.wait()
+                return 0
+            raise self.module.ImageBuildError("worker unavailable")
+        self.manager.client.disk_usage = AsyncMock(side_effect=usage)
+        earlier = asyncio.create_task(self.manager._ensure_cached_budget())
+        await entered.wait()
+        with self.assertRaises(self.module.ImageBuildError):
+            await self.manager._ensure_budget()
+        release.set()
+        await earlier
+        self.assertEqual(self.manager.cached_budget_generation, -1)
+        with self.assertRaises(self.module.ImageBuildError):
+            await self.manager._ensure_cached_budget()
+        self.assertEqual(calls, 3)
+
+    async def test_hot_budget_sample_checks_occupied_legacy_scratch_volume(self):
+        legacy = self.base / "legacy"
+        legacy.mkdir()
+        (legacy / "retained").write_bytes(b"data")
+        self.manager.legacy_temporary_root = legacy
+        await self.manager._ensure_cached_budget()
+        self.assertIn(legacy, self.manager.budget_volumes)
+        self.manager.free_floor = 100
+        real_usage = self.module.shutil.disk_usage
+        def space(path):
+            return types.SimpleNamespace(free=1) if Path(path) == legacy else real_usage(path)
+        with patch.object(self.module.shutil, "disk_usage", side_effect=space):
+            with self.assertRaises(self.module._CacheBudgetError):
+                await self.manager._ensure_cached_budget()
+
+    async def test_cancelled_budget_waiter_leaves_the_check_owner_running(self):
+        entered = asyncio.Event()
+        released = asyncio.Event()
+        async def usage():
+            entered.set()
+            await released.wait()
+            return 0
+        self.manager.client.disk_usage = AsyncMock(side_effect=usage)
+        owner = asyncio.create_task(self.manager._ensure_cached_budget())
+        await entered.wait()
+        waiter = asyncio.create_task(self.manager._ensure_cached_budget())
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await waiter
+        self.assertFalse(owner.done())
+        released.set()
+        await owner
+        await self.manager._ensure_cached_budget()
+        self.assertEqual(self.manager.client.disk_usage.await_count, 1)
+
+    async def test_low_water_collection_avoids_redundant_scans_and_index_write(self):
+        self.manager._usage = AsyncMock(wraps=self.manager._usage)
+        self.manager.client.disk_usage = AsyncMock(return_value=0)
+        self.manager._save_index = AsyncMock()
+        await self.manager._collect_cache()
+        self.assertEqual(self.manager._usage.await_count, 1)
+        self.assertEqual(self.manager.client.disk_usage.await_count, 1)
+        self.manager._save_index.assert_not_awaited()
+        await self.manager._ensure_budget()
+        self.assertEqual(self.manager.client.disk_usage.await_count, 2)
+
     async def test_incoming_copy_is_protected_from_gc(self):
         copying = threading.Event()
         release_copy = threading.Event()
@@ -244,7 +397,10 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             return original_copy(source, target)
 
         self.finish_conversion.set()
-        with patch.object(self.module.shutil, "copyfile", held_copy):
+        with (
+            patch.object(self.module.shutil, "copyfile", held_copy),
+            patch.object(self.module.os, "replace", cross_volume_replace(self.module.os.replace)),
+        ):
             importing = asyncio.create_task(self.import_image())
             self.assertTrue(await asyncio.to_thread(copying.wait, 2))
             incoming = next(iter(self.manager.incoming_paths))
@@ -273,7 +429,10 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             return original_copy(source, target)
 
         self.finish_conversion.set()
-        with patch.object(self.module.shutil, "copyfile", held_copy):
+        with (
+            patch.object(self.module.shutil, "copyfile", held_copy),
+            patch.object(self.module.os, "replace", cross_volume_replace(self.module.os.replace)),
+        ):
             importing = asyncio.create_task(self.import_image())
             self.assertTrue(await asyncio.to_thread(copying.wait, 2))
             incoming = next(iter(self.manager.incoming_paths))
@@ -414,6 +573,7 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             await release_save.wait()
 
         self.manager._save_index = held_save
+        (self.manager.root / ".abandoned.tmp").write_bytes(b"orphan")
         self.manager.client.size = self.manager.budget // 2
         self.manager.client.prune = AsyncMock(wraps=self.manager.client.prune)
         collecting = asyncio.create_task(self.manager._collect_cache())

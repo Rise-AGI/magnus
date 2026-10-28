@@ -6,6 +6,7 @@ the complete-request mapping, Job waiters, runtime copies and station budget.
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import json
 import logging
@@ -29,6 +30,24 @@ from ._scratch_windows import prepare_private_directory as _prepare_windows_scra
 
 logger = logging.getLogger(__name__)
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _stage_sif(
+    source: Path,
+    destination: Path,
+) -> None:
+    try:
+        os.replace(
+            source,
+            destination,
+        )
+    except OSError as error:
+        if error.errno != errno.EXDEV:
+            raise
+        shutil.copyfile(
+            source,
+            destination,
+        )
 
 
 class _CacheBudgetError(ImageBuildError):
@@ -234,6 +253,12 @@ class ImageBuildManager:
         self.initialize_lock = asyncio.Lock()
         self.maintenance_lock = asyncio.Lock()
         self.inventory_lock = asyncio.Lock()
+        self.cached_budget_lock = asyncio.Lock()
+        self.budget_generation = 0
+        self.cached_budget_generation = -1
+        self.cached_budget_checked_at = 0.0
+        self.budget_check_sequence = 0
+        self.budget_volumes: tuple[Path, ...] = (self.root, self.temporary_root)
         self.slots = asyncio.Semaphore(self.config.get("max_concurrent", 2))
         self.budget = _parse_size_string(self.config.get("cache_size", "40G"))
         self.scratch_budget = self.config.get("scratch_size_bytes") or _parse_size_string(
@@ -665,7 +690,7 @@ class ImageBuildManager:
                 return None
         # Waiter pins (including late arrivals via operation.result) protect the
         # selected image while collection acquires maintenance_lock itself.
-        await self._ensure_budget()
+        await self._ensure_cached_budget()
         return result
 
     async def _run(
@@ -689,6 +714,7 @@ class ImageBuildManager:
                 if cached is not None:
                     operation.progress.set_phase("ready")
                     return cached
+                self.budget_generation += 1
                 await self._collect_cache()
                 await self._ensure_budget()
                 directory = self.temporary_root / f"build-{uuid.uuid4().hex}"
@@ -750,6 +776,8 @@ class ImageBuildManager:
                 if directory:
                     await blocking_io(shutil.rmtree, directory, True)
             finally:
+                if directory:
+                    self.budget_generation += 1
                 with self.lock:
                     if self.operations.get(operation.key) is operation:
                         self.operations.pop(operation.key, None)
@@ -808,6 +836,7 @@ class ImageBuildManager:
         published_digest: str | None = None
         published_result: dict | None = None
         previous_result: dict | None = None
+        self.budget_generation += 1
         try:
             await self._ensure_budget()
             # Register ownership before Docker can install its temporary tag.
@@ -871,10 +900,13 @@ class ImageBuildManager:
                 incoming = self.root / f".{digest.split(':')[1]}.{uuid.uuid4().hex}.tmp"
                 async with self.maintenance_lock:
                     self.incoming_paths.add(incoming)
-                # The two roots can be different filesystems. Only the final
-                # rename belongs to publication; a large copy must not block a
-                # cached image or pressure monitoring for another request.
-                await blocking_io(shutil.copyfile, temporary_sif, incoming)
+                # Same-volume staging needs no second SIF. Cross-volume copies
+                # retain their reservation and joined cancellation semantics.
+                await blocking_io(
+                    _stage_sif,
+                    temporary_sif,
+                    incoming,
+                )
                 await blocking_io(os.chmod, incoming, 0o644)
                 result = {
                     "key": operation.key,
@@ -929,6 +961,7 @@ class ImageBuildManager:
                 temporary_tag,
             ))
             await self._join_cleanup(cleanup)
+            self.budget_generation += 1
 
     @staticmethod
     def _clear_scratch_payload(
@@ -1048,6 +1081,7 @@ class ImageBuildManager:
         size = _directory_size(self.root)
         scratch_size = 0
         free = shutil.disk_usage(self.root).free
+        volumes = [self.root]
         for root in self._scratch_roots():
             occupied = _directory_size(root)
             scratch_size += occupied
@@ -1055,8 +1089,10 @@ class ImageBuildManager:
             # move and need not meet the new scratch volume's free-space floor.
             if root == self.temporary_root or occupied:
                 free = min(free, shutil.disk_usage(root).free)
+                volumes.append(root)
             if not root.is_relative_to(self.root):
                 size += occupied
+        self.budget_volumes = tuple(volumes)
         return size, free, scratch_size
 
     async def _docker_inventory(
@@ -1170,7 +1206,10 @@ class ImageBuildManager:
 
     async def _check_budget(
         self,
-    ) -> None:
+    ) -> int:
+        self.budget_check_sequence += 1
+        sequence = self.budget_check_sequence
+        self.cached_budget_generation = -1
         local_size, free, scratch_size = await self._usage()
         if scratch_size > self.scratch_budget:
             raise _CacheBudgetError(
@@ -1202,6 +1241,7 @@ class ImageBuildManager:
                 reason="free",
                 usage=usage,
             )
+        return sequence
 
     async def _collect_cache(
         self,
@@ -1211,35 +1251,64 @@ class ImageBuildManager:
         # GC thresholds only bound retained cache. Active writes require the
         # worker/scratch volumes' filesystem quota for a strict physical cap.
 
-    async def _ensure_budget(
+    async def _ensure_cached_budget(
         self,
     ) -> None:
+        # Reuse does not add image bytes. Coalesce it within the same three-
+        # second sampling window as active-build monitoring; writes still check
+        # independently. A cancelled waiter never cancels another check owner.
+        async with self.cached_budget_lock:
+            generation = self.budget_generation
+            if (
+                self.cached_budget_generation == generation
+                and time.monotonic() - self.cached_budget_checked_at < 3
+            ):
+                roots = self.budget_volumes
+                free = await blocking_io(
+                    lambda: min(shutil.disk_usage(root).free for root in roots),
+                )
+                if (
+                    free >= self.free_floor
+                    and self.budget_generation == generation
+                    and self.cached_budget_generation == generation
+                ):
+                    return
+            self.cached_budget_generation = -1
+            sequence = await self._ensure_budget()
+            if self.budget_generation == generation and sequence == self.budget_check_sequence:
+                self.cached_budget_generation = generation
+                self.cached_budget_checked_at = time.monotonic()
+
+    async def _ensure_budget(
+        self,
+    ) -> int:
         try:
-            await self._check_budget()
+            return await self._check_budget()
         except _CacheBudgetError as error:
             if error.reason == "scratch":
                 raise
             async with self.maintenance_lock:
-                await self._ensure_budget_locked()
+                return await self._ensure_budget_locked()
 
     async def _ensure_budget_locked(
         self,
         protected: frozenset[str] = frozenset(),
-    ) -> None:
+    ) -> int:
         # Publication already owns maintenance_lock. Recheck after acquiring it
         # so another collector can resolve pressure without duplicate pruning.
         try:
-            await self._check_budget()
+            return await self._check_budget()
         except _CacheBudgetError as error:
             if error.reason == "scratch":
                 raise
             await self._collect_cache_locked(protected)
-            await self._check_budget()
+            return await self._check_budget()
 
     async def _collect_cache_locked(
         self,
         protected: frozenset[str] = frozenset(),
     ) -> None:
+        self.budget_generation += 1
         local_size, free, scratch_size = await self._usage()
         if scratch_size > self.scratch_budget:
             return
@@ -1251,8 +1320,10 @@ class ImageBuildManager:
             worker_size=worker_size,
         )
         removed_orphans = await self._remove_orphans(protected)
-        local_size, free, scratch_size = await self._usage()
         target = int(self.budget * 0.8)
+        if not removed_orphans and local_size + worker_size <= target and free >= self.free_floor:
+            return
+        local_size, free, scratch_size = await self._usage()
         removed_count = 0
         with self.lock:
             products = {value["digest"]: dict(value) for value in self.results.values()}

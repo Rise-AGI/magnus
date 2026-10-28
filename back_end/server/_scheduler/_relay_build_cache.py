@@ -1,6 +1,7 @@
 """Bounded native-build SIF cache on an SSH execution host."""
 from __future__ import annotations
 
+from collections import OrderedDict
 import json
 from pathlib import Path
 import re
@@ -21,6 +22,8 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 # remote reclamation and entire transfer in one critical section.
 _STAGING_LOCKS: dict[tuple[str, ...], threading.Lock] = {}
 _STAGING_LOCKS_GUARD = threading.Lock()
+_VERIFIED_IMAGES: dict[tuple[str, ...], OrderedDict[str, list[int]]] = {}
+_VERIFIED_LIMIT = 256
 _RECEIVER_PATH = Path(__file__).with_name("_relay_build_receiver.py")
 
 
@@ -57,6 +60,7 @@ def stage_built_sif(
     ]
     with _STAGING_LOCKS_GUARD:
         staging_lock = _STAGING_LOCKS.setdefault(cache_key, threading.Lock())
+        verified = _VERIFIED_IMAGES.setdefault(cache_key, OrderedDict())
     check_transfer_cancelled(cancel_event)
     while not staging_lock.acquire(timeout=0.1):
         check_transfer_cancelled(cancel_event)
@@ -84,12 +88,16 @@ def stage_built_sif(
             if not isinstance(active_digest, str) or not _DIGEST.fullmatch(active_digest):
                 raise ValueError("Active Job has an invalid built image digest")
             protected.add(active_digest)
+        size = Path(local_path).stat().st_size
         metadata = json.dumps({
             "digest": digest,
-            "size": Path(local_path).stat().st_size,
+            "size": size,
             "budget": _parse_size_string(config["cache_size"]),
             "free_floor": _parse_size_string(config["min_free_space"]),
             "protected": sorted(protected),
+            # Trust lives only in this controller process. Restart or any
+            # remote inode/size/time change requires full content verification.
+            "verified_signature": verified.pop(digest, None),
         }).encode("utf-8") + b"\n"
         if len(metadata) > 4 * 1024 * 1024:
             raise ValueError("Remote image protection metadata exceeds 4 MiB")
@@ -108,5 +116,19 @@ def stage_built_sif(
         )
         if result.returncode != 0:
             raise RuntimeError(f"Remote built image preparation failed: {result.stderr.strip()[:4096]}")
+        if len(result.stdout) > 4096:
+            raise ValueError("Oversized remote image receipt")
+        receipt = json.loads(result.stdout)
+        signature = receipt.get("signature")
+        if (
+            not isinstance(signature, list)
+            or len(signature) != 5
+            or any(type(value) is not int for value in signature)
+            or signature[2] != size
+        ):
+            raise ValueError("Invalid remote image verification receipt")
+        verified[digest] = signature
+        while len(verified) > _VERIFIED_LIMIT:
+            verified.popitem(last=False)
     finally:
         staging_lock.release()
