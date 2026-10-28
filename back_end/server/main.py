@@ -26,6 +26,7 @@ from .routers.images import recover_stuck_images
 from ._feishu_client import feishu_client
 from ._blocking_io import _run_blocking_io
 from ._lifecycle import cancel_background_tasks, lifespan_resources
+from ._upload_receive import UploadTelemetryMiddleware
 
 
 class EndpointFilter(logging.Filter):
@@ -636,6 +637,8 @@ app.add_middleware(
     allow_headers = ["*"],
 )
 
+
+app.add_middleware(UploadTelemetryMiddleware)
 
 app.include_router(router, prefix="/api")
 app.include_router(ws_router)

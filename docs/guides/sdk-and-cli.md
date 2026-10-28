@@ -2037,3 +2037,9 @@ During polling, transient network errors (DNS, connection reset, etc.) or 5xx re
 **Q: What is the difference between `--format yaml` and auto-switching when piped?**
 
 Auto-switch when piped: YAML is used automatically when the output is not a terminal. `--format yaml`: forces YAML, even in a terminal.
+
+### Upload reception and failures
+
+The legacy custody upload endpoint and receipt format remain supported. Authentication runs before multipart parsing. Administrators can bound concurrent receivers, HTTP body bytes and aggregate temporary-file reservations with `server.file_custody.receive`; omitted limits preserve existing behavior. The temporary filesystem's free-space floor is sampled while receiving; it cannot reserve space against unrelated writers. These limits include multipart overhead and do not replace custody's final file/total-storage limits.
+
+Upload diagnostics correlate the public proxy and backend with a request ID, UTC timestamps and received body bytes, without logging filenames, URLs or receipt secrets. A client disconnect is distinct from an upstream failure. In the current SDK source, legacy uploads retry only failures known to occur before a request was sent. A timeout or 5xx after possible acceptance raises `UploadOutcomeUnknown`: the server may already have stored the file, so the SDK does not silently upload it again. Older installed SDKs keep their original retry behavior.

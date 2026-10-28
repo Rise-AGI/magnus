@@ -90,7 +90,7 @@ class ErrorTests(unittest.TestCase):
         self.assertEqual(stream.read_count, 0)
         response.close()
 
-    def test_upload_retries_and_auth_exception_are_preserved(self):
+    def test_uncertain_upload_is_not_replayed_and_auth_exception_is_preserved(self):
         hits = []
         streams = []
         def handler(request):
@@ -101,9 +101,9 @@ class ErrorTests(unittest.TestCase):
         client = self._client()
         with httpx.Client(base_url="http://invalid", transport=httpx.MockTransport(handler)) as http:
             client._client = http
-            with patch.object(client_module.time, "sleep"), self.assertRaises(exceptions._ServerError) as context:
+            with patch.object(client_module.time, "sleep"), self.assertRaises(exceptions.UploadOutcomeUnknown) as context:
                 client._post_file_with_retry("data.bin", io.BytesIO(b"DATA"), {}, 1)
-        self.assertEqual(len(hits), 3)
+        self.assertEqual(len(hits), 1)
         self.assertTrue(all(b"DATA" in body for body in hits))
         self.assertTrue(all(stream.closed for stream in streams))
         self.assertIn("Storage full", str(context.exception))

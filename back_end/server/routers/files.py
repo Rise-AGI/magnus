@@ -3,14 +3,19 @@ import logging
 import re
 from pathlib import Path
 from typing import Literal, Optional
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from starlette.datastructures import UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from .auth import get_current_user
 from .. import database, models
 from .._magnus_config import magnus_config
+from .._size_utils import _parse_size_string
+from .._upload_receive import UploadAdmission, upload_event
+from .._blocking_io import _run_blocking_io
 from .._custody_receipts import _read_custody_receipts, _RELAY_TOKEN_RE
 from .._file_custody_manager import (
     file_custody_manager,
@@ -22,6 +27,13 @@ from .._file_custody_manager import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_receive_config = magnus_config["server"]["file_custody"].get("receive", {})
+_upload_admission = UploadAdmission(
+    max_concurrent=_receive_config.get("max_concurrent", 0),
+    max_body_bytes=_parse_size_string(_receive_config["max_body_size"]) if _receive_config.get("max_body_size") else 0,
+    max_spool_bytes=_parse_size_string(_receive_config["max_spool_size"]) if _receive_config.get("max_spool_size") else 0,
+    min_free_bytes=_parse_size_string(_receive_config["min_free_space"]) if _receive_config.get("min_free_space") else 0,
+)
 
 
 class FileCustodyResponse(BaseModel):
@@ -118,10 +130,17 @@ class CustodyFileResponse(FileResponse):
             await file_custody_manager.release_file_async(self._custody_token)
 
 
+class UploadOptions(BaseModel):
+    expire_minutes: Optional[int] = None
+    max_downloads: Optional[int] = None
+    is_directory: bool = False
+    job_id: Optional[str] = None
+
+
 def custody_upload_job(
-    job_id: Optional[str] = Form(default=None),
-    db: Session = Depends(database.get_db),
-    user: models.User = Depends(get_current_user),
+    job_id: Optional[str],
+    db: Session,
+    user: models.User,
 ) -> Optional[str]:
     if job_id is None:
         return None
@@ -137,46 +156,62 @@ def custody_upload_job(
     return job_id
 
 
-@router.post("/files/upload", response_model=FileCustodyResponse)
+@router.post(
+    "/files/upload",
+    response_model=FileCustodyResponse,
+    openapi_extra={"requestBody": {"required": True, "content": {"multipart/form-data": {
+        "schema": {"type": "object", "required": ["file"], "properties": {
+            **UploadOptions.model_json_schema()["properties"],
+            "file": {"type": "string", "format": "binary"},
+        }},
+    }}}},
+)
 async def upload_file(
-    file: UploadFile,
-    expire_minutes: Optional[int] = Form(default=None),
-    max_downloads: Optional[int] = Form(default=None),
-    is_directory: bool = Form(default=False),
+    request: Request,
     user: models.User = Depends(get_current_user),
-    job_id: Optional[str] = Depends(custody_upload_job),
-)-> FileCustodyResponse:
-    max_ttl = magnus_config["server"]["file_custody"]["max_ttl_minutes"]
-    if expire_minutes is not None and expire_minutes > max_ttl:
-        raise HTTPException(
-            status_code = 400,
-            detail = f"expire_minutes exceeds maximum allowed ({max_ttl} min)",
-        )
-    if max_downloads is not None and max_downloads < 1:
-        raise HTTPException(
-            status_code = 400,
-            detail = "max_downloads must be at least 1",
-        )
-
-    filename = file.filename or "upload"
-    logger.info(f"File upload from {user.name}: {filename}, expire_minutes={expire_minutes}, max_downloads={max_downloads}")
-
-    try:
-        token = await file_custody_manager.store_file_async(
-            filename = filename,
-            file_obj = file.file,
-            expire_minutes = expire_minutes,
-            is_directory = is_directory,
-            max_downloads = max_downloads,
-            job_id = job_id,
-        )
-    except CustodyLimitError as e:
-        raise HTTPException(status_code=429, detail=str(e))
-    except CustodyStorageFullError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except FileTooLargeError as e:
-        raise HTTPException(status_code=413, detail=str(e))
-    return FileCustodyResponse(file_secret=f"{FILE_SECRET_PREFIX}{token}")
+    db: Session = Depends(database.get_db),
+) -> FileCustodyResponse:
+    # Declaring Form/UploadFile would let FastAPI spool the body before auth.
+    async with _upload_admission.receive(request):
+        async with request.form(max_files=1, max_fields=4, max_part_size=65536) as form:
+            file = form.get("file")
+            if not isinstance(file, UploadFile):
+                raise HTTPException(422, "An uploaded file is required")
+            try:
+                options = UploadOptions.model_validate({
+                    name: form[name]
+                    for name in UploadOptions.model_fields
+                    if name in form and form[name] != ""
+                })
+            except ValidationError as error:
+                raise RequestValidationError(error.errors()) from None
+            max_ttl = magnus_config["server"]["file_custody"]["max_ttl_minutes"]
+            if options.expire_minutes is not None and options.expire_minutes > max_ttl:
+                raise HTTPException(400, f"expire_minutes exceeds maximum allowed ({max_ttl} min)")
+            if options.max_downloads is not None and options.max_downloads < 1:
+                raise HTTPException(400, "max_downloads must be at least 1")
+            # The SQLite session belongs to the dependency's worker; do not run
+            # its blocking lookup on the event loop or concurrently use it.
+            job_id = await _run_blocking_io(custody_upload_job, options.job_id, db, user)
+            upload_event(request, "parsed", file_bytes=file.size)
+            try:
+                upload_event(request, "storing")
+                token = await file_custody_manager.store_file_async(
+                    filename=file.filename or "upload",
+                    file_obj=file.file,
+                    expire_minutes=options.expire_minutes,
+                    is_directory=options.is_directory,
+                    max_downloads=options.max_downloads,
+                    job_id=job_id,
+                )
+            except CustodyLimitError as error:
+                raise HTTPException(429, str(error)) from None
+            except CustodyStorageFullError as error:
+                raise HTTPException(503, str(error)) from None
+            except FileTooLargeError as error:
+                raise HTTPException(413, str(error)) from None
+            upload_event(request, "receipt_committed")
+            return FileCustodyResponse(file_secret=f"{FILE_SECRET_PREFIX}{token}")
 
 
 @router.get("/files/download/{token}")

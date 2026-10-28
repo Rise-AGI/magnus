@@ -53,6 +53,9 @@ class CustodyStatusTests(unittest.TestCase):
 
         namespace = {
             **receipts,
+            **runpy.run_path(str(SERVER / "_upload_receive.py")),
+            "_parse_size_string": self.namespace["_parse_size_string"],
+            "_run_blocking_io": self.namespace["_run_blocking_io"],
             "__name__": __name__,
             "database": SimpleNamespace(get_db=get_db),
             "models": SimpleNamespace(Job=Job, JobStatus=JobStatus, User=object),

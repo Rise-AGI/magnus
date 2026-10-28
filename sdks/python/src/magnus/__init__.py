@@ -6,7 +6,9 @@ from enum import Enum
 import re
 
 from .exceptions import (
-    MagnusError, APIError,
+    MagnusError,
+    UploadOutcomeUnknown,
+    APIError,
     AuthenticationError, ForbiddenError, ResourceNotFoundError, ConflictError,
     ExecutionError,
 )
@@ -144,6 +146,7 @@ __all__ = [
     "remove_site",
     "set_current_site",
     "MagnusError",
+    "UploadOutcomeUnknown",
     "APIError",
     "AuthenticationError",
     "ForbiddenError",

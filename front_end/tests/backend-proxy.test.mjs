@@ -121,6 +121,20 @@ test("100-continue uploads preserve bytes and authentication", async () => {
   assert.equal(received.headers["x-request-id"], result.headers["x-request-id"]);
 });
 
+test("caller cancellation is identified without replaying an upload", async () => {
+  const abort = new AbortController();
+  abort.abort(new Error("private caller reason"));
+  const before = hits.length;
+  const result = await proxyToBackend(new Request("http://public/api/files/upload", {
+    method: "POST", body: "private payload", signal: abort.signal,
+  }), backendBase);
+  assert.equal(result.status, 499);
+  assert.equal(hits.length, before);
+  const body = await result.text();
+  assert.ok(!body.includes("private"));
+  assert.ok(result.headers.get("x-request-id"));
+});
+
 test("chunked uploads and escaped paths are forwarded without buffering", async () => {
   const result = await post("/api/a%2Fb?query=%2F", Buffer.from("chunked payload"));
   assert.equal(result.status, 200);

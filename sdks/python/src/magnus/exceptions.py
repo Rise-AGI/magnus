@@ -43,6 +43,10 @@ class ExecutionError(MagnusError):
     pass
 
 
+class UploadOutcomeUnknown(MagnusError):
+    """An upload may have committed; replaying it could create a second receipt."""
+
+
 class _ServerError(MagnusError):
     """5xx — transient, worth retrying. Internal marker for retry loops;
     not exported. Inherits MagnusError so that if a retry loop exhausts

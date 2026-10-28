@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "cachetools>=5.0.0",
-    "fastapi>=0.124.0",
+    "fastapi>=0.133.0,<0.134.0",
     "fastmcp>=2.14.2",
     "httpx[socks]>=0.28.1",
     "magnus-sdk>=0.8.2",
@@ -21,6 +21,7 @@ dependencies = [
     "pywheels==0.8.3.2",
     "ruamel-yaml>=0.18.16",
     "sqlalchemy>=2.0.44",
+    "starlette>=1.6.0,<1.7.0",
     "torch>=2.9.1",
     "torchvision>=0.24.1",
     "uvicorn>=0.38.0",

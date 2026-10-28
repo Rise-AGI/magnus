@@ -99,7 +99,7 @@ class JobCancellationTests(unittest.TestCase):
                     slurm_manager=SimpleNamespace(kill_job=lambda *args, **kwargs: self.kill(manager, *args, **kwargs)),
                     _clean_up_working_table=lambda value: cleanups.append(value),
                 )
-                job = SimpleNamespace(id="job", status="Running", slurm_job_id="123", finalization_status=None, runner="user", user=SimpleNamespace(token="private-token"))
+                job = SimpleNamespace(id="job", status="Running", slurm_job_id="123", finalization_status=None, submission_attempt=None, runner="user", user=SimpleNamespace(token="private-token"))
                 db = SimpleNamespace(commit=lambda: commits.append(True), refresh=lambda job: None)
                 if accepted:
                     terminate(actor, db, job)

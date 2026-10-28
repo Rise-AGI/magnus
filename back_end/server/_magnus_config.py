@@ -405,8 +405,21 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(file_custody, "max_processes", int)
     _check_key(file_custody, "default_ttl_minutes", int)
     _check_key(file_custody, "max_ttl_minutes", int)
+    file_custody.setdefault("receive", {})
+    receive = file_custody["receive"]
+    _check_key(file_custody, "receive", dict)
+    receive.setdefault("max_concurrent", 0)
+    _check_key(receive, "max_concurrent", int)
+    if type(receive["max_concurrent"]) is not int or receive["max_concurrent"] < 0:
+        raise ValueError("server.file_custody.receive.max_concurrent must be nonnegative")
+    for key in ("max_body_size", "max_spool_size", "min_free_space"):
+        receive.setdefault(key, None)
+        _check_key(receive, key, str, nullable=True)
+        if receive[key] is not None and _parse_size_string(receive[key]) <= 0:
+            raise ValueError(f"server.file_custody.receive.{key} must be a positive size")
+    _warn_extra_keys(receive, {"max_concurrent", "max_body_size", "max_spool_size", "min_free_space"}, "server.file_custody.receive")
     _warn_extra_keys(file_custody, {
-        "max_size", "max_file_size", "max_processes", "default_ttl_minutes", "max_ttl_minutes",
+        "max_size", "max_file_size", "max_processes", "default_ttl_minutes", "max_ttl_minutes", "receive",
     }, "server.file_custody")
 
     # execution 配置 (续)

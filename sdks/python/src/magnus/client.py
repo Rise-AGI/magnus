@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .exceptions import (
+    UploadOutcomeUnknown,
     MagnusError, APIError,
     AuthenticationError, ForbiddenError, ResourceNotFoundError, ConflictError,
     ExecutionError, _ServerError,
@@ -310,17 +311,23 @@ class MagnusClient:
                     timeout=timeout,
                 ) as resp:
                     if resp.status_code >= 500:
-                        raise _ServerError(http_error_detail(resp))
+                        raise UploadOutcomeUnknown(
+                            "Upload outcome is unknown; the request was not replayed. " + http_error_detail(resp)
+                        )
                     self._handle_error(resp)
                     resp.read()
                     return resp
-            except (*self._TRANSFER_TRANSIENT_ERRORS, _ServerError) as e:
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as e:
                 last_exc = e
                 if attempt == self._TRANSFER_MAX_RETRIES - 1:
                     break
                 backoff = min(self._TRANSFER_BACKOFF_BASE * (2 ** attempt), self._TRANSFER_MAX_BACKOFF)
                 logger.warning(f"Upload attempt {attempt + 1} failed: {e}. Retrying in {backoff:.0f}s...")
                 time.sleep(backoff)
+            except httpx.TransportError as error:
+                raise UploadOutcomeUnknown(
+                    "Upload outcome is unknown; the request was not replayed (" + type(error).__name__ + ")."
+                ) from None
         assert last_exc is not None
         raise last_exc
 

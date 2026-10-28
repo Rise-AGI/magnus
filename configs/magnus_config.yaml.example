@@ -80,6 +80,13 @@ server:
     max_processes: 128
     default_ttl_minutes: 60  # 1 hour
     max_ttl_minutes: 1440    # 1 day
+    # Optional receive limits apply before multipart spooling. Omitted/null
+    # sizes and max_concurrent=0 preserve the existing receive limits.
+    receive:
+      max_concurrent: 0
+      max_body_size: null    # whole HTTP body, including multipart metadata
+      max_spool_size: null   # aggregate concurrent request reservations
+      min_free_space: null   # free-space floor on Python's temporary filesystem
   explorer:
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-235b-a22b
