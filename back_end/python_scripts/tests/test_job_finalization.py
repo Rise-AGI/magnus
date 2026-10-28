@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import runpy
 import asyncio
 from datetime import datetime, timezone
 import logging
@@ -50,6 +51,7 @@ def load_mixin(
     relative_path,
     namespace,
 ):
+    namespace.update({key: value for key, value in runpy.run_path(str(SERVER / "_staging_diagnostics.py")).items() if key in {"StagingProgress", "finish_staging", "prune_staging"}})
     path = SERVER / relative_path
     tree = ast.parse(path.read_text(encoding="utf-8"))
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or (not node.level and node.module != "pywheels.file_tools")]

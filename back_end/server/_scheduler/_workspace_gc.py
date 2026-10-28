@@ -23,6 +23,7 @@ from ..models import Job, JobStatus
 from .._magnus_config import magnus_config
 from .._resource_manager import resource_manager
 from .._size_utils import _parse_size_string
+from .._staging_diagnostics import prune_staging
 from . import logger, magnus_workspace_path
 
 if TYPE_CHECKING:
@@ -72,9 +73,7 @@ class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
         self.last_workspace_gc_time = now
 
         cap_config = magnus_config["server"]["scheduler"]["workspace_size_cap"]
-        if not cap_config:
-            return  # None / 空串 = 关闭上限，无限保留
-        cap_bytes = _parse_size_string(cap_config)
+        cap_bytes = _parse_size_string(cap_config) if cap_config else None
 
         jobs_root = f"{magnus_workspace_path}/jobs"
 
@@ -89,6 +88,21 @@ class _WorkspaceGCMixin(_WorkspaceGCMixinBase):
                 ).all()
             }
         active_job_ids.update(self.inflight_job_ids())
+
+        def is_active(job_id):
+            with SessionLocal() as db:
+                return db.query(Job.id).filter(
+                    Job.id == job_id,
+                    Job.status.in_(_ACTIVE_JOB_STATUSES) | Job.slurm_job_id.isnot(None) | Job.finalization_status.isnot(None) | Job.submission_attempt.isnot(None),
+                ).first() is not None or job_id in self.inflight_job_ids()
+
+        try:
+            prune_staging(os.path.dirname(magnus_workspace_path), active_job_ids, is_active)
+        except OSError:
+            logger.warning("Preparation diagnostic cleanup will be retried")
+        if cap_bytes is None:
+            return
+
 
         try:
             terminal_jobs = _measure_terminal_job_artifacts(

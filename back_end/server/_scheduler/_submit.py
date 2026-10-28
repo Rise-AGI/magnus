@@ -20,6 +20,7 @@ from . import (
 from ._wrapper_template import _build_wrapper_content
 from ._relay_build_cache import remote_built_sif_path
 from ._submission_recovery import new_submission_attempt
+from .._staging_diagnostics import StagingProgress, finish_staging
 
 if TYPE_CHECKING:
     from ._typing import _SchedulerProtocol
@@ -311,6 +312,8 @@ class _SubmitMixin(_SubmitMixinBase):
         # 本机执行下 no-op。失败按提交失败处理，不把无 wrapper 的 job 交给 sbatch。
         try:
             if job_id not in self._staged_job_ids:
+                if self._is_remote_execution():
+                    StagingProgress(os.path.dirname(magnus_workspace_path), job_id, restart=True).state("starting")
                 self._stage_in_job(job_id, wrapper_path)
                 self._stage_in_resources(
                     job_id,
@@ -324,17 +327,24 @@ class _SubmitMixin(_SubmitMixinBase):
                 self._stage_in_custody(job_id, job.entry_command, system_entry_command)
                 self._submission_cancel_event(job_id)
                 self._staged_job_ids.add(job_id)
+                if self._is_remote_execution():
+                    finish_staging(os.path.dirname(magnus_workspace_path), job_id)
             self._submission_cancel_event(job_id)
         except InterruptedError:
+            StagingProgress(
+                os.path.dirname(magnus_workspace_path),
+                job_id,
+            ).state("interrupted")
             # User cancellation already owns TERMINATED; shutdown leaves the
             # pending Job retryable. Transfer workers have reaped their children.
             return False
         except Exception as error:
-            logger.error(f"Failed to stage Job {job.id} to remote site: {error}")
+            detail = finish_staging(os.path.dirname(magnus_workspace_path), job_id, failed=True)
+            logger.error("Failed to stage Job %s: %s", job.id, detail)
             self._fail_job_before_submission(
                 db,
                 job_id,
-                f"Failed to stage job to remote execution site: {error}",
+                detail,
             )
             return False
 

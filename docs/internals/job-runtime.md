@@ -609,3 +609,9 @@ SLURM limits apply per node: `cpu_count × tasks_per_node` must fit the node CPU
 limit. In `per_cpu` mode the normalized memory per task is also multiplied by
 `tasks_per_node`; explicit `--mem` already describes the node. `node_count` does
 not multiply either per-node limit, and Docker/local accounting is unchanged.
+
+### Remote preparation diagnostics
+
+`GET /api/jobs/{id}/staging` returns the current preparation phase, input index when applicable, known object size, operation budget and elapsed time. Completed bytes describe successfully prepared objects, including reused images; they are not measured network traffic. Unknown directory sizes remain absent. An interrupted controller is reported explicitly.
+
+When no execution output exists, the existing logs endpoint shows this short status. Once execution output arrives its pagination stays unchanged. Snapshots contain no paths, commands or custody tokens, survive workspace cleanup, and retain the latest 4,096 inactive Jobs in a separate bounded directory. A preparation failure also retains a safe summary in the Job result.

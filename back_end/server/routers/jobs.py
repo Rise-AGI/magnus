@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
+from .._staging_diagnostics import read_staging, staging_message
 from .. import database
 from .. import models
 from .._user_lifecycle import lock_user_for_write
@@ -357,6 +358,21 @@ def _safe_utf8_truncate(data: bytes)-> bytes:
     return data
 
 
+@router.get("/jobs/{job_id}/staging")
+def get_job_staging(
+    job_id: str,
+    db: Session = Depends(database.get_db),
+    _: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    if db.query(models.Job.id).filter(models.Job.id == job_id).first() is None:
+        raise HTTPException(404, "Job not found")
+    try:
+        progress = read_staging(magnus_config["server"]["root"], job_id)
+    except (OSError, ValueError):
+        raise HTTPException(503, "Preparation diagnostics are temporarily unavailable") from None
+    return progress or {"state": "unavailable"}
+
+
 @router.get("/jobs/{job_id}/logs")
 def get_job_logs_paginated(
     job_id: str,
@@ -371,7 +387,18 @@ def get_job_logs_paginated(
     root_path = magnus_config['server']['root']
     # 双模式共用：SLURM 由 sbatch --output 写，Docker 由 _scheduler._dump_docker_logs 追加。
     log_path = f"{root_path}/workspace/jobs/{job_id}/slurm/output.txt"
-    if not os.path.exists(log_path):
+    try:
+        has_output = os.path.getsize(log_path) > 0
+    except FileNotFoundError:
+        has_output = False
+    if not has_output:
+        try:
+            preparation = read_staging(root_path, job_id)
+        except (OSError, ValueError):
+            preparation = None
+        if preparation and preparation.get("state") != "ready":
+            msg = f"[System] {staging_message(preparation)}\n"
+            return {"logs": msg, "page": 0, "total_pages": 1}
         msg = ""
         if job.status == JobStatus.FAILED:
             if job.result and job.result != ".magnus_result":

@@ -23,6 +23,7 @@ def load_staging():
     path = SERVER / "_scheduler" / "_staging.py"
     namespace = {"replace_protocol_file": protocol.replace_protocol_file, "check_transfer_cancelled": load_transport()["check_transfer_cancelled"], "remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
     namespace.update({name: value for name, value in runpy.run_path(str(SERVER / "_custody_receipts.py")).items() if not name.startswith("__")})
+    namespace["StagingProgress"] = runpy.run_path(str(SERVER / "_staging_diagnostics.py"))["StagingProgress"]
     relay_path = SERVER / "_scheduler" / "_custody_relay.py"
     relay = ast.parse(relay_path.read_text())
     relay.body = [node for node in relay.body if not isinstance(node, ast.ImportFrom) or not node.level]
@@ -80,9 +81,9 @@ class CustodyStageOutTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.remote = self.root / "remote"
-        self.namespace["magnus_workspace_path"] = str(self.root)
-        self.local = self.root / "jobs" / "job"
-        self.local.parent.mkdir()
+        self.namespace["magnus_workspace_path"] = str(self.root / "workspace")
+        self.local = self.root / "workspace" / "jobs" / "job"
+        self.local.parent.mkdir(parents=True)
         self.transport = FileTransport()
         self.stored = {}
         self.calls = []

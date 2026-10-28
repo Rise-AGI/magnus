@@ -5,6 +5,7 @@ import ast
 from datetime import datetime, timezone
 import os
 import logging
+import runpy
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -78,6 +79,7 @@ class JobOutputTests(unittest.TestCase):
         schemas = load_schemas()
         self.namespace = {
             "__name__": __name__,
+            **{key: value for key, value in runpy.run_path(str(SERVER / "_staging_diagnostics.py")).items() if key in {"read_staging", "staging_message"}},
             "os": os,
             "open_protocol_file": open_protocol_file,
             "Optional": Optional,

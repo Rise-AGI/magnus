@@ -221,6 +221,8 @@ class CustodyLifecycleTests(unittest.TestCase):
         )
         namespace = {
             "file_custody_manager": self.manager,
+            "StagingProgress": runpy.run_path(str(SERVER / "_staging_diagnostics.py"))["StagingProgress"],
+            "magnus_workspace_path": str(Path(self.temp.name) / "workspace"),
             "_FILE_SECRET_RE": re.compile(r"magnus-secret:([0-9A-Za-z_-]+)"),
             "_CUSTODY_DROPIN_SUBDIR": ".magnus_custody_dropin",
             "check_transfer_cancelled": lambda event: self.assertIsNone(event),

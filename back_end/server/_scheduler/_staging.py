@@ -10,9 +10,8 @@ stdout、metrics 要回读到本机给 scheduler / 前端端点。本 mixin 收�
 立即返回 no-op，且 _scheduler/__init__ 里的远端路径已逐字收敛回本地路径，于是整条
 执行链对本机站点字节级不变、零搬运参与。
 
-搬运一律按**文件粒度**（marker 逐个、output.txt 单文件、metrics 先列目录再逐个），
-不搬目录树 —— scp -r 把源目录落进既存目标目录时是否嵌套有跨版本歧义，逐文件杜绝
-该歧义。SIF / repo 的 relay 搬运也在此收口；native build 的有界缓存由独立模块管理。
+结果按协议文件回读；SDK 与仓库目录通过 transport 的单流归档原子发布。
+SIF / repo 的 relay 搬运也在此收口；native build 的有界缓存由独立模块管理。
 """
 import os
 import re
@@ -37,6 +36,7 @@ from . import (
 from ._relay_build_cache import stage_built_sif
 from .._slurm_manager._ssh_auto_connect import remaining_timeout
 from .._slurm_manager._transport import check_transfer_cancelled
+from .._staging_diagnostics import StagingProgress
 
 # Directory (inside the job working tree) where the in-container SDK drops custody
 # uploads on no-network remote execution, paired with the SDK's MAGNUS_CUSTODY_DROP_DIR.
@@ -326,22 +326,33 @@ class _StagingMixin(_StagingMixinBase):
             _write_custody_receipts(local_table, receipts)
         cancel_event = self._submission_cancel_event(job_id)
         transport = self.slurm_manager.transport
+        progress = StagingProgress(os.path.dirname(magnus_workspace_path), job_id)
         remote_table = self._remote_job_working_table(job_id)
-        transport.run(
+        progress.call(
+            "workspace",
+            transport.run,
             ["mkdir", "-p", f"{remote_table}/slurm", f"{remote_table}/metrics"],
+            require_success=True,
             timeout=30,
             check=True,
         )
         # A restarted, never-submitted attempt must not reuse expired inputs
         # from an interrupted upload. Uncertain submissions never reach staging.
-        transport.run(
+        progress.call(
+            "custody_reset",
+            transport.run,
             ["rm", "-rf", f"{remote_table}/{_CUSTODY_DROPIN_SUBDIR}"],
+            require_success=True,
             timeout=30,
             check=True,
         )
-        transport.push(
+        progress.call(
+            "wrapper",
+            transport.push,
             wrapper_local_path,
             f"{remote_table}/wrapper.py",
+            size=os.path.getsize(wrapper_local_path),
+            budget=getattr(transport, "transfer_timeout_seconds", None),
             cancel_event=cancel_event,
         )
         # 平台 SDK 已由 _provision_platform_sdk 落在本机工作区的 .magnus_sdk，推到远端
@@ -352,20 +363,27 @@ class _StagingMixin(_StagingMixinBase):
             # Only an unsubmitted Job reaches staging; replace its prior SDK
             # before atomically publishing the complete archive.
             check_transfer_cancelled(cancel_event)
-            transport.run(
+            progress.call(
+                "platform_sdk_setup",
+                transport.run,
                 ["rm", "-rf", remote_sdk],
                 timeout=30,
                 check=True,
             )
-            transport.push(
+            progress.call(
+                "platform_sdk",
+                transport.push,
                 local_sdk,
                 remote_sdk,
+                budget=getattr(transport, "transfer_timeout_seconds", None),
                 cancel_event=cancel_event,
             )
             # Windows controllers cannot preserve POSIX executable bits locally.
             # The runtime shim must remain executable on the Linux target.
             check_transfer_cancelled(cancel_event)
-            transport.run(
+            progress.call(
+                "platform_sdk_permissions",
+                transport.run,
                 ["chmod", "+x", f"{remote_table}/{_PLATFORM_SDK_SUBDIR}/bin/magnus"],
                 timeout=30,
                 check=True,
@@ -396,12 +414,16 @@ class _StagingMixin(_StagingMixinBase):
             return
         cancel_event = self._submission_cancel_event(job_id)
         transport = self.slurm_manager.transport
+        progress = StagingProgress(os.path.dirname(magnus_workspace_path), job_id)
 
         if build_digest is not None:
-            stage_built_sif(
+            progress.call(
+                "image_cache",
+                stage_built_sif,
                 transport,
                 local_sif_path,
                 build_digest,
+                size=os.path.getsize(local_sif_path),
                 job_id = job_id,
                 target = self.target,
                 cancel_event = cancel_event,
@@ -410,19 +432,30 @@ class _StagingMixin(_StagingMixinBase):
             remote_sif_path = (
                 f"{self.remote_container_cache_path}/{os.path.basename(local_sif_path)}"
             )
-            already_cached = transport.run(["test", "-f", remote_sif_path], timeout=30)
+            already_cached = progress.call("image_cache_lookup", transport.run, ["test", "-f", remote_sif_path], timeout=30)
             if already_cached.returncode != 0:
                 staged_sif_path = f"{remote_sif_path}.partial.{job_id}"
                 try:
-                    transport.push(
+                    progress.call(
+                        "image_upload",
+                        transport.push,
                         local_sif_path,
                         staged_sif_path,
+                        size=os.path.getsize(local_sif_path),
+                        budget=getattr(transport, "transfer_timeout_seconds", None),
+                        count_bytes=False,
                         cancel_event=cancel_event,
                     )
                     check_transfer_cancelled(cancel_event)
-                    promoted = transport.run(["mv", "-f", staged_sif_path, remote_sif_path], timeout=30)
-                    if promoted.returncode != 0:
-                        raise RuntimeError(f"Failed to promote staged SIF (rc={promoted.returncode})")
+                    progress.call(
+                        "image_publish",
+                        transport.run,
+                        ["mv", "-f", staged_sif_path, remote_sif_path],
+                        size=os.path.getsize(local_sif_path),
+                        timeout=30,
+                        budget=30,
+                        require_success=True,
+                    )
                 except BaseException:
                     try:
                         transport.run(["rm", "-f", staged_sif_path], timeout=30, check=True)
@@ -434,10 +467,13 @@ class _StagingMixin(_StagingMixinBase):
         # pre-submission attempt may still have its previous complete tree.
         remote_repo_dir = f"{self._remote_job_working_table(job_id)}/repository"
         check_transfer_cancelled(cancel_event)
-        transport.run(["rm", "-rf", remote_repo_dir], timeout=30, check=True)
-        transport.push(
+        progress.call("repository_setup", transport.run, ["rm", "-rf", remote_repo_dir], timeout=30, check=True)
+        progress.call(
+            "repository",
+            transport.push,
             local_repo_dir,
             remote_repo_dir,
+            budget=getattr(transport, "transfer_timeout_seconds", None),
             cancel_event=cancel_event,
         )
 
@@ -467,9 +503,10 @@ class _StagingMixin(_StagingMixinBase):
             return
         cancel_event = self._submission_cancel_event(job_id)
         transport = self.slurm_manager.transport
+        progress = StagingProgress(os.path.dirname(magnus_workspace_path), job_id)
         remote_dropin = f"{self._remote_job_working_table(job_id)}/{_CUSTODY_DROPIN_SUBDIR}"
         local_dropin = os.path.join(self._local_job_working_table(job_id), _CUSTODY_DROPIN_SUBDIR)
-        for token in tokens:
+        for index, token in enumerate(sorted(tokens), start=1):
             check_transfer_cancelled(cancel_event)
             acquired = file_custody_manager.acquire_file(
                 token,
@@ -477,25 +514,31 @@ class _StagingMixin(_StagingMixinBase):
             )
             if acquired is None:
                 logger.info(
-                    f"Job {job_id} stage-in: custody token {token} unavailable "
-                    f"(missing/expired); skipped"
+                    "Job %s stage-in: custody input %d/%d unavailable; skipped",
+                    job_id, index, len(tokens),
                 )
                 continue
             file_path, filename, is_directory, _ = acquired
             try:
                 remote_entry = f"{remote_dropin}/{token}"
-                made = transport.run(
+                progress.call(
+                    "custody_directory",
+                    transport.run,
                     ["mkdir", "-p", remote_entry],
-                    timeout = 30,
+                    timeout=30,
+                    index=index,
+                    total=len(tokens),
+                    require_success=True,
                 )
-                if made.returncode != 0:
-                    raise RuntimeError(
-                        f"failed to create remote dropin dir {remote_entry} "
-                        f"(rc={made.returncode}): {made.stderr.strip()}"
-                    )
-                transport.push(
+                progress.call(
+                    "custody_payload",
+                    transport.push,
                     str(file_path),
                     f"{remote_entry}/payload",
+                    size=os.path.getsize(file_path),
+                    index=index,
+                    total=len(tokens),
+                    budget=getattr(transport, "transfer_timeout_seconds", None),
                     cancel_event=cancel_event,
                 )
                 # meta.json follows the SDK's offline drop-dir format.
@@ -512,9 +555,15 @@ class _StagingMixin(_StagingMixinBase):
                         },
                         meta_file,
                     )
-                transport.push(
+                progress.call(
+                    "custody_metadata",
+                    transport.push,
                     meta_path,
                     f"{remote_entry}/meta.json",
+                    size=os.path.getsize(meta_path),
+                    index=index,
+                    total=len(tokens),
+                    budget=getattr(transport, "transfer_timeout_seconds", None),
                     cancel_event=cancel_event,
                 )
             finally:
