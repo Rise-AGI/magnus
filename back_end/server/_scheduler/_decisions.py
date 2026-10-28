@@ -79,7 +79,6 @@ class _DecisionsMixin(_DecisionsMixinBase):
                     logger.error(f"Job {jid} preparation crashed: {exc}")
                     # _clean_up_working_table 在远端执行下含 ssh `rm -rf`（+ 可能触发 socket
                     # 重建），这里跑在事件循环上，丢线程池避免阻塞 loop。
-                    await _run_blocking_io(self._clean_up_working_table, jid)
                     self._job_query(db, Job).filter(
                         Job.id == jid,
                         Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
@@ -88,6 +87,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
                         Job.result: f"Resource preparation crashed: {exc}",
                     }, synchronize_session=False)
                     db.commit()
+                    await _run_blocking_io(self._finish_unsubmitted_job, jid)
 
             # Phase 2.5: 抢占恢复 — PAUSED 任务重新准备资源（镜像/仓库在抢占时已被清理）。
             # `slurm_job_id IS NULL` 过滤把 SLURM 仍在 CG (COMPLETING) 阶段释放
@@ -142,8 +142,8 @@ class _DecisionsMixin(_DecisionsMixinBase):
             self._submission_task = None
 
     def _schedule_pending_jobs(self):
+        self._reconcile_submissions()
         if not is_local_mode:
-            self._reconcile_submissions()
             if self._submission_deferred():
                 return
         with SessionLocal(expire_on_commit=False) as db:

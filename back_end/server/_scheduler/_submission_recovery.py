@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from ..database import SessionLocal
 from ..models import Job, JobStatus
+from .._magnus_config import is_local_mode
 from .._slurm_manager._submission import find_submissions
 from . import logger
 
@@ -109,6 +110,10 @@ class _SubmissionRecoveryMixin(_SubmissionRecoveryMixinBase):
         if not rows:
             return
         self._submission_reconcile_after = monotonic() + 60
+        if is_local_mode:
+            for job_id, attempt in rows:
+                self._reconcile_docker_submission(job_id, attempt)
+            return
         grouped = {}
         for job_id, encoded in rows:
             value = json.loads(encoded)
@@ -141,3 +146,34 @@ class _SubmissionRecoveryMixin(_SubmissionRecoveryMixinBase):
                 if job is not None:
                     self._record_submission(db, job, external_id, attempt=encoded)
                     logger.info("Recovered Slurm submission for Job %s", job_id)
+
+    def _reconcile_docker_submission(
+        self,
+        job_id: str,
+        attempt: str,
+    ) -> None:
+        value = json.loads(attempt)
+        name = f"magnus-job-{job_id}"
+        observed = self.docker_manager.find_submission(name, value["comment"])
+        with SessionLocal() as db:
+            job = self._job_query(db, Job).filter(
+                Job.id == job_id,
+                Job.submission_attempt == attempt,
+            ).first()
+            if job is None:
+                return
+            if observed == "OWNED":
+                self._record_submission(db, job, name, attempt=attempt)
+                if value.get("rejected") and self.docker_manager.check_container_status(name) == "PENDING":
+                    self._job_query(db, Job).filter(
+                        Job.id == job_id,
+                        Job.status == JobStatus.QUEUED,
+                        Job.slurm_job_id == name,
+                    ).update({Job.status: JobStatus.FAILED, Job.result: value["rejected"]}, synchronize_session=False)
+                    db.commit()
+            elif observed == "MISSING" and value.get("rejected"):
+                self._clear_rejected_submission(db, job_id, attempt)
+                self._fail_job_before_submission(db, job_id, value["rejected"])
+                self._finish_unsubmitted_job(job_id)
+            # A missing container after a lost reply is not a definite rejection.
+            # Preserve the intent and workspace until identity can be reconciled.

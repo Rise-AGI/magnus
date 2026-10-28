@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, List
 from sqlalchemy.orm import Session
 from pywheels.file_tools import guarantee_file_exist
 from ..models import Job, JobStatus
+from .._docker_manager import DockerSubmissionRejected
 from .._job_dir_access import grant_job_dir_runner_access
 from .._resource_manager import resource_manager
 from .._slurm_manager._submission import SubmissionDeferred, SubmissionRejected, SubmissionUncertain
@@ -425,9 +426,11 @@ class _SubmitMixin(_SubmitMixinBase):
         资源属性（gpu_count, memory_demand, cpu_count）在 local 模式下不生效。
         """
         assert self.docker_manager is not None
+        attempt = None
+        started = False
 
         db.refresh(job)
-        if job.status != JobStatus.PENDING:
+        if job.status != JobStatus.PENDING or job.submission_attempt is not None:
             logger.info(f"Job {job.id} status changed to {job.status} before submission, skipping")
             return False
 
@@ -498,6 +501,13 @@ class _SubmitMixin(_SubmitMixinBase):
             # GPU: 如果 job 请求了 GPU 且本机有 GPU，尝试启用
             gpu_enabled = job.gpu_count > 0
 
+            attempt = new_submission_attempt(job_id)
+            def begin():
+                nonlocal started
+                self._submission_cancel_event(job_id)
+                self._begin_submission(db, job, attempt)
+                started = True
+
             self.docker_manager.run_container(
                 container_name=container_name,
                 image=runtime_image,
@@ -507,14 +517,31 @@ class _SubmitMixin(_SubmitMixinBase):
                 working_dir=f"{magnus_home}/workspace/repository",
                 gpu_enabled=gpu_enabled,
                 network_mode=network_mode,
+                submission_identity=json.loads(attempt)["comment"],
+                before_start=begin,
             )
 
+        except InterruptedError:
+            return False
         except Exception as error:
+            if started:
+                if isinstance(error, DockerSubmissionRejected):
+                    value = json.loads(attempt)
+                    value["rejected"] = str(error)
+                    updated = json.dumps(value)
+                    db.rollback()
+                    self._job_query(db, Job).filter(
+                        Job.id == job_id,
+                        Job.submission_attempt == attempt,
+                    ).update({Job.submission_attempt: updated}, synchronize_session=False)
+                    db.commit()
+                logger.warning("Job %s Docker launch awaits reconciliation (%s)", job_id, type(error).__name__)
+                return False
             logger.error("Job %s Docker submission error: %s", job.id, error)
             self._fail_job_before_submission(db, job.id, f"Docker container launch failed: {error}")
             return False
 
-        return self._record_submission(db, job, container_name)
+        return self._record_submission(db, job, container_name, attempt=attempt)
 
     def _extract_bind_mounts_from_system_entry_command(self, system_entry_command: str) -> List[str]:
         """

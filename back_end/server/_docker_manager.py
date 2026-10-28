@@ -1,6 +1,8 @@
 # back_end/server/_docker_manager.py
 # Symmetric interface to SlurmManager for local-mode Docker execution.
 import logging
+import json
+from collections.abc import Callable
 import subprocess
 from typing import Any, Dict, List, Optional
 
@@ -8,6 +10,7 @@ from typing import Any, Dict, List, Optional
 __all__ = [
     "DockerManager",
     "DockerError",
+    "DockerSubmissionRejected",
 ]
 
 
@@ -16,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 class DockerError(Exception):
     pass
+
+
+class DockerSubmissionRejected(DockerError):
+    """The CLI returned a definite rejection; inspect before discarding intent."""
 
 
 # Magnus stores images as docker://org/repo:tag; Docker CLI expects org/repo:tag
@@ -40,6 +47,9 @@ class DockerManager:
         working_dir: str,
         gpu_enabled: bool = False,
         network_mode: Optional[str] = None,
+        *,
+        submission_identity: str | None = None,
+        before_start: Callable[[], None] | None = None,
     ) -> str:
         image = _normalize_image_uri(image)
         # --init 让 docker 自带的 tini 当 PID 1：reap 容器内孤儿进程，并把
@@ -52,6 +62,9 @@ class DockerManager:
             "--name", container_name,
             "-w", working_dir,
         ]
+
+        if submission_identity is not None:
+            command.extend(["--label", f"io.magnus.submission={submission_identity}"])
 
         if network_mode:
             command.extend(["--network", network_mode])
@@ -70,12 +83,15 @@ class DockerManager:
 
         logger.info(f"Starting container '{container_name}' (image: {image})")
 
+        if before_start is not None:
+            before_start()
         try:
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=60,
             )
             container_id = result.stdout.strip()[:12]
             logger.info(f"Container '{container_name}' started (ID: {container_id})")
@@ -87,7 +103,36 @@ class DockerManager:
                 error_msg = error_msg.replace(token, "[redacted]")
             error_msg = error_msg[-4096:]
             logger.error(f"Docker run failed: {error_msg}")
-            raise DockerError(f"docker run failed: {error_msg}") from None
+            if e.returncode < 0:
+                raise DockerError("Docker launch reply was interrupted") from None
+            raise DockerSubmissionRejected(f"docker run failed: {error_msg}") from None
+        except (FileNotFoundError, PermissionError):
+            raise DockerSubmissionRejected("Docker CLI could not start") from None
+        except (OSError, subprocess.TimeoutExpired):
+            raise DockerError("Docker launch acceptance is unknown") from None
+
+    def find_submission(
+        self,
+        container_name: str,
+        identity: str,
+    ) -> str:
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "--format", "{{json .Config.Labels}}", container_name],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                return "MISSING" if self._container_missing(container_name) else "UNKNOWN"
+            if len(result.stdout) > 65536:
+                return "UNKNOWN"
+            labels = json.loads(result.stdout)
+            if not isinstance(labels, dict) or labels.get("io.magnus.submission") != identity:
+                return "CONFLICT"
+            return "OWNED"
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return "UNKNOWN"
 
     def check_container_status(self, container_name: str) -> str:
         # Maps Docker State.Status to Magnus job status constants
@@ -96,6 +141,7 @@ class DockerManager:
                 ["docker", "inspect", "--format", "{{.State.Status}}:{{.State.ExitCode}}", container_name],
                 capture_output=True,
                 text=True,
+                timeout=30,
             )
             if result.returncode != 0:
                 return "MISSING" if self._container_missing(container_name) else "UNKNOWN"
@@ -134,6 +180,7 @@ class DockerManager:
                 ["docker", "inspect", "--format", "{{.State.OOMKilled}}:{{.State.ExitCode}}", container_name],
                 capture_output=True,
                 text=True,
+                timeout=30,
             )
             if result.returncode != 0:
                 return {"oom_killed": False, "exit_code": -1}
@@ -157,6 +204,7 @@ class DockerManager:
                 ["docker", "inspect", "--format", "{{.State.ExitCode}}", container_name],
                 capture_output=True,
                 text=True,
+                timeout=30,
             )
             if result.returncode == 0:
                 return int(result.stdout.strip())

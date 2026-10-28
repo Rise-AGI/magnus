@@ -80,7 +80,7 @@ class SubmissionRecoveryTests(unittest.TestCase):
         self.db.commit()
         namespace = {
             '__name__': __name__, 'Job': Job, 'JobStatus': JobStatus,
-            'SessionLocal': self.sessions, 'logger': logging.getLogger(__name__),
+            'SessionLocal': self.sessions, 'logger': logging.getLogger(__name__), 'is_local_mode': False,
             'SubmissionDeferred': submission.SubmissionDeferred,
             'SubmissionRejected': submission.SubmissionRejected,
             'SubmissionUncertain': submission.SubmissionUncertain,

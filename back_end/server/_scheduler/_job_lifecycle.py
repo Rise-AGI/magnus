@@ -124,6 +124,22 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
         marker_path = f"{magnus_workspace_path}/jobs/{job_id}/.magnus_oom"
         return os.path.exists(marker_path)
 
+    def _finish_unsubmitted_job(
+        self,
+        job_id: str,
+    ) -> None:
+        with SessionLocal() as db:
+            changed = self._job_query(db, Job).filter(
+                Job.id == job_id,
+                Job.status.in_([JobStatus.FAILED, JobStatus.TERMINATED]),
+                Job.slurm_job_id.is_(None),
+                Job.submission_attempt.is_(None),
+                Job.finalization_status.is_(None) | (Job.finalization_status == "CLEANUP"),
+            ).update({Job.finalization_status: "CLEANUP"}, synchronize_session=False)
+            db.commit()
+        if changed:
+            self._finish_job_cleanup(job_id, None)
+
     def _clean_up_working_table(
         self,
         job_id: str,
@@ -141,6 +157,8 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
                     Job.submission_attempt,
                 ).filter(Job.id == job_id).first()
             if pending and (pending[2] is not None or pending[0] not in (None, "CLEANUP")):
+                return False
+            if pending and is_local_mode and pending[1] is not None and pending[0] != "CLEANUP":
                 return False
             if pending and pending[1] is not None and not is_local_mode:
                 assert self.slurm_manager is not None

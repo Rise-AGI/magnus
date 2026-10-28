@@ -48,6 +48,14 @@ Directory uploads use one compressed stream instead of recursive SCP. The comple
 
 Only explicit submission-quota reason codes trigger a 60-second account-level backoff. Prepared inputs are reused within the same backend process; a restart stages again only when no unresolved submission exists. Other definite rejections still fail with bounded, redacted diagnostics. Successful final-log or custody transfer wakes finalization on the next scheduler pass; failed transfers retain backoff, and resource-release and completeness checks still govern cleanup.
 
+Once Slurm confirms terminal execution, waiting for allocation release is rechecked after 10 seconds; transfer failures still back off for 60 seconds. Preparation failure or user cancellation persists cleanup only after both preparation workers have drained. Cooperative shutdown leaves unfinished preparation retryable.
+
+### Docker launch and finalization recovery
+
+Docker launches also persist an attempt before dispatch, with a deterministic container name and an exact ownership label. The CLI has a 60-second deadline. Lost replies retain the attempt and workspace; reconciliation binds only the matching label and never launches a duplicate. A definite rejection permits cleanup after confirmed absence. Missing or conflicting evidence after an uncertain reply requires administrator reconciliation, rather than automatic resubmission.
+
+Docker execution outcome is saved before finalization. Cancellation stops the container but retains its association until final logs and cleanup succeed. Log reads stream to disk with a 30-second deadline; complete snapshots replace the retained log atomically. Failed reads retain the container and retry after 30 seconds, including after backend restart. Only successful final-log retrieval or confirmed external removal allows container cleanup; an externally removed container's previously retained logs are kept.
+
 ## wrapper.py: three-layer structure
 
 `_build_wrapper_content()` in `_scheduler/_wrapper_template.py` generates `wrapper.py`, which is the actual entry point executed by SLURM. The wrapper contains three nested layers:

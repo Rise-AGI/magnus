@@ -234,6 +234,6 @@ class _ResourcesMixin(_ResourcesMixinBase):
                 with self._preparing_jobs_lock:
                     self._build_pinned_jobs.discard(job_id)
                 await _run_blocking_io(
-                    self._clean_up_working_table,
+                    self._finish_unsubmitted_job,
                     job_id,
                 )

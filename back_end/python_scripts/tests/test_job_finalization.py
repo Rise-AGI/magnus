@@ -891,8 +891,16 @@ class SlurmFinalizationTests(unittest.TestCase):
                 remove_container=reject,
             )
             with self.subTest(observed=observed), patch.object(Job, "time_limit", 1, create=True):
+                with self.sessions() as db:
+                    current = db.get(Job, "job")
+                    current.status = JobStatus.RUNNING
+                    current.finalization_status = None
+                    db.commit()
+                self.scheduler._finalization_retry_after.clear()
                 self.scheduler._sync_reality_docker()
-                self.assertEqual(self.state()[:3], (JobStatus.RUNNING, "slurm-job", None))
+                status = {"FAILED": JobStatus.FAILED, "COMPLETED": JobStatus.SUCCESS}.get(observed, JobStatus.RUNNING)
+                finalization = observed if observed in ("FAILED", "COMPLETED") else None
+                self.assertEqual(self.state()[:3], (status, "slurm-job", finalization))
                 self.assertTrue((table / "repository").exists())
 
     def test_docker_completion_keeps_existing_local_cleanup_behavior(self):

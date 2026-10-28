@@ -181,7 +181,6 @@ class MagnusScheduler(
                 # 因此 SIGKILL 直发立刻清场。
 
                 self.docker_manager.stop_container(container_name, timeout = 0)
-                self.docker_manager.remove_container(container_name)
             else:
                 assert self.slurm_manager is not None
                 logger.info(f"Terminating job {job.id} (SLURM: {job.slurm_job_id}) by user request.")
@@ -192,19 +191,8 @@ class MagnusScheduler(
                 )
 
         job.status = JobStatus.TERMINATED
-        if is_local_mode:
-            # Docker 模式没有 SLURM 那种 CG 收尾窗口，stop_container +
-            # remove_container 已同步完成，slurm_job_id (实际存的是
-            # container_name) 立即清空，跟 _sync_reality_docker 的清理路径一致。
-            job.slurm_job_id = None
-        # else (SLURM): slurm_job_id 不在这里清空。scancel 后 SLURM job 进入
-        # CG (COMPLETING) 阶段跑 epilog（含 GPU reset 等），可能持续数十秒。
-        # 期间 cluster endpoint 看 squeue 还能见到这个 slurm_job_id，若 magnus
-        # 端立即清空，cluster 的 magnus_job_map 找不到映射，会把该 inflight job
-        # 错显示成 external "(slurm)" 任务，让用户怀疑是绕过 magnus 的越权提交。
-        # 改由 _sync_reality_slurm 在 SLURM 真正报
-        # COMPLETED/FAILED/CANCELLED/TIMEOUT 后清空，跟 RUNNING → 终态的清理
-        # 路径一致。
+        # Keep the execution identity until final logs and workspace cleanup
+        # complete, even when Docker has already stopped synchronously.
         job.start_time = None
         db.commit()
         db.refresh(job)
@@ -230,7 +218,7 @@ class MagnusScheduler(
                 # callback. In that case cancellation is a no-op; still clean up.
                 if preparing_task.done():
                     cleanup = asyncio.create_task(_run_blocking_io(
-                        self._clean_up_working_table,
+                        self._finish_unsubmitted_job,
                         job_id,
                     ))
                     with self._preparing_jobs_lock:
@@ -238,8 +226,8 @@ class MagnusScheduler(
                 else:
                     preparing_task.cancel()
             self._loop.call_soon_threadsafe(cancel_preparation)
-        elif not job.finalization_status and job.submission_attempt is None and (is_local_mode or job.slurm_job_id is None):
-            self._clean_up_working_table(job.id)
+        elif not job.finalization_status and job.submission_attempt is None and job.slurm_job_id is None:
+            self._finish_unsubmitted_job(job.id)
 
     def _release_finished_builds(self) -> None:
         """Release artifacts only after submit/staging and external resources drain."""

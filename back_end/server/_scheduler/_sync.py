@@ -1,10 +1,13 @@
 # back_end/server/_scheduler/_sync.py
 import os
 import subprocess
+import shutil
+import tempfile
+from pathlib import Path
 from datetime import datetime, timezone
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Dict, Optional
-from .._protocol_files import open_protocol_file
+from .._protocol_files import open_protocol_file, replace_protocol_file
 from ..database import SessionLocal
 from ..models import Job, JobStatus, ClusterSnapshot
 from .._magnus_config import is_local_mode
@@ -84,40 +87,50 @@ class _SyncMixin(_SyncMixinBase):
         except Exception as error:
             logger.error(f"Failed to record cluster snapshot: {error}")
 
-    def _dump_docker_logs(self, job_id: str, container_name: str, since: Optional[str] = None) -> Optional[str]:
-        # 与 SLURM 模式的 sbatch --output 共用同一文件，让 jobs.py 读端点不必按模式分支。
-        # Capture cursor BEFORE fetching logs to avoid missing lines emitted during the call.
-        # Microsecond precision (RFC 3339 with %f) drastically narrows the duplicate window
-        # vs second precision: docker logs --since is inclusive, so saving a floor-to-second
-        # cursor would re-fetch every line emitted within the same wall-clock second on each tick.
-        new_cursor = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        try:
-            command = [
-                "docker",
-                "logs",
-                container_name,
-            ]
+    def _dump_docker_logs(
+        self,
+        job_id: str,
+        container_name: str,
+        since: Optional[str] = None,
+        *,
+        final: bool = False,
+    ) -> str:
+        cursor = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        command = ["docker", "logs", container_name]
+        if not final:
+            command.extend(["--until", cursor])
             if since:
                 command.extend(["--since", since])
-            result = subprocess.run(
-                command,
-                capture_output = True,
-                text = True,
-            )
-            if result.returncode != 0:
-                # container 已不存在 / docker 出错，本次跳过
-                return since
-            output = result.stdout
-            if result.stderr:
-                output += result.stderr
-            if output:
-                mode = "ab" if since else "wb"
-                with open_protocol_file(f"{magnus_workspace_path}/jobs", f"{job_id}/slurm/output.txt", mode) as stream:
-                    stream.write(output.encode("utf-8"))
-            return new_cursor
-        except Exception as error:
-            logger.warning(f"Failed to dump Docker logs for {job_id}: {error}")
-            return since
+        # Final snapshots replace the previous file atomically: a failed fetch
+        # or restart cannot truncate retained logs or append the full log twice.
+        with tempfile.TemporaryDirectory(prefix=".docker-logs-", dir=magnus_workspace_path) as directory:
+            snapshot = Path(directory) / "output"
+            with snapshot.open("wb") as stream:
+                result = subprocess.run(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stream,
+                    stderr=subprocess.STDOUT,
+                    timeout=30,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError("Docker log retrieval failed")
+                stream.flush()
+                os.fsync(stream.fileno())
+            if final or since is None:
+                replace_protocol_file(
+                    f"{magnus_workspace_path}/jobs",
+                    f"{job_id}/slurm/output.txt",
+                    str(snapshot),
+                )
+            else:
+                with snapshot.open("rb") as source, open_protocol_file(
+                    f"{magnus_workspace_path}/jobs",
+                    f"{job_id}/slurm/output.txt",
+                    "ab",
+                ) as destination:
+                    shutil.copyfileobj(source, destination)
+        return cursor
 
     def _sync_reality(self) -> dict[str, str | None]:
         """同步真实状态到数据库（SLURM 或 Docker）"""
@@ -140,128 +153,110 @@ class _SyncMixin(_SyncMixinBase):
         elapsed_minutes = (datetime.now(timezone.utc) - start).total_seconds() / 60
         return elapsed_minutes > job.time_limit
 
-    def _sync_reality_docker(self):
-        """同步 Docker 容器状态到数据库（三阶段模式，与 _sync_reality_slurm 对称）"""
+    def _sync_reality_docker(
+        self,
+    ) -> None:
         assert self.docker_manager is not None
-
-        # Phase 1 — 收集 job 信息（短 session）
+        terminal = (JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED)
         with SessionLocal() as db:
-            active_info = [
-                (job.id, job.status)
-                for job in self._job_query(db, Job).filter(
-                    Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])
-                    | ((Job.status == JobStatus.TERMINATED) & Job.slurm_job_id.is_not(None))
-                ).all()
-            ]
-
-        if not active_info:
-            return
-
-        # Phase 2 — Docker 状态检查 + 日志抓取（无 session）
-        docker_results: Dict[str, Dict[str, Any]] = {}
-        for job_id, db_status in active_info:
-            container_name = f"magnus-job-{job_id}"
+            identifiers = [row[0] for row in self._job_query(db, Job.id).filter(
+                Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]) | Job.slurm_job_id.isnot(None),
+                Job.finalization_status.is_(None) | (Job.finalization_status != "CLEANUP"),
+            ).all()]
+        for job_id in identifiers:
+            if monotonic() < self._finalization_retry_after.get(job_id, 0):
+                continue
+            name = f"magnus-job-{job_id}"
             try:
-                real_status = self.docker_manager.check_container_status(container_name)
-
-                # 增量日志：RUNNING 状态每次心跳抓取
-                log_since = self._docker_log_cursors.get(job_id)
-                if real_status == "RUNNING" or real_status in ["COMPLETED", "FAILED"]:
-                    new_cursor = self._dump_docker_logs(job_id, container_name, since=log_since)
-                    self._docker_log_cursors[job_id] = new_cursor
-
-                docker_results[job_id] = {
-                    "status": real_status,
-                    "container_name": container_name,
-                    "db_status": db_status,
-                }
-            except Exception as error:
-                logger.error(f"Failed to check Docker job {job_id}: {error}")
-
-        # Phase 3 — 批量更新（短 session）
-        with SessionLocal() as db:
-            for job_id, info in docker_results.items():
-                try:
+                observed = self.docker_manager.check_container_status(name)
+                if observed == "UNKNOWN":
+                    raise RuntimeError("Docker state is unavailable")
+                with SessionLocal() as db:
                     job = self._job_query(db, Job).filter(Job.id == job_id).first()
-                    if not job:
+                    if job is None or job.finalization_status == "CLEANUP":
                         continue
-
-                    real_status = info["status"]
-                    container_name = info["container_name"]
-
-                    if job.status == JobStatus.TERMINATED:
-                        self.terminate_job(db, job)
-                        continue
-
-                    if job.status == JobStatus.QUEUED:
-                        if real_status == "RUNNING":
-                            job.status = JobStatus.RUNNING
-                            job.start_time = datetime.now(timezone.utc)
-                            logger.info(f"Job {job.id} started running in Docker")
-                        elif real_status == "COMPLETED":
-                            self._write_success_marker(job.id)
-                            self.docker_manager.remove_container(container_name)
-                            self._finalize_completed_job(job)
-                            self._docker_log_cursors.pop(job_id, None)
-                        elif real_status == "FAILED":
-                            logger.warning(f"Job {job.id} failed in Docker")
+                    original_status = job.status
+                    external_id = job.slurm_job_id
+                    if job.status == JobStatus.RUNNING and observed == "RUNNING" and self._docker_job_timed_out(job):
+                        self.docker_manager.stop_container(name)
+                        job.status = JobStatus.FAILED
+                        job.result = f"Job exceeded its time limit ({job.time_limit} min)"
+                        job.finalization_status = "TIMEOUT"
+                    elif job.status in terminal:
+                        if observed in ("RUNNING", "PENDING"):
+                            self.docker_manager.stop_container(name, timeout=0)
+                        job.finalization_status = job.finalization_status or "STOPPED"
+                    elif observed in ("COMPLETED", "FAILED", "MISSING"):
+                        if observed == "COMPLETED":
+                            self._write_success_marker(job_id)
+                            self._finalize_completed_job(job, cleanup=False)
+                        else:
                             job.status = JobStatus.FAILED
-                            term_info = self.docker_manager.get_termination_info(container_name)
-                            if term_info.get("oom_killed"):
-                                job.result = self._format_oom_message(job.memory_demand)
-                            else:
-                                job.result = "Container exited with non-zero status while starting"
-                            self.docker_manager.remove_container(container_name)
-                            job.slurm_job_id = None
-                            self._clean_up_working_table(job.id)
-                            self._docker_log_cursors.pop(job_id, None)
-                        elif real_status in ["MISSING"]:
-                            logger.warning(f"Job {job.id} container not found while QUEUED")
-                            job.status = JobStatus.FAILED
-                            job.result = "Container disappeared while queued (may have been removed externally)"
-                            self.docker_manager.remove_container(container_name)
-                            job.slurm_job_id = None
-                            self._clean_up_working_table(job.id)
-                            self._docker_log_cursors.pop(job_id, None)
-
-                    elif job.status == JobStatus.RUNNING:
-                        if real_status == "COMPLETED":
-                            self._write_success_marker(job.id)
-                            self.docker_manager.remove_container(container_name)
-                            self._finalize_completed_job(job)
-                            self._docker_log_cursors.pop(job_id, None)
-                        elif real_status in ["FAILED", "MISSING"]:
-                            logger.warning(f"Job {job.id} failed in Docker (Status: {real_status})")
-                            job.status = JobStatus.FAILED
-                            # MISSING means the container is gone; OOMKilled is only meaningful
-                            # for FAILED (exited non-zero), so only consult inspect there.
-                            term_info = (
-                                self.docker_manager.get_termination_info(container_name)
-                                if real_status == "FAILED" else {"oom_killed": False}
+                            information = self.docker_manager.get_termination_info(name) if observed == "FAILED" else {}
+                            job.result = (
+                                self._format_oom_message(job.memory_demand)
+                                if information.get("oom_killed") else f"Container {observed} during execution"
                             )
-                            if term_info.get("oom_killed"):
-                                job.result = self._format_oom_message(job.memory_demand)
-                            else:
-                                job.result = f"Container {real_status} during execution"
-                            self.docker_manager.remove_container(container_name)
-                            job.slurm_job_id = None
-                            self._clean_up_working_table(job.id)
-                            self._docker_log_cursors.pop(job_id, None)
-                        elif real_status == "RUNNING" and self._docker_job_timed_out(job):
-                            # 对偶 SLURM 的 --time：容器仍在跑但超出 time_limit → kill + FAILED。
-                            logger.warning(f"Job {job.id} exceeded time_limit ({job.time_limit} min), terminating")
-                            self.docker_manager.stop_container(container_name)
-                            self.docker_manager.remove_container(container_name)
-                            job.status = JobStatus.FAILED
-                            job.result = f"Job exceeded its time limit ({job.time_limit} min)"
-                            job.slurm_job_id = None
-                            self._clean_up_working_table(job.id)
-                            self._docker_log_cursors.pop(job_id, None)
-
+                        job.finalization_status = observed
+                    elif observed == "RUNNING" and job.status == JobStatus.QUEUED:
+                        job.status = JobStatus.RUNNING
+                        job.start_time = datetime.now(timezone.utc)
+                    values = {
+                        Job.status: job.status,
+                        Job.result: job.result,
+                        Job.action: job.action,
+                        Job.start_time: job.start_time,
+                        Job.finalization_status: job.finalization_status,
+                    }
+                    finished = job.status in terminal
+                    db.expunge(job)
+                    changed = self._job_query(db, Job).filter(
+                        Job.id == job_id,
+                        Job.status == original_status,
+                        Job.slurm_job_id == external_id,
+                        Job.submission_attempt.is_(None),
+                    ).update(values, synchronize_session=False)
                     db.commit()
-                except Exception as error:
-                    db.rollback()
-                    logger.error(f"Failed to sync Docker job {job_id}: {error}")
+                if not changed:
+                    continue
+                if finished:
+                    self._finish_docker_job(job_id, external_id, observed)
+                elif observed == "RUNNING":
+                    self._docker_log_cursors[job_id] = self._dump_docker_logs(
+                        job_id,
+                        name,
+                        since=self._docker_log_cursors.get(job_id),
+                    )
+                self._finalization_retry_after.pop(job_id, None)
+            except Exception as error:
+                self._finalization_retry_after[job_id] = monotonic() + 30
+                logger.warning("Job %s Docker synchronization pending (%s)", job_id, type(error).__name__)
+
+    def _finish_docker_job(
+        self,
+        job_id: str,
+        external_id: str | None,
+        observed: str,
+    ) -> None:
+        name = f"magnus-job-{job_id}"
+        if observed != "MISSING":
+            try:
+                self._dump_docker_logs(job_id, name, final=True)
+            except Exception:
+                if self.docker_manager.check_container_status(name) != "MISSING":
+                    raise
+        self.docker_manager.remove_container(name)
+        with SessionLocal() as db:
+            changed = self._job_query(db, Job).filter(
+                Job.id == job_id,
+                Job.status.in_([JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED]),
+                Job.slurm_job_id == external_id,
+                Job.submission_attempt.is_(None),
+            ).update({Job.finalization_status: "CLEANUP"}, synchronize_session=False)
+            db.commit()
+        if changed:
+            self._docker_log_cursors.pop(job_id, None)
+            self._finish_job_cleanup(job_id, external_id)
 
     def _sync_reality_slurm(
         self,
@@ -418,8 +413,7 @@ class _SyncMixin(_SyncMixinBase):
             # classification's marker read. Recover these files before cleanup.
             if status in (JobStatus.TERMINATED, JobStatus.PAUSED):
                 self._stage_out_markers(job_id)
-            self._finalize_slurm_job(job_id, slurm_job_id, finalization_status)
-            return 60
+            return self._finalize_slurm_job(job_id, slurm_job_id, finalization_status)
         if status == JobStatus.TERMINATED and slurm_job_id is not None:
             with SessionLocal() as db:
                 job = self._job_query(db, Job).filter(
@@ -443,7 +437,7 @@ class _SyncMixin(_SyncMixinBase):
         job_id: str,
         slurm_job_id: str,
         real_status: str,
-    ) -> None:
+    ) -> int:
         assert self.slurm_manager is not None
         if not self.slurm_manager.observe_job(slurm_job_id).allocation_released:
             # Epilog/requeue cleanup can still hold the workspace after the
@@ -452,9 +446,9 @@ class _SyncMixin(_SyncMixinBase):
                 self._stage_out_custody(job_id)
             finally:
                 self._stage_out_logs(job_id)
-            return
+            return 10
         if self._stage_out_final(job_id) is not True:
-            return
+            return 60
         with SessionLocal() as db:
             changed = self._job_query(db, Job).filter(
                 Job.id == job_id,
@@ -464,6 +458,7 @@ class _SyncMixin(_SyncMixinBase):
             db.commit()
         if changed:
             self._finish_job_cleanup(job_id, slurm_job_id)
+        return 60
 
     def _finish_job_cleanup(
         self,
