@@ -24,6 +24,7 @@ def service_job_released(
     return (
         job.status in (JobStatus.FAILED, JobStatus.TERMINATED, JobStatus.SUCCESS)
         and job.slurm_job_id is None
+        and job.submission_attempt is None
         and job.id not in scheduler.inflight_job_ids()
     )
 

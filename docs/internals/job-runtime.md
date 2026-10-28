@@ -40,6 +40,14 @@ Slurm execution outcome and allocation release are tracked separately. For `COMP
 
 Backend startup failure and shutdown both unwind registered resources. All background loops and their blocking filesystem workers are joined before the scheduler, custody and build managers close. Failure in one shutdown does not skip the others; repeated cancellation does not detach their teardown. This covers cooperative application shutdown, not `SIGKILL` or power loss, which continue to use durable recovery records.
 
+### SSH staging and uncertain submissions
+
+Directory uploads use one compressed stream instead of recursive SCP. The complete tree includes `.git`, empty directories, file modes and symbolic links as link text; link targets are never copied from outside the tree. A Python 3.6+ receiver verifies the byte count and SHA-256, extracts into a private sibling directory without following links, then publishes the complete tree atomically. Packaging, connection setup and streaming share the configured transfer deadline. Temporary compressed storage is required on both ends; local/Docker execution stays unchanged. A fresh staging attempt removes stale offline inputs before preparing current custody inputs.
+
+`sbatch` has a 60-second deadline. Immediately before dispatch, Magnus persists a unique attempt identity and passes it as the Slurm comment. A timeout, lost transport reply or invalid ID leaves the attempt unresolved: it is neither resubmitted nor eligible for workspace/image reclamation. Once per minute, bounded `squeue` and `sacct` queries rotate fixed 20-minute windows around submission and can recover a unique exact match, including cancellation concurrent with submission. Accounting recovery requires the site to retain job comments; absent or ambiguous evidence remains protected for administrator reconciliation. Existing Jobs without an attempt retain their original behavior.
+
+Only explicit submission-quota reason codes trigger a 60-second account-level backoff. Prepared inputs are reused within the same backend process; a restart stages again only when no unresolved submission exists. Other definite rejections still fail with bounded, redacted diagnostics. Successful final-log or custody transfer wakes finalization on the next scheduler pass; failed transfers retain backoff, and resource-release and completeness checks still govern cleanup.
+
 ## wrapper.py: three-layer structure
 
 `_build_wrapper_content()` in `_scheduler/_wrapper_template.py` generates `wrapper.py`, which is the actual entry point executed by SLURM. The wrapper contains three nested layers:
@@ -565,7 +573,7 @@ Host-side result, log and metric I/O uses regular files beneath the Job root. Ru
 
 Service proxy authentication is consumed by Magnus: Bearer Authorization, the `token` query parameter and `token`/`access_token` cookies are not forwarded to user applications. Business cookies and repeated query parameters are preserved; upstream redirects are returned to the client. This credential boundary is not origin isolation for arbitrary Service HTML.
 
-Service updates preserve ownership; explicit transfer remains the ownership-changing operation. A stopped Service retains its Job and port while preparation, submission or an external allocation is still active. Deletion can return 409 until release; an unconfirmed stop returns 503 without losing the association. Late submission replies preserve a concurrent termination, retain the external ID and request cancellation; reconciliation retries unconfirmed cancellation. An externally accepted submission whose ID was never received still requires separate reconciliation.
+Service updates preserve ownership; explicit transfer remains the ownership-changing operation. A stopped Service retains its Job and port while preparation, submission or an external allocation is still active. Deletion can return 409 until release; an unconfirmed stop returns 503 without losing the association. Late submission replies preserve a concurrent termination, retain the external ID and request cancellation; reconciliation retries unconfirmed cancellation. Slurm submissions with a lost ID reply use the durable reconciliation described above.
 
 
 ## Staging cancellation and user ownership

@@ -332,6 +332,8 @@ export function MetricsChart({ jobId, jobStatus }: { jobId: string; jobStatus: s
                 tick={{ fontSize: 11, fill: "#71717a" }}
               />
               <YAxis
+                domain={selectedMetric === "system.cpu.utilization" ? [0, 100] : undefined}
+                allowDataOverflow={selectedMetric === "system.cpu.utilization"}
                 stroke="#52525b"
                 tick={{ fontSize: 11, fill: "#71717a" }}
                 tickFormatter={(v: number) => formatValue(v, selectedUnit)}

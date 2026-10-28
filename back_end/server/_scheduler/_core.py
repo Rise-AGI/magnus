@@ -24,6 +24,7 @@ from ._staging import _StagingMixin, _validate_custody_metadata
 from ._custody_relay import CustodyRelay
 from .._file_custody_manager import file_custody_manager
 from ._artifact_recovery import _ArtifactRecoveryMixin
+from ._submission_recovery import _SubmissionRecoveryMixin
 
 
 class MagnusScheduler(
@@ -34,6 +35,7 @@ class MagnusScheduler(
     _JobLifecycleMixin,
     _StagingMixin,
     _ArtifactRecoveryMixin,
+    _SubmissionRecoveryMixin,
 ):
     """Job 调度器主类。
 
@@ -105,6 +107,9 @@ class MagnusScheduler(
         self._submitting_jobs: set[str] = set()
         self._submission_cancel_events: dict[str, threading.Event] = {}
         self._submission_stopping = False
+        self._submission_reconcile_after = 0.0
+        self._submission_reconcile_cursor = 0
+        self._staged_job_ids: set[str] = set()
 
     async def tick(self):
         if not self.enabled:
@@ -233,7 +238,7 @@ class MagnusScheduler(
                 else:
                     preparing_task.cancel()
             self._loop.call_soon_threadsafe(cancel_preparation)
-        elif not job.finalization_status and (is_local_mode or job.slurm_job_id is None):
+        elif not job.finalization_status and job.submission_attempt is None and (is_local_mode or job.slurm_job_id is None):
             self._clean_up_working_table(job.id)
 
     def _release_finished_builds(self) -> None:
@@ -248,6 +253,7 @@ class MagnusScheduler(
                 Job.status.in_([JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED]),
                 Job.slurm_job_id.is_(None),
                 Job.finalization_status.is_(None),
+                Job.submission_attempt.is_(None),
             ).all()
         released = set()
         for (job_id,) in finished:

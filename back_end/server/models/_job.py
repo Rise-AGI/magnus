@@ -116,6 +116,9 @@ class Job(Base):
     # A terminal allocation can outlive its accounting record while artifacts
     # are being recovered. CLEANUP means staging is durable and must not repeat.
     finalization_status: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # Persist before sbatch: an absent reply never proves absent execution.
+    submission_attempt: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    submission_pending = column_property(submission_attempt.isnot(None))
     runner: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc), index=True)
     start_time: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)

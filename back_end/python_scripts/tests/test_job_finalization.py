@@ -39,6 +39,7 @@ class Job(Base):
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus))
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     finalization_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    submission_attempt: Mapped[str | None] = mapped_column(String, nullable=True)
     memory_demand: Mapped[str | None] = mapped_column(String, default="1G")
     result: Mapped[str | None] = mapped_column(String, nullable=True)
     action: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -131,6 +132,9 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor._submitting_jobs = set()
         actor._submission_cancel_events = {}
         actor._submission_stopping = False
+        actor._staged_job_ids = set()
+        actor._submission_deferred = lambda: False
+        actor._reconcile_submissions = lambda: None
         def status(identifier):
             self.events.append(("query", identifier))
             result = self.statuses[identifier]
@@ -276,6 +280,18 @@ class SlurmFinalizationTests(unittest.TestCase):
             self.assertTrue((table / "repository").exists())
         self.assertFalse(any(event[0] == "cleanup" for event in self.events))
 
+    def test_unresolved_submission_protects_cancelled_workspace(self):
+        table = self.add_job(status=JobStatus.TERMINATED)
+        with self.sessions() as db:
+            job = db.get(Job, "job")
+            job.slurm_job_id = None
+            job.submission_attempt = '{"comment":"unknown"}'
+            job.finalization_status = "CLEANUP"
+            db.commit()
+        self.assertFalse(self.scheduler._clean_up_working_table("job"))
+        self.assertTrue((table / "repository" / "checkpoint").exists())
+        self.assertFalse(any(event[0] == "cleanup" for event in self.events))
+
     def test_cleanup_imports_runtime_dependencies_without_injected_globals(self):
         table = self.add_job(status=JobStatus.FAILED)
         with self.sessions() as db:
@@ -311,6 +327,7 @@ class SlurmFinalizationTests(unittest.TestCase):
             actor = module._JobLifecycleMixin()
             actor._preparing_jobs_lock = threading.Lock()
             actor._submitting_jobs = set()
+            actor._staged_job_ids = set()
             observed = SimpleNamespace(allocation_released=False)
             actor.slurm_manager = SimpleNamespace(observe_job=lambda identifier: observed)
             actor._cleanup_remote_job = lambda identifier: None

@@ -217,10 +217,10 @@ class CustodyRelay:
         state: _JobTransfers,
         drop: _Drop,
         deadline: float,
-    ) -> None:
+    ) -> bool:
         with state.lock:
             if drop.token in state.inflight or drop.retry_after > monotonic() or drop.token not in state.pending:
-                return
+                return False
             state.inflight.add(drop.token)
         try:
             previous = self.custody.import_receipt(job_id, drop.token)
@@ -257,12 +257,14 @@ class CustodyRelay:
                 _write_custody_receipts(self.local_table(job_id), receipts)
                 del state.pending[drop.token]
                 self.custody.acknowledge_import(job_id, drop.token, drop.digest)
+            return True
         except Exception as error:
             with state.lock:
                 drop.retry_after = monotonic() + 60
                 if drop.token not in state.pending:
                     state.ack_pending = True
             self.logger.warning('Job %s custody transfer pending (%s)', job_id, type(error).__name__)
+            return False
         finally:
             with state.lock:
                 state.inflight.remove(drop.token)
@@ -289,11 +291,11 @@ class CustodyRelay:
     def transfer_bulk(
         self,
         job_id: str,
-    ) -> None:
+    ) -> bool:
         state = self._state(job_id)
         with state.lock:
             if self._cancel.is_set():
-                return
+                return False
             now = monotonic()
             eligible = [
                 drop for drop in state.pending.values()
@@ -327,13 +329,15 @@ class CustodyRelay:
                 self.mark_logs_complete(job_id)
                 with state.lock:
                     state.logs_pending = False
+                return True
             except Exception as error:
                 with state.lock:
                     state.logs_retry_after = monotonic() + 60
                 self.logger.warning('Job %s final log transfer pending (%s)', job_id, type(error).__name__)
-            return
+            return False
         if drop is not None and not self._cancel.is_set():
-            self._transfer(job_id, state, drop, monotonic() + self.transfer_timeout)
+            return self._transfer(job_id, state, drop, monotonic() + self.transfer_timeout)
+        return False
 
     def cancel_transfers(
         self,

@@ -61,6 +61,25 @@ class _SchedulerProtocol:
     _submitting_jobs: set[str]
     _submission_cancel_events: dict[str, threading.Event]
     _submission_stopping: bool
+    _staged_job_ids: set[str]
+    _submission_reconcile_after: float
+    _submission_reconcile_cursor: int
+
+    def _submission_deferred(self) -> bool: ...
+    def _defer_submission(self) -> None: ...
+    def _reconcile_submissions(self) -> None: ...
+    def _begin_submission(
+        self,
+        db: "Session",
+        job: "Job",
+        attempt: str,
+    ) -> None: ...
+    def _clear_rejected_submission(
+        self,
+        db: "Session",
+        job_id: str,
+        attempt: str,
+    ) -> None: ...
 
     def _submission_cancel_event(
         self,
@@ -79,6 +98,8 @@ class _SchedulerProtocol:
         db: "Session",
         job: "Job",
         external_id: str,
+        *,
+        attempt: str | None = None,
     ) -> bool: ...
 
     def _queue_pending_submission(self) -> None: ...
@@ -96,7 +117,7 @@ class _SchedulerProtocol:
     async def _transfer_custody_bulk(
         self,
         job_id: str,
-    ) -> None: ...
+    ) -> bool: ...
     def _recover_job_artifacts(
         self,
         job_id: str,

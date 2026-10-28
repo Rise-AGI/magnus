@@ -12,6 +12,9 @@ transport 由 build_transport() 按传入的 transport 配置块决定，配置�
 （_manager.py）。
 """
 import os
+import json
+import math
+from pathlib import Path
 import posixpath
 import shlex
 import select
@@ -21,9 +24,11 @@ import tempfile
 import threading
 import time
 from typing import Dict, List, Optional
+from collections.abc import Callable
 
 from ._ssh_auto_connect import ensure_control_master, remaining_timeout
 from ._file_receive import receive_file
+from ._directory_archive import pack_directory
 
 
 def check_transfer_cancelled(
@@ -277,6 +282,7 @@ class _Transport:
         check: bool = False,
         env: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None,
+        before_start: Callable[[], None] | None = None,
     ) -> subprocess.CompletedProcess:
         raise NotImplementedError
 
@@ -328,7 +334,10 @@ class _LocalTransport(_Transport):
         check: bool = False,
         env: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None,
+        before_start: Callable[[], None] | None = None,
     ) -> subprocess.CompletedProcess:
+        if before_start is not None:
+            before_start()
         return _run_command(
             command,
             public_command = command,
@@ -462,6 +471,7 @@ class _SshControlMasterTransport(_Transport):
         check: bool = False,
         env: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None,
+        before_start: Callable[[], None] | None = None,
     ) -> subprocess.CompletedProcess:
         deadline = time.monotonic() + timeout if timeout is not None else None
         self._ensure_socket(deadline=deadline)
@@ -495,6 +505,8 @@ class _SshControlMasterTransport(_Transport):
         ssh_command.append(f"{self._user}@{self._host}")
         ssh_command.append(remote_command)
 
+        if before_start is not None:
+            before_start()
         return _run_command(
             ssh_command,
             public_command = command,
@@ -549,6 +561,14 @@ class _SshControlMasterTransport(_Transport):
         timeout: Optional[float] = None,
         cancel_event: threading.Event | None = None,
     ) -> None:
+        if os.path.isdir(local_path):
+            self._push_directory(
+                local_path,
+                remote_path,
+                timeout=timeout,
+                cancel_event=cancel_event,
+            )
+            return
         # 先在远端建好 remote_path 的父目录，scp 才能把条目落在 remote_path 本身
         # （scp 不会替你建中间目录）。父目录经 run() 骑同一条 socket 创建。
         check_transfer_cancelled(cancel_event)
@@ -570,6 +590,39 @@ class _SshControlMasterTransport(_Transport):
             timeout = remaining_timeout(deadline),
             cancel_event = cancel_event,
         )
+
+    def _push_directory(
+        self,
+        local_path: str,
+        remote_path: str,
+        *,
+        timeout: Optional[float],
+        cancel_event: threading.Event | None,
+    ) -> None:
+        deadline = time.monotonic() + (self.transfer_timeout_seconds if timeout is None else timeout)
+        check_transfer_cancelled(cancel_event)
+        receiver = Path(__file__).with_name("_directory_receiver.py").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory(prefix="magnus-directory-") as directory:
+            archive = os.path.join(directory, "archive.tar.gz")
+            metadata = pack_directory(
+                local_path,
+                archive,
+                deadline=deadline,
+                cancel_event=cancel_event,
+            )
+            remaining = remaining_timeout(deadline)
+            try:
+                result = self.run_with_file_input(
+                    ["python3", "-c", receiver, remote_path, str(max(1, math.ceil(remaining)))],
+                    archive,
+                    prefix=json.dumps(metadata).encode("utf-8") + b"\n",
+                    timeout=remaining,
+                    cancel_event=cancel_event,
+                )
+            except subprocess.TimeoutExpired:
+                raise TimeoutError("Directory transfer exceeded its time budget") from None
+            if result.returncode != 0:
+                raise RuntimeError(f"Directory transfer failed (exit {result.returncode})")
 
     def fetch(
         self,

@@ -20,6 +20,7 @@ def load_accounting():
         BACKEND / "server/_size_utils.py",
         BACKEND / "server/_job_resources.py",
         BACKEND / "server/_scheduler/_resource_accounting.py",
+        BACKEND / "server/_slurm_manager/_submission.py",
         BACKEND / "server/_slurm_manager/_control.py",
         BACKEND / "server/_scheduler/_decisions.py",
     ):
@@ -39,6 +40,8 @@ def load_accounting():
     for name in ("_ControlMixin", "_DecisionsMixin"):
         namespace[name].config = property(lambda self: namespace["magnus_config"])
     namespace["_DecisionsMixin"]._job_query = staticmethod(lambda db, *entities: db.query(*entities))
+    namespace["_DecisionsMixin"]._reconcile_submissions = lambda self: None
+    namespace["_DecisionsMixin"]._submission_deferred = lambda self: False
     return namespace
 
 
@@ -190,6 +193,9 @@ class ResourceVectorTests(unittest.TestCase):
 
 
 class Field:
+    def is_(self, value):
+        return self
+
     def __eq__(
         self,
         other,
@@ -373,7 +379,7 @@ class DecisionIntegrationTests(unittest.TestCase):
         self.module = load_accounting()
         self.module.update(
             magnus_config=configuration(),
-            Job=SimpleNamespace(status=Field(), job_type=Field()),
+            Job=SimpleNamespace(status=Field(), job_type=Field(), submission_attempt=Field()),
             JobStatus=SimpleNamespace(PENDING="Pending", RUNNING="Running"),
             JobType=SimpleNamespace(A1="A1", A2="A2", B1="B1", B2="B2"),
             job_metadata_load_options=lambda: (),

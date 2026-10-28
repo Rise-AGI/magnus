@@ -369,7 +369,7 @@ def run_migrations()-> None:
                 conn.commit()
             logger.info("✅ Migration completed.")
 
-    for column in ("dockerfile", "build_result", "resource_mode", "finalization_status", "execution_target"):
+    for column in ("dockerfile", "build_result", "resource_mode", "finalization_status", "execution_target", "submission_attempt"):
         if column not in job_columns:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {column} TEXT"))
@@ -394,6 +394,7 @@ def run_migrations()-> None:
         "ix_jobs_status": "CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs (status)",
         "ix_jobs_slurm_job_id": "CREATE INDEX IF NOT EXISTS ix_jobs_slurm_job_id ON jobs (slurm_job_id)",
         "ix_jobs_finalization_status": "CREATE INDEX IF NOT EXISTS ix_jobs_finalization_status ON jobs (finalization_status)",
+        "ix_jobs_submission_attempt": "CREATE INDEX IF NOT EXISTS ix_jobs_submission_attempt ON jobs (submission_attempt)",
     }
     existing_job_indexes = {idx["name"] for idx in inspector.get_indexes("jobs")}
     missing_job_indexes = {
@@ -581,13 +582,14 @@ async def lifespan(
                     models.JobStatus.QUEUED,
                     models.JobStatus.RUNNING,
                     models.JobStatus.PAUSED,
-                ]) | models.Job.slurm_job_id.isnot(None)),
+                ]) | models.Job.slurm_job_id.isnot(None) | models.Job.submission_attempt.isnot(None)),
             ).all()
             pins = {job_id: json.loads(result) for job_id, result, _ in rows}
             active_targets = db.query(models.Job.execution_target).filter(
                 models.Job.status.notin_([models.JobStatus.SUCCESS, models.JobStatus.FAILED, models.JobStatus.TERMINATED])
                 | models.Job.slurm_job_id.isnot(None)
-                | models.Job.finalization_status.isnot(None),
+                | models.Job.finalization_status.isnot(None)
+                | models.Job.submission_attempt.isnot(None),
             ).distinct().all()
             for (target_id,) in active_targets:
                 scheduler.for_target(target_id)

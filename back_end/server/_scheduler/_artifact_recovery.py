@@ -31,6 +31,14 @@ class _ArtifactRecoveryMixin(_ArtifactRecoveryMixinBase):
                 delay = 60
             self._artifact_retry_after[job_id] = monotonic() + delay
 
+        for job_id, task in list(self._custody_bulk_tasks.items()):
+            if task.done():
+                del self._custody_bulk_tasks[job_id]
+                if not task.cancelled() and task.exception() is not None:
+                    logger.warning("Job %s custody bulk worker failed", job_id)
+                elif not task.cancelled() and task.result():
+                    self._artifact_retry_after.pop(job_id, None)
+
         retained = candidates.keys() | self._artifact_recovery_tasks.keys()
         self._artifact_retry_after = {
             job_id: deadline
@@ -46,11 +54,6 @@ class _ArtifactRecoveryMixin(_ArtifactRecoveryMixinBase):
                 self._recover_artifacts_in_slot(job_id, slurm_job_id),
             )
 
-        for job_id, task in list(self._custody_bulk_tasks.items()):
-            if task.done():
-                del self._custody_bulk_tasks[job_id]
-                if not task.cancelled() and task.exception() is not None:
-                    logger.warning("Job %s custody bulk worker failed", job_id)
         for job_id in sorted(self._custody_relay.bulk_job_ids()):
             if job_id in candidates and job_id not in self._custody_bulk_tasks:
                 self._custody_bulk_tasks[job_id] = asyncio.create_task(self._transfer_custody_bulk(job_id))
@@ -58,9 +61,9 @@ class _ArtifactRecoveryMixin(_ArtifactRecoveryMixinBase):
     async def _transfer_custody_bulk(
         self,
         job_id: str,
-    ) -> None:
+    ) -> bool:
         async with self._custody_bulk_slots:
-            await _run_blocking_io(self._custody_relay.transfer_bulk, job_id)
+            return await _run_blocking_io(self._custody_relay.transfer_bulk, job_id)
 
     async def _recover_artifacts_in_slot(
         self,

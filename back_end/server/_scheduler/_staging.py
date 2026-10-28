@@ -327,16 +327,18 @@ class _StagingMixin(_StagingMixinBase):
         cancel_event = self._submission_cancel_event(job_id)
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
-        for subdir in ("slurm", "metrics"):
-            made = transport.run(
-                ["mkdir", "-p", f"{remote_table}/{subdir}"],
-                timeout = 30,
-            )
-            if made.returncode != 0:
-                raise RuntimeError(
-                    f"failed to create remote job dir {remote_table}/{subdir} "
-                    f"(rc={made.returncode}): {made.stderr.strip()}"
-                )
+        transport.run(
+            ["mkdir", "-p", f"{remote_table}/slurm", f"{remote_table}/metrics"],
+            timeout=30,
+            check=True,
+        )
+        # A restarted, never-submitted attempt must not reuse expired inputs
+        # from an interrupted upload. Uncertain submissions never reach staging.
+        transport.run(
+            ["rm", "-rf", f"{remote_table}/{_CUSTODY_DROPIN_SUBDIR}"],
+            timeout=30,
+            check=True,
+        )
         transport.push(
             wrapper_local_path,
             f"{remote_table}/wrapper.py",
@@ -347,8 +349,8 @@ class _StagingMixin(_StagingMixinBase):
         local_sdk = os.path.join(self._local_job_working_table(job_id), _PLATFORM_SDK_SUBDIR)
         if os.path.isdir(local_sdk):
             remote_sdk = f"{remote_table}/{_PLATFORM_SDK_SUBDIR}"
-            # A restarted Pending attempt may have a partial directory; scp -r
-            # into it would nest the complete SDK below the broken outer tree.
+            # Only an unsubmitted Job reaches staging; replace its prior SDK
+            # before atomically publishing the complete archive.
             check_transfer_cancelled(cancel_event)
             transport.run(
                 ["rm", "-rf", remote_sdk],
@@ -360,8 +362,8 @@ class _StagingMixin(_StagingMixinBase):
                 remote_sdk,
                 cancel_event=cancel_event,
             )
-            # scp 不保模式位，远端 bash `magnus` shim 的 +x 须显式补回，否则 PATH 上
-            # 这个 shim 不可执行、bash 链路 hijack 失效。
+            # Windows controllers cannot preserve POSIX executable bits locally.
+            # The runtime shim must remain executable on the Linux target.
             check_transfer_cancelled(cancel_event)
             transport.run(
                 ["chmod", "+x", f"{remote_table}/{_PLATFORM_SDK_SUBDIR}/bin/magnus"],
@@ -428,9 +430,8 @@ class _StagingMixin(_StagingMixinBase):
                         logger.warning("Interrupted image upload could not be removed for Job %s", job_id)
                     raise
 
-        # 仓库是目录：scp -r 落进一个**已存在**的同名目录会嵌套（remote/repository/
-        # repository）。unique job-id + pause 时清远端使它通常不预存在，这里仍先 rm -rf
-        # 清一遍兜底，保证 scp 把仓库落在 remote_repo_dir 本身。
+        # Directory publication requires an absent destination. A restarted
+        # pre-submission attempt may still have its previous complete tree.
         remote_repo_dir = f"{self._remote_job_working_table(job_id)}/repository"
         check_transfer_cancelled(cancel_event)
         transport.run(["rm", "-rf", remote_repo_dir], timeout=30, check=True)

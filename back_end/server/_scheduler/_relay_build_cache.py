@@ -69,6 +69,7 @@ def stage_built_sif(
                 or_(
                     Job.status.notin_([JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED]),
                     Job.slurm_job_id.isnot(None),
+                    Job.submission_attempt.isnot(None),
                 ),
             ).all()
         protected = set()

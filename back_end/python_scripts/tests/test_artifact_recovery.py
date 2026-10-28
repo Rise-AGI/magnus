@@ -26,6 +26,25 @@ def load_recovery():
 
 
 class ArtifactRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_successful_bulk_completion_wakes_finalization_without_clearing_failed_backoff(self):
+        namespace = load_recovery()
+        for success in (False, True):
+            with self.subTest(success=success):
+                calls = []
+                actor = self.actor(namespace, lambda job, external: calls.append(job) or 60)
+                actor._artifact_retry_after['job'] = namespace['monotonic']() + 60
+                completed = asyncio.get_running_loop().create_future()
+                completed.set_result(success)
+                actor._custody_bulk_tasks['job'] = completed
+                actor._schedule_artifact_recovery({'job': '42'})
+                if success:
+                    await actor._artifact_recovery_tasks['job']
+                    self.assertEqual(calls, ['job'])
+                else:
+                    self.assertEqual(calls, [])
+                    self.assertNotIn('job', actor._artifact_recovery_tasks)
+                await actor.shutdown_artifact_recovery()
+
     def actor(self, namespace, work, slots=4):
         actor = namespace["_ArtifactRecoveryMixin"]()
         actor._artifact_recovery_tasks = {}

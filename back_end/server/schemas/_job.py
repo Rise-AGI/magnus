@@ -102,6 +102,7 @@ class JobListItem(BaseModel):
     job_type: JobType
     status: JobStatus
     slurm_job_id: Optional[str] = None
+    submission_pending: bool = Field(default=False, exclude=True, repr=False)
     start_time: Optional[datetime] = None
     created_at: datetime
     user: Optional[UserInfo] = None
@@ -144,7 +145,7 @@ class JobListItem(BaseModel):
         Artifact recovery can outlast the allocation, so this does not measure
         resource usage. Docker clears its binding after synchronous removal.
         """
-        return self.slurm_job_id is not None and self.status in (
+        return (self.slurm_job_id is not None or self.submission_pending) and self.status in (
             JobStatus.TERMINATED,
             JobStatus.PAUSED,
             JobStatus.SUCCESS,

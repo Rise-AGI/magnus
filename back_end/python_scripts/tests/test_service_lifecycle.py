@@ -97,6 +97,18 @@ class ServiceLifecycleTests(unittest.TestCase):
         self.assertIsNone(self.service.current_job_id)
         self.assertIsNone(self.service.assigned_port)
 
+    def test_unknown_submission_retains_service_and_port_after_stop(self):
+        self.service.is_active = False
+        self.job.status = JobStatus.TERMINATED
+        self.job.slurm_job_id = None
+        self.job.submission_attempt = '{"comment":"unknown"}'
+        self.db.commit()
+        self.assertFalse(self.released(self.job))
+        self.tick(self.manager)
+        self.db.refresh(self.service)
+        self.assertEqual(self.service.current_job_id, "job")
+        self.assertEqual(self.service.assigned_port, 12345)
+
     def test_released_execution_allows_explicit_shutdown_cleanup(self):
         self.job.status = JobStatus.TERMINATED
         self.job.slurm_job_id = None

@@ -10,6 +10,7 @@ from pywheels.file_tools import guarantee_file_exist
 from ..models import Job, JobStatus
 from .._job_dir_access import grant_job_dir_runner_access
 from .._resource_manager import resource_manager
+from .._slurm_manager._submission import SubmissionDeferred, SubmissionRejected, SubmissionUncertain
 from . import (
     logger,
     magnus_workspace_path,
@@ -17,6 +18,7 @@ from . import (
 )
 from ._wrapper_template import _build_wrapper_content
 from ._relay_build_cache import remote_built_sif_path
+from ._submission_recovery import new_submission_attempt
 
 if TYPE_CHECKING:
     from ._typing import _SchedulerProtocol
@@ -102,6 +104,7 @@ class _SubmitMixin(_SubmitMixinBase):
             Job.id == job_id,
             Job.status == JobStatus.PENDING,
             Job.slurm_job_id.is_(None),
+            Job.submission_attempt.is_(None),
         ).update({
             Job.status: JobStatus.FAILED,
             Job.result: message,
@@ -114,6 +117,8 @@ class _SubmitMixin(_SubmitMixinBase):
         db: Session,
         job: Job,
         external_id: str,
+        *,
+        attempt: str | None = None,
     ) -> bool:
         job_id = job.id
         db.rollback()
@@ -121,9 +126,11 @@ class _SubmitMixin(_SubmitMixinBase):
             Job.id == job_id,
             Job.status == JobStatus.PENDING,
             Job.slurm_job_id.is_(None),
+            Job.submission_attempt == attempt,
         ).update({
             Job.status: JobStatus.QUEUED,
             Job.slurm_job_id: external_id,
+            Job.submission_attempt: None,
         }, synchronize_session=False)
         if not changed:
             # Cancellation can precede the scheduler's reply. Keep its ID even
@@ -131,7 +138,8 @@ class _SubmitMixin(_SubmitMixinBase):
             self._job_query(db, Job).filter(
                 Job.id == job_id,
                 Job.slurm_job_id.is_(None),
-            ).update({Job.slurm_job_id: external_id}, synchronize_session=False)
+                Job.submission_attempt == attempt,
+            ).update({Job.slurm_job_id: external_id, Job.submission_attempt: None}, synchronize_session=False)
         db.commit()
         db.refresh(job)
         if job.status == JobStatus.TERMINATED:
@@ -171,6 +179,9 @@ class _SubmitMixin(_SubmitMixinBase):
         db.refresh(job)
         if job.status != JobStatus.PENDING:
             logger.info(f"Job {job.id} status changed to {job.status} before submission, skipping")
+            return False
+
+        if job.submission_attempt is not None or self._submission_deferred():
             return False
 
         try:
@@ -298,17 +309,20 @@ class _SubmitMixin(_SubmitMixinBase):
         # 远端执行（transport=ssh）：在远端建好工作区骨架并把本机生成的 wrapper 推过去；
         # 本机执行下 no-op。失败按提交失败处理，不把无 wrapper 的 job 交给 sbatch。
         try:
-            self._stage_in_job(job_id, wrapper_path)
-            self._stage_in_resources(
-                job_id,
-                local_sif_path,
-                local_repo_dir,
-                build_digest=build_digest,
-            )
-            # 无网计算节点：把 entry_command / system_entry_command 引用的 custody 文件预置
-            # 进远端 dropin，让 in-job `magnus receive` 读盘而非打 HTTP（download 侧的离线通道，
-            # 对称于上传侧的 drop + _stage_out_custody）。本机执行下 no-op。
-            self._stage_in_custody(job_id, job.entry_command, system_entry_command)
+            if job_id not in self._staged_job_ids:
+                self._stage_in_job(job_id, wrapper_path)
+                self._stage_in_resources(
+                    job_id,
+                    local_sif_path,
+                    local_repo_dir,
+                    build_digest=build_digest,
+                )
+                # 无网计算节点：把 entry_command / system_entry_command 引用的 custody 文件预置
+                # 进远端 dropin，让 in-job `magnus receive` 读盘而非打 HTTP（download 侧的离线通道，
+                # 对称于上传侧的 drop + _stage_out_custody）。本机执行下 no-op。
+                self._stage_in_custody(job_id, job.entry_command, system_entry_command)
+                self._submission_cancel_event(job_id)
+                self._staged_job_ids.add(job_id)
             self._submission_cancel_event(job_id)
         except InterruptedError:
             # User cancellation already owns TERMINATED; shutdown leaves the
@@ -334,30 +348,75 @@ class _SubmitMixin(_SubmitMixinBase):
 
         # 执行端 wrapper 路径：本机执行下逐字等于本机 wrapper_path，sbatch 参数字节级不变。
         remote_wrapper_path = f"{remote_job_working_table}/wrapper.py"
-        try:
-            assert self.slurm_manager is not None
-            slurm_id = self.slurm_manager.submit_job_simple(
-                entry_command = f"python3 {remote_wrapper_path}",
-                gpus = job.gpu_count,
-                job_name = job.task_name,
-                gpu_type = job.gpu_type,
-                output_path = f"{remote_job_working_table}/slurm/output.txt",
-                overwrite_output = False,
-                runner = effective_runner,
-                cpu_count = job.cpu_count,
-                memory_demand = job.memory_demand,
-                time_limit = job.time_limit,
-                node_count = node_count,
-                tasks_per_node = tasks_per_node,
-                token = job.user.token if job.user.token is not None else "",
-            )
+        return self._submit_prepared_slurm(
+            db,
+            job,
+            entry_command = f"python3 {remote_wrapper_path}",
+            gpus = job.gpu_count,
+            job_name = job.task_name,
+            gpu_type = job.gpu_type,
+            output_path = f"{remote_job_working_table}/slurm/output.txt",
+            overwrite_output = False,
+            runner = effective_runner,
+            cpu_count = job.cpu_count,
+            memory_demand = job.memory_demand,
+            time_limit = job.time_limit,
+            node_count = node_count,
+            tasks_per_node = tasks_per_node,
+            token = job.user.token if job.user.token is not None else "",
+        )
 
+    def _submit_prepared_slurm(
+        self,
+        db: Session,
+        job: Job,
+        **arguments,
+    ) -> bool:
+        job_id = job.id
+        attempt = new_submission_attempt(job_id)
+        started = False
+
+        def begin():
+            nonlocal started
+            self._submission_cancel_event(job_id)
+            self._begin_submission(
+                db,
+                job,
+                attempt,
+            )
+            started = True
+
+        try:
+            slurm_id = self.slurm_manager.submit_job_simple(
+                **arguments,
+                submission_comment=json.loads(attempt)["comment"],
+                before_start=begin,
+            )
+        except SubmissionUncertain:
+            if not started:
+                self._defer_submission()
+            logger.warning("Job %s submission awaits %s", job_id, "reconciliation" if started else "connection recovery")
+            return False
+        except SubmissionDeferred:
+            self._clear_rejected_submission(db, job_id, attempt)
+            self._defer_submission()
+            return False
+        except InterruptedError:
+            return False
+        except SubmissionRejected as error:
+            self._clear_rejected_submission(db, job_id, attempt)
+            self._fail_job_before_submission(db, job_id, str(error))
+            return False
         except Exception as error:
+            if started:
+                logger.warning("Job %s submission reply handling failed; preserving intent (%s)", job_id, type(error).__name__)
+                return False
+            self._clear_rejected_submission(db, job_id, attempt)
             logger.error("Job %s submission error: %s", job_id, error)
             self._fail_job_before_submission(db, job_id, f"Job submission to scheduler failed: {error}")
             return False
-
-        return self._record_submission(db, job, slurm_id)
+        self._staged_job_ids.discard(job_id)
+        return self._record_submission(db, job, slurm_id, attempt=attempt)
 
     def _submit_to_docker(self, db: Session, job: Job) -> bool:
         """

@@ -72,9 +72,9 @@ class SchedulerCoordinator(_WorkspaceGCMixin):
         if not pending:
             return
         with SessionLocal() as db:
-            rows = db.query(Job.id, Job.status, Job.slurm_job_id, Job.finalization_status).filter(Job.id.in_(pending)).all()
-        for job_id, status, allocation, finalization in rows:
-            if status in (JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED) and (
+            rows = db.query(Job.id, Job.status, Job.slurm_job_id, Job.finalization_status, Job.submission_attempt).filter(Job.id.in_(pending)).all()
+        for job_id, status, allocation, finalization, attempt in rows:
+            if attempt is None and status in (JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TERMINATED) and (
                 finalization is not None or allocation is None
             ):
                 file_custody_manager.finish_job(job_id)

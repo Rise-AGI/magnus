@@ -50,7 +50,8 @@ class FileTransport:
                 return SimpleNamespace(returncode=1, stderr="cleanup failed")
             return subprocess.run(command, capture_output=True, text=True, timeout=10)
         if command[:2] == ["mkdir", "-p"]:
-            Path(command[-1]).mkdir(parents=True, exist_ok=True)
+            for directory in command[2:]:
+                Path(directory).mkdir(parents=True, exist_ok=True)
             return SimpleNamespace(returncode=0)
         path = Path(command[-1])
         entries = sorted(os.listdir(path)) if path.exists() else None

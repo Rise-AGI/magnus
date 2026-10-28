@@ -32,6 +32,7 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String)
     build_result: Mapped[str | None] = mapped_column(String, nullable=True)
     slurm_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    submission_attempt: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 def checksum(

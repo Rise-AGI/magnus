@@ -21,8 +21,8 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 
 def load_transport():
-    namespace = {"__name__": __name__}
-    for name in ("_ssh_auto_connect.py", "_file_receive.py", "_transport.py"):
+    namespace = {"__name__": __name__, "__file__": str(SERVER / "_slurm_manager" / "_transport.py")}
+    for name in ("_ssh_auto_connect.py", "_file_receive.py", "_directory_archive.py", "_transport.py"):
         path = SERVER / "_slurm_manager" / name
         tree = ast.parse(path.read_text(encoding="utf-8"))
         tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]

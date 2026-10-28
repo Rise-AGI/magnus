@@ -50,6 +50,7 @@ def get_file_status(
             models.Job.status,
             models.Job.slurm_job_id,
             models.Job.finalization_status,
+            models.Job.submission_attempt,
         ).filter(models.Job.id == job_id).first()
         if job is None:
             raise HTTPException(
@@ -60,6 +61,7 @@ def get_file_status(
         transfers_pending = job.finalization_status != "CLEANUP" and (
             job.slurm_job_id is not None
             or job.finalization_status is not None
+            or job.submission_attempt is not None
             or job.status not in (models.JobStatus.SUCCESS, models.JobStatus.FAILED, models.JobStatus.TERMINATED)
         )
 

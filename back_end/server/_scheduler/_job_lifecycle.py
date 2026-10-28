@@ -47,6 +47,7 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
                 Job.status == JobStatus.PAUSED,
                 Job.slurm_job_id.is_(None),
                 Job.finalization_status.is_(None),
+                Job.submission_attempt.is_(None),
             ).update({
                 Job.status: JobStatus.PREPARING,
                 Job.result: None,
@@ -137,8 +138,9 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
                 pending = db.query(
                     Job.finalization_status,
                     Job.slurm_job_id,
+                    Job.submission_attempt,
                 ).filter(Job.id == job_id).first()
-            if pending and pending[0] not in (None, "CLEANUP"):
+            if pending and (pending[2] is not None or pending[0] not in (None, "CLEANUP")):
                 return False
             if pending and pending[1] is not None and not is_local_mode:
                 assert self.slurm_manager is not None
@@ -174,6 +176,7 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
             # 上面的 keep-whitelist 在本机侧保留）。本机执行下 no-op；远端不存在时 rm -rf
             # 亦无害（覆盖 terminate / preparing 失败等尚未在远端建目录的清理路径）。
             self._cleanup_remote_job(job_id)
+            self._staged_job_ids.discard(job_id)
             return True
         except Exception as error:
             logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")

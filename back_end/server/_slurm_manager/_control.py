@@ -3,12 +3,14 @@
 import os
 import shlex
 import subprocess
+from collections.abc import Callable
 from typing import Dict, Optional
 
 from .._job_resources import resolve_job_resource_target
 from .._size_utils import effective_cpu_count_per_cpu, parse_memory_bytes
 from . import logger
 from ._transport import _Transport
+from ._submission import submit_batch
 
 
 class _ControlMixin:
@@ -30,6 +32,9 @@ class _ControlMixin:
         time_limit: Optional[int] = None,
         node_count: Optional[int] = None,
         tasks_per_node: Optional[int] = None,
+        *,
+        submission_comment: str | None = None,
+        before_start: Callable[[], None] | None = None,
     ) -> str:
         """简单提交：不做 sleep + 状态检查，让 SLURM 自己排队和调度。
 
@@ -76,6 +81,9 @@ class _ControlMixin:
             "--parsable",
             f"--job-name={job_name}",
         ]
+
+        if submission_comment is not None:
+            command.append(f"--comment={submission_comment}")
 
         # partition / qos / account：租户站点的 SLURM 强制要求这三项；自有
         # 站点配为 None，不下发对应 flag，sbatch 行为与历史一致。
@@ -146,26 +154,13 @@ class _ControlMixin:
         gpu_info = f"{gpu_type}:{gpus}" if (gpu_type and gpus > 0) else f"{gpus}"
         logger.info(f"🚀 Submitting '{job_name}' to SLURM queue (GPUs: {gpu_info})...")
 
-        try:
-            result = self._transport.run(
-                command,
-                input = script_content,
-                check = True,
-                env = env,
-            )
-        except subprocess.CalledProcessError as error:
-            detail = (error.stderr or "").strip()
-            if token:
-                detail = detail.replace(token, "[redacted]")
-            raise RuntimeError(
-                f"Slurm rejected submission (exit {error.returncode}): {detail[-4096:] or 'no diagnostic returned'}"
-            ) from None
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Slurm submission timed out; acceptance is unknown") from None
-        except OSError as error:
-            raise RuntimeError(f"Slurm submission transport failed ({type(error).__name__})") from None
-
-        job_id = result.stdout.strip()
+        job_id = submit_batch(
+            self._transport,
+            command,
+            script_content,
+            env,
+            before_start,
+        )
         logger.info(f"✅ Job '{job_name}' queued in SLURM (ID: {job_id})")
         return job_id
 

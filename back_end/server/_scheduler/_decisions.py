@@ -98,6 +98,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
             paused_jobs = self._job_query(db, Job.id).filter(
                 Job.status == JobStatus.PAUSED,
                 Job.slurm_job_id.is_(None),
+                Job.submission_attempt.is_(None),
                 Job.finalization_status.is_(None),
             ).all()
         for job in paused_jobs:
@@ -141,9 +142,14 @@ class _DecisionsMixin(_DecisionsMixinBase):
             self._submission_task = None
 
     def _schedule_pending_jobs(self):
+        if not is_local_mode:
+            self._reconcile_submissions()
+            if self._submission_deferred():
+                return
         with SessionLocal(expire_on_commit=False) as db:
             jobs = self._job_query(db, Job).options(*job_metadata_load_options()).filter(
                 Job.status == JobStatus.PENDING,
+                Job.submission_attempt.is_(None),
             ).all()
             if not jobs:
                 return
@@ -267,6 +273,8 @@ class _DecisionsMixin(_DecisionsMixinBase):
         共享 ORM 对象。"""
         with SessionLocal() as db:
             for job_id in job_ids:
+                if not is_local_mode and self._submission_deferred():
+                    break
                 with self._preparing_jobs_lock:
                     if self._submission_stopping:
                         break
@@ -288,6 +296,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
                             Job.status == JobStatus.TERMINATED,
                             Job.slurm_job_id.is_(None),
                             Job.finalization_status.is_(None),
+                            Job.submission_attempt.is_(None),
                         ).update({Job.finalization_status: "CLEANUP"}, synchronize_session=False)
                         db.commit()
                     finally:
