@@ -7,6 +7,7 @@
 - _config.py:     全局常量与全局只读状态（mirror 改写、cache 上限、git env、TTL、SHA pattern）
 - _cache.py:      LRU cache 清理 + 启动时孤儿清理
 - _images.py:     镜像拉取（apptainer pull on HPC / docker pull on local）
+- _image_cache.py: SIF identity, legacy paths, ownership and idle-file eviction
 - _repos.py:      仓库 clone/fetch/checkout + ensure_repo 主流程
 
 公共面：单例 `resource_manager`、`_image_to_sif_filename`。

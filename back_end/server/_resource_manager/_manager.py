@@ -5,7 +5,9 @@ import os
 from typing import Dict, Tuple
 
 from . import magnus_container_cache_path, magnus_repo_cache_path
-from ._helpers import _image_to_sif_filename, _repo_to_cache_dirname
+from ._helpers import _repo_to_cache_dirname
+from ._image_cache import ImageCache
+from ._config import CONTAINER_CACHE_SIZE
 from ._cache import _CacheMixin
 from ._images import _ImagesMixin
 from ._repos import _ReposMixin
@@ -20,6 +22,10 @@ class ResourceManager(_CacheMixin, _ImagesMixin, _ReposMixin):
     """
 
     def __init__(self):
+        self.images = ImageCache(
+            root=magnus_container_cache_path,
+            size_limit=CONTAINER_CACHE_SIZE,
+        )
         self.image_locks: Dict[str, asyncio.Lock] = {}
         # repo cache 目录 -> asyncio.Lock，一个目录一把锁
         self.repo_locks: Dict[str, asyncio.Lock] = {}
@@ -31,7 +37,9 @@ class ResourceManager(_CacheMixin, _ImagesMixin, _ReposMixin):
         self.builds = ImageBuildManager()
 
     def get_sif_path(self, image: str) -> str:
-        return os.path.join(magnus_container_cache_path, _image_to_sif_filename(image))
+        return self.images.path(
+            image,
+        )
 
     def _get_repo_cache_path(self, namespace: str, repo_name: str, branch: str) -> str:
         return os.path.join(magnus_repo_cache_path, _repo_to_cache_dirname(namespace, repo_name, branch))

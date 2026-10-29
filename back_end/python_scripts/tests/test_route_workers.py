@@ -2,6 +2,7 @@
 import ast
 import asyncio
 import __future__
+import logging
 from pathlib import Path
 import runpy
 import threading
@@ -27,9 +28,10 @@ class RouteWorkerTests(unittest.IsolatedAsyncioTestCase):
             calls.append((identifier, uri, is_refresh))
             pulled.set()
         namespace.update(_prepare_pull=prepare, _do_pull=pull)
+        namespace.update(_pull_tasks=set(), logger=logging.getLogger(__name__))
         path = SERVER / "routers/images.py"
-        node = next(node for node in ast.parse(path.read_text()).body if isinstance(node, ast.AsyncFunctionDef) and node.name == "_begin_pull")
-        exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec", flags=__future__.annotations.compiler_flag), namespace)
+        nodes = [node for node in ast.parse(path.read_text()).body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in ("_begin_pull", "_schedule_pull")]
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec", flags=__future__.annotations.compiler_flag), namespace)
         task = asyncio.create_task(namespace["_begin_pull"](None, "image", None, False))
         try:
             self.assertTrue(await asyncio.to_thread(started.wait, 1))

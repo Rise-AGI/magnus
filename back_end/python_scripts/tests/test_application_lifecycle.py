@@ -97,14 +97,18 @@ class ApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
             "models": MagicMock(),
             "json": __import__("json"),
             "recover_stuck_images": recover,
+            "shutdown_image_pulls": lambda: asyncio.sleep(0),
             "scheduler": SimpleNamespace(
                 shutdown=lambda: shutdown("scheduler"),
                 restore_pins=lambda rows: None,
             ),
-            "resource_manager": SimpleNamespace(builds=SimpleNamespace(
-                shutdown=lambda: shutdown("builds"),
-                restore_pins=lambda pins: None,
-            )),
+            "resource_manager": SimpleNamespace(
+                builds=SimpleNamespace(
+                    shutdown=lambda: shutdown("builds"),
+                    restore_pins=lambda pins: None,
+                ),
+                images=SimpleNamespace(restore_legacy_names=lambda rows: None, pin=lambda *args: None),
+            ),
             "file_custody_manager": SimpleNamespace(
                 cleanup_loop=lambda: background("custody-loop"),
                 shutdown=custody_shutdown,
@@ -263,6 +267,7 @@ class SchedulerShutdownTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(entered.wait(), 2)
         worker = SimpleNamespace(
             _preparing_jobs_lock=threading.Lock(), preparing_jobs={"job": task},
+            _image_pull_tasks={},
             shutdown_submission=submissions, shutdown_artifact_recovery=artifacts,
         )
         worker._shutdown_preparing_jobs = lambda: preparing(worker)
@@ -270,6 +275,35 @@ class SchedulerShutdownTests(unittest.IsolatedAsyncioTestCase):
             await shutdown(worker)
         self.assertTrue(task.done())
         self.assertEqual(events, ["artifacts", "preparation joined"])
+
+    async def test_shutdown_joins_detached_shared_pull_after_its_last_job_leaves(self):
+        namespace = {**helpers, "asyncio": asyncio}
+        shutdown = load_function("_scheduler/_core.py", "_shutdown_preparing_jobs", namespace)
+        started, cleaning, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def pull():
+            try:
+                started.set()
+                await asyncio.Future()
+            finally:
+                cleaning.set()
+                await finish.wait()
+
+        pull_task = asyncio.create_task(pull())
+        await asyncio.wait_for(started.wait(), 2)
+        worker = SimpleNamespace(
+            _preparing_jobs_lock=threading.Lock(),
+            preparing_jobs={},
+            _image_pull_tasks={"image": pull_task},
+        )
+        closing = asyncio.create_task(shutdown(worker))
+        try:
+            await asyncio.wait_for(cleaning.wait(), 2)
+            self.assertFalse(closing.done())
+        finally:
+            finish.set()
+            await asyncio.wait_for(closing, 2)
+        self.assertTrue(pull_task.done())
 
 
 class BackgroundWriterTests(unittest.IsolatedAsyncioTestCase):

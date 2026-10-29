@@ -434,9 +434,9 @@ Authoritative 调度使用全 Job 的 CPU/RAM/GPU 需求及实际 GPU 型号。�
 在 PREPARING 阶段并行执行：
 
 **镜像拉取** (`_resource_manager.ensure_image`):
-- docker URI → SIF 文件名映射（`docker://a/b:tag` → `a_b_tag.sif`）
-- 缓存目录 `{magnus_root}/container_cache/`，LRU 淘汰，上限 `resource_cache.container_cache_size`
-- per-image asyncio.Lock 防重复拉取
+- 新 SIF 文件名使用镜像 URI 的完整 SHA-256。已登记的旧文件名继续有效；不能仅凭未登记的旧文件名猜测镜像身份。
+- 缓存目录 `{magnus_root}/container_cache/`，LRU 淘汰，目标容量为 `resource_cache.container_cache_size`。准备、排队和执行中的 Job 持有镜像保护，直到提交及资源清理结束；重启后先恢复保护再调度。只淘汰空闲条目，因此受保护的镜像可能超过缓存目标；原有剩余空间检查仍会在余量不足时拒绝拉取。这是采样检查，不是文件系统配额。
+- Apptainer 和 Docker 均以 per-image asyncio.Lock 防止重复拉取。取消或服务关闭时，所有者等待拉取进程和 scratch 清理结束再退出。删除仍被 Job 使用的 SIF 返回 HTTP 409，并保留缓存登记。
 - 3 次重试 + 指数退避，非瞬态错误（unauthorized, not found）直接失败
 
 **仓库克隆** (`_resource_manager.ensure_repo`):

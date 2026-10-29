@@ -109,7 +109,7 @@ class SchedulerCoordinator(_WorkspaceGCMixin):
         for job_id, target_id in rows:
             worker = self.for_target(target_id)
             with worker._preparing_jobs_lock:
-                worker._build_pinned_jobs.add(job_id)
+                worker._pinned_jobs.add(job_id)
 
     async def shutdown(
         self,

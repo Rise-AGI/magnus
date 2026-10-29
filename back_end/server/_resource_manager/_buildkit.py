@@ -118,7 +118,7 @@ async def run_command(
     *,
     on_line: Callable[[str], None] | None = None,
     environment: dict[str, str] | None = None,
-    timeout: float = 60,
+    timeout: float | None = 60,
     process_directory: Path | None = None,
 ) -> str:
     """Drain both pipes concurrently and retain a bounded diagnostic tail.

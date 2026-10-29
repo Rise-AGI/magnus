@@ -50,7 +50,7 @@ REPO_CACHE_SIZE = _parse_size_string(magnus_config['execution']['resource_cache'
 # so we fail fast with a clear message instead of attempting and burning the
 # retry/backoff budget. Conservative (2 GiB) so a small-image pull is never
 # falsely rejected when space is merely tight -- eviction tries to restore this
-# headroom first (see _evict_lru_images).
+# headroom first (see ImageCache.collect).
 MIN_FREE_BYTES_FOR_PULL = _parse_size_string("2G")
 
 

@@ -21,7 +21,7 @@ from ._service_manager import service_manager
 from ._file_custody_manager import file_custody_manager
 from ._metrics_collector import DockerMetricsCollector
 from ._resource_manager import resource_manager
-from .routers.images import recover_stuck_images
+from .routers.images import recover_stuck_images, shutdown_image_pulls
 from .routers.uploads import upload_store, cleanup_uploads
 from ._feishu_client import feishu_client
 from ._blocking_io import _run_blocking_io
@@ -296,6 +296,7 @@ async def lifespan(
         )
         cleanup.push_async_callback(_run_blocking_io, upload_store.shutdown)
         cleanup.push_async_callback(scheduler.shutdown)
+        cleanup.push_async_callback(shutdown_image_pulls)
 
         thread_pool_size = 200
 
@@ -312,8 +313,16 @@ async def lifespan(
 
         # Restore cache protection before any new preparation or cache collection.
         with SessionLocal() as db:
-            rows = db.query(models.Job.id, models.Job.build_result, models.Job.execution_target).filter(
-                models.Job.build_result.isnot(None),
+            resource_manager.images.restore_legacy_names(
+                db.query(models.CachedImage.uri, models.CachedImage.filename).all(),
+            )
+            rows = db.query(
+                models.Job.id,
+                models.Job.build_result,
+                models.Job.container_image,
+                models.Job.execution_target,
+            ).filter(
+                models.Job.build_result.isnot(None) | models.Job.container_image.isnot(None),
                 (models.Job.status.in_([
                     models.JobStatus.PREPARING,
                     models.JobStatus.BUILDING,
@@ -321,9 +330,22 @@ async def lifespan(
                     models.JobStatus.QUEUED,
                     models.JobStatus.RUNNING,
                     models.JobStatus.PAUSED,
-                ]) | models.Job.slurm_job_id.isnot(None) | models.Job.submission_attempt.isnot(None)),
+                ]) | models.Job.slurm_job_id.isnot(None)
+                | models.Job.finalization_status.isnot(None)
+                | models.Job.submission_attempt.isnot(None)),
             ).all()
-            pins = {job_id: json.loads(result) for job_id, result, _ in rows}
+            pins = {
+                job_id: json.loads(result)
+                for job_id, result, _, _ in rows
+                if result is not None
+            }
+            for job_id, _, image, _ in rows:
+                if image is not None:
+                    resource_manager.images.pin(
+                        job_id,
+                        image,
+                        preserve_legacy=True,
+                    )
             active_targets = db.query(models.Job.execution_target).filter(
                 models.Job.status.notin_([models.JobStatus.SUCCESS, models.JobStatus.FAILED, models.JobStatus.TERMINATED])
                 | models.Job.slurm_job_id.isnot(None)
@@ -333,7 +355,7 @@ async def lifespan(
             for (target_id,) in active_targets:
                 scheduler.for_target(target_id)
         resource_manager.builds.restore_pins(pins)
-        scheduler.restore_pins([(job_id, target_id) for job_id, _, target_id in rows])
+        scheduler.restore_pins([(job_id, target_id) for job_id, _, _, target_id in rows])
 
         if is_local_mode:
             collector = DockerMetricsCollector()

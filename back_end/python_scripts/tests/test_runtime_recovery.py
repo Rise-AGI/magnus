@@ -38,7 +38,7 @@ class DockerSubmissionTests(unittest.TestCase):
         self.actor._begin_calls = 0
         self.actor._submission_reconcile_after = 0
         self.actor._submission_reconcile_cursor = 0
-        self.actor._built_environment_ready = lambda *args: True
+        self.actor._environment_ready = lambda *args: True
         self.actor._init_job_working_dir = lambda path: Path(path).mkdir(parents=True, exist_ok=True)
         self.actor.terminate_job = Mock()
         self.fixture.add_job(status=JobStatus.PENDING)
@@ -230,7 +230,11 @@ class PreparationCleanupTests(unittest.IsolatedAsyncioTestCase):
                         return False, 'repository unavailable', None
                     fixture.namespace.update(
                         asyncio=asyncio,
-                        resource_manager=SimpleNamespace(ensure_repo=repository, builds=SimpleNamespace(release=Mock())),
+                        resource_manager=SimpleNamespace(
+                            ensure_repo=repository,
+                            builds=SimpleNamespace(release=Mock()),
+                            images=SimpleNamespace(pin=Mock(), release=Mock()),
+                        ),
                         guarantee_file_exist=lambda path, **kwargs: Path(path).mkdir(parents=True, exist_ok=True),
                     )
                     async def blocking(function, *args):
@@ -239,7 +243,7 @@ class PreparationCleanupTests(unittest.IsolatedAsyncioTestCase):
                     prepare = load_method('_scheduler/_resources.py', '_prepare_job_resources', fixture.namespace)
                     actor = fixture.scheduler
                     actor.config = {'cluster': {'default_runner': 'runner'}}
-                    actor._build_pinned_jobs = set()
+                    actor._pinned_jobs = set()
                     actor._ensure_image_decoupled = AsyncMock(return_value=(True, None))
                     fixture.cleanup_failure.add('job')
                     with patch.multiple(Job, container_image='image', dockerfile=None, runner=None, namespace='org', repo_name='repo', branch='main', commit_sha='HEAD', create=True):

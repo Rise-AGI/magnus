@@ -742,7 +742,7 @@ class SlurmFinalizationTests(unittest.TestCase):
             db.commit()
         actor = self.scheduler
         actor.preparing_jobs = {}
-        actor._build_pinned_jobs = {"job"}
+        actor._pinned_jobs = {"job"}
         released = []
         def begin_submission_before_terminal_query():
             actor._submitting_jobs.add("job")
@@ -753,16 +753,92 @@ class SlurmFinalizationTests(unittest.TestCase):
             return self.sessions()
         namespace = dict(self.namespace)
         namespace["SessionLocal"] = begin_submission_before_terminal_query
-        namespace["resource_manager"] = SimpleNamespace(builds=SimpleNamespace(release=released.append))
-        release = load_method("_scheduler/_core.py", "_release_finished_builds", namespace)
+        image_released = []
+        namespace["resource_manager"] = SimpleNamespace(
+            builds=SimpleNamespace(release=released.append),
+            images=SimpleNamespace(release=image_released.append),
+        )
+        release = load_method("_scheduler/_core.py", "_release_finished_resources", namespace)
         release(actor)
         self.assertEqual(released, [])
-        self.assertEqual(actor._build_pinned_jobs, {"job"})
+        self.assertEqual(actor._pinned_jobs, {"job"})
         actor._submitting_jobs.clear()
         namespace["SessionLocal"] = self.sessions
         release(actor)
         self.assertEqual(released, ["job"])
-        self.assertEqual(actor._build_pinned_jobs, set())
+        self.assertEqual(image_released, ["job"])
+        self.assertEqual(actor._pinned_jobs, set())
+
+    def test_missing_pulled_image_reenters_preparation_only_before_submission(
+        self,
+    ):
+        self.add_job(status=JobStatus.PENDING)
+        namespace = dict(self.namespace)
+        image = self.root / "missing.sif"
+        namespace["resource_manager"] = SimpleNamespace(get_sif_path=lambda uri: str(image))
+        ready = load_method("_scheduler/_submit.py", "_environment_ready", namespace)
+        with patch.multiple(Job, dockerfile=None, container_image="image", create=True):
+            for status, allocation, attempt, finalization, expected in (
+                (JobStatus.PENDING, None, None, None, JobStatus.PREPARING),
+                (JobStatus.TERMINATED, None, None, None, JobStatus.TERMINATED),
+                (JobStatus.RUNNING, "123", None, None, JobStatus.RUNNING),
+                (JobStatus.PENDING, "123", None, None, JobStatus.PENDING),
+                (JobStatus.PENDING, None, "unresolved", None, JobStatus.PENDING),
+                (JobStatus.PENDING, None, None, "CLEANUP", JobStatus.PENDING),
+            ):
+                with self.subTest(status=status, allocation=allocation, attempt=attempt, finalization=finalization):
+                    with self.sessions() as db:
+                        job = db.get(Job, "job")
+                        job.status = status
+                        job.slurm_job_id = allocation
+                        job.submission_attempt = attempt
+                        job.finalization_status = finalization
+                        db.commit()
+                        self.assertFalse(ready(self.scheduler, db, job))
+                        db.refresh(job)
+                        self.assertEqual(job.status, expected)
+
+    def test_pulled_image_recovery_does_not_overwrite_concurrent_termination(
+        self,
+    ):
+        self.add_job(status=JobStatus.PENDING)
+        with self.sessions() as db:
+            db.get(Job, "job").slurm_job_id = None
+            db.commit()
+        namespace = dict(self.namespace)
+
+        def terminate_while_checking_image(uri):
+            with self.sessions() as other:
+                other.get(Job, "job").status = JobStatus.TERMINATED
+                other.commit()
+            return str(self.root / "missing.sif")
+
+        namespace["resource_manager"] = SimpleNamespace(get_sif_path=terminate_while_checking_image)
+        ready = load_method("_scheduler/_submit.py", "_environment_ready", namespace)
+        with patch.multiple(Job, dockerfile=None, container_image="image", create=True):
+            with self.sessions() as db:
+                job = db.get(Job, "job")
+                self.assertFalse(ready(self.scheduler, db, job))
+                db.refresh(job)
+                self.assertEqual(job.status, JobStatus.TERMINATED)
+
+    def test_existing_sif_and_docker_local_keep_ready_behavior(
+        self,
+    ):
+        self.add_job(status=JobStatus.PENDING)
+        image = self.root / "ready.sif"
+        image.write_bytes(b"image")
+        namespace = dict(self.namespace)
+        namespace["resource_manager"] = SimpleNamespace(get_sif_path=lambda uri: str(image))
+        ready = load_method("_scheduler/_submit.py", "_environment_ready", namespace)
+        with patch.multiple(Job, dockerfile=None, container_image="image", create=True):
+            with self.sessions() as db:
+                job = db.get(Job, "job")
+                self.assertTrue(ready(self.scheduler, db, job))
+                namespace["is_local_mode"] = True
+                image.unlink()
+                self.assertTrue(ready(self.scheduler, db, job))
+                self.assertEqual(job.status, JobStatus.PENDING)
 
     def test_staging_failure_is_committed_before_cleanup_and_retried_without_slurm_id(self):
         table = self.add_job(status=JobStatus.PENDING)
@@ -799,7 +875,7 @@ class SlurmFinalizationTests(unittest.TestCase):
                         other.get(Job, identifier).status = JobStatus.TERMINATED
                         other.commit()
                     raise OSError("setup failed after cancellation")
-                actor._built_environment_ready = setup
+                actor._environment_ready = setup
                 actor.docker_manager = object()
                 name = "_submit_to_docker" if local else "_submit_to_slurm"
                 operation = load_method("_scheduler/_submit.py", name, namespace)

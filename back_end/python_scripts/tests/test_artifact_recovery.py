@@ -104,7 +104,7 @@ class ArtifactRecoveryTests(unittest.IsolatedAsyncioTestCase):
         actor._loop = None
         actor._sync_reality = lambda: {"old": "1", "new": "2"}
         actor._make_decisions = decide
-        actor._release_finished_builds = lambda: None
+        actor._release_finished_resources = lambda: None
         actor._record_snapshot = lambda: None
         actor._reclaim_workspace_over_cap = lambda: None
         try:

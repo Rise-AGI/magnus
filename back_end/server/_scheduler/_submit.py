@@ -153,19 +153,30 @@ class _SubmitMixin(_SubmitMixinBase):
             return False
         return bool(changed)
 
-    def _built_environment_ready(
+    def _environment_ready(
         self,
         db: Session,
         job: Job,
     ) -> bool:
         if job.dockerfile is None:
-            return True
-        result = json.loads(job.build_result or "{}")
-        if result and resource_manager.builds.is_available(result):
+            available = is_local_mode or (
+                job.container_image is not None
+                and os.path.isfile(resource_manager.get_sif_path(job.container_image))
+            )
+        else:
+            result = json.loads(job.build_result or "{}")
+            available = bool(result and resource_manager.builds.is_available(result))
+        if available:
             return True
         # Artifacts are disposable. Recover a missing runtime copy by preparing
         # again, but do not overwrite a concurrent user termination.
-        self._job_query(db, Job).filter(Job.id == job.id, Job.status == JobStatus.PENDING).update({
+        self._job_query(db, Job).filter(
+            Job.id == job.id,
+            Job.status == JobStatus.PENDING,
+            Job.slurm_job_id.is_(None),
+            Job.finalization_status.is_(None),
+            Job.submission_attempt.is_(None),
+        ).update({
             Job.status: JobStatus.PREPARING,
         }, synchronize_session=False)
         db.commit()
@@ -187,7 +198,7 @@ class _SubmitMixin(_SubmitMixinBase):
             return False
 
         try:
-            if not self._built_environment_ready(db, job):
+            if not self._environment_ready(db, job):
                 return False
             user_magnus = self.config["cluster"]["default_runner"]
             effective_runner = job.runner if job.runner is not None else user_magnus
@@ -445,7 +456,7 @@ class _SubmitMixin(_SubmitMixinBase):
             return False
 
         try:
-            if not self._built_environment_ready(db, job):
+            if not self._environment_ready(db, job):
                 return False
             if job.dockerfile is not None:
                 build_result = json.loads(job.build_result or "{}")

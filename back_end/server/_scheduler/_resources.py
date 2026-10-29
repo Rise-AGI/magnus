@@ -13,7 +13,7 @@ from ..models import Job, JobStatus, CachedImage
 from .._magnus_config import is_local_mode
 from .._resource_manager import resource_manager, _image_to_sif_filename
 from .._resource_manager._helpers import _run_blocking_io
-from . import logger, magnus_workspace_path, magnus_container_cache_path
+from . import logger, magnus_workspace_path
 
 if TYPE_CHECKING:
     from ._typing import _SchedulerProtocol
@@ -75,7 +75,8 @@ def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 pass
         else:
-            sif_path = os.path.join(magnus_container_cache_path, _image_to_sif_filename(image_uri))
+            sif_path = resource_manager.get_sif_path(image_uri)
+            img.filename = os.path.basename(sif_path)
             try:
                 img.size_bytes = os.stat(sif_path).st_size
             except OSError:
@@ -166,6 +167,12 @@ class _ResourcesMixin(_ResourcesMixinBase):
             if dockerfile is None:
                 if container_image is None:
                     raise RuntimeError("Job has neither a container image nor a Dockerfile")
+                resource_manager.images.pin(
+                    job_id,
+                    container_image,
+                )
+                with self._preparing_jobs_lock:
+                    self._pinned_jobs.add(job_id)
                 image_ok, image_error = await self._ensure_image_decoupled(container_image, user_id)
                 if not image_ok:
                     raise RuntimeError(f"Failed to pull image: {image_error}")
@@ -182,7 +189,7 @@ class _ResourcesMixin(_ResourcesMixinBase):
                 dockerfile = dockerfile,
             )
             with self._preparing_jobs_lock:
-                self._build_pinned_jobs.add(job_id)
+                self._pinned_jobs.add(job_id)
             with SessionLocal() as db:
                 active = db.query(Job).filter(Job.id == job_id, Job.status.in_(preparation_states)).update({
                     Job.build_result: json.dumps(result),
@@ -231,8 +238,9 @@ class _ResourcesMixin(_ResourcesMixinBase):
                     except asyncio.CancelledError:
                         continue
                 resource_manager.builds.release(job_id)
+                resource_manager.images.release(job_id)
                 with self._preparing_jobs_lock:
-                    self._build_pinned_jobs.discard(job_id)
+                    self._pinned_jobs.discard(job_id)
                 await _run_blocking_io(
                     self._finish_unsubmitted_job,
                     job_id,

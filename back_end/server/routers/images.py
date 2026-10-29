@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from .._blocking_io import _run_blocking_io
+from .._lifecycle import cancel_background_tasks
 from sqlalchemy.orm import Session, joinedload
 
 from .. import database
@@ -73,6 +74,43 @@ _recover_lock = threading.Lock()
 # 请求级互斥：同一 URI 的 API 操作（预热/刷新）不可并发穿透状态检查
 # ensure_image 内部也有 asyncio.Lock 防止文件系统并发，这里防的是 DB 层面的 TOCTOU
 _uri_locks: Dict[str, asyncio.Lock] = {}
+_pull_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_pull(
+    image_id: int,
+    uri: str,
+    is_refresh: bool,
+) -> None:
+    task = asyncio.create_task(
+        _do_pull(
+            image_id,
+            uri,
+            is_refresh=is_refresh,
+        ),
+    )
+    _pull_tasks.add(
+        task,
+    )
+
+    def finished(
+        completed: asyncio.Task,
+    ) -> None:
+        _pull_tasks.discard(
+            completed,
+        )
+        if not completed.cancelled() and (error := completed.exception()) is not None:
+            logger.error("Image pull worker %s failed (%s)", image_id, type(error).__name__)
+
+    task.add_done_callback(
+        finished,
+    )
+
+
+async def shutdown_image_pulls() -> None:
+    await cancel_background_tasks(
+        list(_pull_tasks),
+    )
 
 
 def _get_uri_lock(uri: str) -> asyncio.Lock:
@@ -174,7 +212,10 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
         db.close()
 
     # Phase 2: 拉取镜像（耗时操作，不持有任何锁和 DB session）
-    success, error_msg = await resource_manager.ensure_image(uri, force=is_refresh)
+    try:
+        success, error_msg = await resource_manager.ensure_image(uri, force=is_refresh)
+    except Exception as error:
+        success, error_msg = False, f"Image preparation failed ({type(error).__name__})"
 
     # Phase 3: 状态结算（加锁防止和 delete_image / 新 pull 并发竞态）
     async with _get_uri_lock(uri):
@@ -185,13 +226,12 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
                 # 记录已被删除；仅当该 URI 无任何记录时才清理文件，避免误杀并发请求的成果
                 any_exist = db.query(models.CachedImage).filter(models.CachedImage.uri == uri).first()
                 if not any_exist and not is_local_mode:
-                    sif_path = os.path.join(container_cache_path, _image_to_sif_filename(uri))
-                    if os.path.exists(sif_path):
-                        try:
-                            os.remove(sif_path)
-                            logger.info(f"Cleaned up orphan .sif after deleted record: {uri}")
-                        except OSError:
-                            pass
+                    try:
+                        resource_manager.images.remove(
+                            os.path.basename(resource_manager.get_sif_path(uri)),
+                        )
+                    except OSError:
+                        pass
                 return
 
             if success:
@@ -208,7 +248,8 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
                     except (OSError, ValueError):
                         pass
                 else:
-                    sif_path = os.path.join(container_cache_path, img.filename)
+                    sif_path = resource_manager.get_sif_path(uri)
+                    img.filename = os.path.basename(sif_path)
                     try:
                         img.size_bytes = os.stat(sif_path).st_size
                     except OSError:
@@ -343,7 +384,10 @@ async def _begin_pull(
         # A disconnected requester must not leave a committed "pulling" record
         # without its worker. Scheduling belongs to the joined transaction work.
         loop.call_soon_threadsafe(
-            lambda: asyncio.create_task(_do_pull(response.id, uri, is_refresh=refresh)),
+            _schedule_pull,
+            response.id,
+            uri,
+            refresh,
         )
         return response
 
@@ -501,15 +545,19 @@ async def delete_image(
             )
             await proc.communicate()
         else:
-            sif_path = os.path.join(container_cache_path, img.filename)
-            if os.path.exists(sif_path):
-                try:
-                    os.remove(sif_path)
-                except OSError as e:
-                    logger.warning(f"Failed to delete SIF file {sif_path}: {e}")
+            if not resource_manager.images.remove(
+                img.filename,
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete an image that is in use by a Job.",
+                )
 
         db.delete(img)
         db.commit()
+        resource_manager.images.forget(
+            img.uri,
+        )
 
 
 @router.post("/images/{image_id}/transfer", response_model=CachedImageResponse)

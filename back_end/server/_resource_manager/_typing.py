@@ -16,6 +16,7 @@ import asyncio
 from typing import Dict, Tuple
 
 from ._builds import ImageBuildManager
+from ._image_cache import ImageCache
 
 
 class _ResourceManagerProtocol:
@@ -31,13 +32,13 @@ class _ResourceManagerProtocol:
     _default_branch_cache: Dict[str, Tuple[str, float]]
     _default_branch_locks: Dict[str, asyncio.Lock]
     builds: ImageBuildManager
+    images: ImageCache
 
     # === _manager.py ===
     def get_sif_path(self, image: str) -> str: ...
     def _get_repo_cache_path(self, namespace: str, repo_name: str, branch: str) -> str: ...
 
     # === _cache.py ===
-    def _evict_lru_images(self, target_free_bytes: int = 0) -> None: ...
     async def _evict_lru_repos(
         self,
     ) -> None: ...

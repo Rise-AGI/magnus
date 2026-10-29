@@ -85,7 +85,7 @@ class MagnusScheduler(
         self._preparing_jobs_lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._image_pull_tasks: Dict[str, asyncio.Task] = {}  # image_uri -> shared pull Task
-        self._build_pinned_jobs: set[str] = set()
+        self._pinned_jobs: set[str] = set()
         self._docker_log_cursors: Dict[str, Optional[str]] = {}  # job_id -> last log timestamp
         self._finalization_retry_after: Dict[str, float] = {}
         self._artifact_recovery_tasks: Dict[str, asyncio.Task[int]] = {}
@@ -123,7 +123,7 @@ class MagnusScheduler(
             artifact_candidates = await _run_blocking_io(self._sync_reality)
             self._schedule_artifact_recovery(artifact_candidates)
             await self._make_decisions()
-            await _run_blocking_io(self._release_finished_builds)
+            await _run_blocking_io(self._release_finished_resources)
             # _record_snapshot 也会跑 slurm 查询（远端 transport 下是骑 socket 的 squeue/
             # scontrol，秒级，且 auto_connect 时可能触发 socket 重建）——同样丢线程池，
             # 否则会周期性阻塞 event loop。tick 串行执行，线程内独占无并发。
@@ -157,7 +157,12 @@ class MagnusScheduler(
     ) -> None:
         with self._preparing_jobs_lock:
             tasks = list(self.preparing_jobs.values())
-        await cancel_background_tasks(tasks)
+        try:
+            await cancel_background_tasks(tasks)
+        finally:
+            await cancel_background_tasks(
+                list(self._image_pull_tasks.values()),
+            )
 
     def terminate_job(self, db: Session, job: Job) -> None:
         """API endpoint for user-initiated job termination"""
@@ -229,10 +234,10 @@ class MagnusScheduler(
         elif not job.finalization_status and job.submission_attempt is None and job.slurm_job_id is None:
             self._finish_unsubmitted_job(job.id)
 
-    def _release_finished_builds(self) -> None:
+    def _release_finished_resources(self) -> None:
         """Release artifacts only after submit/staging and external resources drain."""
         with self._preparing_jobs_lock:
-            candidates = self._build_pinned_jobs - set(self.preparing_jobs) - self._submitting_jobs
+            candidates = self._pinned_jobs - set(self.preparing_jobs) - self._submitting_jobs
         if not candidates:
             return
         with SessionLocal() as db:
@@ -249,9 +254,10 @@ class MagnusScheduler(
                 if job_id in self.preparing_jobs or job_id in self._submitting_jobs:
                     continue
             resource_manager.builds.release(job_id)
+            resource_manager.images.release(job_id)
             released.add(job_id)
         with self._preparing_jobs_lock:
-            self._build_pinned_jobs.difference_update(released)
+            self._pinned_jobs.difference_update(released)
 
     def signal_job(self, job: Job) -> None:
         """向运行中的 job 进程发送 SIGTERM。

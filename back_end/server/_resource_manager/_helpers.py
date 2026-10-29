@@ -7,6 +7,7 @@ import shutil
 import stat
 import sys
 from .._blocking_io import _run_blocking_io
+from ._image_cache import image_filename
 
 
 def _get_dir_size(path: str) -> int:
@@ -48,11 +49,9 @@ def _remove_tree(path: str) -> None:
 
 
 def _image_to_sif_filename(image: str) -> str:
-    """docker://pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime -> pytorch_pytorch_2.5.1-cuda12.4-cudnn9-runtime.sif"""
-    name = re.sub(r'^[a-z]+://', '', image)
-    name = re.sub(r'[/:@]', '_', name)
-    name = re.sub(r'_+', '_', name).strip('_')
-    return f"{name}.sif"
+    return image_filename(
+        image,
+    )
 
 
 def _repo_to_cache_dirname(namespace: str, repo_name: str, branch: str) -> str:

@@ -48,7 +48,7 @@ class _SchedulerProtocol:
     _preparing_jobs_lock: "threading.Lock"
     _loop: Optional[asyncio.AbstractEventLoop]
     _image_pull_tasks: Dict[str, asyncio.Task[Any]]
-    _build_pinned_jobs: set[str]
+    _pinned_jobs: set[str]
     _docker_log_cursors: Dict[str, Optional[str]]
     _finalization_retry_after: Dict[str, float]
     _artifact_recovery_tasks: Dict[str, asyncio.Task[int]]
@@ -193,7 +193,7 @@ class _SchedulerProtocol:
         job_id: str,
         message: str,
     ) -> None: ...
-    def _built_environment_ready(self, db: "Session", job: "Job") -> bool: ...
+    def _environment_ready(self, db: "Session", job: "Job") -> bool: ...
     def _submit_to_slurm(self, db: "Session", job: "Job") -> bool: ...
     def _submit_to_docker(self, db: "Session", job: "Job") -> bool: ...
     def _extract_bind_mounts_from_system_entry_command(

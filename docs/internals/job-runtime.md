@@ -445,9 +445,9 @@ Heartbeat interval is `scheduler.heartbeat_interval` (default 2 seconds); each t
 Executed in parallel in the PREPARING phase:
 
 **Image pull** (`_resource_manager.ensure_image`):
-- docker URI → SIF filename mapping (`docker://a/b:tag` → `a_b_tag.sif`)
-- Cache directory `{magnus_root}/container_cache/`, LRU eviction, cap `resource_cache.container_cache_size`
-- Per-image asyncio.Lock to prevent duplicate pulls
+- New SIF names use the full SHA-256 of the image URI. Registered legacy filenames remain valid; an unregistered legacy filename is not enough to identify an image.
+- Cache directory `{magnus_root}/container_cache/`, LRU eviction, cap `resource_cache.container_cache_size`. Preparing, pending and active Jobs protect their images until submission and resource cleanup have finished; those pins are restored before scheduling after a restart. Eviction only removes idle entries, so pinned images can exceed the cache target. The existing free-space check still rejects a pull when there is insufficient headroom. These are sampled checks, not a filesystem quota.
+- Per-image asyncio.Lock prevents duplicate pulls in both Apptainer and Docker modes. Pull processes and scratch cleanup are joined before their owner exits, including cancellation and application shutdown. Deleting a SIF still needed by a Job returns HTTP 409 and retains its cache registration.
 - 3 retries + exponential backoff; non-transient errors (unauthorized, not found) fail immediately
 
 **Repo clone** (`_resource_manager.ensure_repo`):
