@@ -21,7 +21,9 @@ class DockerSubmissionTests(unittest.TestCase):
         self.namespace = self.fixture.namespace
         self.namespace.update(
             DockerSubmissionRejected=docker.DockerSubmissionRejected,
-            resource_manager=SimpleNamespace(),
+            resource_manager=SimpleNamespace(
+                get_docker_image=lambda image: image,
+            ),
             is_local_mode=True,
         )
         load_mixin('_scheduler/_submission_recovery.py', self.namespace)

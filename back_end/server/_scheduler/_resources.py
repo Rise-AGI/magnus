@@ -1,6 +1,5 @@
 # back_end/server/_scheduler/_resources.py
 import os
-import re
 import json
 import asyncio
 import subprocess
@@ -57,7 +56,9 @@ def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
     if success:
         if is_local_mode:
             try:
-                docker_image = re.sub(r'^[a-z]+://', '', image_uri)
+                docker_image = resource_manager.get_docker_image(
+                    image_uri,
+                )
                 result = subprocess.run(
                     [
                         "docker",
@@ -99,17 +100,27 @@ class _ResourcesMixin(_ResourcesMixinBase):
             with SessionLocal() as db:
                 owns_db_lifecycle = _register_image_pulling(db, image_uri, user_id)
         try:
-            image_ok, image_err = await resource_manager.ensure_image(image_uri)
-        except asyncio.CancelledError:
-            raise  # 服务器关停，由 recover_stuck_images 善后
-        except Exception as error:
-            image_ok, image_err = False, str(error)
+            try:
+                image_ok, image_err = await resource_manager.ensure_image(image_uri)
+            except asyncio.CancelledError:
+                raise  # 服务器关停，由 recover_stuck_images 善后
+            except Exception as error:
+                image_ok, image_err = False, str(error)
+            if owns_db_lifecycle:
+                def finalize() -> None:
+                    with SessionLocal() as db:
+                        _finalize_image_status(
+                            db,
+                            image_uri,
+                            image_ok,
+                        )
+
+                await _run_blocking_io(
+                    finalize,
+                )
+            return image_ok, image_err
         finally:
             self._image_pull_tasks.pop(image_uri, None)
-        if owns_db_lifecycle:
-            with SessionLocal() as db:
-                _finalize_image_status(db, image_uri, image_ok)
-        return image_ok, image_err
 
     async def _ensure_image_decoupled(self, image_uri: str, user_id: Optional[str]) -> Tuple[bool, Optional[str]]:
         """复用或创建共享 pull task，shield 使 job cancel 不中断拉取。"""

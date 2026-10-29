@@ -462,7 +462,9 @@ class _SubmitMixin(_SubmitMixinBase):
                 build_result = json.loads(job.build_result or "{}")
                 runtime_image = build_result["docker_image"]
             else:
-                runtime_image = job.container_image
+                runtime_image = resource_manager.get_docker_image(
+                    job.container_image,
+                )
             job_working_table = f"{magnus_workspace_path}/jobs/{job.id}"
             self._init_job_working_dir(job_working_table)
 

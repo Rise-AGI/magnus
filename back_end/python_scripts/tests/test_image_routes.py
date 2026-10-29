@@ -4,18 +4,23 @@ import ast
 import asyncio
 import logging
 import os
+import re
 import runpy
+import subprocess
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from typing import Optional, Tuple
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 from sqlalchemy import DateTime, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
-from test_image_cache import SERVER, cache_module
+from test_image_cache import SERVER, blocking_io, cache_module
+from test_job_finalization import load_method
 
 
 class Base(DeclarativeBase):
@@ -113,6 +118,8 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
                 __name__,
             ),
             "os": os,
+            "re": re,
+            "subprocess": subprocess,
             "HTTPException": HTTPException,
             "database": SimpleNamespace(
                 SessionLocal=self.sessions,
@@ -132,9 +139,15 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
             ),
             "_uri_locks": {},
             "_pull_tasks": set(),
+            "_recovered": False,
+            "_recover_lock": threading.Lock(),
             "resource_manager": SimpleNamespace(
                 ensure_image=self.prepare,
                 get_sif_path=self.cache.path,
+                get_docker_image=Mock(
+                    return_value="mirror.invalid/example/image:tag",
+                ),
+                recover_stale_pull_caches=Mock(),
                 images=self.cache,
             ),
         }
@@ -145,6 +158,9 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
             "delete_image",
             "_schedule_pull",
             "shutdown_image_pulls",
+            "_docker_image_cached",
+            "_docker_image_cached_async",
+            "recover_stuck_images",
         }
         tree = ast.parse(
             source.read_text(),
@@ -170,6 +186,211 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
             ),
             self.namespace,
         )
+
+    async def test_restart_recovers_the_mirror_image_and_its_size(
+        self,
+    ) -> None:
+        self.namespace["is_local_mode"] = True
+
+        def inspect(
+            command,
+            **kwargs,
+        ):
+            self.assertEqual(
+                command[-1],
+                "mirror.invalid/example/image:tag",
+            )
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "4321" if "--format" in command else "{}",
+            )
+
+        with patch.object(
+            subprocess,
+            "run",
+            side_effect=inspect,
+        ):
+            self.namespace["recover_stuck_images"]()
+        with self.sessions() as db:
+            row = db.get(
+                Image,
+                1,
+            )
+            self.assertEqual(
+                (row.status, row.size_bytes, row.uri),
+                ("cached", 4321, self.uri),
+            )
+
+    async def test_manual_pull_and_failed_refresh_inspect_the_mirror(
+        self,
+    ) -> None:
+        self.namespace["is_local_mode"] = True
+
+        async def inspect(
+            *command,
+            **kwargs,
+        ):
+            self.assertEqual(
+                command[-1],
+                "mirror.invalid/example/image:tag",
+            )
+            return SimpleNamespace(
+                returncode=0,
+                communicate=AsyncMock(
+                    return_value=(b"4321", b""),
+                ),
+            )
+
+        with patch.object(
+            asyncio,
+            "create_subprocess_exec",
+            side_effect=inspect,
+        ):
+            await self.namespace["_do_pull"](
+                1,
+                self.uri,
+                is_refresh=False,
+            )
+            with self.sessions() as db:
+                row = db.get(
+                    Image,
+                    1,
+                )
+                self.assertEqual(
+                    (row.status, row.size_bytes),
+                    ("cached", 4321),
+                )
+                row.status = "refreshing"
+                db.commit()
+            self.prepare.return_value = (False, "upstream unavailable")
+            await self.namespace["_do_pull"](
+                1,
+                self.uri,
+                is_refresh=True,
+            )
+        with self.sessions() as db:
+            row = db.get(
+                Image,
+                1,
+            )
+            self.assertEqual(
+                (row.status, row.size_bytes),
+                ("cached", 4321),
+            )
+
+    async def test_shared_pull_keeps_ownership_until_threaded_size_query_finishes(
+        self,
+    ) -> None:
+        namespace = {
+            **self.namespace,
+            "CachedImage": Image,
+            "SessionLocal": self.sessions,
+            "is_local_mode": True,
+            "_run_blocking_io": blocking_io,
+            "Optional": Optional,
+            "Tuple": Tuple,
+        }
+        for name in ("_register_image_pulling", "_finalize_image_status", "_pull_image_shared"):
+            load_method(
+                "_scheduler/_resources.py",
+                name,
+                namespace,
+            )
+        with self.sessions() as db:
+            db.get(
+                Image,
+                1,
+            ).status = "failed"
+            db.commit()
+        entered, finish = threading.Event(), threading.Event()
+        loop_thread = threading.get_ident()
+        inspection_threads = []
+
+        def inspect(
+            command,
+            **kwargs,
+        ):
+            inspection_threads.append(
+                threading.get_ident(),
+            )
+            self.assertEqual(
+                command[-1],
+                "mirror.invalid/example/image:tag",
+            )
+            entered.set()
+            if not finish.wait(
+                2,
+            ):
+                raise AssertionError(
+                    "The event loop must remain free to release the query",
+                )
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "4321",
+            )
+
+        actor = SimpleNamespace(
+            _image_pull_tasks={},
+        )
+        with patch.object(
+            subprocess,
+            "run",
+            side_effect=inspect,
+        ):
+            task = asyncio.create_task(
+                namespace["_pull_image_shared"](
+                    actor,
+                    self.uri,
+                    "owner",
+                ),
+            )
+            actor._image_pull_tasks[self.uri] = task
+            try:
+                self.assertTrue(
+                    await asyncio.to_thread(
+                        entered.wait,
+                        2,
+                    ),
+                )
+                self.assertNotIn(
+                    loop_thread,
+                    inspection_threads,
+                )
+                task.cancel()
+                await asyncio.sleep(
+                    0,
+                )
+                self.assertFalse(
+                    task.done(),
+                )
+                self.assertIs(
+                    actor._image_pull_tasks[self.uri],
+                    task,
+                )
+            finally:
+                finish.set()
+                await asyncio.gather(
+                    task,
+                    return_exceptions=True,
+                )
+        self.assertTrue(
+            task.cancelled(),
+        )
+        self.assertEqual(
+            actor._image_pull_tasks,
+            {},
+        )
+        with self.sessions() as db:
+            row = db.get(
+                Image,
+                1,
+            )
+            self.assertEqual(
+                (row.status, row.size_bytes),
+                ("cached", 4321),
+            )
 
     async def test_failed_spawn_persists_failure_instead_of_staying_pulling(
         self,

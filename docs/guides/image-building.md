@@ -61,7 +61,7 @@ Building is opt-in through `execution.image_build`; old configurations leave it 
 
 TCP workers use the configured TLS files. Site credentials do not belong in Dockerfile text, Job commands or logs. The worker needs access to base images and package sources. Offline tenant compute nodes can receive the prepared SIF by relay without contacting the builder.
 
-Configure base-image registry mirrors in the worker's `buildkitd.toml`. The existing `cluster.registry_mirror` only applies to Magnus image pulls; it does not configure BuildKit automatically. Validate both `FROM` pulls and dependency installation with `RUN` in the worker's actual network environment. Host connectivity alone does not prove that builds can reach their sources, especially when IPv4 and IPv6 egress have different access policies.
+Configure base-image registry mirrors in the worker's `buildkitd.toml`. The existing `cluster.registry_mirror` applies to Magnus image pulls; Docker/local Jobs also launch the prepared mirror reference. It does not configure BuildKit or rewrite a Dockerfile's built image. Validate both `FROM` pulls and dependency installation with `RUN` in the worker's actual network environment. Host connectivity alone does not prove that builds can reach their sources, especially when IPv4 and IPv6 egress have different access policies.
 
 Rootless mode limits host privileges but does not automatically isolate networking. RootlessKit shares the host network by default, so Dockerfile `RUN` commands can access host loopback and the LAN. If network isolation is required, select a supported network driver and verify its DNS, egress, and package-source access. See the [BuildKit rootless deployment guide](https://github.com/moby/buildkit/blob/master/docs/rootless.md).
 

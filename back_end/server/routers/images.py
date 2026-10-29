@@ -45,7 +45,9 @@ container_cache_path = f"{magnus_root}/container_cache"
 def _docker_image_cached(uri: str) -> bool:
     """local 模式专用（同步）：通过 docker image inspect 判断镜像是否已拉取。
     仅用于启动恢复 (recover_stuck_images)，热路径禁用。"""
-    docker_image = re.sub(r'^[a-z]+://', '', uri)
+    docker_image = resource_manager.get_docker_image(
+        uri,
+    )
     result = subprocess.run(
         ["docker", "image", "inspect", docker_image],
         capture_output=True,
@@ -55,7 +57,9 @@ def _docker_image_cached(uri: str) -> bool:
 
 async def _docker_image_cached_async(uri: str) -> bool:
     """local 模式专用（异步）：不阻塞事件循环的版本"""
-    docker_image = re.sub(r'^[a-z]+://', '', uri)
+    docker_image = resource_manager.get_docker_image(
+        uri,
+    )
     proc = await asyncio.create_subprocess_exec(
         "docker", "image", "inspect", docker_image,
         stdout=asyncio.subprocess.DEVNULL,
@@ -160,7 +164,9 @@ def recover_stuck_images() -> None:
                 if _docker_image_cached(img.uri):
                     img.status = "cached"
                     try:
-                        docker_image = re.sub(r'^[a-z]+://', '', img.uri)
+                        docker_image = resource_manager.get_docker_image(
+                            img.uri,
+                        )
                         result = subprocess.run(
                             ["docker", "image", "inspect", "--format", "{{.Size}}", docker_image],
                             capture_output=True, text=True, timeout=10,
@@ -237,7 +243,9 @@ async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
             if success:
                 if is_local_mode:
                     try:
-                        docker_image = re.sub(r'^[a-z]+://', '', uri)
+                        docker_image = resource_manager.get_docker_image(
+                            uri,
+                        )
                         proc = await asyncio.create_subprocess_exec(
                             "docker", "image", "inspect", "--format", "{{.Size}}", docker_image,
                             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,

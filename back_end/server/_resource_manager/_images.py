@@ -26,6 +26,18 @@ else:
 
 
 class _ImagesMixin(_ImagesMixinBase):
+    def get_docker_image(
+        self,
+        image: str,
+    ) -> str:
+        return re.sub(
+            r"^[a-z]+://",
+            "",
+            _rewrite_image_for_mirror(
+                image,
+            ),
+        )
+
     async def ensure_image(
         self,
         image: str,
@@ -62,13 +74,8 @@ class _ImagesMixin(_ImagesMixinBase):
         force: bool = False,
     ) -> Tuple[bool, Optional[str]]:
         """Docker 模式：使用 docker pull，Docker 自身管理镜像缓存"""
-        pull_image = _rewrite_image_for_mirror(
+        docker_image = self.get_docker_image(
             image,
-        )
-        docker_image = re.sub(
-            r"^[a-z]+://",
-            "",
-            pull_image,
         )
 
         if not force:
@@ -83,14 +90,9 @@ class _ImagesMixin(_ImagesMixinBase):
             else:
                 return True, None
 
-        if pull_image != image:
-            logger.info(
-                f"🐳 Pulling Docker image: {image} (via mirror: {docker_image})",
-            )
-        else:
-            logger.info(
-                f"🐳 Pulling Docker image: {docker_image}",
-            )
+        logger.info(
+            f"🐳 Pulling Docker image: {docker_image}",
+        )
         start_time = time.time()
 
         try:
