@@ -91,15 +91,28 @@ def _finalize_image_status(db: Session, image_uri: str, success: bool) -> None:
 class _ResourcesMixin(_ResourcesMixinBase):
     """并行准备 Job 环境与仓库；构建可共享，资源全部就绪后才进入 Pending。"""
 
-    async def _pull_image_shared(self, image_uri: str, user_id: Optional[str]) -> Tuple[bool, Optional[str]]:
+    async def _pull_image_shared(
+        self,
+        image_uri: str,
+        user_id: Optional[str],
+    ) -> Tuple[bool, Optional[str]]:
         """独立于 job 的镜像拉取 task，自管 DB 状态。
         仅在本次调用取得 DB 生命周期管理权时才 finalize，避免与 images API 的 _do_pull 互踩。
         """
         owns_db_lifecycle = False
-        if user_id:
-            with SessionLocal() as db:
-                owns_db_lifecycle = _register_image_pulling(db, image_uri, user_id)
         try:
+            if user_id:
+                def register() -> bool:
+                    with SessionLocal() as db:
+                        return _register_image_pulling(
+                            db,
+                            image_uri,
+                            user_id,
+                        )
+
+                owns_db_lifecycle = await _run_blocking_io(
+                    register,
+                )
             try:
                 image_ok, image_err = await resource_manager.ensure_image(image_uri)
             except asyncio.CancelledError:

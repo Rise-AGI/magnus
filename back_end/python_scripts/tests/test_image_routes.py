@@ -292,9 +292,9 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
                 ("cached", 4321),
             )
 
-    async def test_shared_pull_keeps_ownership_until_threaded_size_query_finishes(
+    def shared_pull_namespace(
         self,
-    ) -> None:
+    ) -> dict:
         namespace = {
             **self.namespace,
             "CachedImage": Image,
@@ -310,6 +310,131 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
                 name,
                 namespace,
             )
+        return namespace
+
+    async def test_registration_failure_removes_shared_pull_task(
+        self,
+    ) -> None:
+        namespace = self.shared_pull_namespace()
+        namespace["SessionLocal"] = Mock(
+            side_effect=OSError(
+                "registration store unavailable",
+            ),
+        )
+        actor = SimpleNamespace(
+            _image_pull_tasks={},
+        )
+        task = asyncio.create_task(
+            namespace["_pull_image_shared"](
+                actor,
+                self.uri,
+                "owner",
+            ),
+        )
+        actor._image_pull_tasks[self.uri] = task
+        with self.assertRaisesRegex(
+            OSError,
+            "registration store unavailable",
+        ):
+            await task
+        self.assertEqual(
+            actor._image_pull_tasks,
+            {},
+        )
+        self.prepare.assert_not_awaited()
+
+    async def test_registration_stays_off_loop_and_cancellation_joins_its_commit(
+        self,
+    ) -> None:
+        namespace = self.shared_pull_namespace()
+        with self.sessions() as db:
+            db.get(
+                Image,
+                1,
+            ).status = "failed"
+            db.commit()
+        register = namespace["_register_image_pulling"]
+        entered, finish = threading.Event(), threading.Event()
+        loop_thread = threading.get_ident()
+        registration_threads = []
+
+        def delayed_register(
+            *arguments,
+        ):
+            registration_threads.append(
+                threading.get_ident(),
+            )
+            result = register(
+                *arguments,
+            )
+            entered.set()
+            if threading.get_ident() != loop_thread and not finish.wait(
+                3,
+            ):
+                raise AssertionError("Registration worker not released")
+            return result
+
+        namespace["_register_image_pulling"] = delayed_register
+        actor = SimpleNamespace(
+            _image_pull_tasks={},
+        )
+        task = asyncio.create_task(
+            namespace["_pull_image_shared"](
+                actor,
+                self.uri,
+                "owner",
+            ),
+        )
+        actor._image_pull_tasks[self.uri] = task
+        try:
+            self.assertTrue(
+                await asyncio.to_thread(
+                    entered.wait,
+                    3,
+                ),
+            )
+            self.assertNotIn(
+                loop_thread,
+                registration_threads,
+            )
+            task.cancel()
+            await asyncio.sleep(
+                0,
+            )
+            self.assertFalse(
+                task.done(),
+            )
+            self.assertIs(
+                actor._image_pull_tasks[self.uri],
+                task,
+            )
+        finally:
+            finish.set()
+            await asyncio.gather(
+                task,
+                return_exceptions=True,
+            )
+        self.assertTrue(
+            task.cancelled(),
+        )
+        self.assertEqual(
+            actor._image_pull_tasks,
+            {},
+        )
+        self.prepare.assert_not_awaited()
+        with self.sessions() as db:
+            self.assertEqual(
+                db.get(
+                    Image,
+                    1,
+                ).status,
+                "pulling",
+            )
+
+    async def test_shared_pull_keeps_ownership_until_threaded_size_query_finishes(
+        self,
+    ) -> None:
+        namespace = self.shared_pull_namespace()
         with self.sessions() as db:
             db.get(
                 Image,
