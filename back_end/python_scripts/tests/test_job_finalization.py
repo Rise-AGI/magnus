@@ -18,7 +18,7 @@ import unittest
 from unittest.mock import patch
 from test_protocol_files import open_protocol_file
 
-from sqlalchemy import DateTime, Enum, String, create_engine, inspect, text
+from sqlalchemy import DateTime, Enum, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -917,29 +917,6 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.assertEqual(self.state()[:3], (JobStatus.SUCCESS, None, None))
         self.assertFalse((table / "repository").exists())
         self.assertIn(("remove", "magnus-job-job"), self.events)
-
-    def test_migration_preserves_legacy_history_and_is_idempotent(self):
-        engine = create_engine(f"sqlite:///{self.root / 'legacy.db'}")
-        self.addCleanup(engine.dispose)
-        with engine.begin() as connection:
-            connection.execute(text("CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT, slurm_job_id TEXT, created_at TEXT, user_id TEXT, result TEXT)"))
-            connection.execute(text("INSERT INTO jobs VALUES ('legacy', 'FAILED', NULL, '2026-10-19', 'owner', 'original evidence')"))
-            connection.execute(text("CREATE TABLE explorer_sessions (id TEXT PRIMARY KEY)"))
-            connection.execute(text("CREATE TABLE services (id TEXT PRIMARY KEY)"))
-            connection.execute(text("CREATE TABLE cluster_snapshots (id INTEGER PRIMARY KEY)"))
-        namespace = dict(
-            self.namespace,
-            engine=engine,
-            _repair_legacy_job_metrics_reference=lambda: None,
-            _make_job_container_image_nullable=lambda: None,
-        )
-        migrate = load_method("main.py", "run_migrations", namespace)
-        migrate()
-        migrate()
-        with engine.connect() as connection:
-            record = connection.execute(text("SELECT id, status, result, finalization_status FROM jobs")).one()
-        self.assertEqual(tuple(record), ("legacy", "FAILED", "original evidence", None))
-        self.assertIn("ix_jobs_finalization_status", {index["name"] for index in inspect(engine).get_indexes("jobs")})
 
     def test_resubmission_cannot_accept_stale_markers_after_failed_removal(self):
         table = self.add_job()

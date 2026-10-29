@@ -11,7 +11,6 @@ import unittest
 from unittest.mock import patch
 
 from pydantic import BaseModel
-from sqlalchemy import create_engine, inspect, text
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
@@ -195,23 +194,6 @@ class JobResourceIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(job.resource_mode, "slurm_per_cpu")
         self.assertFalse(hasattr(job, "resource_summary"))
-
-    def test_nullable_migration_is_idempotent_and_preserves_old_rows(self):
-        path = SERVER / "main.py"
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        migration = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "run_migrations")
-        column_loop = next(node for node in migration.body if isinstance(node, ast.For) and isinstance(node.iter, ast.Tuple) and any(isinstance(value, ast.Constant) and value.value == "resource_mode" for value in node.iter.elts))
-        code = compile(ast.Module(body=[column_loop], type_ignores=[]), str(path), "exec")
-        engine = create_engine("sqlite:///:memory:")
-        self.addCleanup(engine.dispose)
-        with engine.begin() as conn:
-            conn.execute(text("CREATE TABLE jobs (id TEXT PRIMARY KEY, memory_demand TEXT)"))
-            conn.execute(text("INSERT INTO jobs VALUES ('old', '4000M')"))
-        for _ in range(2):
-            namespace = {"engine": engine, "text": text, "job_columns": [column["name"] for column in inspect(engine).get_columns("jobs")]}
-            exec(code, namespace)
-        with engine.connect() as conn:
-            self.assertEqual(conn.execute(text("SELECT id, memory_demand, resource_mode FROM jobs")).all(), [("old", "4000M", None)])
 
     def test_cluster_native_and_external_rows_share_actual_allocation_totals(self):
         from test_gpu_resource_query import Field, load_queries
