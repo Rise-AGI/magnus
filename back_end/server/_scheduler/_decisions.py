@@ -42,74 +42,118 @@ else:
 
 class _DecisionsMixin(_DecisionsMixinBase):
 
-    async def _make_decisions(self):
-        """Launch async preparation, then decide/submit in a worker-owned session.
-
-        State flow: Preparing / Building -> Pending -> Queued -> Running.
-        Tenant mode eagerly submits by priority. Authoritative mode only acts on
-        complete live allocation accounting and never treats a queued promise or
-        an unknown resource amount as currently free capacity.
-        """
-        with SessionLocal(expire_on_commit=False) as db:
-            # Preparing/Building both recover through the same preparation task.
-            # Keep cancelled tasks registered until their filesystem I/O drains.
-            # These rows only identify tasks to start. Commands and Dockerfiles
-            # are loaded once by each preparation task, not on every tick.
-            preparing_jobs = self._job_query(db, Job.id).filter(Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING])).all()
-            for job in preparing_jobs:
-                with self._preparing_jobs_lock:
-                    if job.id in self.preparing_jobs:
-                        continue
-                    self.preparing_jobs[job.id] = asyncio.create_task(self._prepare_job_resources(job.id))
-                logger.info(f"Job {job.id} started resource preparation")
-
-            # Phase 2: 清理已完成的 preparing tasks。锁内 snapshot + 摘出已完成 task，
-            # 锁外再处理其结果 —— task.exception() / db.commit 不能在锁内（会把锁占给慢
-            # I/O，阻塞 terminate_job 的线程池访问）。取消的 task 在收尾后同样由这里
-            # 摘出；跳过 task.exception()，否则它会抛 CancelledError。
+    async def _make_decisions(
+        self,
+    ) -> None:
+        """Start preparation on the loop; keep database and cleanup waits joined."""
+        preparing_ids, paused_ids = await _run_blocking_io(
+            self._load_preparation_candidates,
+        )
+        for job_id in preparing_ids:
             with self._preparing_jobs_lock:
-                done_tasks = [(jid, task) for jid, task in self.preparing_jobs.items() if task.done()]
-                for jid, _ in done_tasks:
-                    self.preparing_jobs.pop(jid, None)
-            for jid, task in done_tasks:
-                if task.cancelled():
+                if job_id in self.preparing_jobs:
                     continue
-                exc = task.exception()
-                if exc is not None:
-                    logger.error(f"Job {jid} preparation crashed: {exc}")
-                    # _clean_up_working_table 在远端执行下含 ssh `rm -rf`（+ 可能触发 socket
-                    # 重建），这里跑在事件循环上，丢线程池避免阻塞 loop。
-                    self._job_query(db, Job).filter(
-                        Job.id == jid,
-                        Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
-                    ).update({
-                        Job.status: JobStatus.FAILED,
-                        Job.result: f"Resource preparation crashed: {exc}",
-                    }, synchronize_session=False)
-                    db.commit()
-                    await _run_blocking_io(self._finish_unsubmitted_job, jid)
+                self.preparing_jobs[job_id] = asyncio.create_task(
+                    self._prepare_job_resources(
+                        job_id,
+                    ),
+                )
+            logger.info(
+                f"Job {job_id} started resource preparation",
+            )
 
-            # Phase 2.5: 抢占恢复 — PAUSED 任务重新准备资源（镜像/仓库在抢占时已被清理）。
-            # `slurm_job_id IS NULL` 过滤把 SLURM 仍在 CG (COMPLETING) 阶段释放
-            # 旧 step 的 paused job 排除掉——那种 job slurm_id 还在，资源未真正
-            # 释放，立即 resubmit 会让旧+新两个 SLURM step 同时占资源 + 让 cluster
-            # endpoint 在新 slurm_id 写入后丢失旧 slurm_id 的 magnus 关联。等
-            # _sync_reality_slurm 在 SLURM 真正释放后清空 slurm_job_id 才进这里。
-            paused_jobs = self._job_query(db, Job.id).filter(
+        with self._preparing_jobs_lock:
+            done_tasks = [
+                (job_id, task)
+                for job_id, task in self.preparing_jobs.items()
+                if task.done()
+            ]
+            for job_id, _ in done_tasks:
+                self.preparing_jobs.pop(
+                    job_id,
+                    None,
+                )
+        for job_id, task in done_tasks:
+            if task.cancelled():
+                continue
+            error = task.exception()
+            if error is not None:
+                logger.error(
+                    f"Job {job_id} preparation crashed: {error}",
+                )
+                await _run_blocking_io(
+                    self._fail_preparation,
+                    job_id,
+                    f"Resource preparation crashed: {error}",
+                )
+
+        for job_id in paused_ids:
+            try:
+                changed = await _run_blocking_io(
+                    self._resume_paused_job,
+                    job_id,
+                )
+                if changed:
+                    logger.info(
+                        f"Job {job_id} re-entering preparation after preemption",
+                    )
+            except Exception as error:
+                logger.warning(
+                    "Job %s preemption recovery pending (%s)",
+                    job_id,
+                    type(error).__name__,
+                )
+
+        self._queue_pending_submission()
+
+    def _load_preparation_candidates(
+        self,
+    ) -> tuple[list[str], list[str]]:
+        with SessionLocal() as db:
+            preparing = self._job_query(
+                db,
+                Job.id,
+            ).filter(
+                Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
+            ).all()
+            # Paused work cannot prepare another allocation before its previous
+            # submission and artifact recovery have released ownership.
+            paused = self._job_query(
+                db,
+                Job.id,
+            ).filter(
                 Job.status == JobStatus.PAUSED,
                 Job.slurm_job_id.is_(None),
                 Job.submission_attempt.is_(None),
                 Job.finalization_status.is_(None),
             ).all()
-        for job in paused_jobs:
-            try:
-                changed = await _run_blocking_io(self._resume_paused_job, job.id)
-                if changed:
-                    logger.info(f"Job {job.id} re-entering preparation after preemption")
-            except Exception as error:
-                logger.warning("Job %s preemption recovery pending (%s)", job.id, type(error).__name__)
+            return [row.id for row in preparing], [row.id for row in paused]
 
-        self._queue_pending_submission()
+    def _fail_preparation(
+        self,
+        job_id: str,
+        message: str,
+    ) -> None:
+        with SessionLocal() as db:
+            self._job_query(
+                db,
+                Job,
+            ).filter(
+                Job.id == job_id,
+                Job.status.in_([JobStatus.PREPARING, JobStatus.BUILDING]),
+            ).update(
+                {
+                    Job.status: JobStatus.FAILED,
+                    Job.result: message,
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+        # Joining one worker covers both the commit and the subsequent cleanup;
+        # cancellation cannot leave a committed failure between two awaits.
+        self._finish_unsubmitted_job(
+            job_id,
+        )
 
     def _queue_pending_submission(
         self,

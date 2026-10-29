@@ -631,6 +631,13 @@ class SlurmFinalizationTests(unittest.TestCase):
             _queue_pending_submission=lambda: None,
             _resume_paused_job=self.scheduler._resume_paused_job,
         )
+        actor._load_preparation_candidates = load_method(
+            "_scheduler/_decisions.py",
+            "_load_preparation_candidates",
+            namespace,
+        ).__get__(
+            actor,
+        )
         self.scheduler._init_job_working_dir = lambda path: None
         asyncio.run(decisions(actor))
         self.assertEqual(self.state()[0], JobStatus.PAUSED)
