@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -66,8 +67,13 @@ def main() -> int:
         print(f"Running {suite}: {len(modules)} test modules", flush=True)
         # Separate interpreters avoid collisions between identically named SDK
         # and backend tests and prevent fixture modules leaking across suites.
+        runner = (
+            [str(ROOT / "scripts/ci_unittest.py")]
+            if os.environ.get("GITHUB_ACTIONS") == "true"
+            else ["-m", "unittest", "-q"]
+        )
         result = subprocess.run(
-            [sys.executable, "-m", "unittest", "-q", *modules],
+            [sys.executable, *runner, *modules],
             cwd=SUITES[suite],
             stdin=subprocess.DEVNULL,
             check=False,
