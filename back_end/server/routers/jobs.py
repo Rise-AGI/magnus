@@ -264,6 +264,7 @@ def get_job_capabilities(
     return {
         "dockerfile": True,
         "execution_targets": True,
+        "scheduler_observations": True,
         "image_build_enabled": magnus_config["execution"]["image_build"]["enabled"],
         "default_repository": {"namespace": "Rise-AGI", "repo_name": "magnus"},
     }

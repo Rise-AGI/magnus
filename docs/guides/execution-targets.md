@@ -137,6 +137,90 @@ cache. Configure a single canonical host name and root for a shared directory;
 Magnus does not resolve equivalent host aliases or remote directory symlinks.
 Independent remote caches retain independent transfer locks and protection sets.
 
+## Read scheduling decisions and account limits
+
+Two authenticated HTTP endpoints provide read-only observations without an SDK
+upgrade:
+
+- `GET /api/jobs/{job_id}/scheduling` reads the Job's stored target and current
+  Slurm binding. It returns `scheduler_state`, `reason`, `expected_start_time`
+  for pending jobs, `actual_start_time` otherwise, and `observed_at`. All
+  timestamps are UTC. The forwarding endpoint's default target cannot change
+  the identity of an existing Job.
+- `GET /api/cluster/scheduling?execution_target=secondary` returns the configured
+  scheduler user/account/QoS, visible `associations`, `qos_limits`,
+  `partition_limits`, `usage` (Slurm login), and `account_usage` (configured
+  shared account). Policy rows retain Slurm field names and
+  TRES/time expressions, including inherited association values. Both job and
+  partition QoS definitions are included when visible.
+
+Use the site's existing `Authorization: Bearer <MAGNUS_TOKEN>` credential.
+Job reading follows the existing authenticated collaboration policy.
+`GET /api/jobs/capabilities` reports `scheduler_observations: true`.
+
+```python
+import os
+import httpx
+
+with httpx.Client(
+    base_url=os.environ["MAGNUS_ADDRESS"].rstrip("/") + "/api/",
+    headers={"Authorization": "Bearer " + os.environ["MAGNUS_TOKEN"]},
+    timeout=40,
+) as client:
+    scheduling = client.get("jobs/" + job_id + "/scheduling")
+    scheduling.raise_for_status()
+    print(scheduling.json())
+    policy = client.get(
+        "cluster/scheduling",
+        params={"execution_target": "secondary"},
+    )
+    policy.raise_for_status()
+    print(policy.json())
+```
+
+`availability` is explicit. A Job can have `no_scheduler_id` during preparation,
+submission reconciliation, or after its binding has been released. Use the
+existing Job detail/build/staging endpoints to distinguish those phases.
+`not_in_queue` means an empty successful controller query, not proof of successful
+execution or release. `identity_mismatch` prevents a reused Slurm ID from being
+reported as this Job; old allocations without a verifiable Magnus comment return
+`identity_unverified`. Retired targets return `target_retired`; Docker/local
+returns `unsupported` without invoking Slurm.
+
+Cluster sections report their own availability and observation time. A partial
+accounting failure does not discard readable usage. Usage covers this Slurm
+login across partitions and accounts, including non-Magnus work; pending
+requests and held allocations are separate. Node slots are summed per allocation,
+not distinct physical nodes. Null resource counters mean unavailable, while zero
+requires a successful empty/zero observation. CPU, memory (MiB), node slots, and
+GPU counts come from Slurm TRES. Suspended allocations remain recorded and are
+flagged; these values are not real-time consumption. `account_usage` is a separate
+account-filtered observation across users. When Slurm hides other users' jobs
+(`PrivateData=jobs`) or visibility cannot be verified, account totals are unavailable,
+not a silently incomplete sum. Local submission identity comes from the process
+executing Slurm, not the container runner.
+
+Partition policies cover the target's default and GPU partitions. Optional QoS
+per-account fields unsupported by an older CLI appear in `unavailable_fields`;
+other readable limits remain available.
+
+`remaining_resources` is null: visible user limits do not prove that parent
+account, partition, or QoS constraints permit more work. Some providers hide those
+limits and shared usage. Blank policy values are not an assertion of unlimited
+capacity. This API neither reports commercial credits nor reproduces Slurm's
+hierarchical limit evaluator. See the official [resource-limit hierarchy](https://slurm.schedmd.com/resource_limits.html)
+and [association/QoS field definitions](https://slurm.schedmd.com/sacctmgr.html).
+Slurm's [expected start](https://slurm.schedmd.com/squeue.html) is an estimate
+available with backfill scheduling; null means no estimate, not immediate start.
+
+Queries have six-second command and thirty-second request budgets, and a 20-second server cache,
+separate from execution reconciliation. At most one uncached observation per
+controller connection and four site-wide run at a time; excess callers receive
+HTTP 503 with `Retry-After: 2`. Other failures return section availability and a
+fixed error code, without command output or secrets. Poll no faster than once
+every 20 seconds and honor `Retry-After`. No endpoint submits, cancels, changes
+priority, or rewrites the Job's execution status.
+
 ## Official access clients and renewal
 
 An administrator can delegate authentication to an installed access client:

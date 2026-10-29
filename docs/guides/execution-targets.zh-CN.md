@@ -109,6 +109,74 @@ magnus submit --task-name example --entry-command 'python main.py' --execution-t
 主机名和根路径，Magnus 不推断不同主机别名或远端目录符号链接是否指向同一位置。
 独立远端缓存仍各自保有传输锁和保护集合。
 
+## 查看排队原因与账号限制
+
+新增两个需认证的只读 HTTP 接口，无需先升级 SDK：
+
+- `GET /api/jobs/{job_id}/scheduling` 使用 Job 保存的执行目标和当前 Slurm 编号，
+  返回 `scheduler_state`、`reason`、排队任务的 `expected_start_time`、其余任务的
+  `actual_start_time` 以及 `observed_at`，时间统一为 UTC。旧转发入口的默认目标
+  不会改变既有 Job 的执行身份。
+- `GET /api/cluster/scheduling?execution_target=secondary` 返回配置的调度用户、
+  account、QoS，以及可见的 `associations`、`qos_limits`、`partition_limits` 和
+  `usage`（Slurm 登录用户）及 `account_usage`（配置的共享 account）。策略行保留 Slurm 字段名、TRES/时间表达式及其继承值；可见时同时包含
+  Job QoS 与分区 QoS 定义。
+
+认证沿用 `Authorization: Bearer <MAGNUS_TOKEN>`。Job 读取保持既有的已登录协作
+权限；`GET /api/jobs/capabilities` 返回 `scheduler_observations: true`。
+
+```python
+import os
+import httpx
+
+with httpx.Client(
+    base_url=os.environ["MAGNUS_ADDRESS"].rstrip("/") + "/api/",
+    headers={"Authorization": "Bearer " + os.environ["MAGNUS_TOKEN"]},
+    timeout=40,
+) as client:
+    scheduling = client.get("jobs/" + job_id + "/scheduling")
+    scheduling.raise_for_status()
+    print(scheduling.json())
+    policy = client.get(
+        "cluster/scheduling",
+        params={"execution_target": "secondary"},
+    )
+    policy.raise_for_status()
+    print(policy.json())
+```
+
+`availability` 明确区分可用性。`no_scheduler_id` 可能是准备中、提交结果确认中，
+也可能已经释放编号，结合既有 detail/build/staging 接口判断。
+`not_in_queue` 仅表示成功查询控制器后没有记录，不证明执行成功或资源已释放。
+`identity_mismatch` 防止编号复用后串到其他任务；没有可验证 Magnus comment 的
+旧分配返回 `identity_unverified`。已退役目标返回 `target_retired`；
+Docker/local 返回 `unsupported`，不调用 Slurm。
+
+集群每个子项都有自己的可用性和观测时间。部分记账查询失败不丢弃仍可读的用量。
+`usage` 覆盖该 Slurm 登录用户在各分区、各 account 的任务，包括非 Magnus 作业；
+排队请求与持有的分配分开记录。节点槽位按各作业求和，不是去重后的物理节点数。
+资源计数为 null 表示不可得；只有成功查询的空集合或零记录才返回零。CPU、内存
+（MiB）、节点槽位和 GPU 均取 Slurm TRES；挂起作业的分配仍记入并单独标记，不是
+实时使用率。`account_usage` 按配置 account 跨用户查询；Slurm 设置
+`PrivateData=jobs` 或无法核实可见性时，账号总量标为不可得，不静默少计。
+本地提交身份取实际执行 Slurm 的进程用户，不取容器运行用户。
+
+分区策略覆盖目标的默认及 GPU 分区。旧 CLI 不支持的可选 QoS 账号限制字段放入
+`unavailable_fields`，仍保留其他可读限制。
+
+`remaining_resources` 为 null：看到当前用户的限制，不代表上级 account、分区或
+QoS 允许继续投放；有些平台不公开这些限制及共享用量。空策略值不表示无限额。
+接口不查询商业余额，也不自行复刻 Slurm 的分层额度判定。依据见官方
+[资源限制层级](https://slurm.schedmd.com/resource_limits.html)及
+[association/QoS 字段](https://slurm.schedmd.com/sacctmgr.html)。
+[预计开始时间](https://slurm.schedmd.com/squeue.html)来自 backfill 调度器，是可变化的
+估计；null 表示没有估计，不表示马上运行。
+
+每条命令最多 6 秒、整体最多 30 秒，独立于执行状态同步，服务端缓存 20 秒。每条控制器连接
+至多一个未缓存查询，全站至多四个；超额返回 HTTP 503 和 `Retry-After: 2`。
+其余故障以子项可用性和固定错误码返回，不泄露命令输出或秘密。建议轮询间隔至少
+20 秒，并遵守 `Retry-After`。接口不提交、取消、调整优先级或改写 Job 状态。
+
 ## 官方接入客户端与续期
 
 管理员可以把认证委托给已安装的接入客户端：
