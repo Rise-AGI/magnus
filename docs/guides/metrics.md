@@ -858,6 +858,11 @@ container uses the host CPU count as its denominator. Memory is the whole
 container's cgroup usage minus inactive file cache. GPU access is filtered by
 `NVIDIA_VISIBLE_DEVICES`. The units and JSONL protocol are shared, while labels
 retain the accounting scope and source; host activity is not added to a Job.
+CPU deltas use monotonic elapsed time; timestamps remain wall-clock UTC. The
+collector checks the host process start identity before and after sampling, so
+PID reuse or an exit during collection discards that sample and resets its
+baseline. CPU and memory require readable host process/cgroup data; device GPU
+sampling remains independent of that host capability.
 
 References: [Slurm sstat](https://slurm.schedmd.com/sstat.html),
 [Slurm allocation variables](https://slurm.schedmd.com/sbatch.html), and

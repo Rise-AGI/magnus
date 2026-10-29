@@ -18,6 +18,7 @@ from ._cgroup import (
     _read_allocated_cpus,
     _read_cpu_usage_usec,
     _read_memory_used_bytes,
+    _read_process_starttime,
 )
 from ._docker_inspect import (
     _docker_inspect_container_pid,
@@ -32,15 +33,21 @@ _SAMPLE_INTERVAL_SECONDS = 5.0  # match SLURM-side sidecar cadence (see metrics.
 
 class _JobMetricsState:
     __slots__ = (
-        "container_name", "pid", "prev_usage_usec", "prev_wall_ms",
+        "container_name", "pid", "process_starttime", "prev_usage_usec", "prev_sample_time",
         "alloc_cpus", "visible_gpus",
     )
 
-    def __init__(self, container_name: str, pid: int) -> None:
+    def __init__(
+        self,
+        container_name: str,
+        pid: int,
+        process_starttime: Optional[int],
+    ) -> None:
         self.container_name = container_name
         self.pid = pid
         self.prev_usage_usec: Optional[int] = None
-        self.prev_wall_ms: Optional[int] = None
+        self.process_starttime = process_starttime
+        self.prev_sample_time: Optional[float] = None
         # Cache allocated CPUs lookup; refreshed only if state is rebuilt.
         self.alloc_cpus: Optional[float] = None
         # Cache visible-GPU lookup; refreshed only if state is rebuilt.
@@ -137,10 +144,25 @@ class DockerMetricsCollector:
             pid = _docker_inspect_container_pid(container_name)
             if pid is None:
                 return  # container not yet running or already gone — fail-open
-            state = _JobMetricsState(container_name, pid)
+            process_starttime = _read_process_starttime(
+                pid,
+            )
+            state = _JobMetricsState(
+                container_name,
+                pid,
+                process_starttime,
+            )
             state.alloc_cpus = _read_allocated_cpus(pid)
             state.visible_gpus = _docker_inspect_visible_gpus(container_name)
+            if _docker_inspect_container_pid(container_name) != pid:
+                return
             self._states[job_id] = state
+
+        if state.process_starttime != _read_process_starttime(
+            state.pid,
+        ):
+            self._states.pop(job_id, None)
+            return
 
         lines: List[str] = []
         node_labels = {
@@ -150,14 +172,17 @@ class DockerMetricsCollector:
         }
 
         # CPU utilization (cgroup-based)
-        usage_usec = _read_cpu_usage_usec(state.pid)
+        usage_usec = (
+            _read_cpu_usage_usec(state.pid) if state.process_starttime is not None else None
+        )
+        sampled_at = time.monotonic()
         if usage_usec is not None:
-            if state.prev_usage_usec is not None and state.prev_wall_ms is not None:
+            if state.prev_usage_usec is not None and state.prev_sample_time is not None:
                 d_usage = usage_usec - state.prev_usage_usec
-                d_wall_ms = now_ms - state.prev_wall_ms
+                elapsed = sampled_at - state.prev_sample_time
                 cpus = state.alloc_cpus or float(os.cpu_count() or 1)
-                if d_wall_ms > 0 and cpus > 0 and d_usage >= 0:
-                    cpu_pct = round((d_usage / (d_wall_ms * 1000.0) / cpus) * 100, 1)
+                if elapsed > 0 and cpus > 0 and d_usage >= 0:
+                    cpu_pct = round((d_usage / (elapsed * 1_000_000.0) / cpus) * 100, 1)
                     # Values above 100 expose quota/sampling discrepancies;
                     # silently clipping them would corrupt the measurement.
                     cpu_labels = dict(
@@ -171,10 +196,15 @@ class DockerMetricsCollector:
                         "unit": "percent", "labels": cpu_labels,
                     }))
             state.prev_usage_usec = usage_usec
-            state.prev_wall_ms = now_ms
+            state.prev_sample_time = sampled_at
+        else:
+            state.prev_usage_usec = None
+            state.prev_sample_time = None
 
         # Memory used
-        mem_bytes = _read_memory_used_bytes(state.pid)
+        mem_bytes = (
+            _read_memory_used_bytes(state.pid) if state.process_starttime is not None else None
+        )
         if mem_bytes is not None:
             lines.append(json.dumps({
                 "name": "system.memory.used_bytes", "kind": "gauge",
@@ -210,6 +240,11 @@ class DockerMetricsCollector:
                         "unit": "bytes", "labels": gpu_labels,
                     }))
 
+        if state.process_starttime != _read_process_starttime(
+            state.pid,
+        ):
+            self._states.pop(job_id, None)
+            return
         if not lines:
             return
 

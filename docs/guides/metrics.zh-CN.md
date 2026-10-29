@@ -843,6 +843,9 @@ Docker local模式保留宿主侧采集器与5秒周期。CPU取容器 cgroup �
 的比例，无quota时以宿主机核数作分母；内存取整个容器的 cgroup 使用量扣除 inactive
 文件缓存，GPU按 `NVIDIA_VISIBLE_DEVICES` 过滤。两种后端共用单位与JSONL协议，
 labels保留统计范围与来源，不把其它宿主任务的使用量加进本Job。
+CPU增量使用单调时钟计算间隔，数据点时间戳仍用UTC墙钟。采集前后核对宿主进程
+的启动身份；PID复用或采集中退出时丢弃该次采样并重置基线。CPU和内存需要可读的
+宿主进程与cgroup数据，设备GPU采样不依赖这项宿主能力。
 
 依据：[Slurm sstat](https://slurm.schedmd.com/sstat.html)、
 [Slurm分配环境变量](https://slurm.schedmd.com/sbatch.html)、

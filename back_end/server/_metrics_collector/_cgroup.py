@@ -18,6 +18,30 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 
+def _read_process_starttime(
+    pid: int,
+) -> Optional[int]:
+    """Identify a live host process by field 22 of /proc/PID/stat."""
+    try:
+        with open(
+            f"/proc/{pid}/stat",
+            errors="replace",
+        ) as stream:
+            content = stream.read(4096)
+        # comm can contain spaces and parentheses; only its final ')' separates
+        # the fixed numeric fields. PID alone can be recycled between samples.
+        head, separator, tail = content.rpartition(
+            ")",
+        )
+        fields = tail.split()
+        if not separator or int(head.split()[0]) != pid or fields[0] in {"Z", "X", "x"}:
+            return None
+        ticks = int(fields[19])
+        return ticks if ticks >= 0 else None
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def _is_pure_v2() -> bool:
     """True when /sys/fs/cgroup is the cgroup v2 mount AND no v1 cgroup is mounted.
 

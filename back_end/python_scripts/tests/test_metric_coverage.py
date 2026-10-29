@@ -9,7 +9,7 @@ import sys
 import tempfile
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import mock_open, patch
+from unittest.mock import Mock, mock_open, patch
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
@@ -239,7 +239,9 @@ class MetricCoverageTests(unittest.TestCase):
              "[Magnus metrics] Slurm accounting recovered"],
         )
 
-    def test_docker_metrics_have_container_scope_and_device_gpu_scope(self):
+    def docker_collector(
+        self,
+    ):
         source = SERVER / "_metrics_collector" / "_collector.py"
         tree = ast.parse(source.read_text(encoding="utf-8"))
         tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
@@ -249,21 +251,132 @@ class MetricCoverageTests(unittest.TestCase):
             "magnus_config": {"server": {"root": "/unused"}},
             "_read_cpu_usage_usec": lambda pid: 15000000,
             "_read_memory_used_bytes": lambda pid: 4096,
+            "_read_process_starttime": Mock(return_value=100),
+            "_read_allocated_cpus": lambda pid: 2.0,
+            "_docker_inspect_container_pid": Mock(return_value=1),
+            "_docker_inspect_visible_gpus": lambda name: ["0"],
             "open_protocol_file": lambda *args: writer(),
         }
         exec(compile(tree, str(source), "exec"), namespace)
         collector = namespace["DockerMetricsCollector"]()
         collector._states["example"] = SimpleNamespace(
-            pid=1, alloc_cpus=2.0, prev_usage_usec=0, prev_wall_ms=1000, visible_gpus=["0"],
+            pid=1, process_starttime=100, alloc_cpus=2.0, prev_usage_usec=0,
+            prev_sample_time=1.0, visible_gpus=["0"],
         )
-        collector._sample_job("example", lambda: {"0": (25.0, 4096.0)}, 6000)
+        return collector, namespace, writer
+
+    def sample_docker(
+        self,
+        collector,
+        namespace,
+        writer,
+        *,
+        now_ms=6000,
+        monotonic=6.0,
+    ):
+        with patch.object(
+            namespace["time"],
+            "monotonic",
+            return_value=monotonic,
+        ):
+            collector._sample_job(
+                "example",
+                lambda: {"0": (25.0, 4096.0)},
+                now_ms,
+            )
         records = [json.loads(line) for call in writer().write.call_args_list for line in call.args[0].splitlines()]
+        writer().write.reset_mock()
+        return records
+
+    def test_docker_metrics_have_container_scope_and_device_gpu_scope(self):
+        records = self.sample_docker(*self.docker_collector())
         cpu = next(record for record in records if record["name"] == "system.cpu.utilization")
         self.assertEqual(cpu["value"], 150.0)
         self.assertEqual(cpu["labels"]["scope"], "container")
         self.assertTrue(all(record["labels"]["coverage"] == "single_container" for record in records))
         gpu = next(record for record in records if record["name"] == "system.gpu.utilization")
         self.assertEqual(gpu["labels"]["scope"], "device")
+
+    def test_docker_reused_pid_is_dropped_before_reading_cgroup_data(self):
+        collector, namespace, writer = self.docker_collector()
+        namespace["_read_process_starttime"].return_value = 200
+        namespace["_read_cpu_usage_usec"] = Mock()
+        records = self.sample_docker(
+            collector,
+            namespace,
+            writer,
+        )
+        self.assertEqual(records, [])
+        namespace["_read_cpu_usage_usec"].assert_not_called()
+        self.assertNotIn("example", collector._states)
+
+    def test_docker_process_exit_during_sample_discards_points(self):
+        collector, namespace, writer = self.docker_collector()
+        namespace["_read_process_starttime"].side_effect = [100, None]
+        self.assertEqual(self.sample_docker(collector, namespace, writer), [])
+        self.assertNotIn("example", collector._states)
+
+    def test_docker_creation_rechecks_pid_after_slow_inspect(self):
+        collector, namespace, writer = self.docker_collector()
+        collector._states.clear()
+        namespace["_docker_inspect_container_pid"].side_effect = [1, 2]
+        self.assertEqual(self.sample_docker(collector, namespace, writer), [])
+        self.assertNotIn("example", collector._states)
+
+    def test_docker_cpu_delta_uses_elapsed_time_despite_wall_clock_adjustment(self):
+        for timestamp in (-1000, 1_000_000):
+            with self.subTest(timestamp=timestamp):
+                records = self.sample_docker(
+                    *self.docker_collector(),
+                    now_ms=timestamp,
+                )
+                cpu = next(point for point in records if point["name"] == "system.cpu.utilization")
+                self.assertEqual(cpu["value"], 150.0)
+                self.assertEqual(cpu["time_unix_ms"], timestamp)
+
+    def test_docker_missing_counter_resets_the_cpu_baseline(self):
+        collector, namespace, writer = self.docker_collector()
+        namespace["_read_cpu_usage_usec"] = Mock(side_effect=[None, 0, 10_000_000])
+        cpu_values = []
+        for instant in (6.0, 11.0, 16.0):
+            records = self.sample_docker(
+                collector,
+                namespace,
+                writer,
+                monotonic=instant,
+            )
+            cpu_values.extend(point["value"] for point in records if point["name"] == "system.cpu.utilization")
+        self.assertEqual(cpu_values, [100.0])
+
+    def test_docker_without_host_proc_only_keeps_device_metrics(self):
+        collector, namespace, writer = self.docker_collector()
+        collector._states["example"].process_starttime = None
+        namespace["_read_process_starttime"].return_value = None
+        namespace["_read_cpu_usage_usec"] = Mock()
+        records = self.sample_docker(
+            collector,
+            namespace,
+            writer,
+        )
+        namespace["_read_cpu_usage_usec"].assert_not_called()
+        self.assertEqual(
+            {point["name"] for point in records},
+            {"system.gpu.utilization", "system.gpu.memory.used_bytes"},
+        )
+
+    def test_process_starttime_handles_names_and_rejects_unavailable_processes(self):
+        source = SERVER / "_metrics_collector" / "_cgroup.py"
+        spec = importlib.util.spec_from_file_location("metrics_cgroup_test", source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        suffix = " ".join(["S"] + ["0"] * 18 + ["654321"])
+        with patch("builtins.open", mock_open(read_data="123 (worker ) with ( spaces) " + suffix)):
+            self.assertEqual(module._read_process_starttime(123), 654321)
+        for content in ("", "123 bad stat", "123 (worker) S 0", "124 (worker) " + suffix, "123 (worker) " + suffix.replace("S", "Z")):
+            with patch("builtins.open", mock_open(read_data=content)):
+                self.assertIsNone(module._read_process_starttime(123))
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            self.assertIsNone(module._read_process_starttime(123))
 
 
 if __name__ == "__main__":
