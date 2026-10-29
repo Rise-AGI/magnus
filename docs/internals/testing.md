@@ -18,6 +18,12 @@ on Python 3.10, its minimum supported version. `--list` lists the selected
 modules without importing them. Each suite runs in its own interpreter, and
 any failing suite makes the command fail.
 
+The backend suite first runs Ruff's undefined-name check (`F821`) over
+`back_end/server/` and `back_end/library/`, without importing either package.
+This catches missing bindings that injected test fixtures can otherwise hide.
+Lint errors also fail the command; behavior tests still run to report their
+results. The SDK-only suite and `--list` do not run this check.
+
 Backend regressions live directly in `back_end/python_scripts/tests/`; SDK
 regressions live directly in `sdks/python/tests/`. New `test_*.py` modules in
 these directories join the suite automatically. Tests must use temporary data

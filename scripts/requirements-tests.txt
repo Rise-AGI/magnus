@@ -1,4 +1,5 @@
 # Lightweight isolated tests only, not the backend's runtime environment.
+ruff==0.17.3
 fastapi==0.133.1
 starlette==1.6.0
 httpx==0.28.1

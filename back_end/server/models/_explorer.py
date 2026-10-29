@@ -1,10 +1,14 @@
 # back_end/server/models/_explorer.py
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, ForeignKey, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
 from ._helpers import generate_hex_id, UtcDateTime
+
+if TYPE_CHECKING:
+    from ._user import User
 
 
 class ExplorerSession(Base):

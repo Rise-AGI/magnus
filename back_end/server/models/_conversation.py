@@ -1,11 +1,15 @@
 # back_end/server/models/_conversation.py
 import enum
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from sqlalchemy import Enum as SQLEnum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
 from ._helpers import generate_hex_id, UtcDateTime
+
+if TYPE_CHECKING:
+    from ._user import User
 
 
 class ConversationType(str, enum.Enum):

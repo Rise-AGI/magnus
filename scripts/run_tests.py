@@ -65,6 +65,25 @@ def main() -> int:
                 print(f"{suite}: {module}")
             continue
         print(f"Running {suite}: {len(modules)} test modules", flush=True)
+        if suite == "backend":
+            lint = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "check",
+                    "--isolated",
+                    "--target-version", "py314",
+                    "--select", "F821",
+                    "--output-format", "concise",
+                    "back_end/server",
+                    "back_end/library",
+                ],
+                cwd=ROOT,
+                stdin=subprocess.DEVNULL,
+                check=False,
+            )
+            failed = failed or lint.returncode != 0
         # Separate interpreters avoid collisions between identically named SDK
         # and backend tests and prevent fixture modules leaking across suites.
         runner = (

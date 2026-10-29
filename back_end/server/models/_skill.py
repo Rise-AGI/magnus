@@ -1,10 +1,14 @@
 # back_end/server/models/_skill.py
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
 from ._helpers import UtcDateTime
+
+if TYPE_CHECKING:
+    from ._user import User
 
 
 class Skill(Base):

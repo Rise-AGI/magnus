@@ -159,7 +159,7 @@ class _SubmitMixin(_SubmitMixinBase):
         job: Job,
     ) -> bool:
         if job.dockerfile is None:
-            available = is_local_mode or (
+            available = self.config["execution"]["backend"] == "local" or (
                 job.container_image is not None
                 and os.path.isfile(resource_manager.get_sif_path(job.container_image))
             )

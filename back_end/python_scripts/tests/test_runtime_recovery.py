@@ -33,12 +33,15 @@ class DockerSubmissionTests(unittest.TestCase):
         self.actor = actor_type()
         self.actor.__dict__.update(self.fixture.scheduler.__dict__)
         self.actor.__dict__.pop("_reconcile_submissions", None)
-        self.actor.config = {'server': {'address': 'http://local', 'back_end_port': 1}, 'cluster': {'default_system_entry_command': ''}}
+        self.actor.config = {
+            "server": {"address": "http://local", "back_end_port": 1},
+            "cluster": {"default_system_entry_command": ""},
+            "execution": {"backend": "local"},
+        }
         self.actor._submission_cancel_event = Mock()
         self.actor._begin_calls = 0
         self.actor._submission_reconcile_after = 0
         self.actor._submission_reconcile_cursor = 0
-        self.actor._environment_ready = lambda *args: True
         self.actor._init_job_working_dir = lambda path: Path(path).mkdir(parents=True, exist_ok=True)
         self.actor.terminate_job = Mock()
         self.fixture.add_job(status=JobStatus.PENDING)

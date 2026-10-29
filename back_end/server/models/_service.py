@@ -1,11 +1,16 @@
 # back_end/server/models/_service.py
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, Enum as SQLEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
 from ._helpers import UtcDateTime
 from ._job import JobType
+
+if TYPE_CHECKING:
+    from ._job import Job
+    from ._user import User
 
 
 class Service(Base):

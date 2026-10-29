@@ -1,10 +1,16 @@
 # back_end/server/models/_user.py
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
 from ._helpers import generate_hex_id, UtcDateTime
+
+if TYPE_CHECKING:
+    from ._blueprint import Blueprint
+    from ._job import Job
+    from ._service import Service
 
 
 class User(Base):

@@ -17,6 +17,11 @@ Windows 下将后两条命令中的解释器改为 `./.venv-tests/Scripts/python
 Python 3.10。`--list` 仅列出选中的模块，不导入或运行它们。各套件在独立解释器中
 执行，任一套件失败都会令命令失败。
 
+后端套件先用 Ruff 的未定义名称检查（`F821`）扫描 `back_end/server/` 和
+`back_end/library/`，不导入这些包。这能发现被测试 fixture 注入变量掩盖的缺失
+绑定。静态检查失败同样令命令失败，行为测试仍继续运行并报告结果。
+仅运行 SDK 套件或使用 `--list` 时不执行这项检查。
+
 后端回归放在 `back_end/python_scripts/tests/` 的直属目录，SDK 回归放在
 `sdks/python/tests/` 的直属目录；新增 `test_*.py` 自动纳入。测试必须使用临时数据
 并控制外部边界，不能初始化实际配置的后端、读取个人 SDK 凭证、访问站点、提交

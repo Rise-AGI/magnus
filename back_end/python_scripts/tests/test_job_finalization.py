@@ -774,6 +774,8 @@ class SlurmFinalizationTests(unittest.TestCase):
     ):
         self.add_job(status=JobStatus.PENDING)
         namespace = dict(self.namespace)
+        namespace.pop("is_local_mode")
+        self.scheduler.config = {"execution": {"backend": "slurm"}}
         image = self.root / "missing.sif"
         namespace["resource_manager"] = SimpleNamespace(get_sif_path=lambda uri: str(image))
         ready = load_method("_scheduler/_submit.py", "_environment_ready", namespace)
@@ -806,6 +808,8 @@ class SlurmFinalizationTests(unittest.TestCase):
             db.get(Job, "job").slurm_job_id = None
             db.commit()
         namespace = dict(self.namespace)
+        namespace.pop("is_local_mode")
+        self.scheduler.config = {"execution": {"backend": "slurm"}}
 
         def terminate_while_checking_image(uri):
             with self.sessions() as other:
@@ -829,13 +833,15 @@ class SlurmFinalizationTests(unittest.TestCase):
         image = self.root / "ready.sif"
         image.write_bytes(b"image")
         namespace = dict(self.namespace)
+        namespace.pop("is_local_mode")
+        self.scheduler.config = {"execution": {"backend": "slurm"}}
         namespace["resource_manager"] = SimpleNamespace(get_sif_path=lambda uri: str(image))
         ready = load_method("_scheduler/_submit.py", "_environment_ready", namespace)
         with patch.multiple(Job, dockerfile=None, container_image="image", create=True):
             with self.sessions() as db:
                 job = db.get(Job, "job")
                 self.assertTrue(ready(self.scheduler, db, job))
-                namespace["is_local_mode"] = True
+                self.scheduler.config = {"execution": {"backend": "local"}}
                 image.unlink()
                 self.assertTrue(ready(self.scheduler, db, job))
                 self.assertEqual(job.status, JobStatus.PENDING)
