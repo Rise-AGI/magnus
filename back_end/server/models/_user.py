@@ -22,5 +22,14 @@ class User(Base):
     jobs: Mapped[list["Job"]] = relationship(back_populates="user")
     services: Mapped[list["Service"]] = relationship(back_populates="owner")
     blueprints: Mapped[list["Blueprint"]] = relationship(back_populates="user")
-    parent: Mapped["User | None"] = relationship("User", remote_side=[id], foreign_keys=[parent_id])
-    children: Mapped[list["User"]] = relationship("User", foreign_keys=[parent_id])
+    parent: Mapped["User | None"] = relationship(
+        "User",
+        remote_side=[id],
+        foreign_keys=[parent_id],
+        back_populates="children",
+    )
+    children: Mapped[list["User"]] = relationship(
+        "User",
+        foreign_keys=[parent_id],
+        back_populates="parent",
+    )

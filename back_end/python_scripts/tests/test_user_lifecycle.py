@@ -153,6 +153,96 @@ class UserLifecycleTests(unittest.TestCase):
         self.evict.assert_called_once_with("synthetic")
         self.avatar_delete.assert_called_once_with("avatar")
 
+    def test_reparenting_updates_both_relationships_and_persists(self):
+        with self.sessions() as db:
+            first = User(
+                id="first",
+                name="first",
+            )
+            second = User(
+                id="second",
+                name="second",
+            )
+            child = db.get(
+                User,
+                "agent",
+            )
+            child.parent = first
+            self.assertEqual(
+                first.children,
+                [child],
+            )
+            child.parent = second
+            self.assertEqual(
+                first.children,
+                [],
+            )
+            self.assertEqual(
+                second.children,
+                [child],
+            )
+            db.add_all(
+                [first, second],
+            )
+            db.commit()
+        with self.sessions() as db:
+            child = db.get(
+                User,
+                "agent",
+            )
+            self.assertEqual(
+                child.parent_id,
+                "second",
+            )
+            self.assertEqual(
+                child.parent.children,
+                [child],
+            )
+
+    def test_child_collection_changes_update_parent_without_deleting_user(self):
+        with self.sessions() as db:
+            parent = User(
+                id="parent",
+                name="parent",
+            )
+            child = db.get(
+                User,
+                "agent",
+            )
+            parent.children.append(
+                child,
+            )
+            self.assertIs(
+                child.parent,
+                parent,
+            )
+            db.add(
+                parent,
+            )
+            db.commit()
+            self.assertEqual(
+                child.parent_id,
+                "parent",
+            )
+            parent.children.remove(
+                child,
+            )
+            self.assertIsNone(
+                child.parent,
+            )
+            db.commit()
+        with self.sessions() as db:
+            child = db.get(
+                User,
+                "agent",
+            )
+            self.assertIsNotNone(
+                child,
+            )
+            self.assertIsNone(
+                child.parent_id,
+            )
+
     def test_chat_record_boundaries_preserve_responses_and_ownership(self):
         namespace = self.namespace
         load_leaf("schemas/_user.py", namespace)
