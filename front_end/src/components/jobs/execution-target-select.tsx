@@ -28,6 +28,7 @@ export function ExecutionTargetSelect({
       onChange={onChange}
       disabled={disabled}
       className={className}
+      contentClassName="max-h-[min(20rem,var(--radix-popover-content-available-height))]"
     />
   );
 }

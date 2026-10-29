@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { X, Search, ChevronDown, ChevronUp } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
+import { cn } from "@/lib/utils";
 
 interface SearchableSelectProps {
   label?: string;
@@ -15,6 +16,7 @@ interface SearchableSelectProps {
   hasError?: boolean;
   id?: string;
   className?: string;
+  contentClassName?: string;
   placement?: "top" | "bottom";
   minimal?: boolean;
   allowCustomValue?: boolean;
@@ -22,6 +24,7 @@ interface SearchableSelectProps {
 
 export function SearchableSelect({
   label, value, options, onChange, placeholder, disabled, hasError, id, className = "",
+  contentClassName,
   placement = "bottom",
   minimal = false,
   allowCustomValue = false,
@@ -165,7 +168,7 @@ export function SearchableSelect({
               if (triggerRef.current?.contains(e.target as Node)) e.preventDefault();
             }}
             style={{ width: triggerRef.current?.offsetWidth }}
-            className="bg-[#0F0F11] border border-zinc-800 rounded-lg shadow-2xl z-[200] overflow-hidden max-h-60 overflow-y-auto custom-scrollbar animate-in fade-in duration-100"
+            className={cn("bg-[#0F0F11] border border-zinc-800 rounded-lg shadow-2xl z-[200] overflow-hidden max-h-60 overflow-y-auto custom-scrollbar animate-in fade-in duration-100", contentClassName)}
           >
             {filteredOptions.map((opt) => (
               <div
