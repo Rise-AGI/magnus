@@ -58,6 +58,13 @@ be overridden per target. Use separate remote roots and control sockets for
 independent execution environments. Multiple targets require the Slurm backend;
 Docker/local keeps its existing single-host behavior.
 
+Consolidating existing sites also requires migrating identities, historical Jobs and valid custody
+entries; merging configurations or redirecting domains is not sufficient. An offline administrator
+migration can retain hashed aliases of the same identity's former trust tokens. They are bound to
+the merged primary token and are revoked when it is rotated or replaced. HTTP authentication,
+token login and chat authentication use the same rules. Browser JWT sessions are not migrated,
+and there is no public endpoint for registering aliases.
+
 Targets may also override `container_image_mode` (`native` by default) and
 `container_prepare_timeout_seconds` (300 by default). On runtimes that extract
 every SIF invocation, `sandbox` prepares one read-only directory image per Job

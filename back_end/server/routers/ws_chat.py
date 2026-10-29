@@ -14,6 +14,7 @@ from .chat import _create_message_record
 from ..database import SessionLocal
 from .._chat_manager import chat_manager
 from .._jwt_signer import jwt_signer
+from .._user_tokens import find_user_by_token
 
 logger = logging.getLogger(__name__)
 ws_router = APIRouter()
@@ -53,10 +54,13 @@ def _check_rate_limit(user_id: str) -> bool:
 
 
 def _authenticate_by_app_secret(app_secret: str) -> models.User | None:
-    """通过 app_secret 认证（实际查 User.token，即 MAGNUS_TOKEN）。
+    """通过 app_secret 认证（MAGNUS_TOKEN，包括迁移保留的凭据）。
     参数名对齐 OpenClaw 插件接口契约。"""
     with SessionLocal() as db:
-        user = db.query(models.User).filter(models.User.token == app_secret).first()
+        user = find_user_by_token(
+            db,
+            app_secret,
+        )
         if not user:
             return None
         db.expunge(user)
@@ -86,9 +90,15 @@ async def ws_chat(websocket: WebSocket) -> None:
     user: models.User | None = None
 
     if app_secret:
-        user = _authenticate_by_app_secret(app_secret)
+        user = await _run_blocking_io(
+            _authenticate_by_app_secret,
+            app_secret,
+        )
     elif jwt_token:
-        user = _authenticate_by_jwt(jwt_token)
+        user = await _run_blocking_io(
+            _authenticate_by_jwt,
+            jwt_token,
+        )
 
     if not user:
         logger.warning(

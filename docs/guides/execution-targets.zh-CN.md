@@ -50,6 +50,11 @@ execution:
 属于整个站点，不能按目标覆盖。独立执行环境使用独立远端根目录和 control socket。
 多目标要求 Slurm 后端；Docker/local 保持原有单机行为。
 
+合并既有站点时，用户身份、历史 Job 和有效 custody 需单独迁移，不能只合并配置或
+重定向域名。管理员可在离线迁移中为同一身份保留原 trust token 的哈希别名；它们
+绑定迁移后的主 token，刷新或更换主 token 时一并撤销。HTTP、token 登录和聊天
+鉴权使用相同规则。此机制不迁移浏览器 JWT 会话，不提供在线添加别名的接口。
+
 目标还可覆盖 `container_image_mode`（默认 `native`）和
 `container_prepare_timeout_seconds`（默认 300）。对于每次执行 SIF 都会解包的运行时，
 `sandbox` 会在启动各 task 前为整个 Job 准备一份只读目录镜像。

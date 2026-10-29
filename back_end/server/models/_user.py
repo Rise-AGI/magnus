@@ -39,3 +39,29 @@ class User(Base):
         foreign_keys=[parent_id],
         back_populates="parent",
     )
+    token_aliases: Mapped[list["UserTokenAlias"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class UserTokenAlias(Base):
+    """Imported credentials remain valid only for the current primary token."""
+
+    __tablename__ = "user_token_aliases"
+    digest: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
+    )
+    primary_digest: Mapped[str] = mapped_column(String(64))
+    user: Mapped["User"] = relationship(
+        back_populates="token_aliases",
+    )

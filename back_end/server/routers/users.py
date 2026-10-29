@@ -11,6 +11,7 @@ from sqlalchemy import func
 from .. import database
 from .. import models
 from .._user_lifecycle import lock_user_for_write, assert_user_unreferenced
+from .._user_tokens import find_user_by_token, replace_primary_token
 from ..schemas import (
     UserInfo,
     UserDetail,
@@ -233,7 +234,10 @@ def get_bot_self(
     db: Session = Depends(database.get_db),
 ) -> UserInfo:
     """供 OpenClaw 等外部插件通过 app_secret（实际为 MAGNUS_TOKEN）获取自身 user info。"""
-    user = db.query(models.User).filter(models.User.token == app_secret).first()
+    user = find_user_by_token(
+        db,
+        app_secret,
+    )
     if not user:
         raise HTTPException(status_code=401, detail="Invalid app_secret")
     return UserInfo(
@@ -519,7 +523,11 @@ def refresh_user_token(
 
     old_token = target.token
     new_token = generate_trust_token()
-    target.token = new_token
+    replace_primary_token(
+        db,
+        target,
+        new_token,
+    )
     db.commit()
     db.refresh(target)
 
@@ -556,7 +564,11 @@ def set_user_token(
         )
 
     old_token = target.token
-    target.token = token
+    replace_primary_token(
+        db,
+        target,
+        token,
+    )
     db.commit()
 
     if old_token != token:

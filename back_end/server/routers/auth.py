@@ -16,6 +16,7 @@ from ..schemas import LoginResponse, FeishuLoginRequest, TokenLoginRequest, Toke
 from .._magnus_config import magnus_config, admin_open_ids, is_local_auth
 from .._jwt_signer import jwt_signer
 from .._feishu_client import feishu_client
+from .._user_tokens import find_user_by_token, replace_primary_token
 
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,7 @@ def get_current_user(
         )
 
     user_id_found: Optional[str] = None
+    cacheable_token = True
     
     # 1. Check Cache
     cached_id = _get_from_cache(final_token)
@@ -144,10 +146,13 @@ def get_current_user(
     
     # 2. Check DB Token (SDK Trust Token)
     if not user_id_found:
-        user_by_token = db.query(models.User).filter(models.User.token == final_token).first()
+        user_by_token = find_user_by_token(
+            db,
+            final_token,
+        )
         if user_by_token:
             user_id_found = user_by_token.id
-            _add_to_cache(final_token, user_by_token)
+            cacheable_token = user_by_token.token == final_token
 
     # 3. Check JWT (Web Session)
     if not user_id_found:
@@ -174,7 +179,7 @@ def get_current_user(
             detail = "User not found",
         )
 
-    if not cached_id:
+    if not cached_id and cacheable_token:
         _add_to_cache(final_token, user)
 
     return user
@@ -258,7 +263,10 @@ def token_login(
     db: Session = Depends(database.get_db),
 ) -> Dict[str, Any]:
     """通过 Magnus Token (sk-xxx) 登录，返回 JWT + 用户信息。"""
-    user = db.query(models.User).filter(models.User.token == req.token).first()
+    user = find_user_by_token(
+        db,
+        req.token,
+    )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -293,7 +301,11 @@ def refresh_trust_token(
     # AUTH_CACHE_TTL after the user rotated specifically to revoke it.
     old_token = current_user.token
     new_token = generate_trust_token()
-    current_user.token = new_token
+    replace_primary_token(
+        db,
+        current_user,
+        new_token,
+    )
 
     db.commit()
     db.refresh(current_user)
@@ -325,7 +337,11 @@ def set_custom_token(
         )
 
     old_token = current_user.token
-    current_user.token = token
+    replace_primary_token(
+        db,
+        current_user,
+        token,
+    )
     db.commit()
     db.refresh(current_user)
 

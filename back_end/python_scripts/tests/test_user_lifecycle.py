@@ -126,6 +126,8 @@ class UserLifecycleTests(unittest.TestCase):
             for foreign_key in table.foreign_keys:
                 if foreign_key.column is not User.__table__.c.id:
                     continue
+                if foreign_key.ondelete == "CASCADE":
+                    continue
                 with self.subTest(table=table.name, column=foreign_key.parent.name), self.sessions() as db:
                     values = {}
                     for column in table.columns:
@@ -152,6 +154,19 @@ class UserLifecycleTests(unittest.TestCase):
             self.assertIsNone(db.get(User, "agent"))
         self.evict.assert_called_once_with("synthetic")
         self.avatar_delete.assert_called_once_with("avatar")
+
+    def test_owned_credentials_do_not_prevent_agent_deletion(self):
+        alias_model = ns["UserTokenAlias"]
+        with self.sessions() as db:
+            db.add(alias_model(
+                digest="imported",
+                user_id="agent",
+                primary_digest="bound",
+            ))
+            db.commit()
+            self.delete("agent", db, self.admin)
+            self.assertIsNone(db.get(User, "agent"))
+            self.assertIsNone(db.get(alias_model, "imported"))
 
     def test_reparenting_updates_both_relationships_and_persists(self):
         with self.sessions() as db:
