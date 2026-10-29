@@ -34,3 +34,7 @@ This selection is a testing convention, not an operating-system sandbox.
 GitHub Actions runs the backend and SDK suites on Linux/Python 3.14, plus the SDK
 suite on Linux and Windows/Python 3.10. This checks isolated behavior; it does
 not certify deployment, a real BuildKit/Slurm installation or production load.
+
+The backend rollback-compatibility regression reads committed custody code with
+`git show`. Run it from a clone with full history; GitHub Actions also fetches
+that history. Source-only exports and shallow clones do not contain this fixture.

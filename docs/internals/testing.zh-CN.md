@@ -30,3 +30,7 @@ Job 或要求 GPU。允许本地测试子进程和进程内 HTTP 客户端。
 GitHub Actions 在 Linux/Python 3.14 运行后端与 SDK 套件，并在 Linux 和
 Windows/Python 3.10 运行 SDK 套件。它验证隔离行为，不代表部署、真实
 BuildKit/Slurm 环境或生产负载已经验收。
+
+后端回退兼容回归通过 `git show` 读取已提交的 custody 旧实现，需在包含完整
+历史的 clone 中运行；GitHub Actions 同样获取历史。仅源码导出或浅克隆不含
+该兼容性 fixture。

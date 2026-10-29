@@ -793,6 +793,12 @@ def blueprint(
 
 #### download_file - Receive Files
 
+Directory downloads use the standard library’s data extraction filter. Python builds
+without that filter (including Windows Python 3.10.11) support custody archives
+containing regular files and directories, as produced by the SDK. On those builds,
+links and special files are rejected; extraction never falls back to unrestricted
+archive contents. A failed extraction leaves an existing download target intact.
+
 Receives files in the job execution environment.
 
 ```python

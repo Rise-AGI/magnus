@@ -16,6 +16,7 @@ from typing import Optional
 from .file_transfer import normalize_secret, ENV_CUSTODY_DROPIN_DIR
 from .exceptions import _ServerError
 from ._http_errors import http_error_detail
+from ._archive import extract_custody_archive
 
 logger = logging.getLogger("magnus")
 
@@ -162,11 +163,12 @@ def _extract_directory(
     archive: Path,
     temporary: Path,
 ) -> Path:
-    import tarfile
     extracted_dir = temporary / "extracted"
     extracted_dir.mkdir()
-    with tarfile.open(archive) as tar:
-        tar.extractall(extracted_dir, filter="data")
+    extract_custody_archive(
+        archive,
+        extracted_dir,
+    )
     extracted = list(extracted_dir.iterdir())
     if len(extracted) != 1 or not extracted[0].is_dir() or extracted[0].is_symlink():
         raise _magnus_error("Expected one directory in the custody archive")
