@@ -2,7 +2,7 @@
 """Job submission / response schemas."""
 from datetime import datetime
 from typing import Any, List, Literal, Optional
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from ..models import JobType, JobStatus
 from .._job_resources import RESOURCE_MODES, ResourceMode, requested_job_resources, resource_mode_for_execution
@@ -106,7 +106,9 @@ class JobListItem(BaseModel):
     start_time: Optional[datetime] = None
     created_at: datetime
     user: Optional[UserInfo] = None
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
     @model_validator(mode="after")
     def _summarize_resources(self):

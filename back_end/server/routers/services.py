@@ -7,7 +7,7 @@ import threading
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 from collections import defaultdict
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, status
 from fastapi.responses import StreamingResponse
@@ -93,8 +93,9 @@ class ServiceSnapshot(BaseModel):
     system_entry_command: Optional[str] = None
     job_type: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 # === [New] Helper for Safe DB Access ===

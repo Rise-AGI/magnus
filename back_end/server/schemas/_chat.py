@@ -2,7 +2,7 @@
 """Conversation / message schemas."""
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from ..models import ConversationType, MessageType
 from ._user import UserInfo
@@ -20,7 +20,9 @@ class ConversationMemberResponse(BaseModel):
     last_read_at: Optional[datetime] = None
     joined_at: datetime
     user: Optional[UserInfo] = None
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class MessageResponse(BaseModel):
@@ -31,7 +33,9 @@ class MessageResponse(BaseModel):
     message_type: MessageType
     created_at: datetime
     sender: Optional[UserInfo] = None
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ConversationResponse(BaseModel):
@@ -42,7 +46,9 @@ class ConversationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     members: List[ConversationMemberResponse] = []
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ConversationListItem(BaseModel):
@@ -55,7 +61,9 @@ class ConversationListItem(BaseModel):
     member_count: int = 0
     last_message: Optional[MessageResponse] = None
     other_user: Optional[UserInfo] = None  # P2P 会话中的对方
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class PagedConversationResponse(BaseModel):

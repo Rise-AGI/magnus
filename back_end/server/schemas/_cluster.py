@@ -2,7 +2,7 @@
 """Cluster resources / stats schemas."""
 from datetime import datetime
 from typing import List, Literal, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from ._job import JobListItem
 
@@ -31,7 +31,9 @@ class ClusterResources(BaseModel):
     unavailable_cpus: int = 0
     unavailable_mem_mb: int = 0
     node_count: Optional[int] = None
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class ClusterStatsResponse(BaseModel):
@@ -40,4 +42,6 @@ class ClusterStatsResponse(BaseModel):
     total_running: int
     pending_jobs: List[JobListItem]
     total_pending: int
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )

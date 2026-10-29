@@ -2,7 +2,7 @@
 """Skill create / response schemas."""
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from ._user import UserInfo
 
@@ -31,7 +31,9 @@ class SkillFileResponse(BaseModel):
     content: str
     is_binary: bool = False
     updated_at: Optional[datetime] = None
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class SkillCreate(BaseModel):
@@ -55,7 +57,9 @@ class SkillListItem(BaseModel):
     file_count: int = 0
     user: Optional[UserInfo] = None
     can_manage: bool = False
-    class Config: from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
 
 
 class SkillResponse(SkillListItem):
