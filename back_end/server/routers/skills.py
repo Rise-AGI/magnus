@@ -6,11 +6,11 @@ import shutil
 import tarfile
 import mimetypes
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from urllib.parse import quote
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import Header, APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, raiseload
@@ -18,6 +18,7 @@ from sqlalchemy import or_, case, func
 
 from .. import database
 from .. import models
+from .._resource_aliases import resolve_resource_id, exclude_shadowed_resources
 from .._user_lifecycle import lock_user_for_write
 from ..schemas import (
     SkillCreate,
@@ -118,7 +119,14 @@ def create_skill(
     skill: SkillCreate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    skill = skill.model_copy(update={"id": resolve_resource_id(
+        db,
+        "skill",
+        skill.id,
+        default_target,
+    )})
     enforce_field_size_limits({"id": skill.id, "title": skill.title, "description": skill.description}, "skill")
 
     has_skill_md = any(f.path == "SKILL.md" for f in skill.files)
@@ -174,7 +182,14 @@ def delete_skill(
     skill_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ) -> None:
+    skill_id = resolve_resource_id(
+        db,
+        "skill",
+        skill_id,
+        default_target,
+    )
     skill = db.query(models.Skill).filter(models.Skill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -192,7 +207,14 @@ def transfer_skill(
     body: TransferRequest,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ) -> models.Skill:
+    skill_id = resolve_resource_id(
+        db,
+        "skill",
+        skill_id,
+        default_target,
+    )
     skill = db.query(models.Skill).options(joinedload(models.Skill.user))\
               .filter(models.Skill.id == skill_id).first()
     if not skill:
@@ -217,8 +239,15 @@ def list_skills(
     creator_id: Optional[str] = None,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
     query = db.query(models.Skill)
+    query = exclude_shadowed_resources(
+        query,
+        models.Skill,
+        "skill",
+        default_target,
+    )
 
     if search:
         safe = escape_like(search)
@@ -273,7 +302,14 @@ def get_skill(
     skill_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    skill_id = resolve_resource_id(
+        db,
+        "skill",
+        skill_id,
+        default_target,
+    )
     skill = db.query(models.Skill)\
         .options(joinedload(models.Skill.user), joinedload(models.Skill.files))\
         .filter(models.Skill.id == skill_id)\
@@ -295,7 +331,14 @@ def upload_skill_resource(
     file: UploadFile,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    skill_id = resolve_resource_id(
+        db,
+        "skill",
+        skill_id,
+        default_target,
+    )
     skill = db.query(models.Skill).filter(models.Skill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -340,7 +383,14 @@ def delete_skill_resource(
     path: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ) -> None:
+    skill_id = resolve_resource_id(
+        db,
+        "skill",
+        skill_id,
+        default_target,
+    )
     skill = db.query(models.Skill).filter(models.Skill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -365,8 +415,15 @@ def serve_skill_file(
     path: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
     # 先查文件系统（二进制资源）
+    skill_id = resolve_resource_id(
+        db,
+        "skill",
+        skill_id,
+        default_target,
+    )
     resources_dir = _skill_resources_dir(skill_id)
     resource_path = resources_dir / path
     if not resource_path.resolve().is_relative_to(resources_dir.resolve()):
@@ -408,7 +465,14 @@ def download_skill_archive(
     skill_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    skill_id = resolve_resource_id(
+        db,
+        "skill",
+        skill_id,
+        default_target,
+    )
     skill = db.query(models.Skill)\
         .options(joinedload(models.Skill.files))\
         .filter(models.Skill.id == skill_id)\

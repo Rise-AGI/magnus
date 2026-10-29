@@ -9,6 +9,7 @@ from sqlalchemy import or_, case
 
 from .. import database
 from .. import models
+from .._resource_aliases import resolve_resource_id, exclude_shadowed_resources
 from .._user_lifecycle import lock_user_for_write
 from pydantic import BaseModel
 
@@ -102,7 +103,14 @@ def create_blueprint(
     bp: BlueprintCreate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    bp = bp.model_copy(update={"id": resolve_resource_id(
+        db,
+        "blueprint",
+        bp.id,
+        default_target,
+    )})
     enforce_field_size_limits(bp.model_dump(), "blueprint")
 
     # 1. 验证代码签名
@@ -156,10 +164,17 @@ def delete_blueprint(
     blueprint_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ) -> None:
     """
     删除蓝图。拥有者、管理员、上司可操作。
     """
+    blueprint_id = resolve_resource_id(
+        db,
+        "blueprint",
+        blueprint_id,
+        default_target,
+    )
     bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
 
     if not bp:
@@ -177,7 +192,14 @@ def transfer_blueprint(
     body: TransferRequest,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ) -> models.Blueprint:
+    blueprint_id = resolve_resource_id(
+        db,
+        "blueprint",
+        blueprint_id,
+        default_target,
+    )
     bp = db.query(models.Blueprint).options(joinedload(models.Blueprint.user))\
            .filter(models.Blueprint.id == blueprint_id).first()
     if not bp:
@@ -205,11 +227,18 @@ def list_blueprints(
     creator_id: Optional[str] = None,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
     """
     获取蓝图列表（支持分页、搜索、筛选）
     """
     query = db.query(models.Blueprint)
+    query = exclude_shadowed_resources(
+        query,
+        models.Blueprint,
+        "blueprint",
+        default_target,
+    )
 
     # 1. 搜索逻辑 (Title, ID, Description)
     if search:
@@ -256,7 +285,14 @@ def get_blueprint(
     blueprint_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    blueprint_id = resolve_resource_id(
+        db,
+        "blueprint",
+        blueprint_id,
+        default_target,
+    )
     blueprint = db.query(models.Blueprint)\
         .options(joinedload(models.Blueprint.user))\
         .filter(models.Blueprint.id == blueprint_id)\
@@ -278,7 +314,14 @@ def get_blueprint_schema(
     blueprint_id: str,
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    blueprint_id = resolve_resource_id(
+        db,
+        "blueprint",
+        blueprint_id,
+        default_target,
+    )
     bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
@@ -302,6 +345,12 @@ def run_blueprint(
     - use_preference=True: 合并用户缓存的偏好参数（显式传入 > 缓存）
     - save_preference=True: 成功运行后保存参数为新偏好
     """
+    blueprint_id = resolve_resource_id(
+        db,
+        "blueprint",
+        blueprint_id,
+        default_target,
+    )
     bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
@@ -398,7 +447,14 @@ def get_blueprint_preference(
     blueprint_id: str,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    blueprint_id = resolve_resource_id(
+        db,
+        "blueprint",
+        blueprint_id,
+        default_target,
+    )
     pref = db.query(models.BlueprintUserPreference).filter(
         models.BlueprintUserPreference.user_id == current_user.id,
         models.BlueprintUserPreference.blueprint_id == blueprint_id,
@@ -424,11 +480,24 @@ def save_blueprint_preference(
     pref_update: BlueprintPreferenceUpdate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    blueprint_id = resolve_resource_id(
+        db,
+        "blueprint",
+        blueprint_id,
+        default_target,
+    )
     bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
     if not bp:
         raise HTTPException(status_code=404, detail="Blueprint not found")
         
+    pref_update = pref_update.model_copy(update={"blueprint_id": resolve_resource_id(
+        db,
+        "blueprint",
+        pref_update.blueprint_id,
+        default_target,
+    )})
     if pref_update.blueprint_id != blueprint_id:
          raise HTTPException(status_code=400, detail="Blueprint ID mismatch")
 

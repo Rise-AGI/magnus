@@ -215,3 +215,11 @@ unknown targets are rejected. This header grants no authority: submission grants
 still apply. It never changes target resolution for persisted Jobs or services.
 Canonical endpoints should omit or clear this header. Redirect the old browser UI
 to the canonical site so its target selector uses the consolidated configuration.
+
+Imported Blueprint/Skill IDs that collide must receive distinct canonical IDs;
+content must not silently overwrite another site's resource. An offline migration
+can record `resource_aliases` for the original endpoint target, resource kind and
+old ID. The forwarding header then resolves both path IDs and create/update body
+IDs before normal ownership checks. Lists on an old endpoint omit primary resources whose IDs are shadowed by its
+aliases, so every listed ID still denotes the same object on subsequent requests;
+the canonical endpoint lists both. Aliases do not grant access, are not recursive and have no public registration API.

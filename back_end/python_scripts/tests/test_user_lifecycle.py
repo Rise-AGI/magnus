@@ -51,9 +51,10 @@ def load_function(
 
 
 load_leaf("models/_helpers.py", ns)
-for name in ("_user", "_job", "_service", "_blueprint", "_skill", "_image", "_conversation", "_explorer"):
+for name in ("_user", "_resource_alias", "_job", "_service", "_blueprint", "_skill", "_image", "_conversation", "_explorer"):
     load_leaf(f"models/{name}.py", ns)
 User, Job, JobStatus = (ns[name] for name in ("User", "Job", "JobStatus"))
+load_leaf("_resource_aliases.py", ns)
 load_leaf("_user_lifecycle.py", ns)
 ns["ExecutionTarget"] = targets_module.ExecutionTarget
 load_leaf("_execution_access.py", ns)
