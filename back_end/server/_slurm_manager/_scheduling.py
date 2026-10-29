@@ -389,6 +389,8 @@ def _usage(
             }:
                 raise QueryFailure("account_visibility_unverified")
         selector = "account" if account_scope else "user"
+        # Pending array elements can share JobID before separate allocations
+        # exist. JobArrayID includes the element index with --array.
         output = _run(
             transport,
             [
@@ -399,7 +401,7 @@ def _usage(
                 "--array",
                 "--states=all",
                 f"--{selector}={identity}",
-                "--Format=JobID:0|,State:0|,tres-alloc:0",
+                "--Format=JobArrayID:0|,State:0|,tres-alloc:0",
             ],
             deadline,
         )

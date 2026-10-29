@@ -479,6 +479,30 @@ class QueryTests(unittest.TestCase):
         commands = [command for command, _ in self.transport.commands]
         self.assertTrue(any("name=normal,partition-policy" in command for command in commands))
 
+    def test_pending_array_elements_are_counted_separately(self):
+        result = self.cluster(
+            queue=(
+                "16352277_0|PENDING|cpu=4,mem=16000M,node=1,billing=4\n"
+                "16352277_1|PENDING|cpu=4,mem=16000M,node=1,billing=4\n"
+                "16352278|PENDING|cpu=1,mem=4000M,node=1,billing=1\n"
+            ),
+        )
+        for usage in (result.usage, result.account_usage):
+            self.assertEqual(
+                usage.availability,
+                "ready",
+            )
+            self.assertEqual(
+                (usage.pending_records, usage.pending_cpus, usage.pending_memory_mb),
+                (3, 9, 36000),
+            )
+        for command, _ in self.transport.commands:
+            if "squeue" in command:
+                self.assertIn(
+                    "--Format=JobArrayID:0|,State:0|,tres-alloc:0",
+                    command,
+                )
+
     def test_account_scope_and_user_scope_are_distinct_with_native_tres(self):
         result = self.cluster(
             account_queue="23|RUNNING|cpu=512,node=8,mem=2T,gres/gpu=8,gres/gpu:a100=8\n",
