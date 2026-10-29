@@ -12,6 +12,8 @@ import tempfile
 import threading
 import types
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -466,17 +468,12 @@ class ImageCacheTests(unittest.TestCase):
             )
 
 
-class ImagePullTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(
+class ImagePullFixture:
+    def __init__(
         self,
+        root: Path,
     ) -> None:
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(
-            temporary.cleanup,
-        )
-        self.root = Path(
-            temporary.name,
-        )
+        self.root = root
         self.scratch = self.root / "scratch"
         self.scratch.mkdir()
         self.cache = cache_module.ImageCache(
@@ -535,6 +532,30 @@ class ImagePullTests(unittest.IsolatedAsyncioTestCase):
         self.manager.images = self.cache
         self.manager.image_locks = {}
         self.manager.get_sif_path = self.cache.path
+
+
+@contextmanager
+def image_pull_fixture() -> Iterator[ImagePullFixture]:
+    with tempfile.TemporaryDirectory() as directory:
+        yield ImagePullFixture(
+            Path(
+                directory,
+            ),
+        )
+
+
+class ImagePullTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(
+        self,
+    ) -> None:
+        fixture = self.enterContext(
+            image_pull_fixture(),
+        )
+        self.root = fixture.root
+        self.scratch = fixture.scratch
+        self.cache = fixture.cache
+        self.namespace = fixture.namespace
+        self.manager = fixture.manager
 
     async def test_refreshes_use_distinct_outputs_and_preserve_legacy_partial(
         self,

@@ -366,10 +366,8 @@ class PullWriterLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(
         self,
     ) -> None:
-        self.fixture = image_fixtures.ImagePullTests()
-        self.fixture.setUp()
-        self.addCleanup(
-            self.fixture.doCleanups,
+        self.fixture = self.enterContext(
+            image_fixtures.image_pull_fixture(),
         )
 
     async def check_leader_exit(

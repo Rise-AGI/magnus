@@ -14,10 +14,8 @@ class DockerImageReferenceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(
         self,
     ) -> None:
-        self.images = image_fixtures.ImagePullTests()
-        self.images.setUp()
-        self.addCleanup(
-            self.images.doCleanups,
+        self.images = self.enterContext(
+            image_fixtures.image_pull_fixture(),
         )
         self.images.namespace["is_local_mode"] = True
         self.submission = submission_fixtures.DockerSubmissionTests()
