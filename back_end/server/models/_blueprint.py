@@ -17,6 +17,7 @@ class Blueprint(Base):
     title: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(String)
     code: Mapped[str] = mapped_column(Text)
+    default_execution_target: Mapped[str | None] = mapped_column(String, nullable=True)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     user: Mapped["User"] = relationship(back_populates="blueprints")
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(timezone.utc))

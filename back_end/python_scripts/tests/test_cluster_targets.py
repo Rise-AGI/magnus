@@ -82,6 +82,7 @@ class ClusterTargetTests(unittest.TestCase):
             "magnus_config": self.config,
             "configured_execution_targets": self.targets,
             "select_execution_target": targets_module.select_execution_target,
+            "requested_execution_target": targets_module.requested_execution_target,
             "is_local_mode": False,
             "resource_partitions": lambda config: [config["execution"]["slurm"]["partition"]],
             "SlurmManager": lambda **kwargs: kwargs["config"]["execution"]["slurm"]["partition"],

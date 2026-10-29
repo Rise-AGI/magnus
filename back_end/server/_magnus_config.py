@@ -488,7 +488,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     if type(prepare_timeout) is not int or prepare_timeout <= 0:
         raise ValueError("execution.container_prepare_timeout_seconds must be a positive integer")
 
-    _warn_extra_keys(execution, expected_exec_keys | {"image_build", "target_id", "target_name", "targets", "container_image_mode", "container_prepare_timeout_seconds"}, "execution")
+    _warn_extra_keys(execution, expected_exec_keys | {"image_build", "target_id", "target_name", "targets", "allowed_users", "container_image_mode", "container_prepare_timeout_seconds"}, "execution")
 
     resource_cache = execution["resource_cache"]
     _check_key(resource_cache, "container_cache_size", str)

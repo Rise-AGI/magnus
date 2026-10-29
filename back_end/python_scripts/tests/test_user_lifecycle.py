@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, event, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from test_job_resources import load_schemas
+from test_execution_targets import targets_module
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
@@ -54,6 +55,9 @@ for name in ("_user", "_job", "_service", "_blueprint", "_skill", "_image", "_co
     load_leaf(f"models/{name}.py", ns)
 User, Job, JobStatus = (ns[name] for name in ("User", "Job", "JobStatus"))
 load_leaf("_user_lifecycle.py", ns)
+ns["ExecutionTarget"] = targets_module.ExecutionTarget
+load_leaf("_execution_access.py", ns)
+ns["requested_execution_target"] = targets_module.requested_execution_target
 lock_user_for_write = ns["lock_user_for_write"]
 
 
@@ -302,7 +306,7 @@ class UserLifecycleTests(unittest.TestCase):
             resource_mode_for_execution=schemas["resource_mode_for_execution"],
             magnus_config={"execution": {"image_build": {"enabled": True}}},
             scheduler=SimpleNamespace(for_target=lambda key: SimpleNamespace(
-                target=SimpleNamespace(id="default"), config={"execution": {}}, slurm_manager=None,
+                target=SimpleNamespace(id="default", allowed_users=None), config={"execution": {}}, slurm_manager=None,
             )),
             is_local_mode=True,
             apply_cluster_defaults=lambda data, **kwargs: data,

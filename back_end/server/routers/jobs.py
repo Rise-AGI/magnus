@@ -12,15 +12,17 @@ Job 权限模型：
 """
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Annotated, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from .._staging_diagnostics import read_staging, staging_message
 from .. import database
 from .. import models
+from .._execution_access import assert_target_submission_allowed
+from .._execution_targets import requested_execution_target
 from .._user_lifecycle import lock_user_for_write
 from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
@@ -80,6 +82,8 @@ def create_job(
     job_dict: Dict[str, Any],
     user_id: str,
     db: Session,
+    *,
+    default_target: str | None = None,
 )-> models.Job:
     """
     共享的 Job 创建逻辑。
@@ -94,9 +98,19 @@ def create_job(
             detail = "Dockerfile builds are not enabled on this Magnus site",
         )
     try:
-        worker = scheduler.for_target(job_dict["execution_target"])
+        worker = scheduler.for_target(
+            requested_execution_target(
+                job_dict["execution_target"],
+                default_target,
+            ),
+        )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    assert_target_submission_allowed(
+        db,
+        user_id,
+        worker.target,
+    )
     config = worker.config
     job_dict["execution_target"] = worker.target.id
     apply_cluster_defaults(job_dict, config=config)
@@ -184,6 +198,7 @@ def submit_job(
     job_data: JobSubmission,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
     """
     提交新任务。
@@ -191,7 +206,12 @@ def submit_job(
     后续的资源准备、调度决策和 sbatch 提交由后台 _scheduler 负责。
     """
     try:
-        db_job = create_job(job_data.model_dump(), current_user.id, db)
+        db_job = create_job(
+            job_data.model_dump(),
+            current_user.id,
+            db,
+            default_target=default_target,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return db_job

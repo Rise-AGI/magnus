@@ -157,3 +157,20 @@ SSH/SCP 只复用既有 master；socket 消失时不会回落到另一条连接�
 batch 输入或污染调度器输出及二进制传输。脚本必须非交互，并在当前操作的既有
 超时预算内完成。此项由管理员配置，不改变 SSH 认证或 SFTP/SCP 会话；省略时
 保持原有行为。`module_init` 仍单独在 batch Job 内执行。
+
+## 提交授权与转发入口
+
+迁入的 Blueprint 可在数据库可空字段 `default_execution_target` 保留来源目标，
+不改 Python 代码。返回值中非 `default` 的显式目标优先；否则依次使用保存的来源、
+转发请求头、站点默认值。新建 Blueprint 不设置此运维迁移字段。
+
+执行目标可选配 `allowed_users: [user_id, ...]`，允许列出的用户及其下属提交。
+默认目标放在 `execution.allowed_users`，其他目标放在各自配置内。省略/null 为不限制，
+空列表禁止新提交；各目标独立配置，不继承默认目标的授权。Job 创建（包括 Blueprint）
+及 Service 创建/唤醒执行该校验；已在执行的任务和全员可读的 Job 历史不变。
+
+合并旧 API 入口的反向代理可设置 `X-Magnus-Default-Execution-Target` 为原目标。
+收到的 Job/Blueprint 提交、新 Service 目标选择和集群查询，在省略目标或使用旧 ID
+`default` 时按此值解析；其他显式 ID 不变，未知目标拒绝。该请求头不提供权限，
+仍执行目标提交授权，也不改变数据库中已有 Job/Service 的目标解析。
+统一入口应省略或清除此头。旧浏览器入口应重定向到统一站点，使选择器使用合并后的配置。

@@ -254,6 +254,7 @@ class ClusterGpuTests(unittest.TestCase):
             "datetime": datetime, "timezone": timezone, "or_": lambda *args: None,
             "_scheduler_sort_key": lambda value: 0,
             "resource_partitions": lambda config: [],
+            "requested_execution_target": lambda target_id, default: target_id,
             "_resolve_target": lambda target_id: target,
             "time": time,
         }

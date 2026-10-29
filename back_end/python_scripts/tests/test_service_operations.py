@@ -52,7 +52,7 @@ class ServiceOperationTests(unittest.IsolatedAsyncioTestCase):
             enforce_field_size_limits=lambda *args, **kwargs: None,
             resource_mode_for_execution=lambda execution: "local",
             _resolve_target=lambda key: SimpleNamespace(
-                id="local", config={"transport": {"mode": "local"}, "execution": {}, "cluster": {"default_container_image": "synthetic"}},
+                id="local", allowed_users=None, config={"transport": {"mode": "local"}, "execution": {}, "cluster": {"default_container_image": "synthetic"}},
             ),
         )
         for name in ("service_job_released", "allocate_port", "_sync_service"):
@@ -124,6 +124,44 @@ class ServiceOperationTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIsNone(db.get(Service, identifier))
                 self.assertIn(job_id, self.killed)
                 self.assertEqual(db.get(Job, job_id).status, JobStatus.TERMINATED)
+
+    async def test_revoked_submission_grant_still_allows_stopping_service(self):
+        job_id, _ = self.revive("first")
+        original = self.namespace["_resolve_target"]
+        def restricted(key):
+            target = original(key)
+            target.allowed_users = frozenset()
+            return target
+        self.namespace["_resolve_target"] = restricted
+        with self.sessions() as db:
+            request = SimpleNamespace(
+                id="first", execution_target=None, max_concurrency=1, model_fields_set=set(),
+                model_dump=lambda: {"is_active": False, "max_concurrency": 1},
+            )
+            self.namespace["create_service"](request, db, SimpleNamespace(id="owner"))
+            self.assertFalse(db.get(Service, "first").is_active)
+            self.assertEqual(db.get(Job, job_id).status, JobStatus.TERMINATED)
+            self.assertIsNotNone(db.get(Service, "first"))
+
+    async def test_manager_cannot_activate_for_an_owner_without_submission_authority(self):
+        original = self.namespace["_resolve_target"]
+        def restricted(key):
+            target = original(key)
+            target.allowed_users = frozenset({"admin"})
+            return target
+        self.namespace["_resolve_target"] = restricted
+        with self.sessions() as db:
+            db.add(User(id="admin", name="admin"))
+            db.get(Service, "first").is_active = False
+            db.commit()
+            request = SimpleNamespace(
+                id="first", execution_target=None, max_concurrency=1, model_fields_set=set(),
+                model_dump=lambda: {"is_active": True, "max_concurrency": 1},
+            )
+            with self.assertRaises(HTTPException) as error:
+                self.namespace["create_service"](request, db, db.get(User, "admin"))
+            self.assertEqual(error.exception.status_code, 403)
+            self.assertFalse(db.get(Service, "first").is_active)
 
     async def test_manager_cannot_clear_a_later_spawn_association(self):
         previous, _ = self.revive("first")

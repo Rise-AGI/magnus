@@ -64,6 +64,11 @@ migration can retain hashed aliases of the same identity's former trust tokens. 
 the merged primary token and are revoked when it is rotated or replaced. HTTP authentication,
 token login and chat authentication use the same rules. Browser JWT sessions are not migrated,
 and there is no public endpoint for registering aliases.
+An imported Blueprint can retain its originating target in the nullable
+`default_execution_target` database column, without changing its Python code.
+A returned explicit target other than `default` takes precedence; otherwise the
+stored origin precedes the forwarding header and site default. New Blueprints
+leave this administrative migration field unset.
 
 Targets may also override `container_image_mode` (`native` by default) and
 `container_prepare_timeout_seconds` (300 by default). On runtimes that extract
@@ -192,3 +197,21 @@ batch input, scheduler output and binary transfers. It must be noninteractive an
 finish within the operation's existing timeout. This administrator-owned setting
 does not change SSH authentication or SFTP/SCP sessions. Omit it to retain the
 existing behavior; `module_init` still runs separately inside the batch Job.
+
+## Submission grants and forwarding endpoints
+
+An optional `allowed_users: [user_id, ...]` on an execution target allows those
+users and their descendants to submit. Put it at `execution.allowed_users` for
+the base target, or inside an additional target. Omitted/null means unrestricted;
+an empty list denies new submissions. Each target specifies its own policy; grants
+do not inherit from the base. Job creation (including Blueprint runs) and service
+creation/revival enforce it. Existing executions and shared Job reads are unchanged.
+
+A reverse proxy consolidating an old API endpoint may set
+`X-Magnus-Default-Execution-Target` to its former target. For incoming Job/Blueprint
+submissions, new service selections and cluster queries, an omitted target or the
+legacy ID `default` then resolves to that target. Other explicit IDs remain unchanged;
+unknown targets are rejected. This header grants no authority: submission grants
+still apply. It never changes target resolution for persisted Jobs or services.
+Canonical endpoints should omit or clear this header. Redirect the old browser UI
+to the canonical site so its target selector uses the consolidated configuration.

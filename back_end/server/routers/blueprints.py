@@ -1,9 +1,9 @@
 # back_end/server/routers/blueprints.py
 import logging
-from typing import List, Optional, Dict, Any
+from typing import Annotated, List, Optional, Dict, Any
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import Header, APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, case
 
@@ -295,6 +295,7 @@ def run_blueprint(
     request: BlueprintRunRequest,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
     """
     统一的 Blueprint 运行端点。
@@ -343,7 +344,15 @@ def run_blueprint(
         job_submission = blueprint_manager.execute(bp.code, final_params)
         job_dict = job_submission.model_dump()
 
-        db_job = create_job(job_dict, current_user.id, db)
+        blueprint_default = bp.default_execution_target
+        if blueprint_default is None:
+            blueprint_default = default_target
+        db_job = create_job(
+            job_dict,
+            current_user.id,
+            db,
+            default_target=blueprint_default,
+        )
 
 
         # 3. 保存偏好（仅在成功执行后）

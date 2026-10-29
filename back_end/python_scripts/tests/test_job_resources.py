@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from pydantic import BaseModel
+from test_execution_targets import targets_module
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
@@ -175,6 +176,8 @@ class JobResourceIntegrationTests(unittest.TestCase):
         function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "create_job")
         namespace = dict(self.namespace)
         namespace.update(
+            requested_execution_target=targets_module.requested_execution_target,
+            assert_target_submission_allowed=lambda *args: None,
             magnus_config=self.config,
             models=SimpleNamespace(Job=lambda **values: SimpleNamespace(**values)),
             is_local_mode=True,
@@ -221,6 +224,8 @@ class JobResourceIntegrationTests(unittest.TestCase):
         self.config.update(cluster={"scheduling": {"mode": "authoritative"}}, server={"scheduler": {"cluster_stats_cache_ttl": 0}})
         namespace = dict(self.namespace)
         namespace.update(
+            requested_execution_target=targets_module.requested_execution_target,
+            assert_target_submission_allowed=lambda *args: None,
             magnus_config=self.config,
             is_local_mode=False,
             SlurmManager=lambda **kwargs: manager,

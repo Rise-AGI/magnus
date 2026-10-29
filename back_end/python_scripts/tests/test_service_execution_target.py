@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from sqlalchemy import Boolean, String, create_engine
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from test_execution_targets import Base, load_method
+from test_execution_targets import Base, load_method, targets_module
 
 
 class ServiceRow(Base):
@@ -37,6 +37,8 @@ class ServiceTargetUpdateTests(unittest.TestCase):
         self.db.commit()
         self.apply_defaults = Mock()
         namespace = {
+            "requested_execution_target": targets_module.requested_execution_target,
+            "assert_target_submission_allowed": Mock(),
             "Depends": lambda dependency: None,
             "database": SimpleNamespace(get_db=lambda: None),
             "get_current_user": lambda: None,

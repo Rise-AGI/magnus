@@ -3,10 +3,10 @@ import time
 import logging
 import os
 import threading
-from typing import Callable, List
+from typing import Annotated, Callable, List
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Header, APIRouter, Depends, HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,7 @@ from ..schemas import ClusterStatsResponse, JobListItem, JobResourceSummary, Pag
 from .._job_resources import allocated_job_resources, resource_mode_for_execution
 from .auth import get_current_user
 from .._magnus_config import magnus_config, is_local_mode, configured_execution_targets
-from .._execution_targets import ExecutionTarget, select_execution_target
+from .._execution_targets import ExecutionTarget, select_execution_target, requested_execution_target
 from .._slurm_manager import SlurmManager
 from .._slurm_manager._resource_query import resource_partitions
 
@@ -237,11 +237,13 @@ def _resolve_target(
 @router.get("/cluster/targets")
 def get_execution_targets(
     _: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
+    default_id = _resolve_target(default_target).id
     return [{
         "id": target.id,
         "name": target.name,
-        "is_default": target.is_default,
+        "is_default": target.id == default_id,
         "cluster": {
             **target.config["cluster"],
             "mem_mode": target.config["execution"].get("slurm", {}).get("mem_mode", "explicit"),
@@ -307,8 +309,14 @@ def get_cluster_stats(
     execution_target: str | None = None,
     db: Session = Depends(database.get_db),
     _: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
-    target = _resolve_target(execution_target)
+    target = _resolve_target(
+        requested_execution_target(
+            execution_target,
+            default_target,
+        ),
+    )
     config = target.config
     if is_local_mode:
         return _get_cluster_stats_local(db, running_skip, running_limit, pending_skip, pending_limit)
@@ -503,6 +511,7 @@ def get_my_active_jobs(
     execution_target: str | None = None,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ):
     """
     获取当前用户及其下属"活跃"的任务
@@ -515,7 +524,12 @@ def get_my_active_jobs(
             ids.extend(_collect_descendant_ids(child))
         return ids
 
-    target = _resolve_target(execution_target)
+    target = _resolve_target(
+        requested_execution_target(
+            execution_target,
+            default_target,
+        ),
+    )
     user_ids = [current_user.id] + _collect_descendant_ids(current_user)
 
     # 获取 Running 任务

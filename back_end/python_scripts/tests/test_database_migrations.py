@@ -96,6 +96,24 @@ class DatabaseMigrationTests(unittest.TestCase):
                 ).fetchall()
             ]
 
+    def test_blueprint_origin_is_nullable_and_preserved_across_repeated_upgrade(self):
+        with self.engine.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE blueprints (id TEXT PRIMARY KEY, code TEXT)")
+            connection.exec_driver_sql("INSERT INTO blueprints VALUES ('original', 'unchanged')")
+        MIGRATIONS.run_migrations(self.engine)
+        with self.engine.begin() as connection:
+            self.assertEqual(
+                connection.exec_driver_sql("SELECT code,default_execution_target FROM blueprints").one(),
+                ("unchanged", None),
+            )
+            connection.exec_driver_sql("UPDATE blueprints SET default_execution_target='source'")
+        MIGRATIONS.run_migrations(self.engine)
+        with self.engine.connect() as connection:
+            self.assertEqual(
+                connection.exec_driver_sql("SELECT default_execution_target FROM blueprints").scalar_one(),
+                "source",
+            )
+
     def test_complete_upgrade_preserves_history_and_site_schema(self) -> None:
         MIGRATIONS.run_migrations(
             self.engine,

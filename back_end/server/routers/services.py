@@ -4,12 +4,12 @@ import logging
 import asyncio
 import socket
 import threading
-from typing import Optional, Dict, Any, Tuple
+from typing import Annotated, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 from collections import defaultdict
 from pydantic import BaseModel, ConfigDict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query, status
+from fastapi import Header, APIRouter, Depends, HTTPException, Request, Query, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session, joinedload, defer
@@ -33,6 +33,8 @@ from .auth import get_current_user
 from .users import _get_all_subordinate_ids
 from .jobs import enforce_field_size_limits
 from .cluster import _resolve_target
+from .._execution_access import assert_target_submission_allowed
+from .._execution_targets import requested_execution_target
 from ._authz import (
     assert_can_manage_resource,
     assert_valid_transfer_target,
@@ -195,6 +197,11 @@ def _try_revive_service_standalone(
                 return current_job.id, service.assigned_port
 
             # Path B: Restart needed
+            assert_target_submission_allowed(
+                db,
+                service.owner_id,
+                target,
+            )
             try:
                 port = service_manager.allocate_port(db, service)
 
@@ -299,6 +306,7 @@ def create_service(
     service_data: ServiceCreate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
+    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 )-> models.Service:
     with service_operation(service_data.id):
         existing = db.query(Service).filter(Service.id == service_data.id).populate_existing().first()
@@ -310,6 +318,11 @@ def create_service(
         target_id = service_data.execution_target
         if existing and "execution_target" not in service_data.model_fields_set:
             target_id = existing.execution_target
+        else:
+            target_id = requested_execution_target(
+                target_id,
+                default_target,
+            )
         target = _resolve_target(target_id)
         config = target.config
         if config["transport"]["mode"] == "ssh":
@@ -319,6 +332,22 @@ def create_service(
                 raise HTTPException(status_code=409, detail="Stop the service before changing its execution target")
 
         data = service_data.model_dump()
+        if (
+            existing is None
+            or data.get("is_active", existing.is_active)
+            or target.id != _resolve_target(existing.execution_target).id
+        ):
+            assert_target_submission_allowed(
+                db,
+                current_user.id,
+                target,
+            )
+            if existing and existing.owner_id != current_user.id:
+                assert_target_submission_allowed(
+                    db,
+                    existing.owner_id,
+                    target,
+                )
         data["execution_target"] = target.id
         enforce_field_size_limits(data, "service")
 

@@ -251,6 +251,11 @@ def run_migrations(
         if "execution_target" not in columns:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN execution_target TEXT"))
+    if inspector.has_table("blueprints"):
+        columns = {column["name"] for column in inspector.get_columns("blueprints")}
+        if "default_execution_target" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE blueprints ADD COLUMN default_execution_target TEXT"))
     with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cluster_snapshots_execution_target ON cluster_snapshots (execution_target)"))
     _repair_legacy_job_metrics_reference(

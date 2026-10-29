@@ -304,6 +304,7 @@ class CacheAndHistoryTests(unittest.TestCase):
         namespace = {
             "Depends": lambda dependency: None, "database": SimpleNamespace(get_db=None), "get_current_user": None,
             "SlurmManager": lambda **kwargs: object(), "is_local_mode": False, "resource_partitions": lambda config: [],
+            "requested_execution_target": lambda target_id, default: target_id,
             "_resolve_target": lambda target_id: SimpleNamespace(id="default", config={}),
             "magnus_config": {"server": {"scheduler": {"cluster_stats_cache_ttl": 0}}},
             "_cached_slurm_view": failed, "HTTPException": HTTPException,

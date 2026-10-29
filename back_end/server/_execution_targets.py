@@ -16,6 +16,7 @@ _OVERRIDES = {
     "container_image_mode",
     "container_prepare_timeout_seconds",
     "cluster",
+    "allowed_users",
 }
 
 
@@ -25,6 +26,7 @@ class ExecutionTarget:
     name: str
     config: dict[str, Any]
     is_default: bool = False
+    allowed_users: frozenset[str] | None = None
 
     def job_filter(
         self,
@@ -65,6 +67,30 @@ class ExecutionTarget:
         return ("local", os.path.normcase(os.path.abspath(self.remote_root)))
 
 
+def _allowed_users(
+    value: Any,
+) -> frozenset[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or any(
+        not isinstance(user_id, str) or not user_id.strip() or user_id != user_id.strip()
+        for user_id in value
+    ):
+        raise ValueError("Execution target allowed_users must be null or a list of user IDs")
+    return frozenset(value)
+
+
+def requested_execution_target(
+    target_id: str | None,
+    default_target: str | None,
+) -> str | None:
+    # A forwarding endpoint can retain its former default without changing
+    # the meaning of historical NULL rows in the merged database.
+    if default_target is not None and target_id in (None, "default"):
+        return default_target
+    return target_id
+
+
 def execution_targets(
     config: dict[str, Any],
     *,
@@ -85,7 +111,13 @@ def execution_targets(
 
     base = deepcopy(config)
     base["execution"].pop("targets", None)
-    result = {base_id: ExecutionTarget(base_id, base_name, base, True)}
+    result = {base_id: ExecutionTarget(
+        base_id,
+        base_name,
+        base,
+        True,
+        _allowed_users(execution.get("allowed_users")),
+    )}
     for target_id, settings in overrides.items():
         if not isinstance(target_id, str) or not _TARGET_ID.fullmatch(target_id):
             raise ValueError("Each execution target must have a stable identifier (up to 64 characters)")
@@ -116,9 +148,15 @@ def execution_targets(
                 target["execution"][field] = settings[field]
         target["execution"]["target_id"] = target_id
         target["execution"]["target_name"] = name
+        target["execution"]["allowed_users"] = deepcopy(settings.get("allowed_users"))
         if validate is not None:
             validate(target)
-        result[target_id] = ExecutionTarget(target_id, name, target)
+        result[target_id] = ExecutionTarget(
+            target_id,
+            name,
+            target,
+            allowed_users=_allowed_users(settings.get("allowed_users")),
+        )
     return result
 
 
