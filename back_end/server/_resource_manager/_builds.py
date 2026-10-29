@@ -928,6 +928,7 @@ class ImageBuildManager:
                 )
                 await run_command(
                     [
+                        *self.config.get("conversion_command_prefix", []),
                         "apptainer", "build", "--mksquashfs-args", squashfs_arguments,
                         str(temporary_sif), f"docker-archive:{archive}",
                     ],
@@ -937,7 +938,10 @@ class ImageBuildManager:
                     process_directory=directory,
                 )
                 await run_command(
-                    ["apptainer", "inspect", str(temporary_sif)],
+                    [
+                        *self.config.get("conversion_command_prefix", []),
+                        "apptainer", "inspect", str(temporary_sif),
+                    ],
                     process_directory=directory,
                 )
                 await self._ensure_budget()

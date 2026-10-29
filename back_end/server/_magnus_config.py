@@ -99,6 +99,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         "scratch_size": None,
         "conversion_cpus": 2,
         "conversion_memory": "1G",
+        "conversion_command_prefix": [],
         "tls_ca": None,
         "tls_cert": None,
         "tls_key": None,
@@ -107,6 +108,12 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     for key, value in build_defaults.items():
         image_build.setdefault(key, value)
     _check_key(image_build, "enabled", bool)
+    prefix = image_build["conversion_command_prefix"]
+    if not isinstance(prefix, list) or any(
+        not isinstance(argument, str) or not argument.strip() or "\x00" in argument
+        for argument in prefix
+    ):
+        raise ValueError("execution.image_build.conversion_command_prefix must be an argv list")
     if image_build["enabled"]:
         for key in ("address", "buildctl", "platform", "cache_size", "min_free_space", "conversion_memory"):
             _check_key(image_build, key, str)

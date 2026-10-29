@@ -64,6 +64,7 @@ class BuildConfigurationTests(unittest.TestCase):
         self.validate(config)
         self.assertFalse(config["execution"]["image_build"]["enabled"])
         self.assertIsNone(config["execution"]["image_build"]["scratch_root"])
+        self.assertEqual(config["execution"]["image_build"]["conversion_command_prefix"], [])
 
     def test_defaults_and_repeated_validation(self):
         config = self.configuration(cache_size="2G")
@@ -89,6 +90,8 @@ class BuildConfigurationTests(unittest.TestCase):
         for field, value in (
             ("scratch_root", ""), ("scratch_root", "relative/path"), ("scratch_root", 12),
             ("scratch_size", ""), ("scratch_size", "0M"), ("scratch_size", "-1G"), ("scratch_size", True),
+            ("conversion_command_prefix", "shell string"), ("conversion_command_prefix", ["wrapper", ""]),
+            ("conversion_command_prefix", [True]), ("conversion_command_prefix", ["x\x00y"]),
             ("conversion_cpus", True), ("conversion_cpus", 0), ("conversion_cpus", 1.5),
             ("conversion_memory", "512K"), ("conversion_memory", "-1M"), ("conversion_memory", False),
         ):

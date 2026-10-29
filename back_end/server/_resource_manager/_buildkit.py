@@ -346,6 +346,9 @@ class BuildKitClient:
         # buildctl automatically reads Docker's auth store. A build must not
         # silently inherit the backend operator's personal registry credentials.
         environment["DOCKER_CONFIG"] = str(directory / "docker-config")
+        # Registry challenges supply arbitrary token realms. Keep that HTTP
+        # exchange inside the builder's network boundary, not on the backend.
+        environment["BUILDKIT_NO_CLIENT_TOKEN"] = "true"
         await run_command(
             self.arguments(
                 "build",

@@ -200,6 +200,22 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.module.is_local_mode = True
         self.manager._docker_inventory = self.docker_inventory
 
+    async def test_conversion_boundary_wraps_build_and_inspect_without_shell(self):
+        prefix = ["resource-controller", "--scope", "--"]
+        self.manager.config["conversion_command_prefix"] = prefix
+        observed = []
+        async def bounded_command(arguments, **keywords):
+            observed.append(arguments)
+            self.assertEqual(arguments[:len(prefix)], prefix)
+            return await self.command(arguments[len(prefix):], **keywords)
+        self.module.run_command = bounded_command
+        self.finish_conversion.set()
+        result = await self.import_image()
+        self.assertEqual([args[len(prefix):len(prefix) + 2] for args in observed], [
+            ["apptainer", "build"], ["apptainer", "inspect"],
+        ])
+        self.assertTrue(Path(result["sif_path"]).is_file())
+
     async def test_cache_hit_does_not_wait_for_conversion(self):
         warm = self.manager.root / "warm-source"
         warm.write_bytes(b"warm image")

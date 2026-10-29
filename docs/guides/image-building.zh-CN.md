@@ -94,3 +94,14 @@ SIF 转换可用 `conversion_cpus`（默认 `2`）和 `conversion_memory`（默�
 生产启用前需验收步骤复用、同配方并发、取消、重启、磁盘压力、Docker 执行及 Apptainer/Singularity 与 relay 消费。静态检查不能证明这些运行时性质。
 
 参考：[BuildKit](https://docs.docker.com/build/buildkit/)、[空 context](https://docs.docker.com/build/concepts/context/#empty-context)、[缓存失效](https://docs.docker.com/build/cache/invalidation/)、[GC](https://docs.docker.com/build/cache/garbage-collection/)。
+
+需要系统强制限制转换资源时，管理员可将 `conversion_command_prefix` 配为 argv 列表，
+例如 `[systemd-run, --user, --scope, --quiet, --slice=magnus_image.slice, --]`，
+并单独配置该 slice 的合计 CPU、内存和进程数上限。前缀包裹 Apptainer build/inspect，
+不经过 shell；所有平台默认 `[]`，保持现状。启动器必须同步运行且子进程留在原进程组，
+启用前验证取消与实际 cgroup 归属；脱离调用方的后台 service 启动器不符合此契约。
+
+Buildctl 使用独立空 Docker 配置，并固定 BuildKit 原生开关
+`BUILDKIT_NO_CLIENT_TOKEN=true`，让镜像仓库提供的 token realm 请求由 daemon 完成，
+接受构建器的出站网络限制。构建账号、整个进程树、网络和存储仍需系统隔离；rootless
+本身不会提供这些策略，也不隔离互不信任用户之间的 cache mount。

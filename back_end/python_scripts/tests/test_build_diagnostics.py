@@ -216,6 +216,23 @@ class ProgressTests(unittest.TestCase):
         self.assertNotIn('"statuses"', detail)
 
 
+class ClientNetworkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_registry_token_exchange_stays_on_the_builder(self):
+        observed = []
+        async def command(arguments, **kwargs):
+            observed.append(kwargs["environment"])
+            (kwargs["process_directory"] / "image.tar").write_bytes(b"synthetic archive")
+        with tempfile.TemporaryDirectory() as directory:
+            client = buildkit.BuildKitClient({"platform": "linux/amd64", "timeout_seconds": 30})
+            with patch.object(buildkit, "run_command", command), patch.dict(
+                buildkit.os.environ,
+                {"DOCKER_CONFIG": "/operator/credentials", "BUILDKIT_NO_CLIENT_TOKEN": "false"},
+            ):
+                await client.build(pathlib.Path(directory), "example", lambda line: None)
+            self.assertEqual(observed[0]["BUILDKIT_NO_CLIENT_TOKEN"], "true")
+            self.assertEqual(observed[0]["DOCKER_CONFIG"], str(pathlib.Path(directory) / "docker-config"))
+
+
 class UsageTests(unittest.IsolatedAsyncioTestCase):
     async def test_usage_partitions_preserve_every_record_and_are_reused(self):
         records = dict(zip(("a", "aa", "an", "n", "na", "nn", "中"), range(1, 8)))

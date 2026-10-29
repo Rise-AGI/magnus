@@ -94,3 +94,19 @@ The upgrade preserves old Job rows and source semantics, adds Building and defer
 Production enablement requires runtime acceptance of step reuse, same-recipe concurrency, cancellation, restart, disk pressure, Docker execution, and Apptainer/Singularity consumption including relay. Static inspection cannot establish those runtime properties.
 
 References: [BuildKit](https://docs.docker.com/build/buildkit/), [empty context](https://docs.docker.com/build/concepts/context/#empty-context), [cache invalidation](https://docs.docker.com/build/cache/invalidation/), [GC](https://docs.docker.com/build/cache/garbage-collection/).
+
+For an OS-enforced conversion budget, administrators may set
+`conversion_command_prefix` to an argv list, for example
+`[systemd-run, --user, --scope, --quiet, --slice=magnus_image.slice, --]`.
+Configure the slice's aggregate CPU, memory and task limits separately. The prefix
+wraps Apptainer build and inspect, uses no shell, and defaults to `[]` on every
+platform. It must run synchronously and keep children in the owned process group;
+verify cancellation and actual cgroup placement before enabling it. A detached
+service launcher does not satisfy that contract.
+
+Buildctl uses an isolated empty Docker configuration and disables client-side
+registry token exchange with BuildKit's `BUILDKIT_NO_CLIENT_TOKEN=true`. Token
+realms supplied by registries are then fetched by the daemon, so its outbound
+network restrictions cover them too. The worker's account, process tree, network
+and storage still require OS-level isolation; rootless alone does not supply
+those policies or isolate cache mounts between mutually untrusted users.
