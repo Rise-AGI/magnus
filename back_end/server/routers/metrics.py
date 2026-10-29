@@ -1,28 +1,30 @@
 # back_end/server/routers/metrics.py
-import os
+import asyncio
+import glob
 import io
 import json
-import asyncio
 import logging
-import glob
-from typing import List, Optional, Dict, Any, Tuple
-
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
+import os
+from collections.abc import Iterable, Iterator
+from typing import Any, Dict, List, Optional, Tuple
 
 # Matplotlib must use a non-GUI backend before pyplot is imported.
 # This is a process-wide setting; importing this router at FastAPI startup
 # is what locks the backend in. Do NOT move the use("Agg") call below
 # pyplot import — the default backend may try to talk to an X server.
 import matplotlib  # noqa: E402
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
+
 matplotlib.use("Agg")  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 
-from .._protocol_files import open_protocol_file
 from .. import models
+from .._blocking_io import _run_blocking_io
 from .._magnus_config import magnus_config
+from .._metric_points import MetricPoint, iter_points, parse_labels
+from .._protocol_files import open_protocol_file
 from .auth import get_current_user
-
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,26 +37,23 @@ def _metrics_dir_for_job(job_id: str) -> str:
     return f"{magnus_workspace_path}/jobs/{job_id}/metrics"
 
 
-def _read_all_points(metrics_dir: str) -> List[Dict[str, Any]]:
-    points: List[Dict[str, Any]] = []
+def _iter_points(
+    metrics_dir: str,
+) -> Iterator[MetricPoint]:
     root = os.path.join(magnus_workspace_path, "jobs")
     pattern = os.path.join(metrics_dir, "*.jsonl")
     for filepath in glob.glob(pattern):
-        if not os.path.isfile(filepath):
-            continue
         try:
-            with open_protocol_file(root, os.path.relpath(filepath, root)) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        points.append(json.loads(line))
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        continue
+            with open_protocol_file(
+                root,
+                os.path.relpath(filepath, root),
+            ) as stream:
+                yield from iter_points(
+                    stream,
+                    os.fstat(stream.fileno()).st_size,
+                )
         except OSError:
             continue
-    return points
 
 
 def _stream_key(point: Dict[str, Any]) -> Tuple:
@@ -66,7 +65,9 @@ def _stream_key(point: Dict[str, Any]) -> Tuple:
     )
 
 
-def _build_streams(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _build_streams(
+    points: Iterable[MetricPoint],
+) -> List[Dict[str, Any]]:
     streams: Dict[Tuple, Dict[str, Any]] = {}
     for p in points:
         key = _stream_key(p)
@@ -107,7 +108,7 @@ def list_metric_streams(
     metrics_dir = _metrics_dir_for_job(job_id)
     if not os.path.isdir(metrics_dir):
         return []
-    return _build_streams(_read_all_points(metrics_dir))
+    return _build_streams(_iter_points(metrics_dir))
 
 
 def _shape_point(p: Dict[str, Any]) -> Dict[str, Any]:
@@ -151,14 +152,11 @@ def query_metrics(
     if not os.path.isdir(metrics_dir):
         return {"name": name, "points": []}
 
-    parsed_labels: Optional[Dict[str, str]] = None
-    if labels:
-        try:
-            parsed_labels = json.loads(labels)
-        except json.JSONDecodeError:
-            parsed_labels = None
+    parsed_labels = parse_labels(
+        labels,
+    )
 
-    all_points = _read_all_points(metrics_dir)
+    all_points = _iter_points(metrics_dir)
 
     filtered = []
     for p in all_points:
@@ -211,7 +209,7 @@ def _render_chart_png(
     name: str,
     unit: Optional[str],
 ) -> bytes:
-    """Render a metric chart as PNG. Pure CPU-bound; call via asyncio.to_thread.
+    """Render a metric chart as PNG; the route serializes rendering.
 
     series: list of (legend_label, sorted_points) tuples — one per labels combo.
     """
@@ -278,6 +276,11 @@ def _no_data_png(name: str) -> bytes:
         plt.close(fig)
 
 
+# Wait outside the shared HTTP thread pool. Cancellation joins the renderer
+# before releasing this slot, since cancelling a waiter cannot stop its thread.
+_chart_semaphore = asyncio.Semaphore(1)
+
+
 @router.get("/jobs/{job_id}/metrics/render")
 async def render_metric_chart(
     job_id: str,
@@ -296,6 +299,30 @@ async def render_metric_chart(
     rather than 404 — friendlier for users who paste this into a notebook
     or grab it via the SDK.
     """
+    async with _chart_semaphore:
+        return await _run_blocking_io(
+            _render_metric_chart_response,
+            job_id=job_id,
+            name=name,
+            labels=labels,
+            step_domain=step_domain,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            max_points=max_points,
+            format=format,
+        )
+
+
+def _render_metric_chart_response(
+    job_id: str,
+    name: str,
+    labels: Optional[str] = None,
+    step_domain: Optional[str] = None,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+    max_points: int = 2000,
+    format: str = "png",
+) -> Response:
     if format != "png":
         return Response(
             content=json.dumps({"detail": f"Unsupported format: {format}"}),
@@ -304,20 +331,19 @@ async def render_metric_chart(
         )
 
     metrics_dir = _metrics_dir_for_job(job_id)
-    parsed_labels: Optional[Dict[str, str]] = None
-    if labels:
-        try:
-            parsed_labels = json.loads(labels)
-        except json.JSONDecodeError:
-            parsed_labels = None
+    parsed_labels = parse_labels(
+        labels,
+    )
 
     if not os.path.isdir(metrics_dir):
-        png = await asyncio.to_thread(_no_data_png, name)
+        png = _no_data_png(
+            name,
+        )
         return Response(content=png, media_type="image/png")
 
-    # 在这个 async 端点里，_read_all_points 会 glob + 逐行 json.loads 整个 metrics 目录，
-    # 长跑 job 可达数十 MB —— 必须丢线程池，否则阻塞事件循环（本函数其余重活已都 to_thread）。
-    all_points = await asyncio.to_thread(_read_all_points, metrics_dir)
+    all_points = _iter_points(
+        metrics_dir,
+    )
     unit: Optional[str] = None
     by_labels: Dict[Tuple, List[Dict[str, Any]]] = {}
     for p in all_points:
@@ -340,7 +366,9 @@ async def render_metric_chart(
         by_labels.setdefault(key, []).append(p)
 
     if not by_labels:
-        png = await asyncio.to_thread(_no_data_png, name)
+        png = _no_data_png(
+            name,
+        )
         return Response(content=png, media_type="image/png")
 
     series: List[Tuple[str, List[Dict[str, Any]]]] = []
@@ -350,7 +378,11 @@ async def render_metric_chart(
         legend = _labels_legend_key(dict(key))
         series.append((legend, pts))
 
-    png = await asyncio.to_thread(_render_chart_png, series, name, unit)
+    png = _render_chart_png(
+        series,
+        name,
+        unit,
+    )
     return Response(content=png, media_type="image/png")
 
 
@@ -365,7 +397,11 @@ def get_initial_metrics(
     if not os.path.isdir(metrics_dir):
         return empty
 
-    all_points = _read_all_points(metrics_dir)
+    all_points = list(
+        _iter_points(
+            metrics_dir,
+        ),
+    )
     stream_list = _build_streams(all_points)
     if not stream_list:
         return empty

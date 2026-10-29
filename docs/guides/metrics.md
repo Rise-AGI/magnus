@@ -883,6 +883,16 @@ The host path corresponding to `MAGNUS_METRICS_DIR` is `{workspace}/jobs/{job_id
 ### 17.4 Storage and Lifecycle
 
 - **No database**. JSONL files are the data source; the API reads and parses on demand.
+- Readers scan each file up to its size when opened. Invalid records, non-finite
+  values, and lines larger than 256 KiB are skipped without hiding other points.
+  An unterminated trailing record is ignored until its newline is written.
+  Historical records without `kind` remain gauges. Stream listing and metric
+  queries scan incrementally; the initial response keeps one snapshot for both
+  stream selection and its default series.
+- PNG export reads, groups, and renders in a worker thread. Requests wait for a
+  rendering slot outside the shared HTTP thread pool; cancellation waits for the
+  active renderer to finish before releasing that slot. Access to Matplotlib is
+  serialized because its rendering state is shared across requests.
 - **The metrics/ directory is not deleted when the Job is cleaned up**, same policy as `slurm/output.txt`. After the Job ends, users can still review historical metrics.
 - Typical data volume: 8 GPUs × 3 metrics × 5-second interval × 24 hours ≈ 410k lines ≈ 50 MB, negligible for a shared filesystem.
 
