@@ -4,11 +4,13 @@ from __future__ import annotations
 import ast
 from datetime import datetime, timedelta, timezone
 import logging
+import os
 from pathlib import Path
+import subprocess
 import threading
-import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock
 
 from fastapi import HTTPException
 
@@ -298,17 +300,120 @@ class CacheAndHistoryTests(unittest.TestCase):
         route.decorator_list = []
         def failed(*args):
             raise OSError("SSH disconnected")
+        report = Mock()
         namespace = {
             "Depends": lambda dependency: None, "database": SimpleNamespace(get_db=None), "get_current_user": None,
             "SlurmManager": lambda **kwargs: object(), "is_local_mode": False, "resource_partitions": lambda config: [],
             "_resolve_target": lambda target_id: SimpleNamespace(id="default", config={}),
             "magnus_config": {"server": {"scheduler": {"cluster_stats_cache_ttl": 0}}},
             "_cached_slurm_view": failed, "HTTPException": HTTPException,
+            "_report_cluster_query_failure": report,
         }
         exec(compile(ast.Module(body=[route], type_ignores=[]), str(path), "exec"), namespace)
         with self.assertRaises(HTTPException) as context:
             namespace["get_cluster_stats"]()
         self.assertEqual(context.exception.status_code, 503)
+        self.assertEqual(
+            context.exception.detail,
+            "Slurm resource accounting is temporarily unavailable",
+        )
+        report.assert_called_once_with(
+            "default",
+            context.exception.__cause__,
+        )
+
+    def test_failure_diagnostics_are_safe_and_rate_limited_per_target(self):
+        path = SERVER / "routers" / "cluster.py"
+        tree = ast.parse(
+            path.read_text(
+                encoding="utf-8",
+            ),
+        )
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_report_cluster_query_failure"
+        )
+        clock = SimpleNamespace(
+            value=0,
+        )
+        logger = Mock()
+        namespace = {
+            "time": SimpleNamespace(monotonic=lambda: clock.value),
+            "os": os,
+            "logger": logger,
+            "_cluster_failure_log_times": {},
+            "_cluster_failure_log_lock": threading.Lock(),
+        }
+        exec(
+            compile(
+                ast.Module(
+                    body=[function],
+                    type_ignores=[],
+                ),
+                str(
+                    path,
+                ),
+                "exec",
+            ),
+            namespace,
+        )
+        report = namespace["_report_cluster_query_failure"]
+        try:
+            raise subprocess.CalledProcessError(
+                255,
+                ["ssh", "synthetic-secret"],
+                output="private-response",
+                stderr="private-response",
+            )
+        except subprocess.CalledProcessError as error:
+            failure = error
+        threads = [
+            threading.Thread(
+                target=report,
+                args=("first", failure),
+            )
+            for _ in range(16)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(
+                timeout=2,
+            )
+            self.assertFalse(
+                thread.is_alive(),
+            )
+        logger.warning.assert_called_once()
+        report(
+            "second",
+            failure,
+        )
+        clock.value = 60
+        report(
+            "first",
+            failure,
+        )
+        self.assertEqual(
+            logger.warning.call_count,
+            3,
+        )
+        template, *arguments = logger.warning.call_args.args
+        message = template % tuple(
+            arguments,
+        )
+        self.assertIn(
+            "error=CalledProcessError returncode=255",
+            message,
+        )
+        self.assertIn(
+            "test_cluster_accounting.py:",
+            message,
+        )
+        for private in ("synthetic-secret", "private-response"):
+            self.assertNotIn(
+                private,
+                message,
+            )
 
     def test_cache_has_bounded_staleness_and_query_failures_propagate(self):
         path = SERVER / "routers" / "cluster.py"

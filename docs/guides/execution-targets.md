@@ -5,6 +5,13 @@ image builder, bounded caches and Job database. Each Job selects one execution
 target. Magnus does not automatically move a Job between clusters or submit it
 to several clusters.
 
+If resource accounting is unavailable, `/api/cluster/stats` returns its existing
+HTTP 503 response. The backend log records the target, exception type, numeric
+process/OS status and code locations, at most once per target per minute. Command
+arguments, exception messages, raw output and traceback locals are excluded from
+this diagnostic. This distinguishes transport failures from parsing/validation
+failures without exposing credentials or treating unknown capacity as zero.
+
 The existing top-level `transport`, `execution.slurm`, `execution.container_runtime`
 and `cluster` describe the default target. Old configurations need no changes.
 Additional targets are optional overrides:

@@ -1,5 +1,7 @@
 # back_end/server/routers/cluster.py
 import time
+import logging
+import os
 import threading
 from typing import Callable, List
 from datetime import datetime, timezone
@@ -25,6 +27,57 @@ _node_name = magnus_config["cluster"]["name"]
 
 
 router = APIRouter()
+logger = logging.getLogger(
+    __name__,
+)
+_cluster_failure_log_times: dict[str, float] = {}
+_cluster_failure_log_lock = threading.Lock()
+
+
+def _report_cluster_query_failure(
+    target_id: str,
+    error: Exception,
+) -> None:
+    # Polling is concurrent; one target outage must not flood the server log.
+    now = time.monotonic()
+    with _cluster_failure_log_lock:
+        previous = _cluster_failure_log_times.get(
+            target_id,
+        )
+        if previous is not None and now - previous < 60:
+            return
+        _cluster_failure_log_times[target_id] = now
+
+    # Exception strings/commands/traceback locals can contain credentials.
+    # Code locations identify validation failures without publishing raw data.
+    locations = []
+    traceback = error.__traceback__
+    while traceback is not None:
+        code = traceback.tb_frame.f_code
+        locations.append(
+            f"{os.path.basename(code.co_filename)}:{traceback.tb_lineno}:{code.co_name}",
+        )
+        traceback = traceback.tb_next
+    numbers = {}
+    for name in ("returncode", "errno", "timeout"):
+        value = getattr(
+            error,
+            name,
+            None,
+        )
+        numbers[name] = value if type(value) in (int, float) else None
+    logger.warning(
+        "Cluster resource query failed: target=%s error=%s returncode=%s "
+        "errno=%s timeout=%s locations=%s",
+        target_id,
+        type(error).__name__,
+        numbers["returncode"],
+        numbers["errno"],
+        numbers["timeout"],
+        " -> ".join(
+            locations[-4:],
+        ),
+    )
 
 
 # cluster 页面每次 poll 都要现查 SLURM（squeue + scontrol）。本机执行下是本地 subprocess、
@@ -272,6 +325,10 @@ def get_cluster_stats(
             lambda: _query_cluster_view(slurm_manager, tenant_partitions),
         )
     except Exception as error:
+        _report_cluster_query_failure(
+            target.id,
+            error,
+        )
         raise HTTPException(
             status_code = 503,
             detail = "Slurm resource accounting is temporarily unavailable",
