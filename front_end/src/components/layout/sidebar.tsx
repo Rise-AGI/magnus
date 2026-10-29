@@ -14,9 +14,12 @@ import { useLanguage } from "@/context/language-context";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { CLUSTER_CONFIG } from "@/lib/config";
 import { NAV_ITEMS } from "./nav-items";
+import { useExecutionTarget } from "@/context/execution-target-context";
+import { executionTargetHref } from "@/lib/execution-target-navigation";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const executionTarget = useExecutionTarget();
   const { user, login, logout, isLoading } = useAuth();
   const { t } = useLanguage(); 
 
@@ -48,7 +51,7 @@ export function Sidebar() {
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={executionTargetHref(item.href, executionTarget)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium group ${
                   isActive
                     ? "bg-blue-600/10 text-blue-400 border border-blue-600/10 shadow-[0_0_15px_rgba(37,99,235,0.1)]"

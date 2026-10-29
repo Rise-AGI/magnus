@@ -16,7 +16,7 @@ import { JobTable } from "@/components/jobs/job-table";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { useUrlPagination } from "@/hooks/use-url-pagination";
 import { presentClusterResources, type ClusterResources } from "@/lib/cluster-resources";
-import { useSearchParams } from "next/navigation";
+import { useExecutionTarget } from "@/context/execution-target-context";
 import { ExecutionTargetSelect } from "@/components/jobs/execution-target-select";
 import { cn } from "@/lib/utils";
 
@@ -31,8 +31,7 @@ interface ClusterStats {
 export default function ClusterPage() {
   const { user: currentUser } = useAuth();
   const { t } = useLanguage();
-  const searchParams = useSearchParams();
-  const executionTarget = searchParams.get("execution_target") ?? DEFAULT_EXECUTION_TARGET;
+  const executionTarget = useExecutionTarget();
   const selectTarget = (id: string) => {
     const url = new URL(window.location.href);
     url.searchParams.set("execution_target", id);

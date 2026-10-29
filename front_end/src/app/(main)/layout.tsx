@@ -1,6 +1,8 @@
 // front_end/src/app/(main)/layout.tsx
 "use client";
 
+import { Suspense } from "react";
+import { ExecutionTargetProvider } from "@/context/execution-target-context";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { useAuth } from "@/context/auth-context";
@@ -11,6 +13,16 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { usePathname } from "next/navigation";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense>
+      <ExecutionTargetProvider>
+        <MainLayoutContent>{children}</MainLayoutContent>
+      </ExecutionTargetProvider>
+    </Suspense>
+  );
+}
+
+function MainLayoutContent({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const { t } = useLanguage();
   const pathname = usePathname();

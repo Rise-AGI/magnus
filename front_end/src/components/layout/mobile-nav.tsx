@@ -11,12 +11,15 @@ import { useLanguage } from "@/context/language-context";
 import { AvatarCircle } from "@/components/ui/user-avatar";
 import { CLUSTER_CONFIG } from "@/lib/config";
 import { NAV_ITEMS } from "./nav-items";
+import { useExecutionTarget } from "@/context/execution-target-context";
+import { executionTargetHref } from "@/lib/execution-target-navigation";
 
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
+  const executionTarget = useExecutionTarget();
   const { user, login, logout, isLoading } = useAuth();
   const { t } = useLanguage();
 
@@ -75,7 +78,7 @@ export function MobileNav() {
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={executionTargetHref(item.href, executionTarget)}
                   className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-all text-sm font-medium active:scale-[0.98] ${
                     isActive
                       ? "bg-blue-600/10 text-blue-400 border border-blue-600/10"

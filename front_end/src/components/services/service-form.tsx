@@ -8,6 +8,7 @@ import { NumberStepper } from "@/components/ui/number-stepper";
 import { client } from "@/lib/api";
 import { Service } from "@/types/service";
 import { useLanguage } from "@/context/language-context";
+import { useExecutionTarget } from "@/context/execution-target-context";
 import { CLUSTER_CONFIG, EXECUTION_TARGETS, DEFAULT_EXECUTION_TARGET, getExecutionTarget } from "@/lib/config";
 import { ExecutionTargetSelect } from "@/components/jobs/execution-target-select";
 import { ServiceImplicitExport } from "@/lib/service-defaults";
@@ -62,7 +63,8 @@ interface ServiceFormProps {
 const ServiceForm = forwardRef(function ServiceForm({ initialData, onCancel, onSuccess }: ServiceFormProps, ref) {
   const { t } = useLanguage();
   const data = initialData as ServiceFormData; 
-  const [executionTarget, setExecutionTarget] = useState(data?.execution_target ?? DEFAULT_EXECUTION_TARGET);
+  const selectedTarget = useExecutionTarget();
+  const [executionTarget, setExecutionTarget] = useState(data?.execution_target ?? selectedTarget);
   const target = getExecutionTarget(executionTarget);
   const config = target?.cluster ?? CLUSTER_CONFIG;
   const PHYSICAL_GPUS = config.gpus;

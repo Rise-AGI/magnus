@@ -12,7 +12,7 @@ import { JobCapabilities } from "@/types/job";
 import { useLanguage } from "@/context/language-context";
 import { CLUSTER_CONFIG, EXECUTION_TARGETS, DEFAULT_EXECUTION_TARGET, getExecutionTarget } from "@/lib/config";
 import { ExecutionTargetSelect } from "@/components/jobs/execution-target-select";
-import { useSearchParams } from "next/navigation";
+import { useExecutionTarget } from "@/context/execution-target-context";
 
 const JOB_TYPES = [
   { label: "A1 - 高优稳定", value: "A1", meta: "Non-Preemptible • Urgent" },
@@ -57,8 +57,8 @@ interface JobFormProps {
 
 const JobForm = forwardRef(function JobForm({ mode, initialData, onCancel, onSuccess }: JobFormProps, ref) {
   const { t } = useLanguage();
-  const searchParams = useSearchParams();
-  const [executionTarget, setExecutionTarget] = useState(initialData?.execution_target ?? searchParams.get("execution_target") ?? DEFAULT_EXECUTION_TARGET);
+  const selectedTarget = useExecutionTarget();
+  const [executionTarget, setExecutionTarget] = useState(initialData?.execution_target ?? selectedTarget);
   const target = getExecutionTarget(executionTarget);
   const config = target?.cluster ?? CLUSTER_CONFIG;
   const PHYSICAL_GPUS = config.gpus;

@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { EXECUTION_TARGET_STORAGE_KEY, executionTargetHref } from "@/lib/execution-target-navigation";
 import { API_BASE, DEFAULT_ROUTE } from "@/lib/config";
 import { LoginResponse } from "@/types/auth";
 import { PageLoader } from "@/components/ui/page-loader";
@@ -76,7 +77,7 @@ function AuthCallbackContent() {
         // 通知 AuthContext 更新状态
         window.dispatchEvent(new Event("magnus-auth-change"));
 
-        router.push(DEFAULT_ROUTE);
+        router.push(executionTargetHref(DEFAULT_ROUTE, sessionStorage.getItem(EXECUTION_TARGET_STORAGE_KEY)));
         
       } catch (err: any) {
         console.error("Login Error:", err);

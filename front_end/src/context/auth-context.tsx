@@ -6,6 +6,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { User } from "@/types/auth";
 import { FEISHU_APP_ID, IS_LOCAL_MODE, API_BASE } from "@/lib/config";
+import { EXECUTION_TARGET_STORAGE_KEY, executionTargetHref } from "@/lib/execution-target-navigation";
 
 
 interface AuthContextType {
@@ -118,6 +119,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.crypto.getRandomValues(stateBytes);
     const state = Array.from(stateBytes, b => b.toString(16).padStart(2, "0")).join("");
     sessionStorage.setItem("magnus_oauth_state", state);
+    const target = new URL(window.location.href).searchParams.get("execution_target");
+    if (target !== null) sessionStorage.setItem(EXECUTION_TARGET_STORAGE_KEY, target);
     const FEISHU_AUTH_URL = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${FEISHU_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=${encodeURIComponent(state)}`;
 
     window.location.href = FEISHU_AUTH_URL;
@@ -150,7 +153,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("magnus_token");
     localStorage.removeItem("magnus_user");
     setUser(null);
-    router.push("/"); // 登出后回首页
+    const target = new URL(window.location.href).searchParams.get("execution_target");
+    router.push(executionTargetHref("/", target));
   };
 
   return (
