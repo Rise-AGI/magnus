@@ -233,10 +233,19 @@ class _ResourcesMixin(_ResourcesMixinBase):
                 for task in done:
                     task.result()
             with SessionLocal() as db:
-                ready = bool(db.query(Job).filter(Job.id == job_id, Job.status.in_(preparation_states)).update({
-                    Job.status: JobStatus.PENDING,
-                }, synchronize_session=False))
+                changed = db.query(
+                    Job,
+                ).filter(
+                    Job.id == job_id,
+                    Job.status.in_(preparation_states),
+                ).update(
+                    {Job.status: JobStatus.PENDING},
+                    synchronize_session=False,
+                )
                 db.commit()
+                ready = bool(
+                    changed,
+                )
             if ready:
                 logger.info(f"Job {job_id} resources ready, status -> PENDING")
         except asyncio.CancelledError:
