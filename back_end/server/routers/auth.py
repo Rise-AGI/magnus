@@ -3,10 +3,10 @@ import secrets
 import logging
 import asyncio
 import threading
-from typing import Optional, Dict, Any
+from typing import Annotated, Optional, Dict, Any
 
 from cachetools import TTLCache
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -140,7 +140,8 @@ def get_current_user(
     cacheable_token = True
     
     # 1. Check Cache
-    cached_id = _get_from_cache(final_token)
+    source_target = request.headers.get("x-magnus-default-execution-target")
+    cached_id = _get_from_cache(final_token) if source_target is None else None
     if cached_id:
         user_id_found = cached_id
     
@@ -149,6 +150,7 @@ def get_current_user(
         user_by_token = find_user_by_token(
             db,
             final_token,
+            source_target,
         )
         if user_by_token:
             user_id_found = user_by_token.id
@@ -179,7 +181,7 @@ def get_current_user(
             detail = "User not found",
         )
 
-    if not cached_id and cacheable_token:
+    if not cached_id and cacheable_token and source_target is None:
         _add_to_cache(final_token, user)
 
     return user
@@ -261,11 +263,13 @@ async def feishu_login(
 def token_login(
     req: TokenLoginRequest,
     db: Session = Depends(database.get_db),
+    source_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ) -> Dict[str, Any]:
     """通过 Magnus Token (sk-xxx) 登录，返回 JWT + 用户信息。"""
     user = find_user_by_token(
         db,
         req.token,
+        source_target,
     )
     if not user:
         raise HTTPException(

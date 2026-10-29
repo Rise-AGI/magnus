@@ -15,6 +15,7 @@ tokens = dict(ns)
 load_leaf("_user_tokens.py", tokens)
 User = ns["User"]
 Alias = ns["UserTokenAlias"]
+ScopedAlias = ns["ScopedUserTokenAlias"]
 digest = tokens["token_digest"]
 lookup = tokens["find_user_by_token"]
 replace = tokens["replace_primary_token"]
@@ -79,6 +80,43 @@ class UserTokenAliasTests(unittest.TestCase):
             db.commit()
             self.assertIsNone(lookup(db, "orphan"))
 
+    def add_scoped_collision(self, db):
+        db.add(ScopedAlias(
+            source_target="legacy",
+            digest=digest("primary"),
+            user_id="other",
+            primary_digest=digest("other-primary"),
+        ))
+        db.commit()
+
+    def test_scoped_collision_preserves_both_accounts(self):
+        with self.sessions() as db:
+            self.add_scoped_collision(db)
+            self.assertEqual(lookup(db, "primary").id, "owner")
+            self.assertEqual(lookup(db, "primary", "legacy").id, "other")
+            self.assertEqual(lookup(db, "primary", "unrelated").id, "owner")
+            self.assertEqual(lookup(db, "other-primary", "legacy").id, "other")
+
+    def test_scoped_rotation_never_falls_through_or_revives(self):
+        with self.sessions() as db:
+            self.add_scoped_collision(db)
+            replace(db, db.get(User, "other"), "new-primary")
+            db.commit()
+            self.assertIsNone(lookup(db, "primary", "legacy"))
+            self.assertEqual(lookup(db, "primary").id, "owner")
+            replace(db, db.get(User, "other"), "other-primary")
+            db.commit()
+            self.assertIsNone(lookup(db, "primary", "legacy"))
+
+    def test_scoped_deletion_leaves_a_revoked_tombstone(self):
+        with self.sessions() as db:
+            self.add_scoped_collision(db)
+            db.delete(db.get(User, "other"))
+            db.commit()
+            self.assertIsNone(lookup(db, "primary", "legacy"))
+            self.assertIsNone(db.get(ScopedAlias, ("legacy", digest("primary"))).user_id)
+            self.assertEqual(lookup(db, "primary").id, "owner")
+
     def test_http_auth_does_not_cache_aliases_past_rotation(self):
         cache = {}
         context = dict(ns)
@@ -106,6 +144,20 @@ class UserTokenAliasTests(unittest.TestCase):
             self.assertEqual(error.exception.status_code, 401)
             authenticate(request, "replacement", db)
             self.assertEqual(cache, {"replacement": "owner"})
+            db.add(ScopedAlias(
+                source_target="legacy",
+                digest=digest("replacement"),
+                user_id="other",
+                primary_digest=digest("other-primary"),
+            ))
+            db.commit()
+            request.headers["x-magnus-default-execution-target"] = "legacy"
+            self.assertEqual(authenticate(request, "replacement", db).id, "other")
+            self.assertEqual(cache, {"replacement": "owner"})
+            replace(db, db.get(User, "other"), "rotated")
+            db.commit()
+            with self.assertRaises(HTTPException):
+                authenticate(request, "replacement", db)
 
 
 if __name__ == "__main__":

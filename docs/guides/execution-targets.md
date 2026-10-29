@@ -223,3 +223,19 @@ old ID. The forwarding header then resolves both path IDs and create/update body
 IDs before normal ownership checks. Lists on an old endpoint omit primary resources whose IDs are shadowed by its
 aliases, so every listed ID still denotes the same object on subsequent requests;
 the canonical endpoint lists both. Aliases do not grant access, are not recursive and have no public registration API.
+
+When unrelated source accounts share the same trust-token bytes, an administrator
+must not merge their owners implicitly. A separate primary token plus a scoped
+hash alias in `scoped_user_token_aliases` preserves the former endpoint's identity.
+The forwarding header selects that scope before primary-token lookup; canonical
+requests keep their normal identity. Scoped authentication bypasses the shared
+authentication cache. Rotation or deletion leaves a revoked tombstone so a later
+request cannot fall through to another account with the same token. The account
+owner can retrieve its new primary token through the existing authorized token
+endpoint. There is no public alias-registration API.
+
+A shared former token already authorizes both original accounts through their
+respective endpoints. Scoped aliases preserve that authority; they do not create
+an isolation boundary between prior holders of identical credentials. Rotating
+the primary token revokes its trust-token aliases and the previous primary token.
+Already-issued JWTs retain the existing session-expiration behavior.

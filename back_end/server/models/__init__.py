@@ -16,7 +16,7 @@
 """
 from ..database import Base as Base
 from ._helpers import generate_hex_id as generate_hex_id
-from ._user import User, UserTokenAlias
+from ._user import User, UserTokenAlias, ScopedUserTokenAlias
 from ._resource_alias import ResourceAlias
 from ._job import (
     Job,
@@ -43,6 +43,7 @@ from ._conversation import (
 __all__ = [
     "User",
     "UserTokenAlias",
+    "ScopedUserTokenAlias",
     "ResourceAlias",
     "Job",
     "JobType",

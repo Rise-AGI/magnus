@@ -39,6 +39,9 @@ class User(Base):
         foreign_keys=[parent_id],
         back_populates="parent",
     )
+    scoped_token_aliases: Mapped[list["ScopedUserTokenAlias"]] = relationship(
+        back_populates="user",
+    )
     token_aliases: Mapped[list["UserTokenAlias"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
@@ -64,4 +67,25 @@ class UserTokenAlias(Base):
     primary_digest: Mapped[str] = mapped_column(String(64))
     user: Mapped["User"] = relationship(
         back_populates="token_aliases",
+    )
+
+
+class ScopedUserTokenAlias(Base):
+    """A former endpoint may assign an otherwise identical token to another user."""
+
+    __tablename__ = "scoped_user_token_aliases"
+    source_target: Mapped[str] = mapped_column(String, primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
+        nullable=True,
+    )
+    primary_digest: Mapped[str] = mapped_column(String(64))
+    user: Mapped["User | None"] = relationship(
+        back_populates="scoped_token_aliases",
     )

@@ -53,13 +53,17 @@ def _check_rate_limit(user_id: str) -> bool:
     return True
 
 
-def _authenticate_by_app_secret(app_secret: str) -> models.User | None:
+def _authenticate_by_app_secret(
+    app_secret: str,
+    source_target: str | None = None,
+) -> models.User | None:
     """通过 app_secret 认证（MAGNUS_TOKEN，包括迁移保留的凭据）。
     参数名对齐 OpenClaw 插件接口契约。"""
     with SessionLocal() as db:
         user = find_user_by_token(
             db,
             app_secret,
+            source_target,
         )
         if not user:
             return None
@@ -93,6 +97,7 @@ async def ws_chat(websocket: WebSocket) -> None:
         user = await _run_blocking_io(
             _authenticate_by_app_secret,
             app_secret,
+            websocket.headers.get("x-magnus-default-execution-target"),
         )
     elif jwt_token:
         user = await _run_blocking_io(

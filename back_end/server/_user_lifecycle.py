@@ -30,9 +30,9 @@ def assert_user_unreferenced(
         for foreign_key in table.foreign_keys:
             if foreign_key.column is not User.__table__.c.id:
                 continue
-            if foreign_key.ondelete == "CASCADE":
-                # Owned credentials disappear with the user; historical
-                # resources and subordinate users must instead block deletion.
+            if foreign_key.ondelete in {"CASCADE", "SET NULL"}:
+                # Credentials are deleted or revoked by the declared action;
+                # historical resources and subordinates must block deletion.
                 continue
             reference = foreign_key.parent
             if db.execute(

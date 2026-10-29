@@ -2,9 +2,9 @@
 import asyncio
 import io
 import logging
-from typing import List, Optional, Dict, Any
+from typing import Annotated, List, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -232,11 +232,13 @@ def _build_roster(
 def get_bot_self(
     app_secret: str,
     db: Session = Depends(database.get_db),
+    source_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
 ) -> UserInfo:
     """供 OpenClaw 等外部插件通过 app_secret（实际为 MAGNUS_TOKEN）获取自身 user info。"""
     user = find_user_by_token(
         db,
         app_secret,
+        source_target,
     )
     if not user:
         raise HTTPException(status_code=401, detail="Invalid app_secret")

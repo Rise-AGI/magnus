@@ -2,10 +2,10 @@
 import hashlib
 import hmac
 
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
-from .models import User, UserTokenAlias
+from .models import User, UserTokenAlias, ScopedUserTokenAlias
 
 
 def token_digest(
@@ -19,7 +19,20 @@ def token_digest(
 def find_user_by_token(
     db: Session,
     token: str,
+    source_target: str | None = None,
 ) -> User | None:
+    if source_target is not None:
+        scoped = db.get(
+            ScopedUserTokenAlias,
+            (source_target, token_digest(token)),
+        )
+        if scoped is not None:
+            # A revoked collision remains a tombstone: falling through would
+            # silently authenticate the unrelated account on the new endpoint.
+            return _user_for_alias(
+                db,
+                scoped,
+            )
     user = db.query(User).filter(User.token == token).first()
     if user is not None:
         return user
@@ -28,6 +41,18 @@ def find_user_by_token(
         token_digest(token),
     )
     if alias is None:
+        return None
+    return _user_for_alias(
+        db,
+        alias,
+    )
+
+
+def _user_for_alias(
+    db: Session,
+    alias: UserTokenAlias | ScopedUserTokenAlias,
+) -> User | None:
+    if alias.user_id is None:
         return None
     user = db.get(
         User,
@@ -51,5 +76,10 @@ def replace_primary_token(
     if user.token != token:
         db.execute(
             delete(UserTokenAlias).where(UserTokenAlias.user_id == user.id),
+        )
+        db.execute(
+            update(ScopedUserTokenAlias)
+            .where(ScopedUserTokenAlias.user_id == user.id)
+            .values(primary_digest=""),
         )
     user.token = token

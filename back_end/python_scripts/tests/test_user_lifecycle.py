@@ -131,7 +131,7 @@ class UserLifecycleTests(unittest.TestCase):
             for foreign_key in table.foreign_keys:
                 if foreign_key.column is not User.__table__.c.id:
                     continue
-                if foreign_key.ondelete == "CASCADE":
+                if foreign_key.ondelete in {"CASCADE", "SET NULL"}:
                     continue
                 with self.subTest(table=table.name, column=foreign_key.parent.name), self.sessions() as db:
                     values = {}
