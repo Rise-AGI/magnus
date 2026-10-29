@@ -665,16 +665,37 @@ class ImageBuildManager:
                     self.pins[job_id] = result["digest"]
         # Pins protect the selected artifact while validation runs. A first
         # SIF checksum can be a large read and must not serialize other hits.
-        try:
-            if is_local_mode:
+        if is_local_mode:
+            # A successful filtered listing distinguishes absence from daemon
+            # failure without interpreting Docker's human-readable stderr.
+            try:
                 output = await run_command(
-                    ["docker", "image", "inspect", "--format", "{{.Id}}", result["docker_tag"]],
+                    [
+                        "docker", "image", "ls", "--all", "--no-trunc", "--quiet",
+                        "--filter", f"reference={result['docker_tag']}",
+                    ],
+                    timeout=30,
                 )
-                valid = output.strip() == result["docker_image"]
-            else:
-                valid = await blocking_io(self.is_available, result)
-        except ImageBuildError:
-            valid = False
+            except TimeoutError as error:
+                raise ImageBuildError(
+                    "Docker image cache lookup exceeded 30 seconds",
+                ) from error
+            identifiers = set(
+                output.split(),
+            )
+            if len(identifiers) > 1 or any(
+                not _DIGEST.fullmatch(identifier)
+                for identifier in identifiers
+            ):
+                raise ImageBuildError(
+                    "Docker image cache lookup returned invalid image identities",
+                )
+            valid = identifiers == {result["docker_image"]}
+        else:
+            valid = await blocking_io(
+                self.is_available,
+                result,
+            )
         async with self.maintenance_lock:
             if valid:
                 with self.lock:
