@@ -11,6 +11,7 @@ from test_docker_release import docker
 import test_job_finalization as fixtures
 from test_job_finalization import Job, JobStatus, load_method, load_mixin
 from test_protocol_files import protocol
+from test_preparation_commit import PreparationInputs
 
 
 class DockerSubmissionTests(unittest.TestCase):
@@ -235,6 +236,7 @@ class PreparationCleanupTests(unittest.IsolatedAsyncioTestCase):
                         return False, 'repository unavailable', None
                     fixture.namespace.update(
                         asyncio=asyncio,
+                        PreparationInputs=PreparationInputs,
                         resource_manager=SimpleNamespace(
                             ensure_repo=repository,
                             builds=SimpleNamespace(release=Mock()),
