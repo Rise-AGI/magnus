@@ -140,21 +140,32 @@ This avoids holding a DB session during external Docker calls.
 | Feature | Linux | Windows | macOS |
 |---------|-------|---------|-------|
 | Docker networking | `--network host` | bridge + `host.docker.internal` | bridge + `host.docker.internal` |
-| system_entry_command | bash execution | skipped (no bash) | bash execution |
+| system_entry_command | literal mount array | literal mount array | literal mount array |
 | Process management | `start_new_session` | `CREATE_NEW_PROCESS_GROUP` | `start_new_session` |
 | npm command | `npm` | `npm.cmd` | `npm` |
 
 ## system_entry_command Interpretation
 
-Blueprints may specify a `system_entry_command` that sets `APPTAINER_BIND` for bind mounts. In local mode, the scheduler (`_extract_bind_mounts_from_system_entry_command`):
+In Docker/local mode, the scheduler reads double-quoted `host:container[:options]`
+entries from a literal `mounts=(...)` array in `system_entry_command` and passes
+them to Docker as `-v` arguments. It does not execute the shell command or read
+an `APPTAINER_BIND` assignment. This applies on Linux, macOS and Windows without
+requiring Bash.
 
-1. Executes the command in a bash subprocess
-2. Reads the resulting `APPTAINER_BIND` environment variable
-3. Translates each entry to Docker `-v` flags
+```bash
+mounts=(
+  "$HOME/datasets:/input:ro"
+  "/shared/results (current):/output:rw"
+)
+```
 
-This is a **lossy conversion** — only the `APPTAINER_BIND` variable is extracted. Other environment variables and side effects (e.g., `module load`) are discarded.
-
-On Windows, `system_entry_command` is skipped entirely (no bash available).
+Only `$HOME` and `${HOME}` are expanded: the source uses the controller user's
+home, while the container destination uses `/root`. Windows drive paths in the
+source are converted to Docker's `/c/...` form. Spaces, parentheses, mount options
+and declaration order are preserved. Single-quoted entries and shell expressions
+such as `$PWD`, command substitution and conditional mount construction are not
+interpreted. Other environment assignments and side effects, including
+`module load`, do not run. Slurm targets execute `system_entry_command` normally.
 
 ## Authentication
 

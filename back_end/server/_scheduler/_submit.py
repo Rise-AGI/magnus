@@ -1,6 +1,5 @@
 # back_end/server/_scheduler/_submit.py
 import os
-import re
 import json
 import sys
 import traceback
@@ -18,6 +17,7 @@ from . import (
     magnus_ephemeral_workspace_path,
 )
 from ._wrapper_template import _build_wrapper_content
+from ._bind_mounts import docker_bind_mounts
 from ._relay_build_cache import remote_built_sif_path
 from ._submission_recovery import new_submission_attempt
 from .._staging_diagnostics import StagingProgress, finish_staging
@@ -564,50 +564,14 @@ class _SubmitMixin(_SubmitMixinBase):
 
         return self._record_submission(db, job, container_name, attempt=attempt)
 
-    def _extract_bind_mounts_from_system_entry_command(self, system_entry_command: str) -> List[str]:
-        """
-        从 system_entry_command 中提取 bind mount 列表，用于 Docker -v。
-        返回 ["host:container", ...] 列表。
-
-        有损转换——约定与局限：
-        1. 只解析 bash array `mounts=(...)` 中的挂载对，忽略一切其他逻辑
-           （环境变量设置、module load、条件分支等在 Docker 模式下丢弃）
-        2. 仅展开 $HOME / ${HOME}；host 侧使用 os.path.expanduser，
-           container 侧硬编码 /root（Docker 容器默认以 root 运行）；
-           不支持 $PWD、命令替换 $(...) 等动态值
-        3. 纯 Python 实现，不依赖 bash，全平台行为一致
-        4. Windows 盘符（C:\\）会被转为 Docker mount 格式（/c/），
-           仅转换 host 侧；container 侧是容器内 Linux 路径，不转换
-        """
-        if not system_entry_command:
-            return []
-
-        # 提取 mounts=( ... ) 块内的所有双引号字符串
-        # re.DOTALL 让 . 匹配换行，容忍任意 whitespace
-        array_match = re.search(r'mounts\s*=\s*\((.*?)\)', system_entry_command, re.DOTALL)
-        if array_match is None:
-            return []
-
-        body = array_match.group(1)
-        entries = re.findall(r'"([^"]+)"', body)
-
-        host_home = os.path.expanduser("~")
-        container_home = "/root"  # Docker 容器默认以 root 运行
-        binds = []
-        for entry in entries:
-            # 展开前拆分：raw entry 里只有 1 个冒号（mount 分隔符），
-            # 展开后 Windows 盘符会引入额外冒号，所以必须先拆再展开
-            if ":" not in entry:
-                continue
-            host_raw, container_raw = entry.split(":", 1)
-            host_path = host_raw.replace("${HOME}", host_home).replace("$HOME", host_home)
-            container_path = container_raw.replace("${HOME}", container_home).replace("$HOME", container_home)
-            # Windows 盘符转 Docker mount 格式（C:\Users\... → /c/Users/...）
-            # 仅 host 侧需要；container 侧是容器内 Linux 路径
-            if len(host_path) >= 2 and host_path[1] == ":":
-                host_path = "/" + host_path[0].lower() + host_path[2:].replace("\\", "/")
-            binds.append(f"{host_path}:{container_path}")
-        return binds
+    def _extract_bind_mounts_from_system_entry_command(
+        self,
+        system_entry_command: str,
+    ) -> List[str]:
+        return docker_bind_mounts(
+            system_entry_command,
+            host_home=os.path.expanduser("~"),
+        )
 
     def _init_job_working_dir(self, job_working_table: str) -> None:
         guarantee_file_exist(f"{job_working_table}/slurm", is_directory=True)

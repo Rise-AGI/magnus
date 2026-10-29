@@ -140,21 +140,29 @@ docker run -d \
 | 功能 | Linux | Windows | macOS |
 |---------|-------|---------|-------|
 | Docker 网络 | `--network host` | bridge + `host.docker.internal` | bridge + `host.docker.internal` |
-| system_entry_command | bash 执行 | 跳过（无 bash） | bash 执行 |
+| system_entry_command | 字面量挂载数组 | 字面量挂载数组 | 字面量挂载数组 |
 | 进程管理 | `start_new_session` | `CREATE_NEW_PROCESS_GROUP` | `start_new_session` |
 | npm 命令 | `npm` | `npm.cmd` | `npm` |
 
 ## system_entry_command 解释
 
-Blueprint 可能指定一个 `system_entry_command`，用于设置 `APPTAINER_BIND` 以进行 bind mount。在本地模式下，scheduler（`_extract_bind_mounts_from_system_entry_command`）会：
+在 Docker/local 模式下，scheduler 从 `system_entry_command` 的字面量
+`mounts=(...)` 数组中读取双引号包裹的 `host:container[:options]` 条目，
+作为 `-v` 参数传给 Docker。它不执行 shell 命令，也不读取 `APPTAINER_BIND`
+赋值。Linux、macOS 和 Windows 均采用此行为，无需 Bash。
 
-1. 在 bash subprocess 中执行该命令
-2. 读取最终得到的 `APPTAINER_BIND` 环境变量
-3. 将每个条目翻译为 Docker 的 `-v` 标志
+```bash
+mounts=(
+  "$HOME/datasets:/input:ro"
+  "/shared/results (current):/output:rw"
+)
+```
 
-这是一个**有损的转换** —— 只提取 `APPTAINER_BIND` 变量。其他环境变量和副作用（例如 `module load`）都会被丢弃。
-
-在 Windows 上，`system_entry_command` 完全被跳过（无可用的 bash）。
+只展开 `$HOME` 和 `${HOME}`：源路径使用控制面的用户主目录，容器目标路径
+使用 `/root`。源路径中的 Windows 盘符转为 Docker 的 `/c/...` 形式。
+保留空格、括号、挂载选项与声明顺序。不解释单引号条目，以及 `$PWD`、
+命令替换、条件构造挂载等 shell 表达式；其他环境赋值和 `module load` 等
+副作用均不执行。Slurm 目标仍正常执行 `system_entry_command`。
 
 ## 认证
 
