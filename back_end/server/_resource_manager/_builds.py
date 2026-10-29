@@ -18,6 +18,8 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -171,6 +173,12 @@ class _BuildOperation:
     result: dict | None = None
 
 
+@dataclass
+class _VerificationLock:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    users: int = 0
+
+
 class ImageBuildManager:
     def __init__(
         self,
@@ -189,9 +197,11 @@ class ImageBuildManager:
         )
         self.client = BuildKitClient(self.config)
         self.lock = threading.RLock()
-        # Verification runs in filesystem workers. Its lock never protects Job
-        # state, so hashing a large SIF cannot block API/scheduler state access.
+        # This index lock never covers file I/O. Each SIF coordinates its own
+        # verification and removal, so other verified hits remain independent.
         self.verification_lock = threading.Lock()
+        self._verification_locks: dict[str, _VerificationLock] = {}
+        self._cold_hash_lock = threading.Lock()
         self.verified_sifs: dict[str, tuple[int, int, int, int, int]] = {}
         self.operations: dict[str, _BuildOperation] = {}
         self.jobs: dict[str, _BuildOperation] = {}
@@ -433,6 +443,28 @@ class ImageBuildManager:
             return False
         return self._verify_sif(path, digest, expected_size)
 
+    @contextmanager
+    def _hold_sif_verification(
+        self,
+        digest: str,
+    ) -> Iterator[None]:
+        with self.verification_lock:
+            owner = self._verification_locks.get(
+                digest,
+            )
+            if owner is None:
+                owner = _VerificationLock()
+                self._verification_locks[digest] = owner
+            owner.users += 1
+        try:
+            with owner.lock:
+                yield
+        finally:
+            with self.verification_lock:
+                owner.users -= 1
+                if not owner.users:
+                    del self._verification_locks[digest]
+
     def _verify_sif(
         self,
         path: Path,
@@ -441,30 +473,41 @@ class ImageBuildManager:
     ) -> bool:
         # This memo is deliberately process-local: startup revalidates every
         # restored artifact, and replacing/truncating a file invalidates it.
-        with self.verification_lock:
+        with self._hold_sif_verification(
+            digest,
+        ):
             try:
                 information = path.stat(follow_symlinks=False)
                 signature = _file_signature(information)
-                if not stat.S_ISREG(information.st_mode) or information.st_size != expected_size:
+                with self.verification_lock:
+                    if not stat.S_ISREG(information.st_mode) or information.st_size != expected_size:
+                        self.verified_sifs.pop(digest, None)
+                        return False
+                    if self.verified_sifs.get(digest) == signature:
+                        return True
                     self.verified_sifs.pop(digest, None)
-                    return False
-                if self.verified_sifs.get(digest) == signature:
-                    return True
-                self.verified_sifs.pop(digest, None)
                 with path.open("rb") as stream:
                     if _file_signature(os.fstat(stream.fileno())) != signature:
                         return False
-                    actual_digest = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
+                    # Keep the existing single-reader disk budget for cold
+                    # verification; memo hits never wait for this work lock.
+                    with self._cold_hash_lock:
+                        actual_digest = "sha256:" + hashlib.file_digest(
+                            stream,
+                            "sha256",
+                        ).hexdigest()
                     if _file_signature(os.fstat(stream.fileno())) != signature:
                         return False
                 # Compare both the open inode and the current path: a rename
                 # during hashing must not validate different published bytes.
                 if actual_digest != digest or _file_signature(path.stat(follow_symlinks=False)) != signature:
                     return False
-                self.verified_sifs[digest] = signature
+                with self.verification_lock:
+                    self.verified_sifs[digest] = signature
                 return True
             except OSError:
-                self.verified_sifs.pop(digest, None)
+                with self.verification_lock:
+                    self.verified_sifs.pop(digest, None)
                 return False
 
     def _remove_sif(
@@ -473,9 +516,12 @@ class ImageBuildManager:
     ) -> None:
         # Join in-flight verification before deletion, without taking the
         # manager state lock or waiting for a thread lock on the event loop.
-        with self.verification_lock:
+        with self._hold_sif_verification(
+            digest,
+        ):
             self._sif_path(digest).unlink(missing_ok=True)
-            self.verified_sifs.pop(digest, None)
+            with self.verification_lock:
+                self.verified_sifs.pop(digest, None)
 
     async def shutdown(
         self,
