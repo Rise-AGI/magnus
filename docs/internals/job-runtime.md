@@ -40,6 +40,17 @@ Slurm execution outcome and allocation release are tracked separately. For `COMP
 
 Backend startup failure and shutdown both unwind registered resources. All background loops and their blocking filesystem workers are joined before the scheduler, custody and build managers close. Failure in one shutdown does not skip the others; repeated cancellation does not detach their teardown. This covers cooperative application shutdown, not `SIGKILL` or power loss, which continue to use durable recovery records.
 
+### Repository preparation diagnostics
+
+Repository lookup and fetch failures retain their operation, exit code, OS error or timeout,
+and a recognized error category in the Job diagnostic. Arbitrary Git/transport
+stderr is not published because it may contain credentials. Unknown failures keep
+the operation and exit code. Git diagnostics retain up to 64 KiB of trailing output,
+preserving an earlier disk-full marker for fail-fast handling; query stdout remains
+complete. Cancellation stops Git and its transport helpers
+before releasing the repository lock. An expired moving reference still requires a
+successful fetch; a failure never silently selects an older cached HEAD.
+
 ### SSH staging and uncertain submissions
 
 Directory uploads use one compressed stream instead of recursive SCP. The complete tree includes `.git`, empty directories, file modes and symbolic links as link text; link targets are never copied from outside the tree. A Python 3.6+ receiver verifies the byte count and SHA-256, extracts into a private sibling directory without following links, then publishes the complete tree atomically. Packaging, connection setup and streaming share the configured transfer deadline. Temporary compressed storage is required on both ends; local/Docker execution stays unchanged. A fresh staging attempt removes stale offline inputs before preparing current custody inputs.

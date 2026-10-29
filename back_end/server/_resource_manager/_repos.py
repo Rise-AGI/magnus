@@ -1,12 +1,11 @@
 # back_end/server/_resource_manager/_repos.py
 """仓库 clone/fetch/checkout：默认分支解析、cache 时效性、ensure_repo 主流程。"""
 import os
+import math
 import re
 import time
 import shutil
 import asyncio
-import signal
-import sys
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from library import is_disk_full_stderr, disk_full_message
@@ -15,7 +14,6 @@ from .._magnus_config import is_local_mode
 from .._job_dir_access import grant_job_dir_runner_access
 from . import logger, magnus_repo_cache_path
 from ._config import (
-    _git_env,
     DEFAULT_BRANCH_CACHE_TTL_SECONDS,
     REPO_FRESHNESS_TTL_SECONDS,
     GIT_FETCH_MAX_RETRIES,
@@ -25,6 +23,7 @@ from ._config import (
     CACHE_FETCH_TIMESTAMP_FILENAME,
     FULL_SHA_PATTERN,
 )
+from ._git_process import GitOperationError, _run_git, describe_git_failure
 from ._helpers import _remove_tree, _run_blocking_io
 
 
@@ -49,105 +48,15 @@ async def _remove_cache_dir(
     )
 
 
-async def _kill_git_process(
-    process: asyncio.subprocess.Process,
-) -> None:
-    """Stop Git and its transport helpers while communicate keeps pipes drained."""
-    if os.name == "posix":
-        # SSH/HTTPS helpers can retain Git's pipes or continue writing packs.
-        # Every invocation has its own session, so the group is ours to stop.
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    elif process.returncode is None:
-        # The Windows launcher owns a KILL_ON_JOB_CLOSE Job Object. Killing
-        # it closes the only handle, terminating Git and its transport helpers.
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-    await process.wait()
-
-
-async def _run_git(
-    *arguments: str,
-    cwd: Optional[str] = None,
-    timeout: Optional[float] = None,
-    capture_stdout: bool = True,
-    capture_stderr: bool = True,
-) -> Tuple[int, bytes, bytes]:
-    """Run Git with cancellation-safe spawn, pipe draining and process reaping.
-
-    The caller retains its repository lock until this function has stopped all
-    child I/O, including when cancellation arrives during process creation or
-    arrives repeatedly during cleanup. Clone intentionally has no time limit;
-    cancelling its owning preparation still interrupts network I/O immediately.
-    """
-    command = ["git"]
-    if os.name == "nt":
-        command = [
-            sys.executable,
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "_git_windows.py"),
-        ]
-    spawning = asyncio.create_task(asyncio.create_subprocess_exec(
-        *command,
-        *arguments,
-        cwd = cwd,
-        stdin = asyncio.subprocess.DEVNULL,
-        stdout = asyncio.subprocess.PIPE if capture_stdout else asyncio.subprocess.DEVNULL,
-        stderr = asyncio.subprocess.PIPE if capture_stderr else asyncio.subprocess.DEVNULL,
-        env = _git_env,
-        start_new_session = os.name == "posix",
-    ))
-    communication = None
-    try:
-        process = await asyncio.shield(spawning)
-        communication = asyncio.create_task(process.communicate())
-        if timeout is None:
-            stdout, stderr = await asyncio.shield(communication)
-        else:
-            stdout, stderr = await asyncio.wait_for(
-                asyncio.shield(communication),
-                timeout = timeout,
-            )
-        assert process.returncode is not None
-        return process.returncode, stdout or b"", stderr or b""
-    except BaseException:
-        async def stop_and_reap() -> None:
-            try:
-                process = await spawning
-            except Exception:
-                return  # Spawn failed before acquiring a process to reap.
-            reader = communication or asyncio.create_task(process.communicate())
-            try:
-                await _kill_git_process(process)
-            finally:
-                await asyncio.gather(
-                    reader,
-                    return_exceptions = True,
-                )
-
-        cleanup = asyncio.create_task(stop_and_reap())
-        while not cleanup.done():
-            try:
-                await asyncio.shield(cleanup)
-            except asyncio.CancelledError:
-                continue
-        cleanup.result()
-        raise
-
-
 class _ReposMixin(_ReposMixinBase):
 
-    async def _resolve_default_branch(self, repo_url: str) -> Optional[str]:
-        """
-        通过 git ls-remote 解析仓库默认分支。
-        带重试（网络瞬断）和超时（SSH 挂起）。
-        """
+    async def _resolve_default_branch(
+        self,
+        repo_url: str,
+    ) -> str:
         max_retries = 3
         timeout_seconds = 15
-
+        failure = "git ls-remote failed"
         for attempt in range(max_retries):
             try:
                 returncode, stdout, stderr = await _run_git(
@@ -155,29 +64,59 @@ class _ReposMixin(_ReposMixinBase):
                     "--symref",
                     repo_url,
                     "HEAD",
-                    timeout = timeout_seconds,
+                    timeout=timeout_seconds,
                 )
             except asyncio.TimeoutError:
-                logger.warning(f"git ls-remote timed out ({timeout_seconds}s), attempt {attempt + 1}/{max_retries}: {repo_url}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
-                continue
-
-            if returncode == 0:
-                for line in stdout.decode().strip().splitlines():
-                    if line.startswith("ref:"):
-                        ref = line.split()[1]
-                        return ref.replace("refs/heads/", "")
-                return "main"
-
-            error_msg = stderr.decode().strip()
-            logger.warning(f"git ls-remote failed (rc={returncode}), attempt {attempt + 1}/{max_retries}: {repo_url} — {error_msg}")
+                failure = f"git ls-remote timed out after {timeout_seconds}s"
+            else:
+                if returncode == 0:
+                    try:
+                        lines = stdout.decode().strip().splitlines()
+                    except UnicodeDecodeError:
+                        raise GitOperationError(
+                            "git ls-remote returned a non-UTF-8 default branch",
+                        ) from None
+                    for line in lines:
+                        if line.startswith(
+                            "ref:",
+                        ):
+                            parts = line.split()
+                            if (
+                                len(parts) == 3
+                                and parts[2] == "HEAD"
+                                and parts[1].startswith("refs/heads/")
+                                and parts[1] != "refs/heads/"
+                            ):
+                                return parts[1].removeprefix(
+                                    "refs/heads/",
+                                )
+                            raise GitOperationError(
+                                "git ls-remote returned an invalid HEAD reference",
+                            )
+                    return "main"
+                failure = describe_git_failure(
+                    "ls-remote",
+                    returncode,
+                    stderr,
+                )
+            logger.warning(
+                "%s (attempt %s/%s)",
+                failure,
+                attempt + 1,
+                max_retries,
+            )
             if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(
+                    2 ** attempt,
+                )
+        raise GitOperationError(
+            failure,
+        )
 
-        return None
-
-    async def _resolve_default_branch_cached(self, repo_url: str) -> Optional[str]:
+    async def _resolve_default_branch_cached(
+        self,
+        repo_url: str,
+    ) -> str:
         """带 TTL 内存缓存 + per-repo 锁的默认分支解析。
         fanout 里 N 个 worker 命中同一个 repo 时，只有第一个打上游 ls-remote，
         其余在锁内等待 + 二次命中缓存直接返回。"""
@@ -196,22 +135,37 @@ class _ReposMixin(_ReposMixinBase):
                 return cached[0]
 
             branch = await self._resolve_default_branch(repo_url)
-            if branch is not None:
-                self._default_branch_cache[repo_url] = (
-                    branch, time.time() + DEFAULT_BRANCH_CACHE_TTL_SECONDS,
-                )
+            self._default_branch_cache[repo_url] = (
+                branch,
+                time.time() + DEFAULT_BRANCH_CACHE_TTL_SECONDS,
+            )
             return branch
 
     def _cache_fetch_ts_path(self, cache_path: str) -> str:
         return os.path.join(cache_path, ".git", CACHE_FETCH_TIMESTAMP_FILENAME)
 
-    def _read_cache_fetch_ts(self, cache_path: str) -> float:
-        """读取 cache 上次成功 fetch/clone 的 epoch 秒；缺失或损坏返回 0.0（视为极陈旧）"""
+    def _read_cache_fetch_ts(
+        self,
+        cache_path: str,
+    ) -> float:
         try:
-            with open(self._cache_fetch_ts_path(cache_path)) as f:
-                return float(f.read().strip())
+            with open(
+                self._cache_fetch_ts_path(
+                    cache_path,
+                ),
+            ) as file:
+                timestamp = float(
+                    file.read().strip(),
+                )
         except (OSError, ValueError):
             return 0.0
+        # NaN makes age comparisons false; clock rollback must not make a
+        # moving reference appear fresh indefinitely either.
+        if not math.isfinite(
+            timestamp,
+        ) or not 0 <= timestamp <= time.time():
+            return 0.0
+        return timestamp
 
     def _write_cache_fetch_ts(self, cache_path: str) -> None:
         try:
@@ -235,7 +189,17 @@ class _ReposMixin(_ReposMixinBase):
             )
         except asyncio.TimeoutError:
             return None
-        return returncode == 0, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+        return (
+            returncode == 0,
+            stdout.decode(
+                errors="replace",
+            ),
+            describe_git_failure(
+                args[0],
+                returncode,
+                stderr,
+            ) if returncode != 0 else "",
+        )
 
     async def _cache_has_commit(self, cache_path: str, sha: str) -> bool:
         """检查 cache 的 object db 中是否已有该 commit。
@@ -262,9 +226,19 @@ class _ReposMixin(_ReposMixinBase):
         index.lock：cache 的 index 只有 clone 会写，且在 repo_lock 内写，持锁时它还在就
         一定是残留；它会随 copytree 进入每个 job 的副本，让那里的 checkout 失败。
 
-        返回的原因带着 git 自己的报错：git 的运行环境出问题（比如全局 gitconfig 写坏）时
-        健康的 cache 也通不过这项检查，日志里得分辨得出来。查询超时算无法判断、按能用
-        处理，不因一次 I/O 抖动删掉好的 cache。"""
+        查询超时算无法判断、按能用处理，不因一次 I/O 抖动删掉好的 cache。
+        失败诊断仅保留 Git 错误类别，不能把外部输出中的凭证带入 Job。"""
+        git_path = os.path.join(
+            cache_path,
+            ".git",
+        )
+        for path in (cache_path, git_path):
+            if os.path.islink(
+                path,
+            ) or os.path.isjunction(
+                path,
+            ):
+                return "repository cache must own its directory and Git metadata"
         if not os.path.isdir(cache_path):
             return "not a directory"
         result = await self._run_cache_git_query(
@@ -278,55 +252,63 @@ class _ReposMixin(_ReposMixinBase):
             return None
         succeeded, stdout, stderr = result
         if not succeeded:
-            return f"git rev-parse failed: {stderr.strip() or 'no error output'}"
+            return stderr
         lines = stdout.splitlines()
         git_dir = lines[0].strip() if lines else ""
         if git_dir != ".git":
-            return f"no .git of its own (git resolved {git_dir or 'nothing'})"
+            return "repository cache does not own its .git directory"
         if os.path.exists(os.path.join(cache_path, ".git", "index.lock")):
             return "stale .git/index.lock left by an interrupted git process"
         return None
 
-    async def _fetch_in_cache(self, cache_path: str, repo_url: str) -> bool:
-        """在 cache 里跑 git fetch origin，带 3 次重试和指数退避。
-        重试语义与 _resolve_default_branch 对齐，便于日志对照分析。"""
+    async def _fetch_in_cache(
+        self,
+        cache_path: str,
+    ) -> tuple[bool, str | None]:
+        failure = "git fetch failed"
         for attempt in range(GIT_FETCH_MAX_RETRIES):
             try:
                 returncode, _, stderr = await _run_git(
                     "fetch",
                     "origin",
-                    cwd = cache_path,
-                    timeout = GIT_FETCH_TIMEOUT_SECONDS,
-                    capture_stdout = False,
+                    cwd=cache_path,
+                    timeout=GIT_FETCH_TIMEOUT_SECONDS,
+                    capture_stdout=False,
                 )
             except asyncio.TimeoutError:
-                logger.warning(
-                    f"git fetch timed out ({GIT_FETCH_TIMEOUT_SECONDS}s), "
-                    f"attempt {attempt + 1}/{GIT_FETCH_MAX_RETRIES}: {repo_url}"
+                failure = f"git fetch timed out after {GIT_FETCH_TIMEOUT_SECONDS}s"
+            except GitOperationError as error:
+                return False, str(
+                    error,
                 )
-                if attempt < GIT_FETCH_MAX_RETRIES - 1:
-                    await asyncio.sleep(2 ** attempt)
-                continue
-            if returncode == 0:
-                return True
-
-            error_msg = stderr.decode().strip()
-            # 磁盘满不会在 backoff 期间自愈——和 image pull 同理，直接 fail-fast，
-            # 不烧 retry/backoff 预算。
-            if is_disk_full_stderr(error_msg):
-                logger.error(
-                    f"git fetch aborted (disk full): {repo_url} — "
-                    f"{disk_full_message(magnus_repo_cache_path)}"
+            else:
+                if returncode == 0:
+                    return True, None
+                if is_disk_full_stderr(
+                    stderr.decode(
+                        errors="replace",
+                    ),
+                ):
+                    return False, disk_full_message(
+                        magnus_repo_cache_path,
+                    )
+                failure = describe_git_failure(
+                    "fetch",
+                    returncode,
+                    stderr,
                 )
-                return False
             logger.warning(
-                f"git fetch failed (rc={returncode}), "
-                f"attempt {attempt + 1}/{GIT_FETCH_MAX_RETRIES}: {repo_url} — {error_msg}"
+                "%s (attempt %s/%s, cache %s)",
+                failure,
+                attempt + 1,
+                GIT_FETCH_MAX_RETRIES,
+                cache_path,
             )
             if attempt < GIT_FETCH_MAX_RETRIES - 1:
-                await asyncio.sleep(2 ** attempt)
-
-        return False
+                await asyncio.sleep(
+                    2 ** attempt,
+                )
+        return False, failure
 
     async def _clone_into_cache(
         self,
@@ -359,11 +341,27 @@ class _ReposMixin(_ReposMixinBase):
                 if os.path.exists(cache_path):
                     await _remove_cache_dir(cache_path)
                 raise
+            except GitOperationError as error:
+                await _remove_cache_dir(
+                    cache_path,
+                )
+                return False, str(
+                    error,
+                )
 
             if returncode == 0:
                 return True, None
 
-            clone_error = stderr.decode().strip()
+            storage_full = is_disk_full_stderr(
+                stderr.decode(
+                    errors="replace",
+                ),
+            )
+            clone_error = describe_git_failure(
+                "clone",
+                returncode,
+                stderr,
+            )
             # 失败会留下半个 cache 目录，而 git clone 拒绝写入已存在的非空目录 ——
             # 不清掉的话后续重试（以及下一个 job）会连环失败在"目标已存在"上。
             if os.path.exists(cache_path):
@@ -375,10 +373,10 @@ class _ReposMixin(_ReposMixinBase):
                         f"Clone cleanup left {cache_path} in place; "
                         f"not retrying ({repo_url}): {clone_error}"
                     )
-                    return False, f"git clone failed: {clone_error}"
+                    return False, clone_error
             # 磁盘满不会在 backoff 期间自愈 —— 和 fetch / image pull 同理，直接
             # fail-fast，不烧 retry/backoff 预算。
-            if is_disk_full_stderr(clone_error):
+            if storage_full:
                 logger.error(f"Clone aborted (disk full) ({repo_url}): {clone_error}")
                 return False, disk_full_message(magnus_repo_cache_path)
             logger.warning(
@@ -391,9 +389,35 @@ class _ReposMixin(_ReposMixinBase):
         logger.error(
             f"Clone failed after {GIT_CLONE_MAX_RETRIES} attempts ({repo_url}): {clone_error}"
         )
-        return False, f"git clone failed: {clone_error}"
+        return False, clone_error
 
     async def ensure_repo(
+        self,
+        namespace: str,
+        repo_name: str,
+        branch: Optional[str],
+        commit_sha: Optional[str],
+        target_dir: str,
+        runner: str,
+        job_working_dir: str,
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Return (success, full SHA or safe failure, resolved branch)."""
+        try:
+            return await self._ensure_repo(
+                namespace=namespace,
+                repo_name=repo_name,
+                branch=branch,
+                commit_sha=commit_sha,
+                target_dir=target_dir,
+                runner=runner,
+                job_working_dir=job_working_dir,
+            )
+        except GitOperationError as error:
+            return False, str(
+                error,
+            ), None
+
+    async def _ensure_repo(
         self,
         namespace: str,
         repo_name: str,
@@ -437,9 +461,12 @@ class _ReposMixin(_ReposMixinBase):
 
         # branch=None: 解析仓库默认分支（带 TTL 内存缓存，fanout 里只打一次 ls-remote）
         if branch is None:
-            branch = await self._resolve_default_branch_cached(repo_url)
-            if branch is None:
-                return False, "Failed to determine default branch", None
+            try:
+                branch = await self._resolve_default_branch_cached(
+                    repo_url,
+                )
+            except GitOperationError as error:
+                return False, f"Failed to determine default branch: {error}", None
 
         cache_path = self._get_repo_cache_path(namespace, repo_name, branch)
 
@@ -496,17 +523,19 @@ class _ReposMixin(_ReposMixinBase):
                     # 完整 SHA：不可变对象，cache 已有就永远可用；没有才 fetch
                     # （不走 TTL——我们需要的是对象存在性，不是时效性）
                     if not await self._cache_has_commit(cache_path, commit_sha):
-                        fetch_ok = await self._fetch_in_cache(cache_path, repo_url)
+                        fetch_ok, fetch_error = await self._fetch_in_cache(
+                            cache_path,
+                        )
                         if fetch_ok:
                             self._write_cache_fetch_ts(cache_path)
                         if not await self._cache_has_commit(cache_path, commit_sha):
                             logger.error(
                                 f"Commit {commit_sha} not found in cache for {repo_url} "
-                                f"(fetch_ok={fetch_ok})"
+                                f"({fetch_error or 'fetch succeeded'})"
                             )
                             return False, (
                                 f"commit {commit_sha} not found in repository "
-                                f"(fetch_ok={fetch_ok})"
+                                f"({fetch_error or 'fetch succeeded'})"
                             ), None
                 else:
                     # "HEAD" / "msg:..." / tag / branch / 短 SHA 都可能指向移动目标：
@@ -514,7 +543,9 @@ class _ReposMixin(_ReposMixinBase):
                     # 否则直接 FAIL——绝不回落到化石 cache
                     cache_age = time.time() - self._read_cache_fetch_ts(cache_path)
                     if cache_age > REPO_FRESHNESS_TTL_SECONDS:
-                        fetch_ok = await self._fetch_in_cache(cache_path, repo_url)
+                        fetch_ok, fetch_error = await self._fetch_in_cache(
+                            cache_path,
+                        )
                         if fetch_ok:
                             self._write_cache_fetch_ts(cache_path)
                         else:
@@ -523,8 +554,7 @@ class _ReposMixin(_ReposMixinBase):
                                 f"refusing to serve stale cache for commit_sha={commit_sha!r}"
                             )
                             return False, (
-                                f"git fetch failed for {repo_url}: "
-                                f"cannot guarantee freshness for {commit_sha!r}"
+                                f"{fetch_error}; cannot guarantee freshness for {commit_sha!r}"
                             ), None
 
             # 更新 cache 访问时间（LRU 按 atime 淘汰，活跃 cache 需持续刷 atime）
@@ -625,13 +655,20 @@ class _ReposMixin(_ReposMixinBase):
         )
 
         if returncode != 0:
-            error_msg = stderr.decode().strip()
-            logger.error(f"Failed to checkout {commit_sha}: {error_msg}")
+            error_msg = describe_git_failure(
+                "checkout",
+                returncode,
+                stderr,
+            )
+            logger.error(
+                "%s",
+                error_msg,
+            )
             await _run_blocking_io(
                 _remove_tree,
                 target_dir,
             )
-            return False, f"git checkout failed: {error_msg}", None
+            return False, error_msg, None
 
         # Pin the checked-out commit, never fall back to a moving symbolic ref.
         # Git repositories may use SHA-1 or SHA-256 object identifiers.
@@ -643,7 +680,14 @@ class _ReposMixin(_ReposMixinBase):
         )
         resolved_sha = stdout.decode("ascii", errors="replace").strip()
         if returncode != 0 or not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", resolved_sha):
-            logger.error(f"Failed to resolve checked-out commit: {stderr.decode(errors='replace').strip()}")
+            logger.error(
+                "%s",
+                describe_git_failure(
+                    "rev-parse",
+                    returncode,
+                    stderr,
+                ),
+            )
             await _run_blocking_io(
                 _remove_tree,
                 target_dir,

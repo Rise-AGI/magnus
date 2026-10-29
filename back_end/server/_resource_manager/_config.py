@@ -1,6 +1,5 @@
 # back_end/server/_resource_manager/_config.py
 """配置常量 + 全局只读状态：mirror、cache size、git env、TTLs、SHA pattern。"""
-import os
 import re
 from typing import Optional
 
@@ -52,13 +51,6 @@ REPO_CACHE_SIZE = _parse_size_string(magnus_config['execution']['resource_cache'
 # falsely rejected when space is merely tight -- eviction tries to restore this
 # headroom first (see ImageCache.collect).
 MIN_FREE_BYTES_FOR_PULL = _parse_size_string("2G")
-
-
-# git subprocess 使用的干净环境：禁用交互式认证，剔除 IDE 注入的 credential helper
-_git_env = os.environ.copy()
-_git_env["GIT_TERMINAL_PROMPT"] = "0"
-for _k in ("GIT_ASKPASS", "SSH_ASKPASS"):
-    _git_env.pop(_k, None)
 
 
 # Fanout 聚合窗口：同一个 cache 的 origin refs 在这个 TTL 内被认为足够新，
