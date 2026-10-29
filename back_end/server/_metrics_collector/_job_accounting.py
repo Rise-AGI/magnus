@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 import math
 import re
 import subprocess
+from subprocess import CalledProcessError, TimeoutExpired
 from typing import Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence
 
 
@@ -45,6 +46,93 @@ class JobMetrics:
         if not self.memory_complete:
             return None
         return sum(step.memory_bytes for step in self.steps.values())
+
+
+class SlurmAccountingHealth:
+    """Report sustained gaps without treating warm-up or a first CPU baseline as failure."""
+
+    def __init__(
+        self,
+    ) -> None:
+        self._unavailable_since: Optional[float] = None
+        self._last_report: Optional[float] = None
+
+    def observe(
+        self,
+        snapshot: JobMetrics,
+        allocated_cpus: Optional[int],
+        now: float,
+    ) -> Optional[str]:
+        missing = []
+        if not snapshot.steps:
+            missing.append("steps")
+        else:
+            if not snapshot.cpu_complete:
+                missing.append("cpu_counters")
+            if not snapshot.memory_complete:
+                missing.append("memory_counters")
+            if any(
+                step.task_count is None for step in snapshot.steps.values()
+            ):
+                missing.append("task_counts")
+        if allocated_cpus is None:
+            missing.append("cpu_allocation")
+        return self._report(
+            "missing_" + ",".join(missing) if missing else None,
+            now,
+        )
+
+    def query_failed(
+        self,
+        error: Exception,
+        now: float,
+    ) -> Optional[str]:
+        # Command arguments and stderr may contain credentials or user data.
+        if isinstance(
+            error,
+            TimeoutExpired,
+        ):
+            reason = "query_timeout"
+        elif isinstance(
+            error,
+            CalledProcessError,
+        ):
+            reason = "query_nonzero_exit"
+        elif isinstance(
+            error,
+            OSError,
+        ):
+            reason = "query_os_error"
+        elif isinstance(
+            error,
+            ValueError,
+        ):
+            reason = "invalid_accounting_response"
+        else:
+            reason = "query_incomplete_or_failed"
+        return self._report(
+            reason,
+            now,
+        )
+
+    def _report(
+        self,
+        reason: Optional[str],
+        now: float,
+    ) -> Optional[str]:
+        if reason is None:
+            reported = self._last_report is not None
+            self._unavailable_since = None
+            self._last_report = None
+            return "[Magnus metrics] Slurm accounting recovered" if reported else None
+        if self._unavailable_since is None:
+            self._unavailable_since = now
+        if now - self._unavailable_since < 60.0:
+            return None
+        if self._last_report is not None and now - self._last_report < 300.0:
+            return None
+        self._last_report = now
+        return "[Magnus metrics] Slurm accounting unavailable: " + reason
 
 
 def _nonnegative_integer(

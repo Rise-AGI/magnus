@@ -244,7 +244,9 @@ def _metrics_sidecar(metrics_dir, stop_event):
         allowed_gpus = set(s.strip() for s in _cvd.split(",") if s.strip().isdigit())
         job_id = os.environ.get("SLURM_JOB_ID", "")
         reader = SlurmJobMetricsReader()
-        sampler = SlurmJobMetricsSampler(allocation_cpus(os.environ))
+        allocated_cpus = allocation_cpus(os.environ)
+        sampler = SlurmJobMetricsSampler(allocated_cpus)
+        accounting_health = SlurmAccountingHealth()
         next_accounting = 0.0
         while not stop_event.wait(5.0):
             now_ms = int(time.time() * 1000)
@@ -283,14 +285,32 @@ def _metrics_sidecar(metrics_dir, stop_event):
             if not stop_event.is_set() and time.monotonic() >= next_accounting:
                 try:
                     snapshot = reader.read(job_id, timeout=10.0)
+                    diagnostic = accounting_health.observe(
+                        snapshot,
+                        allocated_cpus,
+                        time.monotonic(),
+                    )
                     records = sampler.sample(
                         snapshot,
                         monotonic_seconds=time.monotonic(),
                         time_unix_ms=int(time.time() * 1000),
                     )
                     lines.extend(json.dumps(record) for record in records)
-                except Exception:
+                except Exception as error:
                     sampler.reset()
+                    diagnostic = accounting_health.query_failed(
+                        error,
+                        time.monotonic(),
+                    )
+                if diagnostic is not None:
+                    try:
+                        print(
+                            diagnostic,
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    except OSError:
+                        pass
                 next_accounting = time.monotonic() + 30.0
             if lines:
                 try:

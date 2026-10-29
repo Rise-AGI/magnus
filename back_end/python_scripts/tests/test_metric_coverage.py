@@ -1,6 +1,7 @@
 """Exercise emitted metrics, without containers, GPUs or a running service."""
 import ast
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -100,6 +101,8 @@ class MetricCoverageTests(unittest.TestCase):
             PIPE=subprocess.PIPE,
         )
         module.open = writer
+        self.diagnostics = io.StringIO()
+        module.sys = SimpleNamespace(stderr=self.diagnostics)
         module._metrics_sidecar("/metrics", SimpleNamespace(wait=wait, is_set=lambda: False))
         records = [
             json.loads(line)
@@ -197,6 +200,44 @@ class MetricCoverageTests(unittest.TestCase):
                 cwd=directory,
             )
         self.assertEqual(result.stdout.splitlines(), ["128", "SlurmJobMetricsReader"])
+
+    def test_sustained_empty_accounting_logs_bounded_diagnostic_and_recovers(self):
+        records, accounting, _ = self.run_sidecar(
+            generated=self.generated_wrapper(2, 64),
+            environment={"SLURM_JOB_ID": "123", "SLURM_JOB_CPUS_PER_NODE": "64(x2)"},
+            samples=["", "", "", "123.0|128|cpu=0,mem=2048", "123.0|128|cpu=3840,mem=4096"],
+            ticks=25,
+        )
+        self.assertEqual(
+            self.diagnostics.getvalue().splitlines(),
+            ["[Magnus metrics] Slurm accounting unavailable: missing_steps",
+             "[Magnus metrics] Slurm accounting recovered"],
+        )
+        self.assertEqual(
+            [point["value"] for point in records if point["name"] == "system.cpu.utilization"],
+            [100.0],
+        )
+        self.assertEqual(
+            [point["value"] for point in records if point["name"] == "system.memory.used_bytes"],
+            [2048, 4096],
+        )
+        self.assertEqual(
+            len(accounting),
+            5,
+        )
+
+    def test_sustained_query_error_logs_no_credentials_and_resumes_sampling(self):
+        self.run_sidecar(
+            generated=self.generated_wrapper(1, 1),
+            environment={"SLURM_JOB_ID": "123", "SLURM_JOB_CPUS_PER_NODE": "2"},
+            samples=[subprocess.TimeoutExpired("secret", 10)] * 3 + ["123.batch|1|cpu=0,mem=100"],
+            ticks=19,
+        )
+        self.assertEqual(
+            self.diagnostics.getvalue().splitlines(),
+            ["[Magnus metrics] Slurm accounting unavailable: query_timeout",
+             "[Magnus metrics] Slurm accounting recovered"],
+        )
 
     def test_docker_metrics_have_container_scope_and_device_gpu_scope(self):
         source = SERVER / "_metrics_collector" / "_collector.py"

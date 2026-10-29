@@ -162,6 +162,153 @@ class SlurmJobMetricsTests(unittest.TestCase):
             reader.read("123", timeout=1)
 
 
+class SlurmAccountingHealthTests(unittest.TestCase):
+    def snapshot(
+        self,
+        row="123.batch|1|cpu=0,mem=100",
+    ):
+        return METRICS.parse_job_metrics(
+            row,
+            ["123"],
+        )["123"]
+
+    def test_healthy_first_cpu_baseline_does_not_report_a_gap(self):
+        health = METRICS.SlurmAccountingHealth()
+        self.assertIsNone(
+            health.observe(
+                self.snapshot(),
+                2,
+                5.0,
+            ),
+        )
+
+    def test_sustained_missing_accounting_reports_then_recovers_once(self):
+        health = METRICS.SlurmAccountingHealth()
+        snapshot = self.snapshot(
+            "",
+        )
+        messages = [health.observe(
+            snapshot,
+            2,
+            now,
+        ) for now in (5.0, 35.0, 65.0, 95.0, 365.0)]
+        self.assertEqual(
+            messages,
+            [None, None, "[Magnus metrics] Slurm accounting unavailable: missing_steps",
+             None, "[Magnus metrics] Slurm accounting unavailable: missing_steps"],
+        )
+        self.assertEqual(
+            health.observe(
+                self.snapshot(),
+                2,
+                395.0,
+            ),
+            "[Magnus metrics] Slurm accounting recovered",
+        )
+        self.assertIsNone(
+            health.observe(
+                self.snapshot(),
+                2,
+                425.0,
+            ),
+        )
+
+    def test_missing_fields_are_distinguished_from_no_steps(self):
+        for row, allocation, expected in (
+            ("123.batch|1|mem=100", 2, "missing_cpu_counters"),
+            ("123.batch|1|cpu=0", 2, "missing_memory_counters"),
+            ("123.batch||cpu=0,mem=100", 2, "missing_task_counts"),
+            ("123.batch|1|cpu=0,mem=100", None, "missing_cpu_allocation"),
+        ):
+            with self.subTest(
+                expected=expected,
+            ):
+                health = METRICS.SlurmAccountingHealth()
+                snapshot = self.snapshot(
+                    row,
+                )
+                health.observe(
+                    snapshot,
+                    allocation,
+                    0.0,
+                )
+                self.assertTrue(
+                    health.observe(
+                        snapshot,
+                        allocation,
+                        60.0,
+                    ).endswith(expected),
+                )
+
+    def test_query_diagnostics_never_echo_exception_arguments_or_output(self):
+        for error, reason in (
+            (subprocess.TimeoutExpired(
+                "secret-command",
+                10,
+                output="secret-body",
+            ), "query_timeout"),
+            (subprocess.CalledProcessError(
+                1,
+                "secret-command",
+                stderr="secret-body",
+            ), "query_nonzero_exit"),
+            (OSError("secret-path"), "query_os_error"),
+            (ValueError("secret-response"), "invalid_accounting_response"),
+            (RuntimeError("secret-response"), "query_incomplete_or_failed"),
+        ):
+            with self.subTest(
+                reason=reason,
+            ):
+                health = METRICS.SlurmAccountingHealth()
+                health.query_failed(
+                    error,
+                    0.0,
+                )
+                message = health.query_failed(
+                    error,
+                    60.0,
+                )
+                self.assertEqual(
+                    message,
+                    "[Magnus metrics] Slurm accounting unavailable: " + reason,
+                )
+
+    def test_changing_failure_reasons_share_one_rate_limit(self):
+        health = METRICS.SlurmAccountingHealth()
+        messages = []
+        for now, error in ((0.0, OSError()), (60.0, ValueError()), (90.0, OSError()),
+                           (359.0, ValueError()), (360.0, OSError())):
+            messages.append(
+                health.query_failed(
+                    error,
+                    now,
+                ),
+            )
+        self.assertEqual(
+            [message is not None for message in messages],
+            [False, True, False, False, True],
+        )
+
+    def test_short_failure_is_silent_and_a_new_outage_gets_its_own_grace_period(self):
+        health = METRICS.SlurmAccountingHealth()
+        messages = []
+        for now, row in ((0.0, ""), (30.0, "123.batch|1|cpu=0,mem=100"),
+                         (60.0, ""), (90.0, ""), (120.0, "")):
+            messages.append(
+                health.observe(
+                    self.snapshot(
+                        row,
+                    ),
+                    2,
+                    now,
+                ),
+            )
+        self.assertEqual(
+            [message is not None for message in messages],
+            [False, False, False, False, True],
+        )
+
+
 class SlurmAllocationCpuTests(unittest.TestCase):
     def test_allocated_node_list_includes_repetitions_and_heterogeneous_nodes(self):
         for allocation, nodes, expected in (

@@ -830,6 +830,13 @@ process-accounting samples. Memory can still be reported when its fields are
 complete but CPU accounting is not. Slurm's configured accounting cadence limits
 the freshness of these observations.
 
+If missing accounting fields, allocation data or query failures persist for
+60 seconds, the wrapper records a diagnostic in the Job's runtime log. It
+reports the current cause at most once every five minutes during an outage,
+and records recovery once. Diagnostics use fixed reason codes, without command
+arguments or raw stderr. The first CPU baseline and shorter gaps stay silent.
+This applies to newly generated wrappers; existing Jobs keep their original code.
+
 The memory accounting basis follows the site's Slurm plugin and parameters.
 For example, cgroup v2 reports `memory.current`, including file cache unless
 the site configures `JobAcctGatherParams=no_file_cache`; it is not procfs RSS.

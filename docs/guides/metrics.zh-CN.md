@@ -824,6 +824,11 @@ SLURM 模式下，原有 wrapper 采集线程以作业所属用户身份，对�
 若内存字段完整而 CPU 不完整，仍可报告内存。观测的新鲜度受站点实际 accounting
 采集周期约束。
 
+统计字段、分配核数缺失或查询失败持续60秒后，wrapper 在 Job 运行日志中记录诊断。
+同一次故障期间每五分钟最多报告一次当前原因，恢复时记录一次。诊断只含固定原因码，
+不包含命令参数或原始 stderr。首次 CPU 基线及较短缺测保持静默。
+此行为作用于新生成的 wrapper；已有 Job 保留原代码。
+
 内存统计口径遵循站点的 Slurm 插件与参数。例如 cgroup v2 使用 `memory.current`，
 除非站点配置 `JobAcctGatherParams=no_file_cache`，否则含文件缓存，并不等同于procfs RSS。
 
