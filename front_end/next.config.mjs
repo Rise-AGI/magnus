@@ -65,6 +65,8 @@ const executionTargets = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Build workers must not scale with every CPU on a shared compute host.
+  experimental: { cpus: 2 },
   // 唯一的 next/image 使用已禁用优化，关闭未使用的图片优化接口。
   images: { unoptimized: true },
   env: {
