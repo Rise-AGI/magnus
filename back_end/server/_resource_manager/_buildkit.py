@@ -13,6 +13,9 @@ from pathlib import Path
 
 from ._helpers import _run_blocking_io as blocking_io
 from ._build_progress import write_json
+from ._processes import _process_group_exists
+
+_PROCESS_STOP_GRACE_SECONDS = 5
 
 
 class ImageBuildError(RuntimeError):
@@ -81,6 +84,19 @@ def _build_error_detail(
     return detail[-8192:]
 
 
+async def _wait_for_group_exit(
+    process_group: int,
+) -> None:
+    if os.name != "posix":
+        return
+    while _process_group_exists(
+        process_group,
+    ):
+        await asyncio.sleep(
+            0.05,
+        )
+
+
 async def _stop_process(
     process: asyncio.subprocess.Process,
 ) -> None:
@@ -94,23 +110,28 @@ async def _stop_process(
     except ProcessLookupError:
         pass
     try:
-        await asyncio.wait_for(process.wait(), timeout=5)
+        await asyncio.wait_for(
+            process.wait(),
+            timeout=_PROCESS_STOP_GRACE_SECONDS,
+        )
     except TimeoutError:
+        pass
+    finally:
         try:
             if os.name == "posix":
                 os.killpg(process.pid, signal.SIGKILL)
-            else:
+            elif process.returncode is None:
                 process.kill()
         except ProcessLookupError:
             pass
+    # Sending a signal does not prove every writer has released its files.
+    async with asyncio.timeout(
+        _PROCESS_STOP_GRACE_SECONDS,
+    ):
         await process.wait()
-    finally:
-        if os.name == "posix":
-            # Apptainer's parent can exit before all namespace/helper children.
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        await _wait_for_group_exit(
+            process.pid,
+        )
 
 
 async def run_command(
@@ -198,13 +219,8 @@ async def run_command(
         try:
             process = await spawning
         except Exception:
-            # A failed spawn acquired no process; the original error propagates.
-            if marker:
-                await blocking_io(
-                    write_json,
-                    marker,
-                    {"state": "idle"},
-                )
+            # Transport setup can fail after creating a process. Without its
+            # handle we cannot disprove surviving helpers; retain "spawning".
             return
 
         assert process.stdout is not None and process.stderr is not None
@@ -226,6 +242,10 @@ async def run_command(
         ]
         try:
             await _stop_process(process)
+        except TimeoutError as error:
+            raise ImageBuildError(
+                "Subprocesses did not exit after termination; process lease and scratch were preserved",
+            ) from error
         finally:
             for drain_task in drains:
                 drain_task.cancel()
@@ -253,6 +273,11 @@ async def run_command(
         async with asyncio.timeout(timeout):
             await asyncio.gather(*readers)
             await process.wait()
+            # EOF and the leader's exit do not imply that same-group helpers
+            # finished writing. Publication and retries require their exit too.
+            await _wait_for_group_exit(
+                process.pid,
+            )
         if marker:
             await blocking_io(
                 write_json,

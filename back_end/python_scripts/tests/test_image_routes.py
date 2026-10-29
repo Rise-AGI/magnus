@@ -187,6 +187,19 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
             self.namespace,
         )
 
+    async def test_restart_preserves_unowned_legacy_partial_files(
+        self,
+    ) -> None:
+        partial = self.root / "legacy.sif.tmp"
+        partial.write_bytes(
+            b"a surviving pull may still be writing",
+        )
+        self.namespace["recover_stuck_images"]()
+        self.assertTrue(
+            partial.exists(),
+        )
+        self.namespace["resource_manager"].recover_stale_pull_caches.assert_called_once()
+
     async def test_restart_recovers_the_mirror_image_and_its_size(
         self,
     ) -> None:

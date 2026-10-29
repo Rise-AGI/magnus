@@ -126,7 +126,7 @@ def _get_uri_lock(uri: str) -> asyncio.Lock:
 def recover_stuck_images() -> None:
     """
     启动时调用：清理上次进程异常退出遗留的中间态。
-    - .sif.tmp 文件：一律删除（不完整或孤儿进程遗留）
+    - 拉取临时目录：只在可确认其进程已退出时回收
     - DB 中 pulling/refreshing 状态的记录：有 .sif 则恢复为 cached，否则删除记录
     必须在 lifespan 中调用，而不是懒加载——否则重启后 POST 请求会被 409 卡住。
     """
@@ -137,18 +137,6 @@ def recover_stuck_images() -> None:
         if _recovered:
             return
         _recovered = True
-
-    # 清理残留的 .tmp 文件（进程异常退出时遗留，或孤儿 apptainer 进程写的）
-    # local 模式无 .sif 文件，跳过磁盘扫描
-    if not is_local_mode and os.path.isdir(container_cache_path):
-        for fname in os.listdir(container_cache_path):
-            if fname.endswith(".sif.tmp"):
-                tmp_path = os.path.join(container_cache_path, fname)
-                try:
-                    os.remove(tmp_path)
-                    logger.info(f"Cleaned up stale tmp file: {fname}")
-                except OSError:
-                    pass
 
     resource_manager.recover_stale_pull_caches()
 

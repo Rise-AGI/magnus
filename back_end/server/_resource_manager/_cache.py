@@ -2,13 +2,18 @@
 """LRU 缓存清理 + 启动时孤儿清理。"""
 import asyncio
 import os
-import shutil
 from typing import TYPE_CHECKING, List, Tuple
 
 from .._magnus_config import is_local_mode
-from . import logger, magnus_repo_cache_path, magnus_apptainer_cache_path
+from . import (
+    logger,
+    magnus_apptainer_cache_path,
+    magnus_container_cache_path,
+    magnus_repo_cache_path,
+)
 from ._helpers import _get_dir_size, _remove_tree, _run_blocking_io
 from ._config import REPO_CACHE_SIZE
+from ._pull_scratch import recover_pull_scratch
 
 
 if TYPE_CHECKING:
@@ -80,15 +85,12 @@ class _CacheMixin(_CacheMixinBase):
             finally:
                 lock.release()
 
-    def recover_stale_pull_caches(self) -> None:
-        """启动时调用：清理上次进程异常退出残留的 per-pull tempdir。
-        正常路径在 _ensure_image_apptainer 的 finally 里就 rmtree 了；
-        这里只兜底 SIGKILL / OOM 这种来不及走 finally 的情况。"""
-        if is_local_mode or not os.path.isdir(magnus_apptainer_cache_path):
+    def recover_stale_pull_caches(
+        self,
+    ) -> None:
+        if is_local_mode:
             return
-        for name in os.listdir(magnus_apptainer_cache_path):
-            if not name.startswith("pull-"):
-                continue
-            path = os.path.join(magnus_apptainer_cache_path, name)
-            shutil.rmtree(path, ignore_errors=True)
-            logger.info(f"Cleaned up stale pull cache: {name}")
+        recover_pull_scratch(
+            cache_root=magnus_apptainer_cache_path,
+            output_root=magnus_container_cache_path,
+        )

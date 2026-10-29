@@ -4,8 +4,6 @@
 import asyncio
 import os
 import re
-import shutil
-import tempfile
 import time
 from typing import TYPE_CHECKING, Optional, Tuple
 
@@ -16,6 +14,8 @@ from . import logger, magnus_apptainer_cache_path, magnus_container_cache_path
 from ._buildkit import ImageBuildError, run_command
 from ._config import MIN_FREE_BYTES_FOR_PULL, _rewrite_image_for_mirror
 from ._helpers import _run_blocking_io
+from ._pull_scratch import PullScratch
+from ._processes import process_lease_is_idle
 
 if TYPE_CHECKING:
     from ._typing import _ResourceManagerProtocol
@@ -127,7 +127,7 @@ class _ImagesMixin(_ImagesMixinBase):
         - 成功：(True, None)
         - 失败：(False, "error message")
         force=True 时跳过缓存检查，强制重新拉取。
-        所有拉取都写入 .tmp 再原子 rename，断电不会留下半成品 .sif。
+        所有拉取都写入独立暂存目录，再原子 rename 为正式 .sif。
         """
         sif_path = self.get_sif_path(
             image,
@@ -165,10 +165,6 @@ class _ImagesMixin(_ImagesMixinBase):
             )
             return False, message
 
-        # 始终写入临时文件，成功后原子 rename
-        # 这样断电/OOM 只会留下 .tmp，重启时统一清理，正式 .sif 不会被污染
-        pull_dest = sif_path + ".tmp"
-
         pull_image = _rewrite_image_for_mirror(
             image,
         )
@@ -196,16 +192,30 @@ class _ImagesMixin(_ImagesMixinBase):
         # apptainer pull 写入的 OCI scratch（blob、oci-tmp、oras）随次单调增长，
         # 实测达到 sif 库存的 2~4 倍后仍无 GC。每次 pull 用独立 tempdir 隔离，
         # 走完 finally 清理，磁盘占用自然有界。
-        pull_cache_dir = tempfile.mkdtemp(
-            prefix="pull-",
-            dir=magnus_apptainer_cache_path,
-        )
+        scratch: PullScratch | None = None
+
+        def prepare_scratch() -> None:
+            nonlocal scratch
+            scratch = PullScratch.create(
+                cache_root=magnus_apptainer_cache_path,
+                output_root=magnus_container_cache_path,
+            )
+
         try:
+            await _run_blocking_io(
+                prepare_scratch,
+            )
+            assert scratch is not None
+            pull_dest = str(
+                scratch.output,
+            )
             for attempt in range(
                 max_retries,
             ):
                 env = os.environ.copy()
-                env["APPTAINER_CACHEDIR"] = pull_cache_dir
+                env["APPTAINER_CACHEDIR"] = str(
+                    scratch.cache,
+                )
                 env["GODEBUG"] = "http2client=0"
                 try:
                     await run_command(
@@ -213,11 +223,16 @@ class _ImagesMixin(_ImagesMixinBase):
                         on_line=logger.debug,
                         environment=env,
                         timeout=None,
+                        process_directory=scratch.cache,
                     )
                 except ImageBuildError as error:
                     error_msg = str(
                         error,
                     )
+                    if not process_lease_is_idle(
+                        scratch.cache,
+                    ):
+                        return False, error_msg
                 else:
                     break
 
@@ -276,17 +291,9 @@ class _ImagesMixin(_ImagesMixinBase):
                 sif_path,
             )
         finally:
-            try:
-                os.unlink(
-                    pull_dest,
-                )
-            except FileNotFoundError:
-                pass
-            finally:
+            if scratch is not None:
                 await _run_blocking_io(
-                    shutil.rmtree,
-                    pull_cache_dir,
-                    ignore_errors=True,
+                    scratch.cleanup,
                 )
 
         elapsed = time.time() - start_time

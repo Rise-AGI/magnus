@@ -3,6 +3,7 @@
 import ast
 import asyncio
 import importlib.util
+import json
 import logging
 import os
 import runpy
@@ -12,7 +13,7 @@ import threading
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 SERVER = (
     Path(
@@ -65,6 +66,9 @@ cache_module = load(
 )
 commands = load(
     "_buildkit",
+)
+pull_scratch = load(
+    "_pull_scratch",
 )
 blocking_io = runpy.run_path(
     str(
@@ -489,6 +493,8 @@ class ImagePullTests(unittest.IsolatedAsyncioTestCase):
             "_run_blocking_io": blocking_io,
             "run_command": commands.run_command,
             "ImageBuildError": commands.ImageBuildError,
+            "PullScratch": pull_scratch.PullScratch,
+            "process_lease_is_idle": pull_scratch.process_lease_is_idle,
             "_rewrite_image_for_mirror": lambda uri: uri,
             "MIN_FREE_BYTES_FOR_PULL": 0,
             "magnus_container_cache_path": str(
@@ -529,6 +535,62 @@ class ImagePullTests(unittest.IsolatedAsyncioTestCase):
         self.manager.images = self.cache
         self.manager.image_locks = {}
         self.manager.get_sif_path = self.cache.path
+
+    async def test_refreshes_use_distinct_outputs_and_preserve_legacy_partial(
+        self,
+    ) -> None:
+        legacy = Path(
+            self.cache.path(
+                "uri",
+            )
+            + ".tmp",
+        )
+        legacy.write_bytes(
+            b"possibly still owned by a previous process",
+        )
+        outputs = []
+
+        async def command(
+            arguments,
+            **keywords,
+        ):
+            output = Path(
+                arguments[2],
+            )
+            outputs.append(
+                output,
+            )
+            output.write_bytes(
+                b"complete SIF",
+            )
+            return ""
+
+        self.namespace["run_command"] = command
+        for _ in range(
+            2,
+        ):
+            self.assertEqual(
+                await self.manager.ensure_image(
+                    "uri",
+                    force=True,
+                ),
+                (True, None),
+            )
+        self.assertEqual(
+            len(
+                set(
+                    outputs,
+                ),
+            ),
+            2,
+        )
+        self.assertEqual(
+            legacy.read_bytes(),
+            b"possibly still owned by a previous process",
+        )
+        self.assertTrue(
+            all(not output.exists() for output in outputs),
+        )
 
     async def test_concurrent_pulls_share_one_file_and_keep_job_pin(
         self,
@@ -658,12 +720,15 @@ class ImagePullTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         entered = asyncio.Event()
         child_pid = None
+        process_directory = None
         marker = self.root / "child-started"
 
         async def command(
             arguments,
             **keywords,
         ):
+            nonlocal process_directory
+            process_directory = keywords["process_directory"]
             script = (
                 "import os,pathlib,time; "
                 "pathlib.Path(os.environ['APPTAINER_CACHEDIR'], 'scratch').write_text('owned'); "
@@ -679,6 +744,7 @@ class ImagePullTests(unittest.IsolatedAsyncioTestCase):
                 [sys.executable, "-c", script],
                 environment=keywords["environment"],
                 timeout=None,
+                process_directory=keywords["process_directory"],
             )
 
         self.namespace["run_command"] = command
@@ -702,6 +768,22 @@ class ImagePullTests(unittest.IsolatedAsyncioTestCase):
             child_pid = int(
                 marker.read_text(),
             )
+            async with asyncio.timeout(
+                3,
+            ):
+                while True:
+                    lease = json.loads(
+                        (process_directory / "process.json").read_text(),
+                    )
+                    if lease.get("state") == "running":
+                        break
+                    await asyncio.sleep(
+                        0.01,
+                    )
+            self.assertEqual(
+                lease["pid"],
+                child_pid,
+            )
             task.cancel()
             await asyncio.sleep(
                 0,
@@ -717,6 +799,14 @@ class ImagePullTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 list(
                     self.scratch.iterdir(),
+                ),
+                [],
+            )
+            self.assertEqual(
+                list(
+                    self.root.glob(
+                        "pull-*",
+                    ),
                 ),
                 [],
             )
@@ -742,6 +832,117 @@ class ImagePullTests(unittest.IsolatedAsyncioTestCase):
                 task,
                 return_exceptions=True,
             )
+
+    async def test_failed_spawn_preserves_scratch_without_claiming_process_exit(
+        self,
+    ) -> None:
+        with (
+            patch.object(
+                commands.asyncio,
+                "create_subprocess_exec",
+                new=AsyncMock(
+                    side_effect=OSError(
+                        "transport setup failed",
+                    ),
+                ),
+            ),
+            self.assertLogs(
+                pull_scratch.logger,
+                level="WARNING",
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "transport setup failed",
+            ),
+        ):
+            await self.manager.ensure_image(
+                "uri",
+            )
+        cache, = self.scratch.iterdir()
+        self.assertEqual(
+            json.loads(
+                (cache / "process.json").read_text(),
+            ),
+            {"state": "spawning"},
+        )
+        self.assertTrue(
+            (self.root / cache.name).is_dir(),
+        )
+
+    async def test_cancelled_allocation_joins_worker_and_removes_owned_scratch(
+        self,
+    ) -> None:
+        allocated = threading.Event()
+        release = threading.Event()
+        create = pull_scratch.PullScratch.create
+
+        def delayed_create(
+            **keywords,
+        ):
+            scratch = create(
+                **keywords,
+            )
+            allocated.set()
+            if not release.wait(
+                3,
+            ):
+                raise RuntimeError("allocation worker not released")
+            return scratch
+
+        command = AsyncMock()
+        self.namespace["run_command"] = command
+        with patch.object(
+            pull_scratch.PullScratch,
+            "create",
+            side_effect=delayed_create,
+        ):
+            task = asyncio.create_task(
+                self.manager.ensure_image(
+                    "uri",
+                ),
+            )
+            try:
+                async with asyncio.timeout(
+                    3,
+                ):
+                    while not allocated.is_set():
+                        await asyncio.sleep(
+                            0.01,
+                        )
+                task.cancel()
+                await asyncio.sleep(
+                    0,
+                )
+                self.assertFalse(
+                    task.done(),
+                )
+                release.set()
+                with self.assertRaises(
+                    asyncio.CancelledError,
+                ):
+                    await task
+            finally:
+                release.set()
+                task.cancel()
+                await asyncio.gather(
+                    task,
+                    return_exceptions=True,
+                )
+        command.assert_not_called()
+        self.assertEqual(
+            list(
+                self.scratch.iterdir(),
+            ),
+            [],
+        )
+        self.assertEqual(
+            list(
+                self.root.glob(
+                    "pull-*",
+                ),
+            ),
+            [],
+        )
 
     async def test_docker_pulls_are_serialized_and_inspect_uses_mirror(
         self,

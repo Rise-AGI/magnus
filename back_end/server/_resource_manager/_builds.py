@@ -25,6 +25,7 @@ from .._magnus_config import is_local_mode, magnus_config
 from .._size_utils import _parse_size_string
 from ._build_progress import BuildProgress, write_json
 from ._buildkit import BuildKitClient, ImageBuildError, blocking_io, run_command
+from ._processes import _process_exists, _process_group_exists, process_lease_is_idle
 from ._scratch_windows import prepare_private_directory as _prepare_windows_scratch_root
 
 
@@ -99,52 +100,6 @@ def _file_signature(
         # a rename. Both expose the same creation time through st_birthtime.
         information.st_birthtime_ns if os.name == "nt" else information.st_ctime_ns,
     )
-
-
-def _process_exists(
-    pid: int,
-) -> bool:
-    if os.name != "nt":
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
-    # os.kill(pid, 0) is not a liveness probe on Windows: non-console signals
-    # map to TerminateProcess. Query the process handle without sending signals.
-    import ctypes
-    from ctypes import wintypes
-
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel.OpenProcess.restype = wintypes.HANDLE
-    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    kernel.WaitForSingleObject.restype = wintypes.DWORD
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = kernel.OpenProcess(0x00100000, False, pid)
-    if not handle:
-        return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER: no such PID
-    try:
-        return kernel.WaitForSingleObject(handle, 0) != 0
-    finally:
-        kernel.CloseHandle(handle)
-
-
-def _process_group_exists(
-    process_group: int,
-) -> bool:
-    try:
-        os.killpg(
-            process_group,
-            0,
-        )
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def _prepare_scratch_root(
@@ -774,13 +729,33 @@ class ImageBuildManager:
         finally:
             try:
                 if directory:
-                    await blocking_io(shutil.rmtree, directory, True)
+                    await blocking_io(
+                        self._cleanup_directory,
+                        directory,
+                    )
             finally:
                 if directory:
                     self.budget_generation += 1
                 with self.lock:
                     if self.operations.get(operation.key) is operation:
                         self.operations.pop(operation.key, None)
+
+    @staticmethod
+    def _cleanup_directory(
+        directory: Path,
+    ) -> None:
+        if process_lease_is_idle(
+            directory,
+        ):
+            shutil.rmtree(
+                directory,
+                ignore_errors=True,
+            )
+        else:
+            logger.warning(
+                "Preserved build scratch %s; subprocess exit has not been confirmed",
+                directory.name,
+            )
 
     @staticmethod
     def _prepare_directory(
@@ -853,6 +828,7 @@ class ImageBuildManager:
                 )
                 output = await run_command(
                     ["docker", "image", "inspect", "--format", "{{json .}}", temporary_tag],
+                    process_directory=directory,
                 )
                 inspected = json.loads(output)
                 identifier = inspected["Id"]
@@ -893,7 +869,10 @@ class ImageBuildManager:
                     timeout=self.config["timeout_seconds"],
                     process_directory=directory,
                 )
-                await run_command(["apptainer", "inspect", str(temporary_sif)])
+                await run_command(
+                    ["apptainer", "inspect", str(temporary_sif)],
+                    process_directory=directory,
+                )
                 await self._ensure_budget()
                 digest = await blocking_io(_hash_file, temporary_sif)
                 path = self._sif_path(digest)

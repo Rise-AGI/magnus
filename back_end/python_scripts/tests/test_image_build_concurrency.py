@@ -66,6 +66,7 @@ def load_coordinator():
     for filename, selected in (
         (SERVER / "_size_utils.py", {"_parse_size_string"}),
         (SERVER / "_blocking_io.py", {"_run_blocking_io"}),
+        (SERVER / "_resource_manager/_processes.py", None),
         (SERVER / "_resource_manager/_builds.py", None),
     ):
         tree = ast.parse(filename.read_text(encoding="utf-8"), filename=str(filename))
@@ -94,6 +95,34 @@ def cross_volume_replace(real_replace):
 
 
 class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_operation_cleanup_preserves_unconfirmed_subprocesses(
+        self,
+    ) -> None:
+        self.manager._flush = AsyncMock()
+        for state in ("running", "spawning", "idle"):
+            with self.subTest(
+                state=state,
+            ):
+                (self.directory / "process.json").write_text(
+                    json.dumps(
+                        {"state": state, "pid": 42},
+                    ),
+                )
+                self.manager.operations[self.operation.key] = self.operation
+                await self.manager._finish_operation(
+                    self.operation,
+                    None,
+                    self.directory,
+                )
+                self.assertEqual(
+                    self.directory.exists(),
+                    state != "idle",
+                )
+                self.assertNotIn(
+                    self.operation.key,
+                    self.manager.operations,
+                )
+
     def setUp(self):
         # ACL tests need a trusted parent. A deliberately shared user-profile
         # ACL must not be weakened just to make these security checks pass.
