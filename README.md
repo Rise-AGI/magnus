@@ -213,6 +213,7 @@ See [Job Runtime Documentation](docs/internals/job-runtime.md) for container exe
 <summary><strong>Internals &amp; references</strong> — for operators and contributors</summary>
 
 - [Job Runtime](docs/internals/job-runtime.md) — Container isolation, environment variables, networking
+- [Isolated Tests](docs/internals/testing.md) — Repeatable backend and SDK regression checks
 - [uv Image Notes](docs/internals/uv-image.md) — Building the `magnus-runtime` container image with uv
 - [Internal Links Requirements](docs/requirements/internal-links.md) — Design notes for the `magnus:///` URI scheme
 

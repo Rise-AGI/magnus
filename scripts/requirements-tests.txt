@@ -1,0 +1,11 @@
+# Lightweight isolated tests only, not the backend's runtime environment.
+fastapi==0.133.1
+starlette==1.6.0
+httpx==0.28.1
+pydantic==2.12.5
+python-multipart==0.0.21
+SQLAlchemy==2.0.44
+ruamel.yaml==0.19.1
+typer>=0.9.0,<1
+rich>=13.0.0,<15
+python-dotenv>=1.0.0,<2

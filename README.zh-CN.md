@@ -209,6 +209,7 @@ cd front_end && npm install && npm run dev
 <summary><strong>内部实现与参考</strong> —— 面向运维者与贡献者</summary>
 
 - [Job Runtime](docs/internals/job-runtime.zh-CN.md) —— 容器隔离、环境变量、网络
+- [隔离测试](docs/internals/testing.zh-CN.md) —— 可重复的后端与 SDK 回归检查
 - [uv Image Notes](docs/internals/uv-image.zh-CN.md) —— 用 uv 构建 `magnus-runtime` 容器镜像
 - [Internal Links Requirements](docs/requirements/internal-links.zh-CN.md) —— `magnus:///` URI 方案的设计说明
 

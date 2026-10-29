@@ -24,6 +24,7 @@ front_end/*.tsbuildinfo
 
 
 # Back End: Python, FastAPI + SQLAlchemy
+.venv-tests/
 back_end/*.py[oc]
 back_end/.venv
 back_end/run*.py
