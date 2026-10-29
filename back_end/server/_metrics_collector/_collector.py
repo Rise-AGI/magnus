@@ -29,12 +29,13 @@ from ._nvidia_smi import _sample_nvidia_smi
 
 
 _SAMPLE_INTERVAL_SECONDS = 5.0  # match SLURM-side sidecar cadence (see metrics.md §17.2)
+_METADATA_RETRY_INTERVAL_SECONDS = 60.0
 
 
 class _JobMetricsState:
     __slots__ = (
         "container_name", "pid", "process_starttime", "prev_usage_usec", "prev_sample_time",
-        "alloc_cpus", "visible_gpus",
+        "alloc_cpus", "visible_gpus", "metadata_retry_at",
     )
 
     def __init__(
@@ -48,13 +49,10 @@ class _JobMetricsState:
         self.prev_usage_usec: Optional[int] = None
         self.process_starttime = process_starttime
         self.prev_sample_time: Optional[float] = None
-        # Cache allocated CPUs lookup; refreshed only if state is rebuilt.
+        # Unknown metadata must not become a permanent cache after a timeout.
         self.alloc_cpus: Optional[float] = None
-        # Cache visible-GPU lookup; refreshed only if state is rebuilt.
-        # None = "all"/"void"/inspect-failed (conservative: sample nothing);
-        # [] = explicit no GPU access; non-empty list = filter to these indices.
-        # The None vs [] distinction is preserved so callers stay fail-open.
         self.visible_gpus: Optional[List[str]] = None
+        self.metadata_retry_at = 0.0
 
 
 class DockerMetricsCollector:
@@ -131,6 +129,7 @@ class DockerMetricsCollector:
                 self._sample_job(job_id, get_gpu_snapshot, now_ms)
             except Exception as error:
                 logger.debug(f"Sample failed for docker job {job_id}: {error}")
+        self._retry_metadata()
 
     def _sample_job(
         self,
@@ -152,8 +151,9 @@ class DockerMetricsCollector:
                 pid,
                 process_starttime,
             )
-            state.alloc_cpus = _read_allocated_cpus(pid)
-            state.visible_gpus = _docker_inspect_visible_gpus(container_name)
+            self._refresh_metadata(
+                state,
+            )
             if _docker_inspect_container_pid(container_name) != pid:
                 return
             self._states[job_id] = state
@@ -213,8 +213,7 @@ class DockerMetricsCollector:
             }))
 
         # GPU metrics (filtered by NVIDIA_VISIBLE_DEVICES, cached on state).
-        # `None` (ambiguous/inspect-failed) and `[]` (explicit no GPUs) both skip;
-        # a non-empty list of indices triggers the nvidia-smi sample for this job.
+        # Only confirmed indices can attribute host device counters to this Job.
         visible = state.visible_gpus
         if visible:
             gpu_snapshot = get_gpu_snapshot()
@@ -254,3 +253,52 @@ class DockerMetricsCollector:
         except OSError:
             # metrics dir may not exist yet (job tear-down race); skip
             pass
+
+    def _retry_metadata(
+        self,
+    ) -> None:
+        # One retry after normal sampling bounds a daemon outage to one inspect
+        # timeout per tick. The oldest deadline prevents a failing Job starving others.
+        now = time.monotonic()
+        candidates = [
+            (state.metadata_retry_at, job_id, state)
+            for job_id, state in self._states.items()
+            if state.metadata_retry_at <= now
+            and (state.alloc_cpus is None or state.visible_gpus is None)
+        ]
+        if not candidates:
+            return
+        _, job_id, state = min(
+            candidates,
+            key=lambda item: (item[0], item[1]),
+        )
+        if state.process_starttime != _read_process_starttime(
+            state.pid,
+        ):
+            self._states.pop(job_id, None)
+            return
+        self._refresh_metadata(
+            state,
+        )
+        if state.process_starttime != _read_process_starttime(
+            state.pid,
+        ):
+            self._states.pop(job_id, None)
+
+    def _refresh_metadata(
+        self,
+        state: _JobMetricsState,
+    ) -> None:
+        if state.alloc_cpus is None:
+            state.alloc_cpus = _read_allocated_cpus(
+                state.pid,
+            )
+            if state.alloc_cpus is not None:
+                # Do not calculate an interval spanning a normalization change.
+                state.prev_usage_usec = None
+                state.prev_sample_time = None
+        if state.visible_gpus is None:
+            state.visible_gpus = _docker_inspect_visible_gpus(
+                state.container_name,
+            )
+        state.metadata_retry_at = time.monotonic() + _METADATA_RETRY_INTERVAL_SECONDS

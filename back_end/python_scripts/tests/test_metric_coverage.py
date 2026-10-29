@@ -248,6 +248,7 @@ class MetricCoverageTests(unittest.TestCase):
         writer = mock_open()
         namespace = {
             "__name__": __name__,
+            "logger": Mock(),
             "magnus_config": {"server": {"root": "/unused"}},
             "_read_cpu_usage_usec": lambda pid: 15000000,
             "_read_memory_used_bytes": lambda pid: 4096,
@@ -255,6 +256,7 @@ class MetricCoverageTests(unittest.TestCase):
             "_read_allocated_cpus": lambda pid: 2.0,
             "_docker_inspect_container_pid": Mock(return_value=1),
             "_docker_inspect_visible_gpus": lambda name: ["0"],
+            "_sample_nvidia_smi": lambda: {"0": (25.0, 4096.0)},
             "open_protocol_file": lambda *args: writer(),
         }
         exec(compile(tree, str(source), "exec"), namespace)
@@ -262,6 +264,7 @@ class MetricCoverageTests(unittest.TestCase):
         collector._states["example"] = SimpleNamespace(
             pid=1, process_starttime=100, alloc_cpus=2.0, prev_usage_usec=0,
             prev_sample_time=1.0, visible_gpus=["0"],
+            container_name="magnus-job-example", metadata_retry_at=60.0,
         )
         return collector, namespace, writer
 
@@ -288,6 +291,30 @@ class MetricCoverageTests(unittest.TestCase):
         writer().write.reset_mock()
         return records
 
+    def tick_docker(
+        self,
+        collector,
+        namespace,
+        writer,
+        *,
+        monotonic,
+        job_ids=("example",),
+    ):
+        collector._list_running_docker_jobs = lambda: list(job_ids)
+        with patch.object(
+            namespace["time"],
+            "monotonic",
+            return_value=monotonic,
+        ):
+            collector._tick()
+        records = [
+            json.loads(line)
+            for call in writer().write.call_args_list
+            for line in call.args[0].splitlines()
+        ]
+        writer().write.reset_mock()
+        return records
+
     def test_docker_metrics_have_container_scope_and_device_gpu_scope(self):
         records = self.sample_docker(*self.docker_collector())
         cpu = next(record for record in records if record["name"] == "system.cpu.utilization")
@@ -296,6 +323,186 @@ class MetricCoverageTests(unittest.TestCase):
         self.assertTrue(all(record["labels"]["coverage"] == "single_container" for record in records))
         gpu = next(record for record in records if record["name"] == "system.gpu.utilization")
         self.assertEqual(gpu["labels"]["scope"], "device")
+
+    def test_docker_gpu_inspect_recovers_without_retrying_known_metadata(self):
+        collector, namespace, writer = self.docker_collector()
+        collector._states.clear()
+        inspector = Mock(
+            side_effect=[None, ["0"]],
+        )
+        namespace["_docker_inspect_visible_gpus"] = inspector
+        point_counts = []
+        for instant in (0.0, 5.0, 59.0, 60.0, 65.0, 120.0):
+            records = self.tick_docker(
+                collector,
+                namespace,
+                writer,
+                monotonic=instant,
+            )
+            point_counts.append(
+                sum(point["name"].startswith("system.gpu.") for point in records),
+            )
+        self.assertEqual(
+            point_counts,
+            [0, 0, 0, 0, 2, 2],
+        )
+        self.assertEqual(
+            inspector.call_count,
+            2,
+        )
+
+    def test_docker_quota_recovery_resets_normalization_interval(self):
+        collector, namespace, writer = self.docker_collector()
+        collector._states.clear()
+        quota = Mock(
+            side_effect=[None, 2.0],
+        )
+        namespace["_read_allocated_cpus"] = quota
+        namespace["_read_cpu_usage_usec"] = Mock(
+            side_effect=[0, 10_000_000, 120_000_000, 130_000_000, 140_000_000],
+        )
+        values = []
+        with patch.object(
+            namespace["os"],
+            "cpu_count",
+            return_value=8,
+        ):
+            for instant in (0.0, 5.0, 60.0, 65.0, 70.0):
+                records = self.tick_docker(
+                    collector,
+                    namespace,
+                    writer,
+                    monotonic=instant,
+                )
+                values.extend(
+                    (instant, point["value"], point["labels"]["normalized_by"])
+                    for point in records if point["name"] == "system.cpu.utilization"
+                )
+        self.assertEqual(
+            values,
+            [(5.0, 25.0, "host_cpu_count"), (60.0, 25.0, "host_cpu_count"),
+             (70.0, 100.0, "cgroup_quota")],
+        )
+        self.assertEqual(
+            quota.call_count,
+            2,
+        )
+
+    def test_docker_verified_empty_gpu_selection_is_cached(self):
+        collector, namespace, writer = self.docker_collector()
+        collector._states.clear()
+        inspector = Mock(
+            return_value=[],
+        )
+        namespace["_docker_inspect_visible_gpus"] = inspector
+        for instant in (0.0, 60.0, 120.0):
+            records = self.tick_docker(
+                collector,
+                namespace,
+                writer,
+                monotonic=instant,
+            )
+            self.assertFalse(
+                any(point["name"].startswith("system.gpu.") for point in records),
+            )
+        self.assertEqual(
+            inspector.call_count,
+            1,
+        )
+
+    def test_metadata_timeouts_are_bounded_per_tick_and_fair_across_jobs(self):
+        collector, namespace, writer = self.docker_collector()
+        collector._states.clear()
+        events = []
+        for job_id in ("a", "b", "c"):
+            state = namespace["_JobMetricsState"](
+                "magnus-job-" + job_id,
+                1,
+                100,
+            )
+            state.alloc_cpus = 2.0
+            collector._states[job_id] = state
+
+        def read_memory(
+            pid,
+        ):
+            events.append("sample")
+            return 4096
+
+        def failed_inspect(
+            container_name,
+        ):
+            events.append(container_name)
+            return None
+
+        namespace["_read_memory_used_bytes"] = read_memory
+        namespace["_docker_inspect_visible_gpus"] = failed_inspect
+        for instant, job_id in ((60.0, "a"), (65.0, "b"), (70.0, "c")):
+            events.clear()
+            records = self.tick_docker(
+                collector,
+                namespace,
+                writer,
+                monotonic=instant,
+                job_ids=("a", "b", "c"),
+            )
+            self.assertEqual(
+                events,
+                ["sample", "sample", "sample", "magnus-job-" + job_id],
+            )
+            self.assertEqual(
+                sum(point["name"] == "system.memory.used_bytes" for point in records),
+                3,
+            )
+
+    def test_docker_gpu_inspect_distinguishes_failed_and_ambiguous_responses(self):
+        source = SERVER / "_metrics_collector" / "_docker_inspect.py"
+        spec = importlib.util.spec_from_file_location(
+            "isolated_docker_inspect",
+            source,
+        )
+        module = importlib.util.module_from_spec(
+            spec,
+        )
+        spec.loader.exec_module(
+            module,
+        )
+        for value, expected in (
+            ("all", []), ("void", []), ("none", []), ("", []), ("0,3", ["0", "3"]),
+        ):
+            with self.subTest(
+                value=value,
+            ), patch.object(
+                module.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    [],
+                    0,
+                    json.dumps(["NVIDIA_VISIBLE_DEVICES=" + value]),
+                ),
+            ):
+                self.assertEqual(
+                    module._docker_inspect_visible_gpus(
+                        "example",
+                    ),
+                    expected,
+                )
+        for failure in (
+            subprocess.TimeoutExpired("docker", 5),
+            subprocess.CompletedProcess([], 1, ""),
+            subprocess.CompletedProcess([], 0, "{"),
+        ):
+            with patch.object(
+                module.subprocess,
+                "run",
+                side_effect=failure if isinstance(failure, Exception) else None,
+                return_value=failure,
+            ):
+                self.assertIsNone(
+                    module._docker_inspect_visible_gpus(
+                        "example",
+                    ),
+                )
 
     def test_docker_reused_pid_is_dropped_before_reading_cgroup_data(self):
         collector, namespace, writer = self.docker_collector()

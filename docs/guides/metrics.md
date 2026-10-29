@@ -863,6 +863,12 @@ collector checks the host process start identity before and after sampling, so
 PID reuse or an exit during collection discards that sample and resets its
 baseline. CPU and memory require readable host process/cgroup data; device GPU
 sampling remains independent of that host capability.
+Unknown CPU quota and failed GPU environment queries are retried at most once
+per minute for a live container. After normal sampling, each tick retries at most
+one due container, oldest deadline first, to avoid accumulating inspect timeouts.
+Confirmed GPU selections stay cached; ambiguous
+`all`/`void` values still do not attribute host-wide GPU activity to a Job. When
+a CPU quota becomes known, the collector starts a new utilization interval.
 
 References: [Slurm sstat](https://slurm.schedmd.com/sstat.html),
 [Slurm allocation variables](https://slurm.schedmd.com/sbatch.html), and

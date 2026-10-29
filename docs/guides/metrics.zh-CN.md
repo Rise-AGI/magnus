@@ -846,6 +846,10 @@ labels保留统计范围与来源，不把其它宿主任务的使用量加进�
 CPU增量使用单调时钟计算间隔，数据点时间戳仍用UTC墙钟。采集前后核对宿主进程
 的启动身份；PID复用或采集中退出时丢弃该次采样并重置基线。CPU和内存需要可读的
 宿主进程与cgroup数据，设备GPU采样不依赖这项宿主能力。
+对存活容器，未读到的CPU quota和失败的GPU环境查询最多每分钟重试一次；每轮先完成正常
+采样，再按最早到期顺序重试至多一个容器，避免查询超时累积。已确认的GPU选择继续缓存，
+`all`/`void`等模糊取值仍不会把全宿主GPU使用量归给Job。CPU quota
+恢复可读时重新建立利用率采样区间。
 
 依据：[Slurm sstat](https://slurm.schedmd.com/sstat.html)、
 [Slurm分配环境变量](https://slurm.schedmd.com/sbatch.html)、
