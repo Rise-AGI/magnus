@@ -120,7 +120,7 @@ class _ReposMixin(_ReposMixinBase):
         """带 TTL 内存缓存 + per-repo 锁的默认分支解析。
         fanout 里 N 个 worker 命中同一个 repo 时，只有第一个打上游 ls-remote，
         其余在锁内等待 + 二次命中缓存直接返回。"""
-        now = time.time()
+        now = time.monotonic()
         cached = self._default_branch_cache.get(repo_url)
         if cached is not None and now < cached[1]:
             return cached[0]
@@ -131,13 +131,13 @@ class _ReposMixin(_ReposMixinBase):
         async with self._default_branch_locks[repo_url]:
             # 二次检查：锁外已有其它协程完成解析
             cached = self._default_branch_cache.get(repo_url)
-            if cached is not None and time.time() < cached[1]:
+            if cached is not None and time.monotonic() < cached[1]:
                 return cached[0]
 
             branch = await self._resolve_default_branch(repo_url)
             self._default_branch_cache[repo_url] = (
                 branch,
-                time.time() + DEFAULT_BRANCH_CACHE_TTL_SECONDS,
+                time.monotonic() + DEFAULT_BRANCH_CACHE_TTL_SECONDS,
             )
             return branch
 

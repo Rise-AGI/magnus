@@ -29,7 +29,7 @@ class ResourceManager(_CacheMixin, _ImagesMixin, _ReposMixin):
         self.image_locks: Dict[str, asyncio.Lock] = {}
         # repo cache 目录 -> asyncio.Lock，一个目录一把锁
         self.repo_locks: Dict[str, asyncio.Lock] = {}
-        # repo_url -> (default_branch, expires_at_epoch_seconds)
+        # repo_url -> (default_branch, expires_at_monotonic_seconds)
         self._default_branch_cache: Dict[str, Tuple[str, float]] = {}
         # repo_url -> asyncio.Lock, 用于串行化同 repo 的 ls-remote，
         # 让 fanout 里先到的解析结果被后到者复用

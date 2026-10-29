@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
@@ -98,6 +99,116 @@ def load_repos(
             namespace,
         )
     return namespace
+
+
+class DefaultBranchCacheTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(
+        self,
+    ) -> None:
+        self.namespace = load_repos(
+            Path("unused-cache"),
+        )
+        self.clock = SimpleNamespace(
+            wall=1000.0,
+            elapsed=100.0,
+        )
+        self.namespace["time"] = SimpleNamespace(
+            time=lambda: self.clock.wall,
+            monotonic=lambda: self.clock.elapsed,
+        )
+        self.manager = self.namespace["_ReposMixin"]()
+        self.manager._default_branch_cache = {}
+        self.manager._default_branch_locks = {}
+        self.manager._resolve_default_branch = AsyncMock(
+            side_effect=["original", "renamed"],
+        )
+
+    async def test_clock_rollback_does_not_extend_the_cache_lifetime(
+        self,
+    ) -> None:
+        await self.manager._resolve_default_branch_cached(
+            "fixture",
+        )
+        self.clock.wall -= 3600
+        self.clock.elapsed += self.namespace["DEFAULT_BRANCH_CACHE_TTL_SECONDS"]
+        self.assertEqual(
+            await self.manager._resolve_default_branch_cached(
+                "fixture",
+            ),
+            "renamed",
+        )
+        self.assertEqual(
+            self.manager._resolve_default_branch.await_count,
+            2,
+        )
+
+    async def test_clock_jump_does_not_expire_a_fresh_cache(
+        self,
+    ) -> None:
+        await self.manager._resolve_default_branch_cached(
+            "fixture",
+        )
+        self.clock.wall += 3600
+        self.clock.elapsed += 1
+        self.assertEqual(
+            await self.manager._resolve_default_branch_cached(
+                "fixture",
+            ),
+            "original",
+        )
+        self.assertEqual(
+            self.manager._resolve_default_branch.await_count,
+            1,
+        )
+
+    async def test_waiting_requests_share_the_refreshed_branch(
+        self,
+    ) -> None:
+        await self.manager._resolve_default_branch_cached(
+            "fixture",
+        )
+        self.clock.elapsed += self.namespace["DEFAULT_BRANCH_CACHE_TTL_SECONDS"]
+        self.clock.wall += self.namespace["DEFAULT_BRANCH_CACHE_TTL_SECONDS"]
+        entered, finish = asyncio.Event(), asyncio.Event()
+
+        async def resolve(
+            uri,
+        ):
+            entered.set()
+            await finish.wait()
+            return "renamed"
+
+        query = AsyncMock(
+            side_effect=resolve,
+        )
+        self.manager._resolve_default_branch = query
+        tasks = [
+            asyncio.create_task(
+                self.manager._resolve_default_branch_cached(
+                    "fixture",
+                ),
+            )
+            for _ in range(5)
+        ]
+        try:
+            await asyncio.wait_for(
+                entered.wait(),
+                2,
+            )
+            self.clock.wall -= 3600
+        finally:
+            finish.set()
+            branches = await asyncio.gather(
+                *tasks,
+            )
+        self.assertEqual(
+            branches,
+            ["renamed"] * 5,
+        )
+        self.assertEqual(
+            query.await_count,
+            1,
+        )
 
 
 class GitProcessTests(unittest.IsolatedAsyncioTestCase):
