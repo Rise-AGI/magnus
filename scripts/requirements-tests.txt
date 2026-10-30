@@ -6,6 +6,7 @@ httpx==0.28.1
 pydantic==2.12.5
 python-multipart==0.0.21
 SQLAlchemy==2.0.44
+cachetools==6.2.4
 ruamel.yaml==0.19.1
 typer>=0.9.0,<1
 rich>=13.0.0,<15
