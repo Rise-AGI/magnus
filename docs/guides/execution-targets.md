@@ -181,9 +181,11 @@ with httpx.Client(
 `availability` is explicit. A Job can have `no_scheduler_id` during preparation,
 submission reconciliation, or after its binding has been released. Use the
 existing Job detail/build/staging endpoints to distinguish those phases.
-`not_in_queue` means an empty successful controller query, not proof of successful
-execution or release. `identity_mismatch` prevents a reused Slurm ID from being
-reported as this Job; old allocations without a verifiable Magnus comment return
+`not_in_queue` means the controller returned no record, including an empty
+successful query or the explicit `squeue` missing-job response after a Job leaves
+the queue. It does not prove successful execution or release. Other command
+failures remain `unavailable`. `identity_mismatch` prevents a reused Slurm ID from
+being reported as this Job; old allocations without a verifiable Magnus comment return
 `identity_unverified`. Retired targets return `target_retired`; Docker/local
 returns `unsupported` without invoking Slurm.
 

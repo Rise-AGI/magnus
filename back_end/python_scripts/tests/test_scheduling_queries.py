@@ -57,6 +57,7 @@ def load_queries():
         "_Transport": object,
         "_parse_tres_int": resources._parse_tres_int,
         "_parse_tres_mem_mb": resources._parse_tres_mem_mb,
+        "_squeue_job_missing": resources._squeue_job_missing,
         **{
             name: getattr(
                 schemas,
@@ -339,6 +340,85 @@ class QueryTests(unittest.TestCase):
             [],
         )
 
+    def test_evicted_job_is_not_in_queue_without_more_queries(self):
+        result = self.observe(
+            subprocess.CompletedProcess(
+                ["squeue"],
+                1,
+                "",
+                "slurm_load_jobs error: Invalid job id specified\n",
+            ),
+        )
+        self.assertEqual(
+            result["availability"],
+            "not_in_queue",
+        )
+        self.assertEqual(
+            set(result),
+            {"availability", "observed_at"},
+        )
+        self.assertEqual(
+            len(self.transport.commands),
+            1,
+        )
+        command, options = self.transport.commands[0]
+        self.assertIn(
+            "LC_ALL=C",
+            command,
+        )
+        self.assertIn(
+            "--jobs=37",
+            command,
+        )
+        self.assertFalse(options["check"])
+
+    def test_missing_job_text_does_not_hide_query_failures(self):
+        missing = "slurm_load_jobs error: Invalid job id specified\n"
+        row = (
+            "37|RUNNING|None|2026-10-29T10:00:02|2026-10-29T10:00:00|"
+            f"proj|normal|cpu|{self.comment}\n"
+        )
+        for code, stdout, stderr in (
+            (255, "", missing),
+            (2, "", missing),
+            (1, "", "Invalid job id specified\n"),
+            (1, "", missing + "Permission denied\n"),
+            (1, "", "Connection closed\n" + missing),
+            (1, row, missing),
+            (1, "unexpected output", missing),
+            (1, None, missing),
+            (1, "", None),
+        ):
+            with self.subTest(
+                code=code,
+                stdout=stdout,
+                stderr=stderr,
+            ):
+                result = self.observe(
+                    subprocess.CompletedProcess(
+                        ["squeue"],
+                        code,
+                        stdout,
+                        stderr,
+                    ),
+                )
+                self.assertEqual(
+                    result["availability"],
+                    "unavailable",
+                )
+                self.assertEqual(
+                    result["error"],
+                    "command_failed",
+                )
+                self.assertEqual(
+                    len(self.transport.commands),
+                    1,
+                )
+                self.assertNotIn(
+                    "scheduler_state",
+                    result,
+                )
+
     def test_transport_failure_exposes_only_public_code(self):
         for error, expected in (
             (
@@ -404,6 +484,30 @@ class QueryTests(unittest.TestCase):
             "project",
             "normal",
             ["cpu"],
+        )
+
+    def test_cluster_usage_does_not_treat_missing_job_error_as_zero_usage(self):
+        result = self.cluster(
+            queue=subprocess.CompletedProcess(
+                ["squeue"],
+                1,
+                "",
+                "slurm_load_jobs error: Invalid job id specified\n",
+            ),
+        )
+        self.assertEqual(
+            result.usage.availability,
+            "unavailable",
+        )
+        self.assertEqual(
+            result.usage.error,
+            "command_failed",
+        )
+        self.assertIsNone(result.usage.allocated_cpus)
+        self.assertIsNone(result.usage.pending_cpus)
+        self.assertEqual(
+            result.associations.availability,
+            "ready",
         )
 
     def test_visible_limits_keep_slurm_units_without_fabricating_remaining(self):

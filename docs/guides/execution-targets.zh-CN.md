@@ -147,7 +147,9 @@ with httpx.Client(
 
 `availability` 明确区分可用性。`no_scheduler_id` 可能是准备中、提交结果确认中，
 也可能已经释放编号，结合既有 detail/build/staging 接口判断。
-`not_in_queue` 仅表示成功查询控制器后没有记录，不证明执行成功或资源已释放。
+`not_in_queue` 表示控制器没有该记录，包括成功查询返回空结果，以及 Job 出队后
+`squeue` 明确返回编号不存在的响应；不证明执行成功或资源已释放。
+其他命令故障仍返回 `unavailable`。
 `identity_mismatch` 防止编号复用后串到其他任务；没有可验证 Magnus comment 的
 旧分配返回 `identity_unverified`。已退役目标返回 `target_retired`；
 Docker/local 返回 `unsupported`，不调用 Slurm。

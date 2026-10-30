@@ -7,13 +7,13 @@ from datetime import datetime, timezone
 
 from ..schemas._scheduling import (
     ClusterSchedulingResponse,
-    SchedulerPolicySection,
     SchedulerAssociationUsageSection,
+    SchedulerPolicySection,
     SchedulerUsage,
 )
-from ._resource_query import _parse_tres_int, _parse_tres_mem_mb
-from ._transport import _Transport
 from ._association_usage import parse_association_record, select_association_chain
+from ._resource_query import _parse_tres_int, _parse_tres_mem_mb, _squeue_job_missing
+from ._transport import _Transport
 
 _ASSOCIATION_FIELDS = (
     "Cluster",
@@ -108,6 +108,8 @@ def _run(
     transport: _Transport,
     command: list[str],
     deadline: float,
+    *,
+    missing_job_is_empty: bool = False,
 ) -> str:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
@@ -126,6 +128,12 @@ def _run(
     except (OSError, subprocess.SubprocessError, RuntimeError):
         raise QueryFailure("transport_error") from None
     if result.returncode:
+        if missing_job_is_empty and command[0] == "squeue" and _squeue_job_missing(
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        ):
+            return ""
         raise QueryFailure("command_failed")
     if (
         not isinstance(
@@ -190,6 +198,7 @@ def read_job_scheduling(
                 "--format=%i|%T|%r|%S|%V|%a|%q|%P|%k",
             ],
             time.monotonic() + 8,
+            missing_job_is_empty=True,
         )
         rows = _rows(
             output,

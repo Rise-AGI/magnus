@@ -55,6 +55,27 @@ class SlurmJobObservation:
     allocation_released: bool = False
 
 
+def _squeue_job_missing(
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> bool:
+    """A precise missing-record reply, not proof that execution completed."""
+    return (
+        returncode == 1
+        and isinstance(
+            stdout,
+            str,
+        )
+        and not stdout.strip()
+        and isinstance(
+            stderr,
+            str,
+        )
+        and stderr.strip() == "slurm_load_jobs error: Invalid job id specified"
+    )
+
+
 def _controller_job_observation(
     output: str,
     slurm_job_id: str,
@@ -774,10 +795,10 @@ class _ResourceQueryMixin:
             returncode = getattr(result, "returncode", 0)
             state = result.stdout.strip()
             error = getattr(result, "stderr", "").strip()
-            evicted = (
-                returncode == 1
-                and not state
-                and error == "slurm_load_jobs error: Invalid job id specified"
+            evicted = _squeue_job_missing(
+                returncode,
+                state,
+                error,
             )
             if (returncode != 0 or error) and not evicted:
                 logger.warning(f"Failed to query Slurm job {slurm_job_id}: exit {returncode}")
