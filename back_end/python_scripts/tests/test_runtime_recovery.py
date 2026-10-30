@@ -158,6 +158,8 @@ class RuntimeFinalizationTests(unittest.TestCase):
         restarted._dump_docker_logs = Mock(return_value='cursor')
         restarted._docker_log_cursors = {}
         restarted._sync_reality_docker()
+        self.assertEqual(self.fixture.state()[2], "CLEANUP")
+        self.fixture.cleanup(restarted)
         self.assertEqual(self.fixture.state()[:3], (JobStatus.SUCCESS, None, None))
         restarted.docker_manager.remove_container.assert_called_once()
         self.assertFalse((self.table / 'repository').exists())
@@ -201,6 +203,8 @@ class RuntimeFinalizationTests(unittest.TestCase):
         self.actor.docker_manager.remove_container.assert_not_called()
         self.actor._dump_docker_logs = Mock(return_value='cursor')
         self.actor._sync_reality_docker()
+        self.assertEqual(self.fixture.state()[2], "CLEANUP")
+        self.fixture.cleanup(self.actor)
         self.assertEqual(self.fixture.state()[:3], (JobStatus.TERMINATED, None, None))
 
     def test_known_terminal_allocation_gets_short_release_recheck(self):
@@ -214,6 +218,8 @@ class RuntimeFinalizationTests(unittest.TestCase):
         self.assertEqual(self.actor._recover_job_artifacts('job', 'slurm-job'), 10)
         self.fixture.release_overrides['slurm-job'] = True
         self.actor._recover_job_artifacts('job', 'slurm-job')
+        self.assertEqual(self.fixture.state()[2], 'CLEANUP')
+        self.fixture.cleanup(self.actor)
         self.assertIsNone(self.fixture.state()[1])
 
 
@@ -273,7 +279,7 @@ class PreparationCleanupTests(unittest.IsolatedAsyncioTestCase):
                         expected = JobStatus.TERMINATED if cancelled else JobStatus.FAILED
                         self.assertEqual(fixture.state()[:3], (expected, None, 'CLEANUP'))
                         fixture.cleanup_failure.clear()
-                        fixture.new_scheduler()._recover_job_artifacts('job', None)
+                        fixture.cleanup(fixture.new_scheduler())
                         self.assertEqual(fixture.state()[:3], (expected, None, None))
                 finally:
                     fixture.doCleanups()

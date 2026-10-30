@@ -23,6 +23,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
+CLEANUP = runpy.run_path(str(SERVER / "_workspace_cleanup.py"))
 status_source = ast.parse((SERVER / "models" / "_job.py").read_text(encoding="utf-8"))
 status_node = next(node for node in status_source.body if isinstance(node, ast.ClassDef) and node.name == "JobStatus")
 import enum
@@ -112,7 +113,7 @@ class SlurmFinalizationTests(unittest.TestCase):
             "magnus_ephemeral_workspace_path": str(self.root),
             "is_local_mode": False,
             "magnus_config": {},
-            "remove_job_path": remove,
+            "cleanup_job_path": CLEANUP["cleanup_job_path"],
             "delete_file": remove,
         }
         load_mixin("_scheduler/_sync.py", self.namespace)
@@ -132,6 +133,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor._test_artifact_retry = {}
         actor._preparing_jobs_lock = threading.Lock()
         actor._submitting_jobs = set()
+        actor.preparing_jobs = {}
         actor._submission_cancel_events = {}
         actor._submission_stopping = False
         actor._staged_job_ids = set()
@@ -162,6 +164,7 @@ class SlurmFinalizationTests(unittest.TestCase):
             self.events.append(("cleanup", identifier))
             if identifier in self.cleanup_failure:
                 raise RuntimeError("remote filesystem unavailable")
+            return CLEANUP["CleanupResult"]("done", 0, 0.0, "")
         def observe(identifier):
             self.release_checks.append(identifier)
             result = self.statuses.get(identifier, "UNKNOWN")
@@ -187,6 +190,14 @@ class SlurmFinalizationTests(unittest.TestCase):
                 continue
             delay = actor._recover_job_artifacts(identifier, external)
             actor._test_artifact_retry[identifier] = now + delay
+        self.cleanup(actor)
+
+    def cleanup(self, actor=None):
+        actor = actor or self.scheduler
+        with self.sessions() as db:
+            candidates = db.query(Job.id, Job.slurm_job_id).filter(Job.finalization_status == "CLEANUP").all()
+        for identifier, external in candidates:
+            actor._finish_job_cleanup(identifier, external)
 
     def add_job(self, identifier="job", status=JobStatus.RUNNING, observed="FAILED"):
         external = f"slurm-{identifier}"
@@ -311,7 +322,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         for name, values in {
             "_magnus_config": {"is_local_mode": False},
             "_protocol_files": {"open_protocol_file": open_protocol_file},
-            "_workspace_cleanup": {"remove_job_path": remove},
+            "_workspace_cleanup": {"cleanup_job_path": CLEANUP["cleanup_job_path"]},
             "database": {"SessionLocal": self.sessions},
             "models": {"Job": Job, "JobStatus": JobStatus},
         }.items():
@@ -329,10 +340,11 @@ class SlurmFinalizationTests(unittest.TestCase):
             actor = module._JobLifecycleMixin()
             actor._preparing_jobs_lock = threading.Lock()
             actor._submitting_jobs = set()
+            actor.preparing_jobs = {}
             actor._staged_job_ids = set()
             observed = SimpleNamespace(allocation_released=False)
             actor.slurm_manager = SimpleNamespace(observe_job=lambda identifier: observed)
-            actor._cleanup_remote_job = lambda identifier: None
+            actor._cleanup_remote_job = lambda identifier: CLEANUP["CleanupResult"]("done", 0, 0.0, "")
             self.assertFalse(actor._clean_up_working_table("job"))
             self.assertTrue((table / "repository" / "checkpoint").exists())
             observed.allocation_released = True
@@ -518,11 +530,11 @@ class SlurmFinalizationTests(unittest.TestCase):
 
     def test_failed_local_delete_keeps_cleanup_pending(self):
         self.add_job()
-        self.namespace["remove_job_path"] = lambda path: None
+        self.namespace["cleanup_job_path"] = lambda *args, **kwargs: CLEANUP["CleanupResult"]("progress", 0, 20.0, "TimeoutError")
         self.sync()
         self.assertEqual(self.state()[:3], (JobStatus.FAILED, "slurm-job", "CLEANUP"))
         self.assertFalse(any(event[0] == "cleanup" for event in self.events))
-        self.namespace["remove_job_path"] = remove
+        self.namespace["cleanup_job_path"] = CLEANUP["cleanup_job_path"]
         self.sync(self.new_scheduler())
         self.assertIsNone(self.state()[2])
 
@@ -918,8 +930,10 @@ class SlurmFinalizationTests(unittest.TestCase):
             db.commit()
         self.namespace["is_local_mode"] = True
         self.scheduler._sync_reality_docker = lambda: None
-        self.assertEqual(self.scheduler._sync_reality(), {"job": None})
+        self.assertEqual(self.scheduler._sync_reality(), {})
         self.scheduler._recover_job_artifacts("job", None)
+        self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, "CLEANUP"))
+        self.cleanup()
         self.assertEqual(self.state()[:3], (JobStatus.TERMINATED, None, None))
         self.assertFalse((table / "repository").exists())
 
@@ -948,6 +962,7 @@ class SlurmFinalizationTests(unittest.TestCase):
                 )
                 with patch.object(Job, "time_limit", 1, create=True):
                     self.scheduler._sync_reality_docker()
+                self.cleanup()
                 self.assertEqual(self.state(identifier)[:3], (JobStatus.FAILED, None, None))
                 self.assertTrue(self.state(identifier)[3])
                 self.assertEqual((table / ".magnus_result").read_text(), "partial result")
@@ -1003,6 +1018,8 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.scheduler._docker_log_cursors = {}
         self.scheduler._dump_docker_logs = lambda *args, **kwargs: "cursor"
         self.scheduler._sync_reality_docker()
+        self.assertEqual(self.state()[:3], (JobStatus.SUCCESS, "slurm-job", "CLEANUP"))
+        self.cleanup()
         self.assertEqual(self.state()[:3], (JobStatus.SUCCESS, None, None))
         self.assertFalse((table / "repository").exists())
         self.assertIn(("remove", "magnus-job-job"), self.events)

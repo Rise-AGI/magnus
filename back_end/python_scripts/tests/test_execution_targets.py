@@ -75,8 +75,12 @@ def coordinator_class(
     targets,
     workers,
 ):
+    async def idle_cleanup():
+        pass
     for key, worker in workers.items():
         worker.config = targets[key].config
+        if not hasattr(worker, "_cleanup_tick"):
+            worker._cleanup_tick = idle_cleanup
     path = SERVER / "_scheduler/_coordinator.py"
     tree = ast.parse(path.read_text())
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or not node.level]
@@ -231,6 +235,39 @@ class TargetConfigurationTests(unittest.TestCase):
 
 
 class CoordinatorConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cleanup_keeps_advancing_while_status_observation_stalls(self):
+        gate = asyncio.Event()
+        entered = asyncio.Event()
+        cleanup_calls = []
+
+        async def observe():
+            entered.set()
+            await gate.wait()
+
+        async def cleanup():
+            cleanup_calls.append(True)
+
+        async def shutdown():
+            pass
+
+        targets = targets_module.execution_targets(configuration())
+        workers = {
+            target: SimpleNamespace(tick=observe, _cleanup_tick=cleanup, shutdown=shutdown)
+            for target in targets
+        }
+        actor = coordinator_class(targets, workers)()
+        try:
+            await actor.tick()
+            await asyncio.wait_for(entered.wait(), 1)
+            await asyncio.gather(*actor._cleanup_ticks.values())
+            self.assertEqual(len(cleanup_calls), 2)
+            await actor.tick()
+            await asyncio.gather(*actor._cleanup_ticks.values())
+            self.assertEqual(len(cleanup_calls), 4)
+            self.assertTrue(all(not task.done() for task in actor._ticks.values()))
+        finally:
+            await actor.shutdown()
+
     async def test_targets_sharing_a_master_share_both_transfer_limits(self):
         config = configuration()
         config["execution"]["targets"]["second"]["transport"]["ssh"]["control_path"] = "first.sock"
@@ -239,6 +276,8 @@ class CoordinatorConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         coordinator_class(targets, workers)()
         self.assertIs(workers["first"]._artifact_recovery_slots, workers["second"]._artifact_recovery_slots)
         self.assertIs(workers["first"]._custody_bulk_slots, workers["second"]._custody_bulk_slots)
+        self.assertIs(workers["first"]._cleanup_slots, workers["second"]._cleanup_slots)
+        self.assertIs(workers["first"]._cleanup_channel_slots, workers["second"]._cleanup_channel_slots)
 
     async def test_stalled_target_does_not_block_other_target_or_duplicate_passes(self):
         gate = asyncio.Event()

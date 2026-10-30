@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .._docker_manager import DockerManager
     from .._slurm_manager import SlurmManager
     from ..models import Job
+    from .._workspace_cleanup import CleanupResult
     from library.fundamental.scheduling import ResourceVector
 
 
@@ -53,6 +54,10 @@ class _SchedulerProtocol:
     _finalization_retry_after: Dict[str, float]
     _artifact_recovery_tasks: Dict[str, asyncio.Task[int]]
     _artifact_recovery_slots: asyncio.Semaphore
+    _cleanup_tasks: dict[str, asyncio.Task]
+    _cleanup_retry_after: dict[str, float]
+    _cleanup_slots: asyncio.Semaphore
+    _cleanup_channel_slots: asyncio.Semaphore
     _custody_relay: CustodyRelay
     _custody_bulk_slots: asyncio.Semaphore
     _custody_bulk_tasks: Dict[str, asyncio.Task]
@@ -109,6 +114,19 @@ class _SchedulerProtocol:
 
     def _queue_pending_submission(self) -> None: ...
     async def shutdown_submission(self) -> None: ...
+
+    def _cleanup_candidates(self) -> dict[str, str | None]: ...
+    async def _cleanup_tick(self) -> None: ...
+    def _schedule_cleanup(
+        self,
+        candidates: dict[str, str | None],
+    ) -> None: ...
+    async def _cleanup_in_slot(
+        self,
+        job_id: str,
+        external_id: str | None,
+    ) -> None: ...
+    async def shutdown_cleanup(self) -> None: ...
 
     def _schedule_artifact_recovery(
         self,
@@ -233,7 +251,7 @@ class _SchedulerProtocol:
         *,
         deadline: float | None = None,
     ) -> bool: ...
-    def _cleanup_remote_job(self, job_id: str) -> None: ...
+    def _cleanup_remote_job(self, job_id: str) -> CleanupResult: ...
 
     # === _workspace_gc.py ===
     def _reclaim_workspace_over_cap(self) -> None: ...

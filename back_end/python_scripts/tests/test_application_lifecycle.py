@@ -231,7 +231,7 @@ class SchedulerShutdownTests(unittest.IsolatedAsyncioTestCase):
             await gate.wait()
             events.append("joined")
         coordinator = SimpleNamespace(
-            _ticks={}, _gc_task=None, _custody_task=None,
+            _ticks={}, _cleanup_ticks={}, _gc_task=None, _custody_task=None,
             workers={"first": SimpleNamespace(shutdown=failed), "second": SimpleNamespace(shutdown=delayed)},
         )
         closing = asyncio.create_task(shutdown(coordinator))
@@ -263,18 +263,21 @@ class SchedulerShutdownTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("submission shutdown")
         async def artifacts():
             events.append("artifacts")
+        async def cleanup():
+            events.append("cleanup")
         task = asyncio.create_task(prepare())
         await asyncio.wait_for(entered.wait(), 2)
         worker = SimpleNamespace(
             _preparing_jobs_lock=threading.Lock(), preparing_jobs={"job": task},
             _image_pull_tasks={},
             shutdown_submission=submissions, shutdown_artifact_recovery=artifacts,
+            shutdown_cleanup=cleanup,
         )
         worker._shutdown_preparing_jobs = lambda: preparing(worker)
         with self.assertRaisesRegex(RuntimeError, "submission shutdown"):
             await shutdown(worker)
         self.assertTrue(task.done())
-        self.assertEqual(events, ["artifacts", "preparation joined"])
+        self.assertEqual(events, ["cleanup", "artifacts", "preparation joined"])
 
     async def test_shutdown_joins_detached_shared_pull_after_its_last_job_leaves(self):
         namespace = {**helpers, "asyncio": asyncio}

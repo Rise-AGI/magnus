@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING
 from .._protocol_files import replace_protocol_file
 from .._file_custody_manager import file_custody_manager
 from .._custody_receipts import (
-    _RELAY_TOKEN_RE,
     _read_custody_receipts,
     _write_custody_receipts,
 )
@@ -37,6 +36,7 @@ from ._relay_build_cache import stage_built_sif
 from .._slurm_manager._ssh_auto_connect import remaining_timeout
 from .._slurm_manager._transport import check_transfer_cancelled
 from .._staging_diagnostics import StagingProgress
+from .._workspace_cleanup import CleanupResult, parse_cleanup_result
 
 # Directory (inside the job working tree) where the in-container SDK drops custody
 # uploads on no-network remote execution, paired with the SDK's MAGNUS_CUSTODY_DROP_DIR.
@@ -668,11 +668,19 @@ class _StagingMixin(_StagingMixinBase):
             return True
         return self._custody_relay.poll(job_id, deadline or monotonic() + 30)
 
-    def _cleanup_remote_job(self, job_id: str) -> None:
+    def _cleanup_remote_job(
+        self,
+        job_id: str,
+    ) -> CleanupResult:
         """删除远端 job 工作区（marker / 日志 / metrics 已在 _stage_out_final 拉回本机，
         本机侧 keep-whitelist 保留持久产物）。本机执行下 no-op。"""
         if not self._is_remote_execution():
-            return
+            return CleanupResult(
+                "done",
+                0,
+                0.0,
+                "",
+            )
         assert self.slurm_manager is not None
         transport = self.slurm_manager.transport
         remote_table = self._remote_job_working_table(job_id)
@@ -680,13 +688,11 @@ class _StagingMixin(_StagingMixinBase):
             [
                 "python3", "-c",
                 (Path(__file__).resolve().parents[1] / "_workspace_cleanup.py").read_text(encoding="utf-8")
-                + "\nimport sys\nremove_job_path(sys.argv[1], timeout_seconds=20)\n",
+                + "\nimport sys\nprint(json.dumps(cleanup_job_path(sys.argv[1])._asdict()))\n",
                 remote_table,
             ],
-            timeout = 30,
+            timeout=30,
         )
         if removed.returncode != 0:
-            raise RuntimeError(
-                f"Failed to clean up remote working table {remote_table} "
-                f"(rc={removed.returncode}): {removed.stderr.strip()}"
-            )
+            raise RuntimeError("Remote cleanup helper failed")
+        return parse_cleanup_result(removed.stdout)

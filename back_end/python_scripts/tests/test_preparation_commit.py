@@ -578,13 +578,7 @@ class PreparationCommitTests(unittest.IsolatedAsyncioTestCase):
                             job.finalization_status,
                             "CLEANUP" if terminated else None,
                         )
-                    if terminated:
-                        self.actor._finish_job_cleanup.assert_called_once_with(
-                            job_id,
-                            None,
-                        )
-                    else:
-                        self.actor._finish_job_cleanup.assert_not_called()
+                    self.actor._finish_job_cleanup.assert_not_called()
                     self.assertIn(
                         job_id,
                         self.actor._pinned_jobs,

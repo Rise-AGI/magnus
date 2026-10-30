@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 from time import monotonic
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Optional
 from .._protocol_files import open_protocol_file, replace_protocol_file
 from ..database import SessionLocal
 from ..models import Job, JobStatus, ClusterSnapshot
@@ -136,10 +136,7 @@ class _SyncMixin(_SyncMixinBase):
         """同步真实状态到数据库（SLURM 或 Docker）"""
         if is_local_mode:
             self._sync_reality_docker()
-            with SessionLocal() as db:
-                return dict(self._job_query(db, Job.id, Job.slurm_job_id).filter(
-                    Job.finalization_status == "CLEANUP",
-                ).all())
+            return {}
         return self._sync_reality_slurm()
 
     def _docker_job_timed_out(self, job: Job) -> bool:
@@ -256,7 +253,6 @@ class _SyncMixin(_SyncMixinBase):
             db.commit()
         if changed:
             self._docker_log_cursors.pop(job_id, None)
-            self._finish_job_cleanup(job_id, external_id)
 
     def _sync_reality_slurm(
         self,
@@ -288,7 +284,6 @@ class _SyncMixin(_SyncMixinBase):
                 if finalization_status and monotonic() < self._finalization_retry_after.get(job_id, 0):
                     continue
                 if finalization_status == "CLEANUP":
-                    artifact_candidates[job_id] = slurm_job_id
                     continue
                 if not slurm_job_id:
                     with SessionLocal() as db:
@@ -403,8 +398,7 @@ class _SyncMixin(_SyncMixinBase):
             return 0
         status, finalization_status = current
         if finalization_status == "CLEANUP":
-            self._finish_job_cleanup(job_id, slurm_job_id)
-            return 60
+            return 0
         if finalization_status:
             # Classification owns marker reads. Bulk recovery must not race it.
             if status in (JobStatus.QUEUED, JobStatus.RUNNING):
@@ -450,14 +444,12 @@ class _SyncMixin(_SyncMixinBase):
         if self._stage_out_final(job_id) is not True:
             return 60
         with SessionLocal() as db:
-            changed = self._job_query(db, Job).filter(
+            self._job_query(db, Job).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
                 Job.finalization_status == real_status,
             ).update({Job.finalization_status: "CLEANUP"}, synchronize_session=False)
             db.commit()
-        if changed:
-            self._finish_job_cleanup(job_id, slurm_job_id)
         return 60
 
     def _finish_job_cleanup(
@@ -479,7 +471,7 @@ class _SyncMixin(_SyncMixinBase):
             return
         self._custody_relay.forget(job_id)
         with SessionLocal() as db:
-            changed = self._job_query(db, Job).filter(
+            self._job_query(db, Job).filter(
                 Job.id == job_id,
                 Job.slurm_job_id == slurm_job_id,
                 Job.finalization_status == "CLEANUP",

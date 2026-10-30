@@ -149,7 +149,7 @@ class _DecisionsMixin(_DecisionsMixinBase):
                 synchronize_session=False,
             )
             db.commit()
-        # Joining one worker covers both the commit and the subsequent cleanup;
+        # Joining one worker covers both terminal state and durable cleanup intent;
         # cancellation cannot leave a committed failure between two awaits.
         self._finish_unsubmitted_job(
             job_id,

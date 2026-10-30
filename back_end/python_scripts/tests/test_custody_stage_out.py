@@ -24,6 +24,8 @@ def load_staging():
     namespace = {"replace_protocol_file": protocol.replace_protocol_file, "check_transfer_cancelled": load_transport()["check_transfer_cancelled"], "remaining_timeout": load_transport()["remaining_timeout"], "magnus_config": {"transport": {"ssh": {}}}, "__name__": __name__, "__file__": str(path), "logger": logging.getLogger("custody-stage-test")}
     namespace.update({name: value for name, value in runpy.run_path(str(SERVER / "_custody_receipts.py")).items() if not name.startswith("__")})
     namespace["StagingProgress"] = runpy.run_path(str(SERVER / "_staging_diagnostics.py"))["StagingProgress"]
+    cleanup = runpy.run_path(str(SERVER / "_workspace_cleanup.py"))
+    namespace.update({name: cleanup[name] for name in ("CleanupResult", "parse_cleanup_result")})
     relay_path = SERVER / "_scheduler" / "_custody_relay.py"
     relay = ast.parse(relay_path.read_text())
     relay.body = [node for node in relay.body if not isinstance(node, ast.ImportFrom) or not node.level]
@@ -46,7 +48,7 @@ class FileTransport:
     def run(self, command, **kwargs):
         if "input" in kwargs:
             return subprocess.run(command, input=kwargs["input"], capture_output=True, text=True, check=True, timeout=kwargs.get("timeout", 10))
-        if command[:2] == ["python3", "-c"] and "remove_job_path(sys.argv[1]" in command[2]:
+        if command[:2] == ["python3", "-c"] and "cleanup_job_path(sys.argv[1]" in command[2]:
             if self.fail_cleanup:
                 return SimpleNamespace(returncode=1, stderr="cleanup failed")
             return subprocess.run(command, capture_output=True, text=True, timeout=10)

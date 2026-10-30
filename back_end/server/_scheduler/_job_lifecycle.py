@@ -2,10 +2,10 @@
 import os
 import shutil
 import tempfile
-import traceback
+from time import monotonic
 from typing import TYPE_CHECKING, Optional
 from .._protocol_files import open_protocol_file
-from .._workspace_cleanup import remove_job_path
+from .._workspace_cleanup import cleanup_job_path
 from ..database import SessionLocal
 from ..models import Job, JobStatus
 from .._magnus_config import is_local_mode
@@ -110,8 +110,7 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
             else:
                 job.result = "Job process exited but did not report success (no success marker found)"
         if cleanup:
-            job.slurm_job_id = None
-            self._clean_up_working_table(job.id)
+            job.finalization_status = "CLEANUP"
 
     @staticmethod
     def _format_oom_message(memory_demand: Optional[str]) -> str:
@@ -129,7 +128,7 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
         job_id: str,
     ) -> None:
         with SessionLocal() as db:
-            changed = self._job_query(db, Job).filter(
+            self._job_query(db, Job).filter(
                 Job.id == job_id,
                 Job.status.in_([JobStatus.FAILED, JobStatus.TERMINATED]),
                 Job.slurm_job_id.is_(None),
@@ -137,15 +136,14 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
                 Job.finalization_status.is_(None) | (Job.finalization_status == "CLEANUP"),
             ).update({Job.finalization_status: "CLEANUP"}, synchronize_session=False)
             db.commit()
-        if changed:
-            self._finish_job_cleanup(job_id, None)
 
     def _clean_up_working_table(
         self,
         job_id: str,
     ) -> bool:
         with self._preparing_jobs_lock:
-            if job_id in self._submitting_jobs:
+            preparation = self.preparing_jobs.get(job_id)
+            if job_id in self._submitting_jobs or (preparation is not None and not preparation.done()):
                 return False
         job_working_table = f"{magnus_workspace_path}/jobs/{job_id}"
         job_ephemeral_table = f"{magnus_ephemeral_workspace_path}/jobs/{job_id}"
@@ -164,38 +162,45 @@ class _JobLifecycleMixin(_JobLifecycleMixinBase):
                 assert self.slurm_manager is not None
                 if not self.slurm_manager.observe_job(pending[1]).allocation_released:
                     return False
-            # Keep-whitelist: remove everything under the working table except the
-            # protocol artifacts. This also reclaims anything the user wrote into the
-            # workspace bind mount (e.g. checkpoints / outputs dumped straight into
-            # $MAGNUS_HOME/workspace instead of going through file_custody), which the
-            # old fixed delete-list silently let accumulate forever.
-            if os.path.isdir(job_working_table):
-                for entry in os.listdir(job_working_table):
-                    if entry not in _WORKING_TABLE_KEEP and not entry.startswith(".magnus-output-reset-"):
-                        path = os.path.join(job_working_table, entry)
-                        if os.path.islink(path):
-                            os.unlink(path)
-                        else:
-                            remove_job_path(path)
-                        if os.path.lexists(path):
-                            raise OSError(f"Could not remove {path}")
-            # When ephemeral_root is split onto a separate disk, the overlay +
-            # apptainer tmp/cache live outside the working table; drop that dir
-            # wholesale (it holds only transient artifacts). When it coincides with
-            # the working table, the keep-whitelist sweep above already removed them.
+            deadline = monotonic() + 20
+            paths = [(job_working_table, tuple(_WORKING_TABLE_KEEP), (".magnus-output-reset-",))]
             if job_ephemeral_table != job_working_table:
-                if os.path.islink(job_ephemeral_table):
-                    os.unlink(job_ephemeral_table)
-                else:
-                    remove_job_path(job_ephemeral_table)
-                if os.path.lexists(job_ephemeral_table):
-                    raise OSError(f"Could not remove {job_ephemeral_table}")
-            # 远端执行：删掉远端 job 工作区（持久产物已在终态 _stage_out_final 拉回本机，
-            # 上面的 keep-whitelist 在本机侧保留）。本机执行下 no-op；远端不存在时 rm -rf
-            # 亦无害（覆盖 terminate / preparing 失败等尚未在远端建目录的清理路径）。
-            self._cleanup_remote_job(job_id)
+                paths.append((job_ephemeral_table, (), ()))
+            for path, keep, prefixes in paths:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    return False
+                result = cleanup_job_path(
+                    path,
+                    timeout_seconds=remaining,
+                    preserve=keep,
+                    preserve_prefixes=prefixes,
+                )
+                if result.status != "done":
+                    logger.log(
+                        30 if result.status == "failed" else 20,
+                        "Job %s local cleanup %s (removed=%d, elapsed=%.3fs, error=%s)",
+                        job_id,
+                        result.status,
+                        result.removed,
+                        result.elapsed_seconds,
+                        result.error,
+                    )
+                    return False
+            result = self._cleanup_remote_job(job_id)
+            if result.status != "done":
+                logger.log(
+                    30 if result.status == "failed" else 20,
+                    "Job %s remote cleanup %s (removed=%d, elapsed=%.3fs, error=%s)",
+                    job_id,
+                    result.status,
+                    result.removed,
+                    result.elapsed_seconds,
+                    result.error,
+                )
+                return False
             self._staged_job_ids.discard(job_id)
             return True
         except Exception as error:
-            logger.warning(f"Clean up working table of job {job_id} failed:\n{error}\nTraceback:\n{traceback.format_exc()}")
+            logger.warning("Job %s workspace cleanup pending (%s)", job_id, type(error).__name__)
             return False

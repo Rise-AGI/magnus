@@ -177,6 +177,12 @@ class PreparationDecisionTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(
             self.fixture.state()[:3],
+            (fixtures.JobStatus.FAILED, None, "CLEANUP"),
+        )
+        self.assertTrue((table / "repository").exists())
+        self.fixture.cleanup(self.actor)
+        self.assertEqual(
+            self.fixture.state()[:3],
             (fixtures.JobStatus.FAILED, None, None),
         )
         self.assertFalse(

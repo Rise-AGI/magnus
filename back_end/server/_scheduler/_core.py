@@ -24,6 +24,7 @@ from ._staging import _StagingMixin, _validate_custody_metadata
 from ._custody_relay import CustodyRelay
 from .._file_custody_manager import file_custody_manager
 from ._artifact_recovery import _ArtifactRecoveryMixin
+from ._cleanup import _CleanupMixin
 from ._submission_recovery import _SubmissionRecoveryMixin
 
 
@@ -35,6 +36,7 @@ class MagnusScheduler(
     _JobLifecycleMixin,
     _StagingMixin,
     _ArtifactRecoveryMixin,
+    _CleanupMixin,
     _SubmissionRecoveryMixin,
 ):
     """Job 调度器主类。
@@ -90,6 +92,10 @@ class MagnusScheduler(
         self._finalization_retry_after: Dict[str, float] = {}
         self._artifact_recovery_tasks: Dict[str, asyncio.Task[int]] = {}
         self._artifact_recovery_slots = asyncio.Semaphore(2)
+        self._cleanup_tasks: dict[str, asyncio.Task] = {}
+        self._cleanup_retry_after: dict[str, float] = {}
+        self._cleanup_slots = asyncio.Semaphore(2)
+        self._cleanup_channel_slots = asyncio.Semaphore(1)
         self._custody_bulk_slots = asyncio.Semaphore(1)
         self._custody_bulk_tasks: Dict[str, asyncio.Task] = {}
         self._custody_relay = CustodyRelay(
@@ -150,6 +156,7 @@ class MagnusScheduler(
         async with AsyncExitStack() as cleanup:
             cleanup.push_async_callback(self._shutdown_preparing_jobs)
             cleanup.push_async_callback(self.shutdown_artifact_recovery)
+            cleanup.push_async_callback(self.shutdown_cleanup)
             cleanup.push_async_callback(self.shutdown_submission)
 
     async def _shutdown_preparing_jobs(

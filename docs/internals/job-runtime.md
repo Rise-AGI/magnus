@@ -32,13 +32,42 @@ RUNNING ───── wrapper.py starts executing
 SUCCESS / FAILED
 ```
 
-SSH artifact recovery runs separately from status reconciliation and admission, with at most four transfers active and one worker per Job. Transfer failures retain the workspace and receipts and retry after 60 seconds. Markers and live logs use a shared 30-second budget per pass. `transport.ssh.transfer_timeout_seconds` (default 900, a positive integer) bounds each staging transfer and each final recovery pass, including SSH authentication. Increase it for large artifacts or slow links. Timeout stops the local transfer process tree without closing the shared SSH master; terminal state still requires a successful marker read.
+SSH artifact recovery runs separately from status reconciliation and admission, with two regular workers and one bulk-transfer worker per SSH channel, shared by targets on that channel. Each Job has at most one worker in each lane. Transfer failures retain the workspace and receipts and retry after 60 seconds. Markers and live logs use a shared 30-second budget per pass. `transport.ssh.transfer_timeout_seconds` (default 900, a positive integer) bounds each staging transfer and each final recovery pass, including SSH authentication. Increase it for large artifacts or slow links. Timeout stops the local transfer process tree without closing the shared SSH master; terminal state still requires a successful marker read.
 
 Admission and submission also run as a single background pass, so a stalled upload cannot suspend status reconciliation or start overlapping resource decisions. Failures before submission persist a terminal result before cleanup; cleanup retries independently, including Jobs that never received a SLURM ID.
 
 Slurm execution outcome and allocation release are tracked separately. For `COMPLETING`, Magnus uses the structured base state and flags from `scontrol --json` when available: confirmed terminal execution may become Success/Failed while the external binding and `is_releasing` remain. Requeue cleanup is not a failed execution. Older parsers that expose only a flattened state, unsupported queries and ambiguous states retain the existing conservative behavior. See [Slurm state codes](https://slurm.schedmd.com/job_state_codes.html). Workspace removal, image-pin release and final artifact/log sealing wait for confirmed allocation release; incremental custody and logs continue while waiting. `is_releasing` includes terminal and paused Jobs with an external binding and is not a resource-usage measurement.
 
 Backend startup failure and shutdown both unwind registered resources. All background loops and their blocking filesystem workers are joined before the scheduler, custody and build managers close. Failure in one shutdown does not skip the others; repeated cancellation does not detach their teardown. This covers cooperative application shutdown, not `SIGKILL` or power loss, which continue to use durable recovery records.
+
+### Workspace reclamation
+
+After final artifact recovery, the existing durable `CLEANUP` phase queues removal
+independently of artifact workers, status observation and admission. Each target
+has a separate cleanup pass on the scheduler heartbeat. At most two Jobs are reclaimed
+across the controller, one per SSH channel and one queued/active worker per target.
+Each attempt has a 20-second local traversal budget and a separate 20-second
+remote traversal budget (30-second SSH deadline). Remaining work rotates through
+30-second retries. Restart reloads `CLEANUP`; no per-file database journal or new
+public state is required. External bindings and image pins remain until cleanup
+has actually completed.
+
+On Linux, a root-inode lock covers the entire walk and all its workers. Directory
+entries are streamed, with at most four concurrent deletion contexts per Job.
+The walker does not follow symlinks, chmod files/hardlinks, or descend across a
+different filesystem device. Only owned directory permissions are repaired.
+Protocol files and interrupted output-reset backups remain in the local workspace;
+the remote scratch directory is removed only after final recovery. Other operating
+systems retain serial platform deletion: the deadline is checked between top-level
+entries, not inside a platform `shutil.rmtree` call. Results distinguish `done`, `progress`,
+`busy` and `failed`, with bounded counts/timing/error codes; partial progress is
+never acknowledged as release.
+
+Budgets are cooperative between filesystem operations: a kernel I/O stall can
+outlive them. A disconnected SSH caller cannot start an overlapping walk while
+the previous helper holds the root lock. Cooperative shutdown joins active workers
+before returning capacity. This does not repair an unavailable filesystem or
+promise a hard cancellation bound for uninterruptible kernel I/O.
 
 ### Repository preparation diagnostics
 

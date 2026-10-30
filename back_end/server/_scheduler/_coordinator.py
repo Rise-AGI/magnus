@@ -24,14 +24,19 @@ class SchedulerCoordinator(_WorkspaceGCMixin):
             for target_id, target in configured_execution_targets.items()
         }
         channels = {}
+        cleanup_channels = {}
+        cleanup_slots = asyncio.Semaphore(2)
         for worker in self.workers.values():
+            worker._cleanup_slots = cleanup_slots
             transport = worker.config.get("transport", {})
             if transport.get("mode") == "ssh":
                 socket = os.path.abspath(os.path.expanduser(transport["ssh"]["control_path"]))
                 slots, bulk = channels.setdefault(socket, (asyncio.Semaphore(2), asyncio.Semaphore(1)))
                 worker._artifact_recovery_slots = slots
                 worker._custody_bulk_slots = bulk
+                worker._cleanup_channel_slots = cleanup_channels.setdefault(socket, asyncio.Semaphore(1))
         self._ticks: dict[str, asyncio.Task] = {}
+        self._cleanup_ticks: dict[str, asyncio.Task] = {}
         self._custody_task: asyncio.Task | None = None
         self._gc_task: asyncio.Task | None = None
         self.last_workspace_gc_time = datetime.min.replace(tzinfo=timezone.utc)
@@ -58,6 +63,10 @@ class SchedulerCoordinator(_WorkspaceGCMixin):
             if task is None or task.done():
                 self._consume_result(task)
                 self._ticks[target_id] = asyncio.create_task(worker.tick())
+            cleanup = self._cleanup_ticks.get(target_id)
+            if cleanup is None or cleanup.done():
+                self._consume_result(cleanup)
+                self._cleanup_ticks[target_id] = asyncio.create_task(worker._cleanup_tick())
         if self._custody_task is None or self._custody_task.done():
             self._consume_result(self._custody_task)
             self._custody_task = asyncio.create_task(_run_blocking_io(self._finish_custody_jobs))
@@ -114,7 +123,7 @@ class SchedulerCoordinator(_WorkspaceGCMixin):
     async def shutdown(
         self,
     ) -> None:
-        tasks = list(self._ticks.values())
+        tasks = [*self._ticks.values(), *self._cleanup_ticks.values()]
         if self._gc_task is not None:
             tasks.append(self._gc_task)
         if self._custody_task is not None:

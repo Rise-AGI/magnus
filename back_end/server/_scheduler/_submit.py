@@ -359,13 +359,11 @@ class _SubmitMixin(_SubmitMixinBase):
             )
             return False
 
-        # 暂存（远端站点 scp SIF/repo 可达数秒）期间 job 可能被 terminate：sbatch 前重读
-        # 状态，已非 PENDING 就放弃并清理远端 —— 否则会把已 terminate 的 job 交给 SLURM
-        # 跑成孤儿，且随后写 QUEUED 覆盖掉 TERMINATED。
+        # Staging may outlive cancellation. The submission owner persists CLEANUP
+        # after draining; this thread must neither submit nor start a second deleter.
         db.refresh(job)
         if job.status != JobStatus.PENDING:
             logger.info(f"Job {job.id} no longer PENDING ({job.status}) after staging; aborting submit")
-            self._cleanup_remote_job(job_id)
             return False
 
         # 执行端 wrapper 路径：本机执行下逐字等于本机 wrapper_path，sbatch 参数字节级不变。
