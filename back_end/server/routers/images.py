@@ -3,7 +3,6 @@ import os
 import re
 import asyncio
 import logging
-import subprocess
 import threading
 from typing import Dict, Optional
 from datetime import datetime, timezone
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from .._blocking_io import _run_blocking_io
 from .._lifecycle import cancel_background_tasks
+from .._image_observation import ImageObservation, inspect_docker_image, inspect_sif_image
 from sqlalchemy.orm import Session, joinedload
 
 from .. import database
@@ -42,31 +42,22 @@ magnus_root = magnus_config['server']['root']
 container_cache_path = f"{magnus_root}/container_cache"
 
 
-def _docker_image_cached(uri: str) -> bool:
-    """local 模式专用（同步）：通过 docker image inspect 判断镜像是否已拉取。
-    仅用于启动恢复 (recover_stuck_images)，热路径禁用。"""
-    docker_image = resource_manager.get_docker_image(
-        uri,
+def _observe_image(
+    uri: str,
+    filename: str,
+) -> ImageObservation:
+    if is_local_mode:
+        return inspect_docker_image(
+            resource_manager.get_docker_image(
+                uri,
+            ),
+        )
+    return inspect_sif_image(
+        os.path.join(
+            container_cache_path,
+            filename,
+        ),
     )
-    result = subprocess.run(
-        ["docker", "image", "inspect", docker_image],
-        capture_output=True,
-    )
-    return result.returncode == 0
-
-
-async def _docker_image_cached_async(uri: str) -> bool:
-    """local 模式专用（异步）：不阻塞事件循环的版本"""
-    docker_image = resource_manager.get_docker_image(
-        uri,
-    )
-    proc = await asyncio.create_subprocess_exec(
-        "docker", "image", "inspect", docker_image,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    await proc.communicate()
-    return proc.returncode == 0
 
 
 # ─── 进程级状态 ──────────────────────────────────────────────────
@@ -124,157 +115,135 @@ def _get_uri_lock(uri: str) -> asyncio.Lock:
 
 
 def recover_stuck_images() -> None:
-    """
-    启动时调用：清理上次进程异常退出遗留的中间态。
-    - 拉取临时目录：只在可确认其进程已退出时回收
-    - DB 中 pulling/refreshing 状态的记录：有 .sif 则恢复为 cached，否则删除记录
-    必须在 lifespan 中调用，而不是懒加载——否则重启后 POST 请求会被 409 卡住。
-    """
+    """Recover interrupted pulls off the event loop without guessing availability."""
     global _recovered
-    if _recovered:
-        return
     with _recover_lock:
         if _recovered:
             return
+        resource_manager.recover_stale_pull_caches()
+        with database.SessionLocal() as db:
+            stuck = db.query(models.CachedImage).filter(
+                models.CachedImage.status.in_(["pulling", "refreshing"]),
+            ).all()
+            for img in stuck:
+                observation = _observe_image(
+                    img.uri,
+                    img.filename,
+                )
+                img.status = "cached" if observation.status == "cached" else "failed"
+                if observation.size_bytes is not None:
+                    img.size_bytes = observation.size_bytes
+                if observation.error:
+                    logger.warning(
+                        "Image %s recovery could not verify cache (%s)",
+                        img.id,
+                        observation.error,
+                    )
+            db.commit()
         _recovered = True
 
-    resource_manager.recover_stale_pull_caches()
 
-    db = database.SessionLocal()
-    try:
-        stuck = db.query(models.CachedImage).filter(
-            models.CachedImage.status.in_(["pulling", "refreshing"]),
-        ).all()
-        if not stuck:
-            return
-        for img in stuck:
-            if is_local_mode:
-                if _docker_image_cached(img.uri):
-                    img.status = "cached"
-                    try:
-                        docker_image = resource_manager.get_docker_image(
-                            img.uri,
-                        )
-                        result = subprocess.run(
-                            ["docker", "image", "inspect", "--format", "{{.Size}}", docker_image],
-                            capture_output=True, text=True, timeout=10,
-                        )
-                        if result.returncode == 0:
-                            img.size_bytes = int(result.stdout.strip())
-                    except (OSError, ValueError, subprocess.TimeoutExpired):
-                        pass
-                    logger.info(f"Recovered stuck image → cached: {img.uri}")
-                else:
-                    img.status = "failed"
-                    logger.info(f"Recovered stuck image → failed: {img.uri}")
-            else:
-                sif_path = os.path.join(container_cache_path, img.filename)
-                if os.path.exists(sif_path):
-                    img.status = "cached"
-                    try:
-                        img.size_bytes = os.stat(sif_path).st_size
-                    except OSError:
-                        pass
-                    logger.info(f"Recovered stuck image → cached: {img.uri}")
-                else:
-                    img.status = "failed"
-                    logger.info(f"Recovered stuck image → failed: {img.uri}")
-        db.commit()
-    finally:
-        db.close()
+def _pull_is_pending(
+    image_id: int,
+    uri: str,
+    expected: str,
+) -> bool:
+    with database.SessionLocal() as db:
+        return db.query(models.CachedImage.id).filter(
+            models.CachedImage.id == image_id,
+            models.CachedImage.uri == uri,
+            models.CachedImage.status == expected,
+        ).first() is not None
 
 
-# ─── 后台拉取任务 ───────────────────────────────────────────────
-
-async def _do_pull(image_id: int, uri: str, is_refresh: bool) -> None:
-    """
-    后台拉取镜像，由路由 handler 通过 asyncio.create_task 调度。
-    分三阶段：防御性校验 → 拉取 → 加锁结算，每阶段独立 DB session。
-    """
-
-    # Phase 1: 防御性校验，确认记录仍处于预期的进行态
-    db = database.SessionLocal()
-    try:
-        img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
-        if not img:
+def _settle_pull(
+    image_id: int,
+    uri: str,
+    is_refresh: bool,
+    success: bool,
+) -> None:
+    with database.SessionLocal() as db:
+        img = db.query(models.CachedImage).filter(
+            models.CachedImage.id == image_id,
+        ).first()
+        if img is None:
+            any_exist = db.query(models.CachedImage.id).filter(
+                models.CachedImage.uri == uri,
+            ).first()
+            if any_exist is None and not is_local_mode:
+                resource_manager.images.remove(
+                    os.path.basename(resource_manager.get_sif_path(uri)),
+                )
             return
         expected = "refreshing" if is_refresh else "pulling"
-        if img.status != expected:
-            logger.warning(f"Skipping _do_pull for image {image_id}: expected status '{expected}', got '{img.status}'")
+        if img.uri != uri or img.status != expected:
             return
-    finally:
-        db.close()
-
-    # Phase 2: 拉取镜像（耗时操作，不持有任何锁和 DB session）
-    try:
-        success, error_msg = await resource_manager.ensure_image(uri, force=is_refresh)
-    except Exception as error:
-        success, error_msg = False, f"Image preparation failed ({type(error).__name__})"
-
-    # Phase 3: 状态结算（加锁防止和 delete_image / 新 pull 并发竞态）
-    async with _get_uri_lock(uri):
-        db = database.SessionLocal()
-        try:
-            img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
-            if not img:
-                # 记录已被删除；仅当该 URI 无任何记录时才清理文件，避免误杀并发请求的成果
-                any_exist = db.query(models.CachedImage).filter(models.CachedImage.uri == uri).first()
-                if not any_exist and not is_local_mode:
-                    try:
-                        resource_manager.images.remove(
-                            os.path.basename(resource_manager.get_sif_path(uri)),
-                        )
-                    except OSError:
-                        pass
-                return
-
-            if success:
-                if is_local_mode:
-                    try:
-                        docker_image = resource_manager.get_docker_image(
-                            uri,
-                        )
-                        proc = await asyncio.create_subprocess_exec(
-                            "docker", "image", "inspect", "--format", "{{.Size}}", docker_image,
-                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-                        )
-                        stdout, _ = await proc.communicate()
-                        if proc.returncode == 0:
-                            img.size_bytes = int(stdout.strip())
-                    except (OSError, ValueError):
-                        pass
-                else:
-                    sif_path = resource_manager.get_sif_path(uri)
-                    img.filename = os.path.basename(sif_path)
-                    try:
-                        img.size_bytes = os.stat(sif_path).st_size
-                    except OSError:
-                        img.size_bytes = 0
-                img.status = "cached"
-                img.updated_at = datetime.now(timezone.utc)
-                db.commit()
+        if success or is_refresh:
+            if success and not is_local_mode:
+                img.filename = os.path.basename(resource_manager.get_sif_path(uri))
+            observation = _observe_image(
+                uri,
+                img.filename,
+            )
+            if observation.size_bytes is not None:
+                img.size_bytes = observation.size_bytes
+            if observation.status == "unknown":
+                # A completed pull proves publication; a failed refresh plus an
+                # unavailable probe does not prove that the previous image vanished.
+                img.status = "cached" if success else "failed"
+                logger.warning(
+                    "Image %s cache observation unavailable (%s)",
+                    image_id,
+                    observation.error,
+                )
             else:
-                logger.error(f"Image {'refresh' if is_refresh else 'pull'} failed for {uri}: {error_msg}")
-                if is_refresh:
-                    # 刷新失败：判断旧镜像是否仍可用
-                    if is_local_mode:
-                        old_available = await _docker_image_cached_async(uri)
-                    else:
-                        sif_path = os.path.join(container_cache_path, img.filename)
-                        old_available = os.path.exists(sif_path)
-                    img.status = "cached" if old_available else "missing"
-                    img.updated_at = datetime.now(timezone.utc)
-                    db.commit()
-                else:
-                    # 首次拉取失败：保留记录，标记 failed，用户可重试或删除
-                    img.status = "failed"
-                    img.updated_at = datetime.now(timezone.utc)
-                    db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception(f"Background pull task crashed for image {image_id}")
-        finally:
-            db.close()
+                img.status = observation.status
+        else:
+            img.status = "failed"
+        img.updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+
+async def _do_pull(
+    image_id: int,
+    uri: str,
+    is_refresh: bool,
+) -> None:
+    expected = "refreshing" if is_refresh else "pulling"
+    if not await _run_blocking_io(
+        _pull_is_pending,
+        image_id,
+        uri,
+        expected,
+    ):
+        return
+    try:
+        success, _ = await resource_manager.ensure_image(
+            uri,
+            force=is_refresh,
+        )
+    except Exception as error:
+        logger.error(
+            "Image preparation failed for %s (%s)",
+            image_id,
+            type(error).__name__,
+        )
+        success = False
+    async with _get_uri_lock(uri):
+        try:
+            await _run_blocking_io(
+                _settle_pull,
+                image_id,
+                uri,
+                is_refresh,
+                success,
+            )
+        except Exception as error:
+            logger.error(
+                "Image settlement failed for %s (%s)",
+                image_id,
+                type(error).__name__,
+            )
 
 
 # ─── 共享逻辑 ────────────────────────────────────────────────────
@@ -501,12 +470,28 @@ async def refresh_image(
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    # 先查出 URI 以获取正确的锁
-    img = db.query(models.CachedImage).filter(models.CachedImage.id == image_id).first()
-    if not img:
-        raise HTTPException(status_code=404, detail="Image not found")
-    async with _get_uri_lock(img.uri):
-        return await _begin_pull(db, img.uri, current_user, is_refresh=True, image_id=image_id)
+    def read_uri() -> str:
+        row = db.query(models.CachedImage.uri).filter(
+            models.CachedImage.id == image_id,
+        ).first()
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Image not found",
+            )
+        return row.uri
+
+    uri = await _run_blocking_io(
+        read_uri,
+    )
+    async with _get_uri_lock(uri):
+        return await _begin_pull(
+            db,
+            uri,
+            current_user,
+            is_refresh=True,
+            image_id=image_id,
+        )
 
 
 @router.delete("/images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)

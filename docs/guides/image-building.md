@@ -89,6 +89,15 @@ If cache metadata exceeds BuildKit's RPC message limit, Magnus splits the usage 
 
 ## Compatibility and acceptance
 
+Ordinary image pulls and refreshes settle their database and filesystem work in
+joined workers. Docker cache probes have a ten-second timeout; cancellation waits
+for the probe to exit before releasing the image's operation lock. An explicit
+missing-image response is distinct from a daemon failure, timeout, or unreadable
+storage. An interrupted pull or failed refresh whose cache cannot be verified
+retains its registration and known size as `failed`, so it can be retried; it is
+not reported as a proven cache miss. Successful pulls remain `cached` when only
+the optional size probe is unavailable. Existing API fields are unchanged.
+
 The upgrade preserves old Job rows and source semantics, adds Building and defers Dockerfile text from list queries. Existing Service submissions retain their image path; their active-Job handling recognizes Building. No special Blueprint is installed.
 
 Production enablement requires runtime acceptance of step reuse, same-recipe concurrency, cancellation, restart, disk pressure, Docker execution, and Apptainer/Singularity consumption including relay. Static inspection cannot establish those runtime properties.

@@ -23,6 +23,9 @@ from test_image_cache import SERVER, blocking_io, cache_module
 from test_job_finalization import load_method
 
 
+observations = runpy.run_path(str(SERVER / "_image_observation.py"))
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -111,6 +114,8 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
         )
         self.namespace = {
             **lifecycle,
+            **observations,
+            "_run_blocking_io": blocking_io,
             "asyncio": asyncio,
             "datetime": datetime,
             "timezone": timezone,
@@ -158,8 +163,9 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
             "delete_image",
             "_schedule_pull",
             "shutdown_image_pulls",
-            "_docker_image_cached",
-            "_docker_image_cached_async",
+            "_observe_image",
+            "_pull_is_pending",
+            "_settle_pull",
             "recover_stuck_images",
         }
         tree = ast.parse(
@@ -240,24 +246,20 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         self.namespace["is_local_mode"] = True
 
-        async def inspect(
-            *command,
+        def inspect(
+            command,
             **kwargs,
         ):
             self.assertEqual(
                 command[-1],
                 "mirror.invalid/example/image:tag",
             )
-            return SimpleNamespace(
-                returncode=0,
-                communicate=AsyncMock(
-                    return_value=(b"4321", b""),
-                ),
-            )
+            self.assertEqual(kwargs["timeout"], 10)
+            return subprocess.CompletedProcess(command, 0, "4321", "")
 
         with patch.object(
-            asyncio,
-            "create_subprocess_exec",
+            subprocess,
+            "run",
             side_effect=inspect,
         ):
             await self.namespace["_do_pull"](
@@ -291,6 +293,79 @@ class ImageRouteTests(unittest.IsolatedAsyncioTestCase):
                 (row.status, row.size_bytes),
                 ("cached", 4321),
             )
+
+    async def test_unknown_refresh_preserves_registration_and_size(self):
+        self.namespace["is_local_mode"] = True
+        with self.sessions() as db:
+            row = db.get(Image, 1)
+            row.status = "refreshing"
+            row.size_bytes = 4321
+            db.commit()
+        self.prepare.return_value = (False, "upstream unavailable")
+        with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("docker", 10)):
+            await self.namespace["_do_pull"](1, self.uri, is_refresh=True)
+        with self.sessions() as db:
+            row = db.get(Image, 1)
+            self.assertEqual((row.status, row.size_bytes, row.uri), ("failed", 4321, self.uri))
+
+    async def test_unavailable_runtime_does_not_abort_other_startup_recovery(self):
+        self.namespace["is_local_mode"] = True
+        with self.sessions() as db:
+            db.add(Image(id=2, uri="docker://other:tag", filename="other.sif", status="pulling"))
+            db.commit()
+        with patch.object(subprocess, "run", side_effect=[
+            FileNotFoundError("docker unavailable"),
+            subprocess.CompletedProcess([], 0, "99", ""),
+        ]):
+            self.namespace["recover_stuck_images"]()
+        with self.sessions() as db:
+            self.assertEqual(db.get(Image, 1).status, "failed")
+            self.assertEqual((db.get(Image, 2).status, db.get(Image, 2).size_bytes), ("cached", 99))
+
+    async def test_cancelled_settlement_joins_probe_and_holds_uri_lock(self):
+        self.namespace["is_local_mode"] = True
+        entered, release = threading.Event(), threading.Event()
+        loop_thread = threading.get_ident()
+
+        def inspect(command, **kwargs):
+            self.assertNotEqual(threading.get_ident(), loop_thread)
+            self.assertEqual(kwargs["timeout"], 10)
+            entered.set()
+            if not release.wait(2):
+                raise AssertionError("Event loop failed to release the worker")
+            return subprocess.CompletedProcess(command, 0, "4321", "")
+
+        with patch.object(subprocess, "run", side_effect=inspect):
+            task = asyncio.create_task(self.namespace["_do_pull"](1, self.uri, is_refresh=False))
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+                for _ in range(2):
+                    task.cancel()
+                    await asyncio.sleep(0)
+                    self.assertFalse(task.done())
+                    self.assertTrue(self.namespace["_get_uri_lock"](self.uri).locked())
+            finally:
+                release.set()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertTrue(task.cancelled())
+        self.assertFalse(self.namespace["_get_uri_lock"](self.uri).locked())
+        with self.sessions() as db:
+            self.assertEqual((db.get(Image, 1).status, db.get(Image, 1).size_bytes), ("cached", 4321))
+
+    async def test_initial_record_check_runs_off_loop(self):
+        original = self.namespace["_pull_is_pending"]
+        loop_thread = threading.get_ident()
+        checked = []
+
+        def read(*args):
+            checked.append(threading.get_ident())
+            return original(*args)
+
+        self.namespace["_pull_is_pending"] = read
+        self.prepare.return_value = (False, "unavailable")
+        await self.namespace["_do_pull"](1, self.uri, is_refresh=False)
+        self.assertEqual(len(checked), 1)
+        self.assertNotEqual(checked[0], loop_thread)
 
     def shared_pull_namespace(
         self,

@@ -89,6 +89,12 @@ SIF 转换可用 `conversion_cpus`（默认 `2`）和 `conversion_memory`（默�
 
 ## 兼容与验收
 
+普通镜像拉取和刷新由等待收尾的工作线程完成数据库与文件结算。Docker 缓存探测有
+十秒超时；取消时先等待探测退出，再释放镜像操作锁。明确的镜像不存在与 daemon
+故障、超时、存储不可读分开处理。中断拉取或失败刷新若无法确认缓存，保留登记与
+已知大小，标为可重试的 `failed`，不冒称镜像已缺失。拉取已成功而仅大小探测不可用
+时仍为 `cached`。现有 API 字段保持不变。
+
 升级保留旧 Job 和镜像来源语义，增加 Building，并在列表查询中延迟加载 Dockerfile。Service 仍走原有镜像输入，其活跃 Job 判断识别 Building。不安装专属构建 Blueprint。
 
 生产启用前需验收步骤复用、同配方并发、取消、重启、磁盘压力、Docker 执行及 Apptainer/Singularity 与 relay 消费。静态检查不能证明这些运行时性质。

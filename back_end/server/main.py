@@ -309,7 +309,9 @@ async def lifespan(
         limiter.total_tokens = thread_pool_size
 
         # 镜像恢复：清理上次异常退出遗留的 .tmp 和卡在 pulling/refreshing 的记录
-        recover_stuck_images()
+        await _run_blocking_io(
+            recover_stuck_images,
+        )
 
         # Restore cache protection before any new preparation or cache collection.
         with SessionLocal() as db:
