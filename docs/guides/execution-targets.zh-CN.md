@@ -169,6 +169,22 @@ QoS 允许继续投放；有些平台不公开这些限制及共享用量。空�
 接口不查询商业余额，也不自行复刻 Slurm 的分层额度判定。依据见官方
 [资源限制层级](https://slurm.schedmd.com/resource_limits.html)及
 [association/QoS 字段](https://slurm.schedmd.com/sacctmgr.html)。
+
+`association_usage` 新增限定范围的[控制器 association 缓存](https://slurm.schedmd.com/scontrol.html#OPT_assoc_mgr)观测，包含配置/成员账号
+及其父链；个人观测保留在 `usage` 和 `associations`。每行标明集群、association ID、账号、用户/分区与父级。
+`group_tres` 将 Slurm TRES 名称映射为 `{limit, used}`；`job_limits` 对可见的
+`GrpJobs`、`GrpSubmitJobs`、`GrpJobsAccrue` 及对应 `Max*` 计数采用同一结构。例如父账号
+`group_tres.node = {"limit": 32, "used": 32}` 能解释个人用量为零时仍遇到组节点限额。
+内存单位为 MiB。这些是控制器计数，不是可见作业求和或硬件实时使用量；父子行不能相加。
+
+limit 为 null 表示该 association 中 Slurm 的 `N`/未设置值，不代表有效配额无限。
+未读到的计数列于行内 `unavailable_fields`；隐藏或未核实的祖先列于 `missing_accounts`，
+该节返回 `partial` 或 `unavailable` 及安全错误码。上级查询超时仍保留已读到的父级信息。
+本节不替换 `account_usage`：其他用户作业不可见时，控制器的账号计数仍可能可见。
+查询仅沿配置/成员账号及实际观测到的父链，在既有总期限内最多执行八次限定账号的请求，
+每次只查一个账号，仅消费首条匹配账号记录中自由文本 Comment 之前的字段。
+记录次序异常或过滤未生效时保持未核实；不返回无关账号或用户行。
+
 [预计开始时间](https://slurm.schedmd.com/squeue.html)来自 backfill 调度器，是可变化的
 估计；null 表示没有估计，不表示马上运行。
 

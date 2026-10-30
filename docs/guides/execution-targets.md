@@ -204,6 +204,29 @@ Partition policies cover the target's default and GPU partitions. Optional QoS
 per-account fields unsupported by an older CLI appear in `unavailable_fields`;
 other readable limits remain available.
 
+`association_usage` adds a scoped [controller association-cache](https://slurm.schedmd.com/scontrol.html#OPT_assoc_mgr) observation of the
+configured/member accounts and their ancestors. Personal observations remain in
+`usage` and `associations`. Each row identifies the cluster,
+association ID, account, user/partition and parent. `group_tres` maps Slurm TRES
+names to `{limit, used}`; `job_limits` does the same for visible `GrpJobs`,
+`GrpSubmitJobs`, `GrpJobsAccrue` and corresponding `Max*` counters. For example,
+an account's `group_tres.node = {"limit": 32, "used": 32}` can explain a group
+node limit even when the user's own usage is zero. Memory uses MiB. These are
+controller counters, not a sum of visible jobs or real-time hardware consumption;
+do not sum parent and child rows.
+
+A null limit represents Slurm's `N`/unset field at that association, not unlimited
+effective capacity. Missing counters are listed in the row's `unavailable_fields`.
+Hidden or unverified ancestors appear in `missing_accounts`; the section is
+`partial` or `unavailable` with a safe error code. A readable parent remains
+available even if a higher ancestor times out. This section does not replace
+`account_usage`: controller counters may be visible when other users' queue
+records are hidden. Queries follow only configured/member accounts and their
+observed parent chain, with at most eight scoped requests within the existing
+request budget. Each request selects one account and consumes only its first
+matching account record, before the free-text comment. Unexpected ordering or
+ignored filters remain unverified. Unrelated accounts and user rows are excluded.
+
 `remaining_resources` is null: visible user limits do not prove that parent
 account, partition, or QoS constraints permit more work. Some providers hide those
 limits and shared usage. Blank policy values are not an assertion of unlimited

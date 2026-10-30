@@ -8,10 +8,12 @@ from datetime import datetime, timezone
 from ..schemas._scheduling import (
     ClusterSchedulingResponse,
     SchedulerPolicySection,
+    SchedulerAssociationUsageSection,
     SchedulerUsage,
 )
 from ._resource_query import _parse_tres_int, _parse_tres_mem_mb
 from ._transport import _Transport
+from ._association_usage import parse_association_record, select_association_chain
 
 _ASSOCIATION_FIELDS = (
     "Cluster",
@@ -496,6 +498,82 @@ def _usage(
         )
 
 
+def _association_usage(
+    transport: _Transport,
+    user: str,
+    account: str | None,
+    associations: SchedulerPolicySection,
+    deadline: float,
+) -> SchedulerAssociationUsageSection:
+    observed_at = datetime.now(timezone.utc)
+    accounts = {account} if account is not None else {
+        row["Account"] for row in associations.rows
+        if row["User"] == user and row["Account"] is not None
+    }
+    if not accounts or len(accounts) > 16:
+        return SchedulerAssociationUsageSection(
+            availability="unavailable",
+            observed_at=observed_at,
+            error="account_scope_unverified",
+        )
+    records = {}
+    fetched = set()
+    chain = select_association_chain(
+        [],
+        accounts,
+    )
+    failure = None
+    for _ in range(8):
+        needed = chain.missing_accounts - fetched
+        if not needed:
+            break
+        requested = sorted(needed)[0]
+        try:
+            output = _run(
+                transport,
+                [
+                    "scontrol",
+                    "--oneliner",
+                    "show",
+                    "assoc_mgr",
+                    "flags=assoc",
+                    f"users={_name(user)}",
+                    f"accounts={_name(requested)}",
+                ],
+                deadline,
+            )
+            row = parse_association_record(
+                output,
+            )
+            fetched.add(requested)
+            if row.account != requested or row.user is not None or row.partition is not None:
+                raise QueryFailure("account_association_unverified")
+            previous = records.get((row.cluster, row.association_id))
+            if previous is not None and previous.account != row.account:
+                raise ValueError("conflicting_association_identity")
+            records[row.cluster, row.association_id] = row
+            chain = select_association_chain(
+                list(records.values()),
+                accounts,
+            )
+        except QueryFailure as error:
+            failure = str(error)
+            break
+        except ValueError:
+            failure = "invalid_association_output"
+            break
+    if chain.missing_accounts and failure is None:
+        failure = "parent_association_unverified"
+    failure = failure or chain.error
+    return SchedulerAssociationUsageSection(
+        availability="ready" if not failure else "partial" if chain.rows else "unavailable",
+        observed_at=observed_at,
+        rows=chain.rows,
+        missing_accounts=sorted(chain.missing_accounts),
+        error=failure,
+    )
+
+
 def read_cluster_scheduling(
     transport: _Transport,
     target_id: str,
@@ -573,15 +651,22 @@ def read_cluster_scheduling(
         else SchedulerPolicySection(availability="not_configured")
     )
     qos_limits.rows = [row for row in qos_limits.rows if row["Name"] in qos_names]
-    sections = (associations, qos_limits, partition_limits, usage)
+    association_usage = _association_usage(
+        transport,
+        user,
+        account,
+        associations,
+        deadline,
+    )
+    sections = (associations, qos_limits, partition_limits, usage, association_usage)
     if account_usage is not None:
         sections = (*sections, account_usage)
-    available = sum(section.availability == "ready" for section in sections)
+    available = any(section.availability in ("ready", "partial") for section in sections)
     return ClusterSchedulingResponse(
         execution_target=target_id,
         backend="slurm",
         availability="ready"
-        if available == len(sections) and not qos_limits.unavailable_fields
+        if all(section.availability == "ready" for section in sections) and not qos_limits.unavailable_fields
         else "partial"
         if available
         else "unavailable",
@@ -595,4 +680,5 @@ def read_cluster_scheduling(
         partition_limits=partition_limits,
         usage=usage,
         account_usage=account_usage,
+        association_usage=association_usage,
     )

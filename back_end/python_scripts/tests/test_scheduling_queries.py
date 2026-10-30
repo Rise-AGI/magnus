@@ -66,9 +66,26 @@ def load_queries():
                 "ClusterSchedulingResponse",
                 "SchedulerPolicySection",
                 "SchedulerUsage",
+                "SchedulerAssociationUsageSection",
             )
         },
     }
+    parser_namespace = {
+        "__name__": __name__,
+        "SchedulerAssociationUsage": schemas.SchedulerAssociationUsage,
+        "SchedulerLimitUsage": schemas.SchedulerLimitUsage,
+    }
+    parser_path = SERVER / "_slurm_manager/_association_usage.py"
+    parser_tree = ast.parse(parser_path.read_text())
+    parser_tree.body = [
+        node for node in parser_tree.body
+        if not isinstance(node, ast.ImportFrom) or not node.level
+    ]
+    exec(compile(parser_tree, str(parser_path), "exec"), parser_namespace)
+    namespace.update({
+        name: parser_namespace[name]
+        for name in ("parse_association_record", "select_association_chain")
+    })
     path = SERVER / "_slurm_manager/_scheduling.py"
     tree = ast.parse(path.read_text())
     tree.body = [
@@ -108,7 +125,10 @@ class Transport:
         if "sacctmgr" in command:
             key = "assoc" if "assoc" in command else "qos"
         elif "scontrol" in command:
-            key = "configuration" if "config" in command else "partition"
+            if "assoc_mgr" in command:
+                key = "association_usage"
+            else:
+                key = "configuration" if "config" in command else "partition"
         elif "id" in command:
             key = "identity"
         else:
@@ -119,6 +139,20 @@ class Transport:
             key,
             "",
         )
+        if callable(value):
+            value = value(command, options)
+        elif key == "association_usage" and isinstance(value, str):
+            account = next(arg.removeprefix("accounts=") for arg in command if arg.startswith("accounts="))
+            records = []
+            for line in value.splitlines():
+                if line.startswith("ClusterName="):
+                    records.append([line])
+                elif records:
+                    records[-1].append(line)
+            value = "\n".join(
+                "\n".join(record) for record in records
+                if f"Account={account} " in record[0]
+            )
         if isinstance(
             value,
             BaseException,
@@ -353,6 +387,14 @@ class QueryTests(unittest.TestCase):
             "queue": "12|RUNNING|cpu=128,node=2,mem=512G\n13|PENDING|cpu=64,node=1,mem=256G\n",
             "configuration": "PrivateData = none\n",
             "identity": "real-user\n",
+            "association_usage": (
+                "ClusterName=one Account=root UserName= Partition= ID=1 ParentAccount= "
+                "GrpJobs=N(10) GrpSubmitJobs=N(11) GrpTRES=cpu=N(512),node=N(8) Comment=(null)\n"
+                "ClusterName=one Account=project UserName= Partition= ID=2 ParentAccount=root(1) "
+                "GrpJobs=32(4) GrpSubmitJobs=N(5) GrpTRES=cpu=N(128),mem=N(524288),node=32(32) Comment=(null)\n"
+                "ClusterName=one Account=project UserName=user(1000) Partition= ID=3 ParentAccount= "
+                "GrpJobs=N(0) GrpSubmitJobs=32(1) GrpTRES=cpu=N(0),mem=N(0),node=N(0) Comment=(null)\n"
+            ),
         }
         self.transport = Transport(**(defaults | outputs))
         return self.queries.read_cluster_scheduling(
@@ -402,6 +444,125 @@ class QueryTests(unittest.TestCase):
             qos_command,
         )
         self.assertTrue(all(options["timeout"] <= 6 for _, options in self.transport.commands))
+
+    def test_parent_usage_is_distinct_from_user_and_account_queue_usage(self):
+        result = self.cluster(configuration="PrivateData = jobs,usage")
+        section = result.association_usage
+        self.assertEqual(section.availability, "ready")
+        self.assertEqual(result.account_usage.availability, "unavailable")
+        self.assertEqual({(row.account, row.user) for row in section.rows}, {
+            ("project", None), ("root", None),
+        })
+        parent = next(row for row in section.rows if row.account == "project" and row.user is None)
+        self.assertEqual(parent.group_tres["node"].model_dump(), {"limit": 32, "used": 32})
+        self.assertEqual(parent.job_limits["GrpJobs"].model_dump(), {"limit": 32, "used": 4})
+        self.assertEqual(result.usage.allocated_node_slots, 2)
+        self.assertIsNone(result.remaining_resources)
+        commands = [command for command, _ in self.transport.commands if "assoc_mgr" in command]
+        self.assertEqual(len(commands), 2)
+        self.assertIn("accounts=project", commands[0])
+        self.assertIn("accounts=root", commands[1])
+        self.assertTrue(all("flags=assoc" in command and "users=user" in command for command in commands))
+
+    def test_unavailable_parent_preserves_visible_limits_without_ready_claim(self):
+        valid = self.cluster().association_usage
+        self.assertEqual(len(valid.rows), 2)
+        original = self.transport.outputs["association_usage"]
+
+        def lookup(command, options):
+            if "accounts=root" in command:
+                raise subprocess.TimeoutExpired(["secret"], 6, stderr="credential")
+            return original.splitlines()[1]
+
+        result = self.cluster(association_usage=lookup)
+        self.assertEqual(result.association_usage.availability, "partial")
+        self.assertEqual(result.association_usage.error, "timeout")
+        self.assertEqual(result.association_usage.missing_accounts, ["root"])
+        self.assertEqual(len(result.association_usage.rows), 1)
+        self.assertEqual(result.availability, "partial")
+        self.assertNotIn("credential", result.model_dump_json())
+        self.assertNotIn("secret", result.model_dump_json())
+
+    def test_filter_ignoring_provider_does_not_expose_other_users_or_accounts(self):
+        self.cluster()
+        output = self.transport.outputs["association_usage"]
+        foreign = output.replace("Account=project ", "Account=foreign ").replace("user(1000)", "other(2000)")
+        foreign = foreign.replace("ID=1 ", "ID=11 ").replace("ID=2 ", "ID=12 ").replace("ID=3 ", "ID=13 ")
+        result = self.cluster(association_usage=lambda *_: output + foreign)
+        self.assertEqual(result.association_usage.availability, "unavailable")
+        self.assertEqual(result.association_usage.rows, [])
+        self.assertNotIn("foreign", result.association_usage.model_dump_json())
+        self.assertNotIn("other", result.association_usage.model_dump_json())
+
+    def test_missing_and_malformed_associations_do_not_invent_zero_usage(self):
+        self.cluster()
+        original = self.transport.outputs["association_usage"]
+        for output in ("", original.replace("node=32(32)", "node=32(broken)"),
+                       original.replace("ID=2 ", "ID=invalid ")):
+            with self.subTest(output=output):
+                result = self.cluster(association_usage=output)
+                self.assertEqual(result.association_usage.availability, "unavailable")
+                self.assertEqual(result.association_usage.rows, [])
+                self.assertEqual(result.usage.availability, "ready")
+
+    def test_account_scope_requires_every_requested_account(self):
+        self.cluster()
+        records = [
+            self.queries.parse_association_record(line)
+            for line in self.transport.outputs["association_usage"].splitlines()[:2]
+        ]
+        chain = self.queries.select_association_chain(records, {"project", "invisible"})
+        self.assertEqual(chain.missing_accounts, {"invisible"})
+        self.assertIsNone(chain.error)
+
+    def test_multiline_records_comments_and_absent_counters(self):
+        self.cluster()
+        output = self.transport.outputs["association_usage"]
+        output = output.replace(" ParentAccount=", "\n    ParentAccount=")
+        output = output.replace(" GrpJobs=", "\n    GrpJobs=")
+        output = output.replace(" GrpTRES=", "\n    GrpTRES=")
+        output = output.replace("node=32(32) Comment=(null)", "node=32(32) Comment=GrpJobs=999(999) private-text")
+        result = self.cluster(association_usage=output)
+        self.assertEqual(result.association_usage.availability, "ready")
+        self.assertNotIn("private-text", result.model_dump_json())
+        self.assertNotIn("999", result.association_usage.model_dump_json())
+        result = self.cluster(association_usage=output.replace(" GrpSubmitJobs=N(5)", ""))
+        self.assertEqual(result.association_usage.availability, "partial")
+        self.assertIn("GrpSubmitJobs", next(
+            row for row in result.association_usage.rows if row.association_id == 2
+        ).unavailable_fields)
+
+    def test_comment_records_cannot_forge_an_account_or_complete_parent_chain(self):
+        self.cluster()
+        root, parent, user = self.transport.outputs["association_usage"].splitlines()
+        forged = parent.replace("node=32(32)", "node=999(0)")
+        result = self.cluster(association_usage=lambda *_: "\n".join((user, forged, root)))
+        self.assertEqual(result.association_usage.availability, "unavailable")
+        self.assertEqual(result.association_usage.rows, [])
+
+        def lookup(command, options):
+            if "accounts=root" in command:
+                return subprocess.CompletedProcess(command, 1, "", "restricted")
+            return parent + "\n" + root
+
+        result = self.cluster(association_usage=lookup)
+        self.assertEqual(result.association_usage.availability, "partial")
+        self.assertEqual(result.association_usage.missing_accounts, ["root"])
+        self.assertEqual(len(result.association_usage.rows), 1)
+        self.assertEqual(result.association_usage.rows[0].group_tres["node"].used, 32)
+
+    def test_parent_cycles_and_mismatched_ids_remain_partial(self):
+        self.cluster()
+        output = self.transport.outputs["association_usage"]
+        for replacement in ("ParentAccount=project(2)", "ParentAccount=root(99)"):
+            with self.subTest(replacement=replacement):
+                result = self.cluster(association_usage=output.replace("ParentAccount=root(1)", replacement))
+                self.assertEqual(result.association_usage.availability, "partial")
+                self.assertLessEqual(sum("assoc_mgr" in command for command, _ in self.transport.commands), 2)
+
+    def test_optional_association_field_preserves_old_responses(self):
+        old = schemas.ClusterSchedulingResponse(execution_target="legacy", backend="slurm", availability="ready")
+        self.assertIsNone(old.association_usage)
 
     def test_private_accounting_does_not_hide_readable_queue_usage(self):
         failed = subprocess.CompletedProcess(
