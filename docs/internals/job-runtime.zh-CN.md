@@ -220,6 +220,11 @@ ${MAGNUS_HOME}/.tmp/                         SDK 文件中转目录 (容器可�
 
 ### 运行时镜像准备
 
+`server/_runtime_image.py` 负责准备参数校验、路径与运行时命令。其纯标准库源码
+嵌入计算 wrapper，兼容 Python 3.6；计算节点不导入控制面及其依赖。
+wrapper 在 system entry command 之后、task 并发启动之前执行准备。
+进程级回归覆盖两种运行时、转换失败与超时和并行 Job；helper 测试验证半成品不复用。
+
 部分非特权 Singularity 安装每次执行 SIF 都会先展开目录。多 task 并发因此可能耗尽
 共享文件系统的文件数量配额，即使压缩镜像很小、字节容量仍充足。这类 Slurm 目标
 可配置 `execution.container_image_mode: sandbox`。

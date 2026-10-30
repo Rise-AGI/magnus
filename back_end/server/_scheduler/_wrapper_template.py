@@ -12,6 +12,8 @@ wrapper.py 在每个 SLURM job 启动时由 sbatch 调起，负责：
 from pathlib import Path
 from typing import List, Optional
 
+from .._runtime_image import runtime_temporary_bind_shell, validate_runtime_image_options
+
 
 def _build_wrapper_content(
     job_working_table: str,
@@ -35,10 +37,11 @@ def _build_wrapper_content(
     container_image_mode: str = "native",
     container_prepare_timeout_seconds: int = 300,
 ) -> str:
-    if container_image_mode not in ("native", "sandbox"):
-        raise ValueError("Unsupported container image mode")
-    if type(container_prepare_timeout_seconds) is not int or container_prepare_timeout_seconds <= 0:
-        raise ValueError("Container preparation timeout must be a positive integer")
+    validate_runtime_image_options(
+        container_runtime,
+        container_image_mode,
+        container_prepare_timeout_seconds,
+    )
     success_marker_path = f"{job_working_table}/.magnus_success"
 
     # 多节点执行：node_count>1 或 tasks_per_node>1 时用 srun 跨节点铺 rank —— 把容器 exec
@@ -104,18 +107,10 @@ def _build_wrapper_content(
     # heredoc 分隔符加引号 → 内容一律不在 node 0 展开；`exec "$@"` 让启动器对容器命令本身
     # 完全透明（参数由 node 0 的 $APPTAINER_CMD 词法切分后原样传入）。
     sandbox_mode = container_image_mode == "sandbox"
-    temporary_bind_shell = ""
-    if sandbox_mode:
-        # A read-only directory image cannot supply writable /tmp through an
-        # overlay on every filesystem. Same-node tasks share job-private tmp.
-        temporary_bind_shell = f'''_node_id="$SLURM_NODEID"
-[ -n "$_node_id" ] || _node_id=0
-case "$_node_id" in ''|*[!0-9]*) echo "[Magnus] Invalid Slurm node identity" >&2; exit 1;; esac
-_job_tmp="$MAGNUS_RUNTIME_TEMP/$_node_id"
-mkdir -p "$_job_tmp/tmp" "$_job_tmp/sdk"
-export {runtime_var_prefix}_BIND="${runtime_var_prefix}_BIND,$_job_tmp/tmp:/tmp,$_job_tmp/tmp:/var/tmp,$_job_tmp/sdk:$MAGNUS_HOME/.tmp"
-export {runtime_env_prefix}_TMPDIR=/tmp
-'''
+    temporary_bind_shell = runtime_temporary_bind_shell(
+        container_runtime,
+        container_image_mode,
+    )
     if _is_multinode or sandbox_mode:
         rank_launch_path = '{shlex.quote(os.path.join(work_dir, ".magnus_rank_launch.sh"))}'
         multinode_rank_launch_block = f"""cat > {rank_launch_path} <<'MAGNUS_RANK_LAUNCH_EOF'
@@ -164,7 +159,12 @@ MAGNUS_RANK_LAUNCH_EOF
         Path(__file__).resolve().parents[1] / "_metrics_collector" / "_job_accounting.py"
     ).read_text(encoding="utf-8")
 
+    runtime_image_source = (
+        Path(__file__).resolve().parents[1] / "_runtime_image.py"
+    ).read_text(encoding="utf-8")
+
     return f'''{accounting_source}
+{runtime_image_source}
 
 import os
 import signal
@@ -526,10 +526,7 @@ def main():
     job_id = {repr(job_id)}
     ephemeral_storage = {repr(ephemeral_storage)}
     container_image_mode = {repr(container_image_mode)}
-    # Image permissions can mask inherited ACLs after extraction. A different
-    # owner cannot reliably reclaim the tree, including after a hard kill.
-    if container_image_mode == "sandbox" and os.stat(ephemeral_dir).st_uid != os.geteuid():
-        raise RuntimeError("Sandbox image mode requires ownership of the Job temporary directory")
+    check_runtime_image_owner(container_image_mode, ephemeral_dir)
     apptainer_tmp_dir = os.path.join(ephemeral_dir, ".magnus_tmp")
     apptainer_cache_dir = os.path.join(ephemeral_dir, ".magnus_cache")
 
@@ -576,26 +573,16 @@ def main():
     try:
         os.makedirs(apptainer_tmp_dir, exist_ok=True)
         os.makedirs(apptainer_cache_dir, exist_ok=True)
-        runtime_image_path = sif_path
-        runtime_temporary_path = ""
-        prepare_image_shell = ""
-        if container_image_mode == "sandbox":
-            # One conversion precedes task fan-out. Each attempt has its own
-            # directory; failed preparations are never reused as ready images.
-            runtime_directory = tempfile.mkdtemp(prefix="runtime-", dir=apptainer_tmp_dir)
-            runtime_image_path = os.path.join(runtime_directory, "rootfs")
-            runtime_temporary_path = os.path.join(runtime_directory, "temporary")
-            prepare_image_shell = (
-                'echo "[Magnus] Preparing one read-only sandbox for this Job"\\n'
-                'if timeout --signal=TERM --kill-after=5 '
-                + {repr(str(container_prepare_timeout_seconds))}
-                + ' {runtime_binary} build --sandbox --notest --disable-cache '
-                + shlex.quote(runtime_image_path) + ' ' + shlex.quote(sif_path) + '; then :; else\\n'
-                '_prepare_status=$?\\n'
-                'echo "[Magnus] Runtime image preparation failed (exit $_prepare_status); no tasks started" >&2\\n'
-                'exit "$_prepare_status"\\nfi\\n'
-                'echo "[Magnus] Runtime image preparation complete"\\n'
-            )
+        runtime_image = prepare_runtime_image(
+            {repr(container_runtime)},
+            container_image_mode,
+            sif_path,
+            ephemeral_dir,
+            {container_prepare_timeout_seconds},
+        )
+        runtime_image_path = runtime_image.image_path
+        runtime_temporary_path = runtime_image.temporary_path
+        prepare_image_shell = runtime_image.preparation_shell
 
         shell_cmd = f"""set -e
 export {runtime_env_prefix}_MAGNUS_TOKEN={{user_token}}

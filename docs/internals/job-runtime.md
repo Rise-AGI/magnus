@@ -222,6 +222,13 @@ the SIF directly. Its writable layer depends on the isolation mode:
 
 ### Runtime image preparation
 
+`server/_runtime_image.py` owns preparation validation, paths and runtime commands.
+Its standard-library source is embedded in the compute wrapper for Python 3.6
+compatibility; compute nodes do not import the controller or its dependencies.
+The wrapper executes preparation after the system entry command and before task
+fan-out. Process regressions cover both runtimes, conversion failure and timeout,
+and concurrent Jobs. Helper tests verify that partial attempts are not reused.
+
 Some unprivileged Singularity installations extract a SIF to a directory on every
 execution. Launching many tasks can therefore exhaust shared filesystem file-count
 quotas even when the compressed image is small and byte capacity is available.

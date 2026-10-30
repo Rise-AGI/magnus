@@ -21,11 +21,9 @@ class MetricCoverageTests(unittest.TestCase):
         nodes,
         tasks,
     ):
-        source = SERVER / "_scheduler" / "_wrapper_template.py"
-        spec = importlib.util.spec_from_file_location("metric_test_wrapper", source)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module._build_wrapper_content(
+        from runtime_support import WRAPPER
+
+        return WRAPPER._build_wrapper_content(
             job_working_table="/work",
             job_ephemeral_table="/tmp/work",
             repo_dir="/repo",

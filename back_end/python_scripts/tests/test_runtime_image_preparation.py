@@ -1,7 +1,6 @@
 """Run generated wrappers through process fixtures without a controller or Slurm."""
 import ast
 from concurrent.futures import ThreadPoolExecutor
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -12,14 +11,10 @@ import tempfile
 import time
 import unittest
 
+from runtime_support import RUNTIME_IMAGE, WRAPPER
+
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
-SPEC = importlib.util.spec_from_file_location(
-    "isolated_runtime_wrapper",
-    SERVER / "_scheduler/_wrapper_template.py",
-)
-WRAPPER = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(WRAPPER)
 
 RUNTIME = r'''#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
@@ -240,6 +235,46 @@ class RuntimeImagePreparationTests(unittest.TestCase):
             temporary_paths.append({row["bind"] for row in rows if row["operation"] == "exec"})
         self.assertNotEqual(*image_paths)
         self.assertFalse(temporary_paths[0] & temporary_paths[1])
+
+    def test_repeated_preparation_never_reuses_a_partial_image(self):
+        (self.root / ".magnus_tmp").mkdir()
+        first = RUNTIME_IMAGE.prepare_runtime_image(
+            "singularity",
+            "sandbox",
+            str(self.image),
+            str(self.root),
+            5,
+        )
+        Path(first.image_path).mkdir()
+        (Path(first.image_path) / "partial").write_text("incomplete")
+        second = RUNTIME_IMAGE.prepare_runtime_image(
+            "singularity",
+            "sandbox",
+            str(self.image),
+            str(self.root),
+            5,
+        )
+        self.assertNotEqual(first.image_path, second.image_path)
+        self.assertFalse(Path(second.image_path).exists())
+        self.assertTrue((Path(first.image_path) / "partial").exists())
+
+    def test_invalid_options_fail_before_creating_scratch(self):
+        for runtime, mode, timeout in (
+            ("docker", "sandbox", 5),
+            ("singularity", "unknown", 5),
+            ("singularity", "sandbox", True),
+            ("singularity", "sandbox", 0),
+        ):
+            with self.subTest(runtime=runtime, mode=mode, timeout=timeout):
+                with self.assertRaises(ValueError):
+                    RUNTIME_IMAGE.prepare_runtime_image(
+                        runtime,
+                        mode,
+                        str(self.image),
+                        str(self.root),
+                        timeout,
+                    )
+        self.assertFalse((self.root / ".magnus_tmp").exists())
 
 
 if __name__ == "__main__":
