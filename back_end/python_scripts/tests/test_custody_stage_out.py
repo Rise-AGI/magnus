@@ -46,7 +46,7 @@ class FileTransport:
     def run(self, command, **kwargs):
         if "input" in kwargs:
             return subprocess.run(command, input=kwargs["input"], capture_output=True, text=True, check=True, timeout=kwargs.get("timeout", 10))
-        if command[:2] == ["python3", "-c"] and "remove_job_path(sys.argv[1])" in command[2]:
+        if command[:2] == ["python3", "-c"] and "remove_job_path(sys.argv[1]" in command[2]:
             if self.fail_cleanup:
                 return SimpleNamespace(returncode=1, stderr="cleanup failed")
             return subprocess.run(command, capture_output=True, text=True, timeout=10)

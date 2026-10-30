@@ -6,6 +6,7 @@ from pathlib import Path
 import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[2] / "server" / "_workspace_cleanup.py"
@@ -56,6 +57,107 @@ class WorkspaceCleanupTests(unittest.TestCase):
 
     def test_helper_is_compatible_with_remote_python(self):
         ast.parse(SOURCE.read_text(), feature_version=(3, 6))
+
+    @unittest.skipUnless(hasattr(os, "O_PATH"), "Linux descriptor-based cleanup")
+    def test_timeout_keeps_deletion_progress_and_retry_finishes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "job"
+            root.mkdir()
+            for index in range(20):
+                (root / str(index)).write_bytes(b"scratch")
+            clock = [0.0]
+            unlink = os.unlink
+
+            def slow_unlink(*args, **kwargs):
+                unlink(*args, **kwargs)
+                clock[0] += 1
+
+            with patch.object(MODULE, "monotonic", lambda: clock[0]), patch.object(
+                MODULE.os,
+                "unlink",
+                slow_unlink,
+            ):
+                with self.assertRaises(TimeoutError):
+                    MODULE.remove_job_path(
+                        root,
+                        timeout_seconds=3,
+                    )
+            self.assertEqual(len(list(root.iterdir())), 17)
+            MODULE.remove_job_path(
+                root,
+                timeout_seconds=3,
+            )
+            self.assertFalse(root.exists())
+
+    @unittest.skipUnless(hasattr(os, "O_PATH"), "Linux descriptor-based cleanup")
+    def test_overlapping_cleanup_does_not_walk_or_delete(self):
+        import fcntl
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "job"
+            root.mkdir()
+            payload = root / "file"
+            payload.write_text("keep until prior cleanup finishes")
+            descriptor = os.open(
+                root,
+                os.O_RDONLY | os.O_DIRECTORY,
+            )
+            try:
+                fcntl.flock(
+                    descriptor,
+                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                )
+                with self.assertRaises(BlockingIOError):
+                    MODULE.remove_job_path(
+                        root,
+                    )
+                self.assertTrue(payload.is_file())
+            finally:
+                os.close(
+                    descriptor,
+                )
+            MODULE.remove_job_path(
+                root,
+            )
+            self.assertFalse(root.exists())
+
+    @unittest.skipUnless(hasattr(os, "O_PATH"), "Linux descriptor-based cleanup")
+    def test_directory_replaced_by_symlink_is_never_followed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            external = parent / "external"
+            external.mkdir()
+            protected = external / "file"
+            protected.write_text("keep")
+            external.chmod(0o555)
+            root = parent / "job"
+            root.mkdir()
+            nested = root / "nested"
+            nested.mkdir()
+            open_directory = os.open
+            replaced = False
+
+            def swap_before_open(name, flags, *args, **kwargs):
+                nonlocal replaced
+                if name == "nested" and not replaced:
+                    nested.rmdir()
+                    nested.symlink_to(external, target_is_directory=True)
+                    replaced = True
+                return open_directory(name, flags, *args, **kwargs)
+
+            with patch.object(MODULE.os, "open", swap_before_open):
+                with self.assertRaises(OSError):
+                    MODULE.remove_job_path(
+                        root,
+                    )
+            self.assertTrue(replaced)
+            self.assertEqual(protected.read_text(), "keep")
+            self.assertEqual(stat.S_IMODE(external.stat().st_mode), 0o555)
+            external.chmod(0o755)
+            MODULE.remove_job_path(
+                root,
+            )
+            self.assertTrue(protected.exists())
 
 
 if __name__ == "__main__":
