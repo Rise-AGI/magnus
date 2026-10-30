@@ -1,7 +1,9 @@
 [project]
 name = "magnus-sdk"
-version = "0.8.2"
+version = "1.0.0"
 description = "Official Python SDK and CLI for Magnus"
+readme = "README.md"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
     { name = "Magnus Team, PKU Plasma Lab × Rise-AGI", email = "sun_retailer@163.com" }
@@ -14,6 +16,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "ruamel.yaml>=0.18.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/Rise-AGI/magnus"
+Documentation = "https://github.com/Rise-AGI/magnus/blob/main/docs/guides/sdk-and-cli.md"
+Changelog = "https://github.com/Rise-AGI/magnus/blob/main/sdks/python/CHANGELOG.md"
 
 [project.scripts]
 magnus = "magnus.cli.main:main"
