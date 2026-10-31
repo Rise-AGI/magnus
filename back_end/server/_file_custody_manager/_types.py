@@ -52,3 +52,4 @@ class CustodyEntry:
     deleting: bool = False
     job_id: Optional[str] = None
     ttl_seconds: float = 0.0
+    owner_id: str | None = None

@@ -53,6 +53,7 @@ class LiveCustodyTests(unittest.TestCase):
             self.transport, self.manager,
             lambda job: str(self.local), lambda job: str(self.remote),
             self.staging['_validate_custody_metadata'], self.staging['logger'], 30,
+            job_owner=lambda job: "owner",
         )
 
     def publish(self, suffix='a', data=b'result', **metadata):
@@ -69,6 +70,45 @@ class LiveCustodyTests(unittest.TestCase):
 
     def poll(self):
         return self.relay.poll(JOB, time.monotonic() + 5)
+
+    def test_relay_owner_comes_from_job_database_and_survives_retry(self):
+        engine = create_engine(f"sqlite:///{self.root / 'owners.db'}")
+        self.addCleanup(engine.dispose)
+        Base.metadata.create_all(engine)
+        sessions = sessionmaker(engine)
+        with sessions() as db:
+            db.add(Job(id=JOB, status=JobStatus.RUNNING, user_id="producer"))
+            db.commit()
+        resolve = load_method(
+            "_scheduler/_core.py",
+            "_custody_job_owner",
+            {"SessionLocal": sessions, "Job": Job},
+        )
+        scheduler = SimpleNamespace(_job_query=lambda db, *entities: db.query(*entities))
+        self.relay.job_owner = lambda job: resolve(scheduler, job)
+        token = self.publish(owner_id="forged", user_id="forged")
+        self.assertTrue(self.poll())
+        self.assertEqual(self.manager.get_entry(token).owner_id, "producer")
+        with sessions() as db:
+            db.get(Job, JOB).user_id = "changed"
+            db.commit()
+        self.manager.shutdown()
+        self.manager = self.manager_namespace["FileCustodyManager"]()
+        self.relay = self.make_relay()
+        self.relay.job_owner = lambda job: resolve(scheduler, job)
+        self.assertTrue(self.poll())
+        self.assertEqual(self.manager.get_entry(token).owner_id, "producer")
+        self.assertEqual(len(self.transport.fetches), 1)
+        self.assertIsNone(resolve(scheduler, "missing"))
+
+    def test_failed_owner_lookup_preserves_remote_payload_for_retry(self):
+        token = self.publish()
+        with patch.object(self.relay, "job_owner", side_effect=OSError("database unavailable")):
+            with self.assertLogs("custody-stage-test", level="WARNING"):
+                self.assertFalse(self.poll())
+        self.assertEqual(self.transport.fetches, [])
+        self.assertEqual(self.manager.get_file_status(token), "unknown")
+        self.assertTrue((self.remote / ".magnus_custody_drop" / token / "payload").is_file())
 
     def publish_sized(
         self,

@@ -616,6 +616,7 @@ async def upload_avatar(
         filename = file.filename,
         file_obj = io.BytesIO(content),
         permanent = True,
+        owner_id=current_user.id,
     )
 
     target.avatar_url = f"/api/files/download/{token}"

@@ -203,6 +203,7 @@ async def upload_file(
                     is_directory=options.is_directory,
                     max_downloads=options.max_downloads,
                     job_id=job_id,
+                    owner_id=user.id,
                 )
             except CustodyLimitError as error:
                 raise HTTPException(429, str(error)) from None

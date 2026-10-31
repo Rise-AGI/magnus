@@ -57,6 +57,13 @@ def _sanitize_filename(name: str) -> str:
     return base
 
 
+def _validate_owner_id(
+    owner_id: str | None,
+) -> None:
+    if owner_id is not None and (not isinstance(owner_id, str) or not owner_id):
+        raise ValueError("Invalid custody owner")
+
+
 async def _settle_task(
     task: asyncio.Task,
 ) -> Any:
@@ -131,6 +138,7 @@ class FileCustodyManager:
                     file_size = file_path.stat().st_size,
                     job_id = meta.get("job_id"),
                     ttl_seconds = meta.get("ttl_seconds", 0),
+                    owner_id=meta.get("owner_id"),
                 )
                 restored.add(token)
 
@@ -199,6 +207,9 @@ class FileCustodyManager:
                     or not isinstance(meta.get("is_directory", False), bool)
                 ):
                     raise ValueError()
+                _validate_owner_id(
+                    meta.get("owner_id"),
+                )
                 if temporary and (
                     (meta["expires_at"] is not None and (
                         type(meta["expires_at"]) not in (int, float)
@@ -226,6 +237,8 @@ class FileCustodyManager:
                     "filename": entry.original_filename,
                     "is_directory": entry.is_directory,
                 }
+                if entry.owner_id is not None:
+                    data[eid]["owner_id"] = entry.owner_id
         self._write_manifest(
             self._manifest_path,
             data,
@@ -243,6 +256,7 @@ class FileCustodyManager:
             "download_count": entry.download_count,
             "job_id": entry.job_id,
             "ttl_seconds": entry.ttl_seconds,
+            "owner_id": entry.owner_id,
         }
 
     def pending_job_ids(
@@ -334,10 +348,14 @@ class FileCustodyManager:
         expected_size: int | None = None,
         receive: Callable[[Path], None] | None = None,
         upload_id: str | None = None,
+        owner_id: str | None = None,
     ) -> str:
         # Sanitize at the entry point so all callers are protected centrally
         # rather than each one needing to remember `os.path.basename`.
         filename = _sanitize_filename(filename)
+        _validate_owner_id(
+            owner_id,
+        )
 
         # explicit_token is untrusted on relay sites (it comes from a job-written
         # meta.json) and is used verbatim as the on-disk entry directory. Reject any
@@ -359,9 +377,16 @@ class FileCustodyManager:
             if permanent or explicit_token is not None or not re.fullmatch(r"[0-9a-f]{32}", upload_id):
                 raise ValueError("Invalid upload publication")
             with self._index.transaction() as db:
-                row = db.execute("SELECT token, state FROM uploads WHERE id=?", (upload_id,)).fetchone()
+                row = db.execute("SELECT token, state, owner FROM uploads WHERE id=?", (upload_id,)).fetchone()
             if row is None or row[1] not in {"complete", "finalizing"}:
                 raise ValueError("Upload is not ready for publication")
+            if owner_id is not None and owner_id != row[2]:
+                raise ValueError("Upload publication owner changed")
+            # The durable upload session, not client metadata, owns publication.
+            owner_id = row[2]
+            _validate_owner_id(
+                owner_id,
+            )
             if row[0] is not None:
                 return row[0]
 
@@ -419,6 +444,7 @@ class FileCustodyManager:
                 file_size = reservation,
                 job_id = job_id,
                 ttl_seconds = 0 if permanent else expire_minutes * 60,
+                owner_id=owner_id,
             )
             self._entries[entry_id] = placeholder
             self._current_size += reservation
@@ -507,6 +533,7 @@ class FileCustodyManager:
         permanent: bool = False,
         *,
         job_id: str | None = None,
+        owner_id: str | None = None,
     ) -> str:
         cancel_event = threading.Event()
         task = asyncio.create_task(asyncio.to_thread(
@@ -519,6 +546,7 @@ class FileCustodyManager:
             permanent = permanent,
             cancel_event = cancel_event,
             job_id = job_id,
+            owner_id=owner_id,
         ))
         try:
             return await asyncio.shield(task)

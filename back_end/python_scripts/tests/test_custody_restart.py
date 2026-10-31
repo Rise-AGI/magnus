@@ -64,6 +64,66 @@ class CustodyRestartTests(unittest.TestCase):
         again.release_file(token)
         self.assertEqual(self.restart().get_file_status(token), "unknown")
 
+    def test_ownership_survives_claims_job_completion_and_restart(self):
+        job_id = "0123456789abcdef"
+        temporary = self.store(
+            owner_id="uploader",
+            job_id=job_id,
+            max_downloads=3,
+        )
+        permanent = self.store(
+            owner_id="avatar-uploader",
+            permanent=True,
+        )
+        self.manager.get_file_path(temporary)
+        self.manager.release_file(temporary)
+        self.manager.finish_job(job_id)
+        self.manager.shutdown()
+        restored = self.restart()
+        self.assertEqual(restored.get_entry(temporary).owner_id, "uploader")
+        self.assertEqual(restored.get_entry(temporary).download_count, 1)
+        self.assertEqual(restored.get_entry(permanent).owner_id, "avatar-uploader")
+        self.assertEqual(restored._index.load()[temporary]["owner_id"], "uploader")
+        self.assertEqual(
+            json.loads(restored._manifest_path.read_text())[permanent]["owner_id"],
+            "avatar-uploader",
+        )
+
+    def test_legacy_owner_is_unknown_and_not_inferred_from_job_or_retry(self):
+        token = self.store(
+            job_id="0123456789abcdef",
+            explicit_token="relay-" + "a" * 32,
+        )
+        metadata = self.manager._index.load()[token]
+        metadata.pop("owner_id")
+        self.manager._index.save(token, metadata)
+        restored = self.restart()
+        self.assertIsNone(restored.get_entry(token).owner_id)
+        restored.store_file(
+            "ignored",
+            io.BytesIO(b"ignored"),
+            explicit_token=token,
+            owner_id="consumer",
+        )
+        self.assertIsNone(self.restart().get_entry(token).owner_id)
+
+    def test_invalid_owner_metadata_does_not_reclaim_existing_payloads(self):
+        token = self.store(owner_id="owner")
+        path = self.manager.get_entry(token).file_dir / "results.tar.gz"
+        metadata = self.manager._index.load()[token]
+        metadata["owner_id"] = ["owner"]
+        self.manager._index.save(token, metadata)
+        with self.assertRaisesRegex(ValueError, "storage left unchanged"):
+            self.restart()
+        self.assertEqual(path.read_bytes(), b"complete scientific results")
+
+    def test_invalid_owner_is_rejected_before_storage(self):
+        for owner in ("", 42, ["owner"]):
+            with self.subTest(owner=owner), self.assertRaises(ValueError):
+                self.store(owner_id=owner)
+        self.assertEqual(self.manager._entries, {})
+        self.assertEqual(self.manager._index.load(), {})
+
     def test_downtime_does_not_renew_ttl(self):
         with patch.object(self.namespace["time"], "time", return_value=1000):
             token = self.store(expire_minutes=5)

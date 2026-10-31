@@ -52,8 +52,17 @@ class ResumableTests(unittest.TestCase):
         self.addCleanup(self.api.close)
         self.headers = {"Authorization": "Bearer test", "Tus-Resumable": "1.0.0"}
 
-    def create(self, payload=b"content", key=None, checksum=None, options=None):
+    def create(
+        self,
+        payload=b"content",
+        key=None,
+        checksum=None,
+        options=None,
+        metadata_owner=None,
+    ):
         metadata = {"filename": "answer.bin", "sha256": checksum or hashlib.sha256(payload).hexdigest(), "options": json.dumps(options or {"max_downloads": 1})}
+        if metadata_owner is not None:
+            metadata["owner_id"] = metadata_owner
         key = key or f"{int(time.time())}-{uuid.uuid4().hex}"
         headers = {
             **self.headers,
@@ -94,6 +103,28 @@ class ResumableTests(unittest.TestCase):
         self.assertEqual(receipt["state"], "complete")
         downloaded = self.api.get("/api/files/download/" + receipt["file_secret"].removeprefix("magnus-secret:"))
         self.assertEqual(downloaded.content, b"abcdef")
+
+    def test_owner_outlives_upload_session_and_cannot_be_supplied_in_metadata(self):
+        path, _ = self.create(metadata_owner="forged")
+        self.assertEqual(self.chunk(path, b"content").status_code, 204)
+        receipt = self.completed(path)
+        token = receipt["file_secret"].removeprefix("magnus-secret:")
+        self.assertEqual(self.manager.get_entry(token).owner_id, "owner")
+        upload_id = path.rsplit("/", 1)[1]
+        with self.assertRaisesRegex(ValueError, "owner changed"):
+            self.manager.store_file(
+                "unused",
+                None,
+                upload_id=upload_id,
+                owner_id="forged",
+            )
+        with self.manager._index.transaction() as db:
+            db.execute("DELETE FROM uploads WHERE id=?", (upload_id,))
+        self.manager.shutdown()
+        restored = self.namespace["FileCustodyManager"]()
+        self.assertEqual(restored.get_entry(token).owner_id, "owner")
+        self.router_namespace["file_custody_manager"] = restored
+        self.assertEqual(self.api.get("/api/files/download/" + token).content, b"content")
 
     def test_lost_creation_and_completion_replies_do_not_republish_consumed_file(self):
         path, headers = self.create()

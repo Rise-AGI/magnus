@@ -151,13 +151,14 @@ class CustodyStatusTests(unittest.TestCase):
             "/api/files/upload",
             headers = {"Authorization": "Bearer test"},
             files = {"file": ("input.bin", b"scientific input")},
-            data = {"expire_minutes": "60", "max_downloads": "2"},
+            data = {"expire_minutes": "60", "max_downloads": "2", "owner_id": "forged"},
         )
         self.assertEqual(response.status_code, 200)
         self.token = response.json()["file_secret"].removeprefix("magnus-secret:")
         self.manager.shutdown()
         for _ in range(2):
             restored = self.namespace["FileCustodyManager"]()
+            self.assertEqual(restored.get_entry(self.token).owner_id, "owner")
             self.router_namespace["file_custody_manager"] = restored
             self.assertEqual(self.query(None).json()["status"], "ready")
             self.assertEqual(self.http.get(f"/api/files/download/{self.token}").content, b"scientific input")
@@ -179,6 +180,7 @@ class CustodyStatusTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         token = response.json()["file_secret"].removeprefix("magnus-secret:")
         self.assertEqual(self.manager.get_entry(token).expires_at, float("inf"))
+        self.assertEqual(self.manager.get_entry(token).owner_id, "owner")
         with self.sessions() as db:
             db.get(Job, job_id).user_id = "someone-else"
             db.commit()

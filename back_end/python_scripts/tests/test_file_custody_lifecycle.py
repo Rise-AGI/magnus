@@ -452,6 +452,29 @@ class CustodyLifecycleTests(unittest.TestCase):
         self.assertEqual(result["avatar_url"], target.avatar_url)
         self.assertEqual(len(self.manager._entries), 1)
 
+    def test_avatar_owner_is_authenticated_uploader_not_recipient(self):
+        endpoint, old_token, target, database, upload = self.avatar_endpoint()
+        endpoint.__globals__["_can_manage"] = lambda *args: True
+        asyncio.run(endpoint("user", upload, database, SimpleNamespace(id="parent")))
+        token = target.avatar_url.rsplit("/", 1)[-1]
+        self.assertEqual(self.manager.get_entry(token).owner_id, "parent")
+
+    def test_chat_media_records_authenticated_owner(self):
+        tree = ast.parse((SERVER / "routers/chat.py").read_text())
+        endpoint = next(node for node in tree.body if getattr(node, "name", None) == "upload_chat_media")
+        endpoint.decorator_list = []
+        endpoint.returns = None
+        endpoint.args.defaults = [ast.Constant(value=None) for _ in endpoint.args.defaults]
+        for argument in endpoint.args.args:
+            argument.annotation = None
+        namespace = {"file_custody_manager": self.manager, "os": os}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[endpoint], type_ignores=[])), "chat-media", "exec"), namespace)
+        result = asyncio.run(namespace["upload_chat_media"](
+            SimpleNamespace(filename="image.png", content_type="image/png", file=io.BytesIO(b"image")),
+            SimpleNamespace(id="sender"),
+        ))
+        self.assertEqual(self.manager.get_entry(result["token"]).owner_id, "sender")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -111,6 +111,7 @@ class CustodyStageOutTests(unittest.TestCase):
             scheduler._local_job_working_table, scheduler._remote_job_working_table,
             self.namespace["_validate_custody_metadata"], self.namespace["logger"], 900,
             transfer_logs=scheduler._stage_out_logs,
+            job_owner=lambda job: "owner",
         )
         return scheduler
 

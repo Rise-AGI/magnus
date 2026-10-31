@@ -54,6 +54,7 @@ class StageOutTests(unittest.TestCase):
             logger = self.namespace['logger'],
             transfer_timeout = 30,
             transfer_logs = self.scheduler._stage_out_logs,
+            job_owner=lambda job: "owner",
         )
         self.scheduler._custody_relay = self.relay
 

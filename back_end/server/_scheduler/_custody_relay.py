@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import threading
 from time import monotonic
+from typing import Callable
 
 from .._custody_receipts import _read_custody_receipts, _write_custody_receipts
 from .._slurm_manager._ssh_auto_connect import remaining_timeout
@@ -101,6 +102,8 @@ class CustodyRelay:
         logger,
         transfer_timeout: float,
         transfer_logs = None,
+        *,
+        job_owner: Callable[[str], str | None],
     ) -> None:
         self.transport = transport
         self.custody = custody
@@ -110,6 +113,7 @@ class CustodyRelay:
         self.logger = logger
         self.transfer_timeout = transfer_timeout
         self.transfer_logs = transfer_logs
+        self.job_owner = job_owner
         self._lock = threading.Lock()
         self._jobs: dict[str, _JobTransfers] = {}
         self._cancel = threading.Event()
@@ -250,6 +254,9 @@ class CustodyRelay:
                     expected_size = drop.size,
                     receive = receive,
                     cancel_event = self._cancel,
+                    owner_id=self.job_owner(
+                        job_id,
+                    ),
                 )
             with state.lock:
                 receipts = _read_custody_receipts(self.local_table(job_id), durable=True)

@@ -735,5 +735,6 @@ async def upload_chat_media(
         filename = filename,
         file_obj = file.file,
         permanent = True,
+        owner_id=current_user.id,
     )
     return {"url": f"/api/files/download/{token}", "token": token}

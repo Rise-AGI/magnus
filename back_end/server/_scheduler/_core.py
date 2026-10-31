@@ -107,6 +107,7 @@ class MagnusScheduler(
             logger = logger,
             transfer_timeout = self.config.get("transport", {}).get("ssh", {}).get("transfer_timeout_seconds", 900),
             transfer_logs = self._stage_out_logs,
+            job_owner=self._custody_job_owner,
         )
         self._artifact_retry_after: Dict[str, float] = {}
         self._submission_task: Optional[asyncio.Task] = None
@@ -143,6 +144,20 @@ class MagnusScheduler(
         *entities,
     ):
         return db.query(*entities).filter(self.target.job_filter(Job))
+
+    def _custody_job_owner(
+        self,
+        job_id: str,
+    ) -> str | None:
+        # Remote drop metadata cannot establish an authenticated identity.
+        with SessionLocal() as db:
+            row = self._job_query(
+                db,
+                Job.user_id,
+            ).filter(
+                Job.id == job_id,
+            ).first()
+            return row[0] if row is not None else None
 
     def inflight_job_ids(
         self,
