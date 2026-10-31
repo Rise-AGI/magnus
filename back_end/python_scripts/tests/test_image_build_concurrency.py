@@ -45,11 +45,13 @@ class Worker:
         self.size = min(self.size, target)
 
 
-def load_coordinator():
+def load_coordinator(
+    progress_type=Progress,
+):
     module = types.ModuleType("image_build_coordinator_fixture")
     sys.modules[module.__name__] = module
     module.__dict__.update({
-        "BuildProgress": Progress,
+        "BuildProgress": progress_type,
         "BuildKitClient": Worker,
         "ImageBuildError": type("ImageBuildError", (RuntimeError,), {}),
         "is_local_mode": False,
@@ -67,6 +69,7 @@ def load_coordinator():
         (SERVER / "_size_utils.py", {"_parse_size_string"}),
         (SERVER / "_blocking_io.py", {"_run_blocking_io"}),
         (SERVER / "_resource_manager/_processes.py", None),
+        (SERVER / "_resource_manager/_build_queue.py", None),
         (SERVER / "_resource_manager/_builds.py", None),
     ):
         tree = ast.parse(filename.read_text(encoding="utf-8"), filename=str(filename))
@@ -95,6 +98,28 @@ def cross_volume_replace(real_replace):
 
 
 class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cleanup_does_not_hide_deletion_or_absence_probe_errors(
+        self,
+    ) -> None:
+        for target in ("deletion", "probe"):
+            with self.subTest(target=target):
+                if target == "deletion":
+                    failure = patch.object(
+                        self.module.shutil,
+                        "rmtree",
+                        side_effect=OSError(errno.EIO, "injected deletion failure"),
+                    )
+                else:
+                    failure = patch.object(
+                        Path,
+                        "lstat",
+                        side_effect=OSError(errno.EIO, "injected absence probe failure"),
+                    )
+                with failure, self.assertRaises(OSError):
+                    self.manager._cleanup_directory(
+                        self.directory,
+                    )
+
     async def test_operation_cleanup_preserves_unconfirmed_subprocesses(
         self,
     ) -> None:
@@ -592,6 +617,77 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         local_size, _, _ = await self.manager._usage()
         self.assertLessEqual(local_size + self.manager.client.size, self.manager.budget)
         self.assertTrue(any("reclamation" in line and "worker_keep_bytes=" in line for line in logs.output))
+
+    async def test_transient_scratch_does_not_evict_cache_below_total_ceiling(
+        self,
+    ) -> None:
+        mib = 1024 ** 2
+        digest = "sha256:" + "d" * 64
+        cached = self.manager._sif_path(digest)
+        with cached.open("wb") as stream:
+            stream.truncate(17 * mib)
+        self.manager.results["d" * 64] = {
+            "digest": digest,
+            "size_bytes": 17 * mib,
+            "accessed_at": 0,
+        }
+        with self.archive.open("wb") as stream:
+            stream.truncate(31 * mib)
+        self.manager.client.size = 50 * mib
+        self.manager.client.prune = AsyncMock()
+        self.manager.budget = 100 * mib
+        self.manager.scratch_budget = 32 * mib
+        await self.manager._collect_cache()
+        self.assertTrue(cached.exists())
+        self.manager.client.prune.assert_not_awaited()
+        await self.manager._check_budget()
+
+    async def test_transient_pressure_stops_eviction_after_total_fits(
+        self,
+    ) -> None:
+        mib = 1024 ** 2
+        paths = []
+        for character, size, accessed in (("c", 4 * mib, 1), ("d", 17 * mib, 2)):
+            digest = "sha256:" + character * 64
+            path = self.manager._sif_path(digest)
+            with path.open("wb") as stream:
+                stream.truncate(size)
+            paths.append(path)
+            self.manager.results[character * 64] = {
+                "digest": digest,
+                "size_bytes": size,
+                "accessed_at": accessed,
+            }
+        with self.archive.open("wb") as stream:
+            stream.truncate(31 * mib)
+        self.manager.client.size = 50 * mib
+        self.manager.client.prune = AsyncMock()
+        self.manager.budget = 100 * mib
+        self.manager.scratch_budget = 32 * mib
+        await self.manager._ensure_budget()
+        self.assertFalse(paths[0].exists())
+        self.assertTrue(paths[1].exists())
+        self.manager.client.prune.assert_not_awaited()
+        await self.manager._check_budget()
+
+    async def test_retained_cache_still_reclaims_to_low_watermark(
+        self,
+    ) -> None:
+        mib = 1024 ** 2
+        for character in ("c", "d"):
+            digest = "sha256:" + character * 64
+            with self.manager._sif_path(digest).open("wb") as stream:
+                stream.truncate(20 * mib)
+            self.manager.results[character * 64] = {
+                "digest": digest,
+                "size_bytes": 20 * mib,
+                "accessed_at": 0,
+            }
+        self.manager.client.size = 50 * mib
+        self.manager.budget = 100 * mib
+        await self.manager._collect_cache()
+        self.assertEqual(len(self.manager.results), 1)
+        await self.manager._check_budget()
 
     async def test_unreclaimable_local_overflow_preserves_worker_cache(self):
         local_size, _, scratch_size = await self.manager._usage()

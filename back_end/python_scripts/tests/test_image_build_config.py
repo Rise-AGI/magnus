@@ -73,6 +73,9 @@ class BuildConfigurationTests(unittest.TestCase):
         self.assertEqual(build["scratch_size_bytes"], 2 * 1024**3)
         self.assertEqual(build["conversion_memory_bytes"], 1024**3)
         self.assertEqual(build["conversion_cpus"], 2)
+        self.assertIsNone(build["max_concurrent_per_user"])
+        self.assertIsNone(build["max_concurrent_conversions"])
+        self.assertIsNone(build["queue_timeout_seconds"])
         expected = copy.deepcopy(config)
         self.validate(config)
         self.assertEqual(config, expected)
@@ -94,9 +97,27 @@ class BuildConfigurationTests(unittest.TestCase):
             ("conversion_command_prefix", [True]), ("conversion_command_prefix", ["x\x00y"]),
             ("conversion_cpus", True), ("conversion_cpus", 0), ("conversion_cpus", 1.5),
             ("conversion_memory", "512K"), ("conversion_memory", "-1M"), ("conversion_memory", False),
+            ("max_concurrent_per_user", True), ("max_concurrent_per_user", 0),
+            ("max_concurrent_per_user", 3), ("max_concurrent_per_user", 1.5),
+            ("max_concurrent_conversions", True), ("max_concurrent_conversions", 0),
+            ("max_concurrent_conversions", 3), ("max_concurrent_conversions", "1"),
+            ("queue_timeout_seconds", False), ("queue_timeout_seconds", 0),
+            ("queue_timeout_seconds", -1), ("queue_timeout_seconds", 1.5),
         ):
             with self.subTest(field=field, value=value), self.assertRaises((TypeError, ValueError)):
                 self.validate(self.configuration(**{field: value}))
+
+    def test_explicit_admission_limits_survive_repeated_validation(self):
+        config = self.configuration(
+            max_concurrent=5,
+            max_concurrent_per_user=2,
+            max_concurrent_conversions=1,
+            queue_timeout_seconds=600,
+        )
+        self.validate(config)
+        expected = copy.deepcopy(config)
+        self.validate(config)
+        self.assertEqual(config, expected)
 
 
 if __name__ == "__main__":

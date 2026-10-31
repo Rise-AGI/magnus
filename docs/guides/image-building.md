@@ -87,6 +87,48 @@ Configure the worker's native GC policy for the retained step cache, including i
 
 If cache metadata exceeds BuildKit's RPC message limit, Magnus splits the usage query with disjoint server-side ID filters and reuses successful partitions. This does not remove cache records or change the budget. Queries remain bounded; if usage cannot be read completely, preparation fails instead of treating an unreadable cache as empty.
 
+## Concurrency and queueing
+
+`max_concurrent` bounds distinct image preparations, including exported archives
+waiting for conversion and teardown. Requests sharing a Dockerfile use one
+preparation; verified cache hits bypass admission. Queued preparations rotate
+between submitting users, preserving FIFO order within each user's queue. The
+first requester owns the shared preparation's admission charge until it finishes;
+another waiter does not consume another slot. Cancelling one waiter preserves a
+build that other Jobs still need.
+
+`max_concurrent_per_user` optionally limits a user's admitted preparations.
+`max_concurrent_conversions` independently limits Docker loading or local SIF
+conversion through scratch cleanup. Both default to `null`, inheriting
+`max_concurrent`, so existing configurations keep their concurrency limits. A
+larger preparation limit with a smaller conversion limit allows unrelated solves
+to proceed while one image is compressed. Archives waiting for conversion remain
+within the preparation count and aggregate scratch budget.
+
+`queue_timeout_seconds` optionally bounds admission waiting; `null` preserves the
+existing unlimited wait. `timeout_seconds` starts after admission and covers the
+build, conversion waiting and import. A queue timeout creates no build scratch
+and does not cancel another build. Process teardown and file cleanup finish
+before capacity is reused, including on timeout or repeated cancellation.
+Unconfirmed child exit or incomplete scratch cleanup blocks new uncached
+preparations until an operator verifies the retained state and restarts the
+backend; existing runtime pins and cache hits remain available.
+
+These limits complement the worker's native
+[`max-parallelism`](https://docs.docker.com/build/buildkit/configure/#max-parallelism)
+and OS CPU/memory/disk limits. Increasing only the Magnus limit does not increase
+worker execution capacity. Size aggregate scratch for all admitted preparations,
+not for just one image. Magnus does not preempt Dockerfile commands or predict
+their runtime from the recipe. The separate queue and execution bounds follow
+the same distinction used by managed build services such as
+[CodeBuild](https://docs.aws.amazon.com/codebuild/latest/userguide/builds-working.html).
+
+The cache's 80% reclamation target applies to retained layer/runtime data.
+Temporary exports and conversion data still count toward the full cache ceiling,
+but do not lower that retained-cache target. During temporary pressure Magnus
+reclaims only enough to fit the total ceiling, respecting active runtime pins;
+it does not discard extra ready images just to reach 80% including scratch.
+
 ## Compatibility and acceptance
 
 Ordinary image pulls and refreshes settle their database and filesystem work in

@@ -271,6 +271,7 @@ class _ResourcesMixin(_ResourcesMixinBase):
             result = await resource_manager.builds.ensure(
                 job_id=job_id,
                 dockerfile=inputs.dockerfile,
+                user_id=inputs.user_id,
             )
             with self._preparing_jobs_lock:
                 self._pinned_jobs.add(

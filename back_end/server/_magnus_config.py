@@ -92,6 +92,9 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         "buildctl": "buildctl",
         "platform": "linux/amd64",
         "max_concurrent": 2,
+        "max_concurrent_per_user": None,
+        "max_concurrent_conversions": None,
+        "queue_timeout_seconds": None,
         "timeout_seconds": 3600,
         "cache_size": "40G",
         "min_free_space": "5G",
@@ -123,6 +126,12 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
             _check_key(image_build, key, int)
             if isinstance(image_build[key], bool) or image_build[key] <= 0:
                 raise ValueError(f"execution.image_build.{key} must be positive")
+        for key in ("max_concurrent_per_user", "max_concurrent_conversions", "queue_timeout_seconds"):
+            value = image_build[key]
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError(f"execution.image_build.{key} must be positive or null")
+            if key != "queue_timeout_seconds" and value is not None and value > image_build["max_concurrent"]:
+                raise ValueError(f"execution.image_build.{key} must not exceed max_concurrent")
         for key in ("cache_size", "min_free_space"):
             if _parse_size_string(image_build[key]) <= 0:
                 raise ValueError(f"execution.image_build.{key} must be a positive size")

@@ -148,6 +148,9 @@ execution:
   #   buildctl: buildctl
   #   platform: linux/amd64              # one Linux target; independent of the job repo
   #   max_concurrent: 2
+  #   max_concurrent_per_user: null      # null inherits max_concurrent
+  #   max_concurrent_conversions: null   # import/conversion cap; null inherits max_concurrent
+  #   queue_timeout_seconds: null        # null preserves unlimited admission waiting
   #   timeout_seconds: 3600
   #   cache_size: 40G
   #   min_free_space: 5G

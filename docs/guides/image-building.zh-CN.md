@@ -87,6 +87,39 @@ SIF 转换可用 `conversion_cpus`（默认 `2`）和 `conversion_memory`（默�
 
 缓存元数据超过 BuildKit 的 RPC 消息上限时，Magnus 使用互不重叠的 ID 过滤器在服务端分批查询容量，并复用成功的分组；此操作不删除缓存，也不改变预算。查询次数与耗时有界，无法完整读取时准备失败，不把无法读取的缓存当作空缓存。
 
+## 并发与排队
+
+`max_concurrent` 限制独立镜像准备的数量，包括等待转换的导出包和收尾。
+相同 Dockerfile 共用一次准备，已验证的成品缓存命中直接通过。
+等待队列在提交用户之间轮转，同一用户内保持先到先服务；共享构建的名额始终
+记在首个发起者名下，后续等待者不额外占槽。取消一个等待者不会停止其他 Job
+仍需要的构建。
+
+`max_concurrent_per_user` 可限制单用户正在准备的数量。
+`max_concurrent_conversions` 独立限制 Docker 加载或本地 SIF 转换，直到临时文件
+清理完成才释放名额。二者默认 `null`，继承 `max_concurrent`，旧配置并发额度不变。
+准备并发较大、转换并发较小时，一个镜像压缩期间其他配方仍可构建；等待转换的
+导出包仍计入准备数量和总 scratch 预算。
+
+`queue_timeout_seconds` 可限制准入等待，`null` 保留原有不限等待时间的行为。
+`timeout_seconds` 从获得名额后开始，覆盖构建、转换等待和导入。排队超时不会
+创建构建临时目录或取消其他构建。超时和重复取消时也先完成进程及文件收尾，
+再复用名额。
+子进程退出无法确认或临时目录清理不完整时，拒绝新的未缓存准备，等待运维核实
+保留现场并重启后端；已有运行副本使用保护和成品缓存命中仍保留。
+
+这些限制与 worker 原生
+[`max-parallelism`](https://docs.docker.com/build/buildkit/configure/#max-parallelism)
+及操作系统 CPU、内存、磁盘限制配合；只提高 Magnus 并发不会增加 worker 执行容量。
+scratch 必须按所有已准入准备共同规划，不能按单镜像配置。Magnus 不抢占 Dockerfile
+命令，也不凭配方猜测执行时间。排队与执行期限分开的做法，与
+[CodeBuild](https://docs.aws.amazon.com/codebuild/latest/userguide/builds-working.html)
+等构建服务采用的边界一致。
+
+缓存的 80% 回收目标针对保留的层和运行副本。临时导出、转换数据仍计入完整总预算，
+但不会压低这个保留缓存目标。临时压力下只回收到总量可容纳，并继续保护活跃运行
+副本，不再为了“含 scratch 的总量降至 80%”而多删已就绪成品。
+
 ## 兼容与验收
 
 普通镜像拉取和刷新由等待收尾的工作线程完成数据库与文件结算。Docker 缓存探测有

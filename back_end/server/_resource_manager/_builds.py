@@ -26,6 +26,7 @@ from pathlib import Path
 from .._magnus_config import is_local_mode, magnus_config
 from .._size_utils import _parse_size_string
 from ._build_progress import BuildProgress, write_json
+from ._build_queue import BuildAdmission
 from ._buildkit import BuildKitClient, ImageBuildError, blocking_io, run_command
 from ._processes import _process_exists, _process_group_exists, process_lease_is_idle
 from ._scratch_windows import prepare_private_directory as _prepare_windows_scratch_root
@@ -165,6 +166,7 @@ def _prepare_scratch_root(
 class _BuildOperation:
     key: str
     dockerfile: str
+    user_id: str | None = None
     progress: BuildProgress = field(default_factory=BuildProgress)
     waiters: dict[str, Path] = field(default_factory=dict)
     task: asyncio.Task | None = None
@@ -214,6 +216,7 @@ class ImageBuildManager:
         self.pending_tags: set[str] = set()
         self.initialized = False
         self.stopping = False
+        self.cleanup_error: str | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.initialize_lock = asyncio.Lock()
         self.maintenance_lock = asyncio.Lock()
@@ -224,7 +227,14 @@ class ImageBuildManager:
         self.cached_budget_checked_at = 0.0
         self.budget_check_sequence = 0
         self.budget_volumes: tuple[Path, ...] = (self.root, self.temporary_root)
-        self.slots = asyncio.Semaphore(self.config.get("max_concurrent", 2))
+        concurrency = self.config.get("max_concurrent", 2)
+        self.admission = BuildAdmission(
+            capacity=concurrency,
+            per_user=self.config.get("max_concurrent_per_user") or concurrency,
+        )
+        self.conversion_slots = asyncio.Semaphore(
+            self.config.get("max_concurrent_conversions") or concurrency,
+        )
         self.budget = _parse_size_string(self.config.get("cache_size", "40G"))
         self.scratch_budget = self.config.get("scratch_size_bytes") or _parse_size_string(
             self.config.get("scratch_size") or self.config.get("cache_size", "40G"),
@@ -246,6 +256,8 @@ class ImageBuildManager:
         self,
         job_id: str,
         dockerfile: str,
+        *,
+        user_id: str | None = None,
     ) -> dict:
         if not self.enabled:
             raise ImageBuildError("Dockerfile builds are not enabled on this station")
@@ -265,7 +277,12 @@ class ImageBuildManager:
             operation = self.operations.get(key)
             if operation is None or operation.closing or (operation.task and operation.task.done()):
                 predecessor = operation.task if operation else None
-                operation = _BuildOperation(key=key, dockerfile=dockerfile, predecessor=predecessor)
+                operation = _BuildOperation(
+                    key=key,
+                    dockerfile=dockerfile,
+                    user_id=user_id,
+                    predecessor=predecessor,
+                )
                 self.operations[key] = operation
                 operation.task = asyncio.create_task(self._run(operation))
                 self.tasks.add(operation.task)
@@ -721,6 +738,8 @@ class ImageBuildManager:
     ) -> dict:
         directory: Path | None = None
         monitor: asyncio.Task | None = None
+        admitted = False
+        converting = False
         try:
             if operation.predecessor:
                 await asyncio.gather(asyncio.shield(operation.predecessor), return_exceptions=True)
@@ -729,34 +748,66 @@ class ImageBuildManager:
                 operation.progress.append("Reusing the prepared image from cache")
                 operation.progress.set_phase("ready")
                 return cached
-            async with self.slots:
-                # Another completed operation may have published while this
-                # request was waiting for its construction slot.
-                cached = await self._cached_result(operation)
-                if cached is not None:
-                    operation.progress.set_phase("ready")
-                    return cached
-                self.budget_generation += 1
-                await self._collect_cache()
-                await self._ensure_budget()
-                directory = self.temporary_root / f"build-{uuid.uuid4().hex}"
-                await blocking_io(self._prepare_directory, directory, operation.dockerfile)
-                monitor = asyncio.create_task(self._monitor(operation))
-                try:
-                    async with asyncio.timeout(self.config["timeout_seconds"]):
-                        operation.progress.set_phase("building")
-                        temporary_tag = f"magnus-build/{self.namespace}:pending-{directory.name}"
-                        archive = await self.client.build(directory, temporary_tag, operation.progress.consume)
-                        operation.progress.set_phase("exporting")
-                        result = await self._import_archive(operation, directory, archive, temporary_tag)
+            if self.cleanup_error is not None:
+                raise ImageBuildError(self.cleanup_error)
+            await self._flush(operation)
+            try:
+                async with asyncio.timeout(self.config.get("queue_timeout_seconds")):
+                    await self.admission.acquire(
+                        user_id=operation.user_id,
+                    )
+            except TimeoutError as error:
+                raise ImageBuildError(
+                    f"Image build queue wait exceeded {self.config['queue_timeout_seconds']} seconds",
+                ) from error
+            admitted = True
+            try:
+                async with asyncio.timeout(self.config["timeout_seconds"]):
+                    # A result may have been published while this request was queued.
+                    cached = await self._cached_result(operation)
+                    if cached is not None:
                         operation.progress.set_phase("ready")
-                        return result
-                except asyncio.CancelledError:
-                    if monitor.done() and not monitor.cancelled():
-                        error = monitor.exception()
-                        if error is not None:
-                            raise error
-                    raise
+                        return cached
+                    if self.cleanup_error is not None:
+                        raise ImageBuildError(self.cleanup_error)
+                    self.budget_generation += 1
+                    await self._collect_cache()
+                    await self._ensure_budget()
+                    directory = self.temporary_root / f"build-{uuid.uuid4().hex}"
+                    await blocking_io(
+                        self._prepare_directory,
+                        directory,
+                        operation.dockerfile,
+                    )
+                    monitor = asyncio.create_task(self._monitor(operation))
+                    if self.cleanup_error is not None:
+                        raise ImageBuildError(self.cleanup_error)
+                    operation.progress.set_phase("building")
+                    temporary_tag = f"magnus-build/{self.namespace}:pending-{directory.name}"
+                    archive = await self.client.build(
+                        directory,
+                        temporary_tag,
+                        operation.progress.consume,
+                    )
+                    operation.progress.set_phase("exporting")
+                    await self.conversion_slots.acquire()
+                    converting = True
+                    if self.cleanup_error is not None:
+                        raise ImageBuildError(self.cleanup_error)
+                    result = await self._import_archive(
+                        operation,
+                        directory,
+                        archive,
+                        temporary_tag,
+                    )
+                    operation.progress.set_phase("ready")
+                    return result
+            except asyncio.CancelledError:
+                if monitor is not None and monitor.done() and not monitor.cancelled():
+                    error = monitor.exception()
+                    if error is not None:
+                        raise error
+                raise
         except asyncio.CancelledError:
             operation.progress.set_phase("cancelled")
             raise
@@ -775,12 +826,22 @@ class ImageBuildManager:
                 monitor,
                 directory,
             ))
-            while not cleanup.done():
-                try:
-                    await asyncio.shield(cleanup)
-                except asyncio.CancelledError:
-                    continue
-            cleanup.result()
+            try:
+                while not cleanup.done():
+                    try:
+                        await asyncio.shield(cleanup)
+                    except asyncio.CancelledError:
+                        continue
+                cleanup.result()
+            finally:
+                # Scratch and subprocess teardown still own capacity after the
+                # build/load command returns, including repeated cancellation.
+                if converting:
+                    self.conversion_slots.release()
+                if admitted:
+                    self.admission.release(
+                        user_id=operation.user_id,
+                    )
 
     async def _finish_operation(
         self,
@@ -796,10 +857,19 @@ class ImageBuildManager:
         finally:
             try:
                 if directory:
-                    await blocking_io(
-                        self._cleanup_directory,
-                        directory,
-                    )
+                    cleaned = False
+                    try:
+                        cleaned = await blocking_io(
+                            self._cleanup_directory,
+                            directory,
+                            allow_missing=monitor is None,
+                        )
+                    finally:
+                        if not cleaned:
+                            self.cleanup_error = (
+                                "Image build cleanup could not confirm released resources; "
+                                "inspect preserved scratch before restarting the backend"
+                            )
             finally:
                 if directory:
                     self.budget_generation += 1
@@ -810,19 +880,37 @@ class ImageBuildManager:
     @staticmethod
     def _cleanup_directory(
         directory: Path,
-    ) -> None:
+        *,
+        allow_missing: bool = False,
+    ) -> bool:
+        if allow_missing:
+            # mkdir can fail before a directory or any child process exists.
+            try:
+                directory.lstat()
+            except FileNotFoundError:
+                return True
         if process_lease_is_idle(
             directory,
         ):
-            shutil.rmtree(
-                directory,
-                ignore_errors=True,
-            )
+            try:
+                shutil.rmtree(
+                    directory,
+                )
+            except FileNotFoundError:
+                pass
+            # exists() suppresses I/O errors; only an explicit ENOENT proves
+            # that deletion released the space owned by this preparation.
+            try:
+                directory.lstat()
+            except FileNotFoundError:
+                return True
+            return False
         else:
             logger.warning(
                 "Preserved build scratch %s; subprocess exit has not been confirmed",
                 directory.name,
             )
+        return False
 
     @staticmethod
     def _prepare_directory(
@@ -1371,14 +1459,20 @@ class ImageBuildManager:
         )
         removed_orphans = await self._remove_orphans(protected)
         target = int(self.budget * 0.8)
-        if not removed_orphans and local_size + worker_size <= target and free >= self.free_floor:
+        # The low watermark applies to retained cache. Temporary conversion
+        # bytes must fit the total ceiling without lowering that watermark.
+        if (
+            not removed_orphans
+            and local_size + worker_size <= min(self.budget, target + scratch_size)
+            and free >= self.free_floor
+        ):
             return
         local_size, free, scratch_size = await self._usage()
         removed_count = 0
         with self.lock:
             products = {value["digest"]: dict(value) for value in self.results.values()}
         for digest, result in sorted(products.items(), key=lambda item: item[1].get("accessed_at", 0)):
-            if local_size + worker_size <= target and free >= self.free_floor:
+            if local_size + worker_size <= min(self.budget, target + scratch_size) and free >= self.free_floor:
                 break
             with self.lock:
                 if digest in protected or digest in self.pins.values():
