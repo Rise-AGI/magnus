@@ -36,25 +36,25 @@ export function JobStatusBadge({ status, isReleasing = false, size = "sm", anima
 
   const isAnimated = animate && (["Running", "Preparing", "Building"].includes(status) || isReleasing);
   return size === "md" ? (
+    <span className="inline-flex flex-col items-center gap-1">
       <span className="inline-flex items-center gap-2">
         <Icon className={`w-5 h-5 ${config.color} ${isAnimated ? 'animate-pulse' : ''}`} />
-        {isReleasing && (
-          <span className={`text-xs font-medium ${config.color} opacity-70`}>· {releasingText}</span>
-        )}
         {children}
       </span>
+      {isReleasing && <span className="text-xs font-medium text-zinc-500">{releasingText}</span>}
+    </span>
   ) : (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border shadow-sm ${config.bg} ${config.color} ${config.border}`}>
-      {isAnimated && (
-        <span className="relative flex h-1.5 w-1.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-current"></span>
-          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-current"></span>
-        </span>
-      )}
-      {displayText}
-      {isReleasing && (
-        <span className="ml-1 opacity-70">· {releasingText}</span>
-      )}
+    <span className="inline-flex max-w-full flex-col items-center gap-1">
+      <span className={`inline-flex max-w-full items-center gap-1.5 px-2 py-1 rounded-md text-xs font-semibold border shadow-sm ${config.bg} ${config.color} ${config.border}`}>
+        {isAnimated && (
+          <span className="relative flex h-1.5 w-1.5 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-current"></span>
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-current"></span>
+          </span>
+        )}
+        <span className="min-w-0 whitespace-normal break-words">{displayText}</span>
+      </span>
+      {isReleasing && <span className="text-[10px] font-medium text-zinc-500">{releasingText}</span>}
     </span>
   );
 }

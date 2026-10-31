@@ -15,7 +15,7 @@ import { POLL_INTERVAL } from "@/lib/config";
 import { Job, JobBuildProgress } from "@/types/job";
 import { formatStationTime } from "@/lib/utils";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
-import { EXECUTION_TARGETS, getExecutionTarget } from "@/lib/config";
+import { getExecutionTarget } from "@/lib/config";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { JobResources } from "@/components/jobs/job-resources";
 import { AvatarCircle } from "@/components/ui/user-avatar";
@@ -410,7 +410,7 @@ export default function JobDetailsPage() {
               <div className="flex items-center gap-2">
                 <span className="text-zinc-600">ID:</span>
                 <CopyableText text={job.id} variant="id" />
-                {EXECUTION_TARGETS.length > 1 && <span className="text-zinc-500">· {getExecutionTarget(job.execution_target)?.name ?? job.execution_target}</span>}
+                <span className="text-zinc-500">· {getExecutionTarget(job.execution_target)?.name ?? job.execution_target}</span>
               </div>
               <span className="text-zinc-700 hidden md:inline">|</span>
               <span className="flex items-center gap-1.5">

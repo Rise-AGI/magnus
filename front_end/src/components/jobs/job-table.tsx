@@ -9,7 +9,7 @@ import { useLanguage } from "@/context/language-context";
 import { CopyableText } from "@/components/ui/copyable-text";
 import { PageLoader } from "@/components/ui/page-loader";
 import { JobPriorityBadge } from "@/components/jobs/job-priority-badge";
-import { EXECUTION_TARGETS, getExecutionTarget } from "@/lib/config";
+import { getExecutionTarget } from "@/lib/config";
 import { JobStatusBadge } from "@/components/jobs/job-status-badge";
 import { JobResources } from "@/components/jobs/job-resources";
 import { UserAvatar } from "@/components/ui/user-avatar";
@@ -79,8 +79,8 @@ export function JobTable({
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold text-zinc-200 text-sm truncate">{job.task_name}</p>
-                  <CopyableText text={job.id} className="text-[10px] tracking-wider" />
-                        {EXECUTION_TARGETS.length > 1 && <span className="text-[10px] text-zinc-500">{getExecutionTarget(job.execution_target)?.name ?? job.execution_target}</span>}
+                  <CopyableText text={job.id} className="min-w-0 max-w-full text-[10px] tracking-wider" />
+                  <span className="text-[10px] text-zinc-500 break-words">{getExecutionTarget(job.execution_target)?.name ?? job.execution_target}</span>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <JobPriorityBadge type={job.job_type} />
@@ -99,11 +99,11 @@ export function JobTable({
                       warm={{ name: job.user.name, avatar_url: job.user.avatar_url ?? null }}
                     >
                       <span className="inline-flex">
-                        <UserAvatar user={job.user} subText={formatStationTime(job.created_at)} />
+                        <UserAvatar user={job.user} subText={<span className="whitespace-normal">{formatStationTime(job.created_at)}</span>} />
                       </span>
                     </PersonHoverCard>
                   ) : (
-                    <UserAvatar user={job.user} subText={formatStationTime(job.created_at)} />
+                    <UserAvatar user={job.user} subText={<span className="whitespace-normal">{formatStationTime(job.created_at)}</span>} />
                   )}
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
@@ -137,15 +137,16 @@ export function JobTable({
   return (
     <div className={cn("border border-zinc-800 rounded-xl bg-zinc-900/40 backdrop-blur-sm shadow-sm flex flex-col overflow-hidden", className)}>
       <div className="overflow-x-auto w-full">
-        <table className="w-full text-left text-sm whitespace-nowrap table-fixed">
+        <table className="w-full text-left text-sm table-fixed">
           <thead className="bg-zinc-900/90 text-zinc-500 border-b border-zinc-800 backdrop-blur-md">
             <tr>
-              <th className="px-6 py-4 font-medium w-[21%]">{t("jobs.table.task")}</th>
-              <th className="px-6 py-4 font-medium w-[8%] text-center">{t("jobs.table.priority")}</th>
-              <th className="px-6 py-4 font-medium w-[13%] text-center">{t("jobs.table.status")}</th>
-              <th className="px-6 py-4 font-medium w-[20%] text-center">{t("jobs.table.repo")}</th>
-              <th className="px-6 py-4 font-medium w-[13%] text-center">{t("jobs.table.resources")}</th>
-              <th className="px-6 py-4 font-medium w-[15%]">{t("jobs.table.creator")}</th>
+              <th className="px-3 xl:px-6 py-4 font-medium w-[17%]">{t("jobs.table.task")}</th>
+              <th className="px-3 py-4 font-medium w-[8%] text-center">{t("jobs.table.priority")}</th>
+              <th className="px-3 py-4 font-medium w-[8%] text-center">{t("jobs.table.status")}</th>
+              <th className="px-3 xl:px-6 py-4 font-medium w-[20%] text-center">{t("jobs.table.repo")}</th>
+              <th className="px-3 py-4 font-medium w-[10%] text-center">{t("jobs.table.resources")}</th>
+              <th className="px-3 py-4 font-medium w-[12%] text-center">{t("executionTarget.label")}</th>
+              <th className="px-3 xl:px-6 py-4 font-medium w-[15%]">{t("jobs.table.creator")}</th>
               <th className="px-6 py-4 font-medium text-right w-[10%]"></th>
             </tr>
           </thead>
@@ -172,30 +173,30 @@ export function JobTable({
                   }}
                   className="hover:bg-zinc-800/40 transition-colors group border-b border-zinc-800/50 last:border-0"
                 >
-                  <td className="px-6 py-4 align-top whitespace-normal break-all">
+                  <td className="px-3 xl:px-6 py-4 align-top whitespace-normal break-all">
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-2">
                         <CopyableText
                           text={job.task_name}
                           variant="text"
-                          className="font-semibold text-zinc-200 text-base"
+                          className="min-w-0 max-w-full font-semibold text-zinc-200 text-base"
                         />
                       </div>
                       <div className="flex items-center gap-2">
-                        <CopyableText text={job.id} className="text-[10px] tracking-wider" />
+                        <CopyableText text={job.id} className="min-w-0 max-w-full text-[10px] tracking-wider" />
                       </div>
                     </div>
                   </td>
 
-                  <td className="px-6 py-4 align-top text-center">
+                  <td className="px-3 py-4 align-top text-center">
                     <JobPriorityBadge type={job.job_type} />
                   </td>
 
-                  <td className="px-6 py-4 align-top text-center">
+                  <td className="px-2 py-4 align-top text-center">
                     <JobStatusBadge status={job.status} isReleasing={job.is_releasing} />
                   </td>
 
-                  <td className="px-6 py-4 align-top">
+                  <td className="px-3 xl:px-6 py-4 align-top">
                     <div className="flex flex-col gap-1.5 items-center">
                       <span className="text-zinc-300 flex items-center gap-2 text-xs font-medium bg-zinc-900/50 w-fit px-2 py-1 rounded border border-zinc-800">
                         <Box className="w-3.5 h-3.5 text-zinc-500" />
@@ -217,35 +218,41 @@ export function JobTable({
                     </div>
                   </td>
 
-                  <td className="px-6 py-4 align-top text-center">
+                  <td className="px-3 py-4 align-top text-center">
                     <JobResources job={job} />
                   </td>
 
-                  <td className="px-6 py-4 align-top whitespace-normal break-words">
+                  <td className="px-3 py-4 align-top text-center whitespace-normal break-words">
+                    <span className="text-sm font-medium text-zinc-300">
+                      {getExecutionTarget(job.execution_target)?.name ?? job.execution_target}
+                    </span>
+                  </td>
+
+                  <td className="px-3 xl:px-6 py-4 align-top whitespace-normal break-words">
                     <div>
                       {job.user ? (
                         <PersonHoverCard
                           userId={job.user.id}
                           warm={{ name: job.user.name, avatar_url: job.user.avatar_url ?? null }}
                         >
-                          <span className="inline-flex">
+                          <span className="inline-flex max-w-full">
                             <UserAvatar
                               user={job.user}
-                              subText={formatStationTime(job.created_at)}
+                              subText={<span className="whitespace-normal">{formatStationTime(job.created_at)}</span>}
                             />
                           </span>
                         </PersonHoverCard>
                       ) : (
                         <UserAvatar
                           user={job.user}
-                          subText={formatStationTime(job.created_at)}
+                          subText={<span className="whitespace-normal">{formatStationTime(job.created_at)}</span>}
                         />
                       )}
                     </div>
                   </td>
 
-                  <td className="px-6 py-4 align-middle text-right">
-                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                  <td className="px-3 py-4 align-middle text-right">
+                    <div className="flex flex-wrap justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
                       {canClone && (
                         <button
                           onClick={(e) => {

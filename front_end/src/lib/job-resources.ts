@@ -8,10 +8,12 @@ type ResourceJob = Pick<Job, "cpu_count" | "memory_demand" | "gpu_count" | "gpu_
 export function formatResourceMemory(bytes: number): string {
   const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
   let exponent = bytes > 0 ? Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1) : 0;
-  // Keep request arithmetic exact: 4000 MiB × 128 is visibly 500 GiB,
-  // while a rounded 3.91 GiB per task would imply a different total.
-  while (exponent > 0 && !Number.isInteger(bytes / 1024 ** exponent)) exponent--;
-  return `${bytes / 1024 ** exponent} ${units[exponent]}`;
+  let value = Number((bytes / 1024 ** exponent).toFixed(2));
+  if (value >= 1024 && exponent < units.length - 1) {
+    exponent++;
+    value = Number((bytes / 1024 ** exponent).toFixed(2));
+  }
+  return `${value} ${units[exponent]}`;
 }
 
 export function presentJobResources(job: ResourceJob, t: Translate) {

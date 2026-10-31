@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Zap, Plus, Activity, Cpu, Clock, Server } from "lucide-react";
 import { client } from "@/lib/api";
 import { Job } from "@/types/job";
-import { POLL_INTERVAL, EXECUTION_TARGETS, DEFAULT_EXECUTION_TARGET } from "@/lib/config";
+import { POLL_INTERVAL, DEFAULT_EXECUTION_TARGET } from "@/lib/config";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { JobDrawer } from "@/components/jobs/job-drawer";
@@ -72,12 +72,12 @@ export default function ClusterPage() {
     if (!isBackground) setLoading(true);
     try {
       const myParams = new URLSearchParams({
-        ...(EXECUTION_TARGETS.length > 1 ? { execution_target: executionTarget } : {}),
+        execution_target: executionTarget,
         skip: ((myPage - 1) * mySize).toString(),
         limit: mySize.toString(),
       });
       const clusterParams = new URLSearchParams({
-        ...(EXECUTION_TARGETS.length > 1 ? { execution_target: executionTarget } : {}),
+        execution_target: executionTarget,
         running_skip: ((runningPage - 1) * runningSize).toString(),
         running_limit: runningSize.toString(),
         pending_skip: ((pendingPage - 1) * pendingSize).toString(),

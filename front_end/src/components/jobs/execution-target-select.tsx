@@ -18,7 +18,6 @@ export function ExecutionTargetSelect({
   servicesOnly?: boolean;
 }) {
   const { t } = useLanguage();
-  if (EXECUTION_TARGETS.length <= 1) return null;
   const targets = EXECUTION_TARGETS.filter(target => !servicesOnly || target.services_supported);
   return (
     <SearchableSelect
@@ -27,6 +26,7 @@ export function ExecutionTargetSelect({
       options={targets.map(target => ({ value: target.id, label: target.name }))}
       onChange={onChange}
       disabled={disabled}
+      clearable={false}
       className={className}
       contentClassName="max-h-[min(20rem,var(--radix-popover-content-available-height))]"
     />

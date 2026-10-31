@@ -86,7 +86,14 @@ test("older APIs preserve raw values without guessing a memory mode", () => {
 
 test("local requests do not manufacture multi-node allocation", () => {
   const view = present(withSummary({ mode: "local", cpu_count: 1, memory_bytes: 4000 * 1024 ** 2, node_count: 1, tasks_per_node: null }));
-  assert.deepEqual(view.values, ["CPU × 1", "RAM 4000 MiB"]);
+  assert.deepEqual(view.values, ["CPU × 1", "RAM 3.91 GiB"]);
+});
+
+test("memory labels scale fractional quantities without falling back to long byte counts", () => {
+  assert.equal(resources.formatResourceMemory(1880000 * 1024 ** 2), "1.79 TiB");
+  assert.equal(resources.formatResourceMemory(1500 * 1024 ** 2), "1.46 GiB");
+  assert.equal(resources.formatResourceMemory(512 * 1024 ** 2), "512 MiB");
+  assert.equal(resources.formatResourceMemory(1024 ** 3 - 1), "1 GiB");
 });
 
 test("unspecified resources and all-node-memory requests do not become zero-byte allocations", () => {

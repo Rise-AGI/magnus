@@ -20,6 +20,7 @@ interface SearchableSelectProps {
   placement?: "top" | "bottom";
   minimal?: boolean;
   allowCustomValue?: boolean;
+  clearable?: boolean;
 }
 
 export function SearchableSelect({
@@ -28,6 +29,7 @@ export function SearchableSelect({
   placement = "bottom",
   minimal = false,
   allowCustomValue = false,
+  clearable = true,
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -139,7 +141,7 @@ export function SearchableSelect({
 
             {!minimal && (
               <div className="absolute right-3 top-0 h-full flex items-center gap-2">
-                {!disabled && query && (
+                {clearable && !disabled && query && (
                   <button onClick={handleClear} className="p-0.5 text-zinc-500 hover:text-white rounded-full transition-colors">
                     <X className="w-3.5 h-3.5" />
                   </button>
