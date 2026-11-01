@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, type InputHTMLAttributes, useRef, useState } from "react";
+import { ChangeEvent, type InputHTMLAttributes, createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { Copy, Check, FolderUp, Upload, Loader2 } from "lucide-react";
 import { useLanguage } from "@/context/language-context";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ interface FileSecretInputProps {
   hasError?: boolean;
 }
 
+export const FileUploadActivity = createContext<(id: string, busy: boolean) => void>(() => {});
+
 const PREFIX = "magnus-secret:";
 
 export function FileSecretInput({
@@ -24,6 +26,28 @@ export function FileSecretInput({
   hasError,
 }: FileSecretInputProps) {
   const { t } = useLanguage();
+  const uploadId = useId();
+  const reportActivity = useContext(FileUploadActivity);
+  const generation = useRef(0);
+  const uploading = useRef(false);
+  const changeRef = useRef(onChange);
+  changeRef.current = onChange;
+
+  useEffect(() => () => {
+    generation.current += 1;
+    uploading.current = false;
+    reportActivity(uploadId, false);
+  }, [reportActivity, uploadId]);
+
+  useEffect(() => {
+    if (disabled) {
+      generation.current += 1;
+      uploading.current = false;
+      setIsUploading(false);
+      setUploadMode(null);
+      reportActivity(uploadId, false);
+    }
+  }, [disabled, reportActivity, uploadId]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
 
@@ -47,50 +71,45 @@ export function FileSecretInput({
     }
   };
 
-  const handleFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  const upload = async (mode: "file" | "directory", files: File[]) => {
+    if (disabled || uploading.current || !files.length) return;
+    const current = ++generation.current;
+    uploading.current = true;
+    reportActivity(uploadId, true);
+    // A replacement upload must never submit the previous file's receipt.
+    changeRef.current("");
     setIsUploading(true);
-    setUploadMode("file");
+    setUploadMode(mode);
     setUploadError(null);
-
     try {
-      const result = await uploadFileToSecret(file);
-      onChange(result.fileSecret);
+      const result = mode === "file"
+        ? await uploadFileToSecret(files[0])
+        : await uploadDirectoryToSecret(files);
+      if (generation.current === current) changeRef.current(result.fileSecret);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("fileSecret.uploadFailed");
-      setUploadError(message);
+      if (generation.current === current) {
+        const message = error instanceof Error ? error.message : t("fileSecret.uploadFailed");
+        setUploadError(message);
+      }
     } finally {
-      setIsUploading(false);
-      setUploadMode(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      if (generation.current === current) {
+        uploading.current = false;
+        reportActivity(uploadId, false);
+        setIsUploading(false);
+        setUploadMode(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        if (directoryInputRef.current) directoryInputRef.current.value = "";
       }
     }
   };
 
-  const handleDirectorySelected = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files ? Array.from(event.target.files) : [];
-    if (!files.length) return;
+  const handleFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) void upload("file", [file]);
+  };
 
-    setIsUploading(true);
-    setUploadMode("directory");
-    setUploadError(null);
-
-    try {
-      const result = await uploadDirectoryToSecret(files);
-      onChange(result.fileSecret);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : t("fileSecret.uploadFailed");
-      setUploadError(message);
-    } finally {
-      setIsUploading(false);
-      setUploadMode(null);
-      if (directoryInputRef.current) {
-        directoryInputRef.current.value = "";
-      }
-    }
+  const handleDirectorySelected = (event: ChangeEvent<HTMLInputElement>) => {
+    void upload("directory", Array.from(event.target.files || []));
   };
 
   const directoryPickerProps = {

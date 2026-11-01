@@ -222,7 +222,8 @@ def _display_job_result(
         if execute_action:
             print_msg("Executing action...")
             try:
-                run_action(action_text)
+                from .. import default_client
+                run_action(action_text, client=default_client, job_id=job_id)
             except ExecutionError as e:
                 print_error(str(e))
                 raise typer.Exit(code=1)
@@ -546,7 +547,12 @@ def _do_job_action(job_ref: str, execute: bool = False) -> None:
         if execute:
             print_msg("Executing action...")
             try:
-                run_action(action_text)
+                from .. import default_client
+                run_action(
+                    action_text,
+                    client=default_client,
+                    job_id=resolved_id,
+                )
             except ExecutionError as e:
                 print_error(str(e))
                 raise typer.Exit(code=1)

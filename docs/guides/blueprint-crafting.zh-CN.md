@@ -66,7 +66,7 @@ from typing import Annotated, Literal, Optional, List
 |------|------|------|--------|------|
 | `task_name` | `str` | **是** | — | 任务显示名称 |
 | `entry_command` | `str` | **是** | — | 容器内执行的 shell 命令（支持多行） |
-| `repo_name` | `str` | **是** | — | GitHub 仓库名 |
+| `repo_name` | `Optional[str]` | 否 | `None` | GitHub 仓库名；不传时使用 Rise-AGI/magnus HEAD，并固化完整提交 SHA |
 | `branch` | `Optional[str]` | 否 | `None` | Git 分支；`None` 时服务端自动检测默认分支 |
 | `commit_sha` | `Optional[str]` | 否 | `None` | Git commit hash；`None` 等同于 `"HEAD"` |
 | `gpu_type` | `str` | 否 | `"cpu"` | GPU 型号标识，如 `"rtx5090"`；纯 CPU 任务用 `"cpu"` |
@@ -75,10 +75,16 @@ from typing import Annotated, Literal, Optional, List
 | `gpu_count` | `int` | 否 | `0` | GPU 数量 |
 | `job_type` | `JobType` | 否 | `JobType.A2` | 优先级（见下表） |
 | `container_image` | `Optional[str]` | 否 | `None` | Docker 镜像 URI；`None` 使用集群默认镜像 |
-| `cpu_count` | `Optional[int]` | 否 | `None` | CPU 核心数；`None` 使用集群默认 |
+| `cpu_count` | `Optional[int]` | 否 | `None` | 每 task 的 CPU 数；`None` 使用所选计算站点默认值 |
 | `memory_demand` | `Optional[str]` | 否 | `None` | 内存需求，如 `"32G"`、`"1600M"` |
 | `runner` | `Optional[str]` | 否 | `None` | 执行用户；`None` 使用集群默认 |
 | `system_entry_command` | `Optional[str]` | 否 | `None` | 容器启动前的宿主机命令 |
+| `dockerfile` | `Optional[str]` | 否 | `None` | 替代 `container_image`，不可同时指定；空构建上下文，与仓库无关 |
+| `execution_target` | `Optional[str]` | 否 | `None` | 计算站点 ID；沿用共同 Job 准入与权限检查 |
+| `node_count` | `Optional[int]` | 否 | `None` | 节点数；与 tasks/CPU 一起遵循目标资源契约 |
+| `tasks_per_node` | `Optional[int]` | 否 | `None` | 每节点 task 数 |
+| `time_limit` | `Optional[int]` | 否 | `None` | 调度运行时限，单位分钟 |
+| `ephemeral_storage` | `Optional[str]` | 否 | `None` | 临时存储请求，按目标运行时支持情况执行 |
 
 **`description`、`entry_command`、`system_entry_command` 会自动 strip 首尾空白。**
 
@@ -291,7 +297,7 @@ def blueprint(data: InputData):
 
 FileSecret 与其他基本类型一样，天然支持 `Optional` 和 `List` 包装（参见 Section 4）。
 
-SDK/CLI 的特殊行为：对 FileSecret 参数，SDK 自动将本地路径上传为 secret；列表中逐个上传，已是 `magnus-secret:` 的跳过。CLI 用重复 flag 传多文件：`--batch-files a.csv --batch-files b.csv`。
+SDK/CLI 的特殊行为：对 FileSecret 参数，SDK 自动将本地路径上传为 secret；列表中逐个上传，已是 `magnus-secret:` 的跳过，可选列表项 `None` 保持为空。CLI 用重复 flag 传多文件：`--batch-files a.csv --batch-files b.csv`。
 
 ### Web 端文件输出约定
 
@@ -314,14 +320,9 @@ echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
 
 文件代管沿用 `magnus-secret` 协议。已完成上传的 secret 可跨后端重启使用，原有 TTL 和下载次数限制保持。HTTP 上传每次使用一个请求，公网网关限制仍然适用。离线 relay 任务原子发布快照后，由控制器在运行中增量导入；Job 成果的 TTL 从任务整体执行结束后起算，更晚导入的文件从就绪时起算，提前领取照常计次。完整约定见 [SDK 文件传输指南](sdk-and-cli.zh-CN.md#custody_file---代管文件)。
 
-当前 Web 端不会执行任意 shell，只会识别安全白名单形式的 `magnus receive ...`，并映射成浏览器下载。
+Web 详情只显示 `MAGNUS_RESULT` / `MAGNUS_ACTION` 的文本，不自动执行 action，也不生成下载按钮。可复制命令到已配置相同站点的 CLI；只有结果中的取件码时使用 `magnus receive <secret> --job <job_id> --wait 600`。
 
-兼容旧蓝图时还有一个补充规则：
-
-- 如果 `MAGNUS_ACTION` 为空，但 `MAGNUS_RESULT` 文本里包含 `magnus-secret:...`
-- Web 也会从结果文本中提取 secret，并提供下载按钮
-
-这主要是为了兼容旧版 `transfer_file` 一类蓝图：它们在 `target` 为空时只写 `MAGNUS_RESULT`，不写 `MAGNUS_ACTION`。
+更新后的 SDK/CLI 自动执行 action 时，会沿用发起调用的 client 的地址与凭证，不修改默认 profile。`magnus receive` 未显式指定 `--job` / `--wait` 时，补入产出 Job 和 600 秒就绪等待；只等待目标文件，不等待同 Job 的所有大文件。显式选项保留。SDK 的 Job 等待总时限还约束 action，异步调用不会阻塞 event loop，取消时回收 action 子进程。旧 SDK 仍可连接新版服务，但这些客户端修复需要更新 SDK 源码或后续发布版本。
 
 ---
 
@@ -574,3 +575,11 @@ submit_job(
    - `runner`：通常暴露为参数让用户填
    - `description`：用 Markdown 总结本次运行配置
 7. **测试**：在 Web 编辑器中粘贴代码，检查表单是否正确生成
+
+## 模板适用范围
+
+内置 ColliderAgent / Wolfram 模板包含应用仓库、镜像、宿主许可证及挂载假设，不是任意计算站点通用的验收样例。依赖与应用资源由对应项目准备；保留目标默认 `system_entry_command`，仅在明确了解目标运行时/MPI/挂载契约时覆盖。不要直接把某个 Slurm 站点的宿主路径套用于 Docker/local 或另一 SSH tenant。
+
+新版 SDK 的 `launch_blueprint` / `run_blueprint` 和 Job 提交入口保留原位置参数，并新增仅关键字的 `idempotency_key`（蓝图还可指定 `blueprint_revision`）。同一次调用遇到不确定回复时，仅在服务声明支持后，复用已上传文件、同一请求体和键作有界重试。`SubmissionOutcomeUnknown.idempotency_key` 可交给 `get_accepted_submission()` 核查；不要把重新上传后生成的新取件码当作原请求的重试。旧服务未声明支持时不自动重试。
+
+取消异步提交时，会等待在途受理线程收尾，再传播 `asyncio.CancelledError`。client 的 `last_submission_key` 保留本次键，`last_job_id` 保留已知的受理 ID（未知时为空）；外层 `asyncio.wait_for` 转为 `TimeoutError` 时仍可查询。这不会终止已受理的 Job。同一个 client 并发提交时，应为每次尝试显式指定独立键，不依赖仅表示最后一次尝试的便捷属性；结果不确定时先用键核查，不直接新建任务。

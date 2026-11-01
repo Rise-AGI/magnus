@@ -11,12 +11,13 @@ import tempfile as _tempfile
 import tarfile as _tarfile
 import httpx
 from ._resumable_upload import resumable_upload
-from typing import Optional, Dict, Any, Union, Literal, List
+from functools import partial
+from typing import Optional, Dict, Any, Union, Literal, List, Callable
 from pathlib import Path
 from urllib.parse import quote
 
 from .exceptions import (
-    UploadOutcomeUnknown,
+    UploadOutcomeUnknown, SubmissionOutcomeUnknown,
     MagnusError, APIError,
     AuthenticationError, ForbiddenError, ResourceNotFoundError, ConflictError,
     ExecutionError, _ServerError,
@@ -25,44 +26,82 @@ from .config import (
     DEFAULT_ADDRESS, DEFAULT_TOKEN, ENV_MAGNUS_TOKEN, ENV_MAGNUS_ADDRESS,
     _get_current_site, normalize_address,
 )
-from .actions import execute_action
+from .actions import execute_action, execute_action_async
 from .file_transfer import is_file_secret, get_tmp_base, normalize_secret, ENV_CUSTODY_DROP_DIR, FILE_SECRET_PREFIX
 from ._http_errors import http_error_detail
 
 logger = logging.getLogger("magnus")
 
 
-def strip_imports(code: str) -> str:
-    """Strip top-level import/from-import statements from blueprint code.
+def strip_imports(
+    code: str,
+) -> str:
+    """Normalize only implicit Magnus imports, preserving aliases and statements.
 
-    Blueprint .py files can include real imports for IDE support, linting,
-    and local testing. The backend sandbox already provides all necessary
-    symbols via execution_globals, so imports are stripped before upload
-    to avoid triggering the restricted-import guard.
-
-    Uses ast to correctly handle multi-line imports (parenthesized, backslash).
+    Keeping typing imports also works with older servers. Unsupported imports
+    remain visible so the server rejects them instead of silently changing code.
     """
     try:
-        tree = ast.parse(code)
+        tree = ast.parse(
+            code,
+        )
     except SyntaxError:
         return code
-
-    import_lines: set = set()
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            for lineno in range(node.lineno, node.end_lineno + 1):  # type: ignore[operator]
-                import_lines.add(lineno)
-
-    lines = code.splitlines(keepends=True)
-    result: List[str] = []
-    for i, line in enumerate(lines):
-        if (i + 1) not in import_lines:
-            result.append(line)
-
-    # Remove leading blank lines left by stripping
-    while result and not result[0].strip():
-        result.pop(0)
-    return "".join(result)
+    source = code.encode(
+        "utf-8",
+    )
+    lines = source.splitlines(
+        keepends=True,
+    )
+    offsets = [0]
+    for line in lines:
+        offsets.append(
+            offsets[-1]
+            + len(
+                line,
+            ),
+        )
+    edits = []
+    implicit = {"submit_job", "JobType", "FileSecret"}
+    for node in tree.body:
+        if (
+            not isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            or node.module != "magnus"
+            or node.level
+        ):
+            continue
+        if not all(alias.name in implicit or alias.name == "*" for alias in node.names):
+            continue
+        assignments = [
+            f"{alias.asname} = {alias.name}"
+            for alias in node.names
+            if alias.asname and alias.asname != alias.name
+        ]
+        replacement = (
+            "; ".join(
+                assignments,
+            )
+            or "pass"
+        )
+        edits.append(
+            (
+                offsets[node.lineno - 1] + node.col_offset,
+                offsets[node.end_lineno - 1] + node.end_col_offset,
+                replacement.encode(
+                    "utf-8",
+                ),
+            ),
+        )
+    for start, end, replacement in reversed(
+        edits,
+    ):
+        source = source[:start] + replacement + source[end:]
+    return source.decode(
+        "utf-8",
+    )
 
 
 def parse_blueprint_yaml(path: Path) -> Dict[str, str]:
@@ -157,6 +196,7 @@ class MagnusClient:
         self._client: Optional[httpx.Client] = None
         self._async_client: Optional[httpx.AsyncClient] = None
         self.last_job_id: Optional[str] = None
+        self.last_submission_key: Optional[str] = None
 
     # === Lifecycle ===
 
@@ -454,16 +494,103 @@ class MagnusClient:
 
     # === Blueprint Methods ===
 
-    def _get_file_secret_params(self, blueprint_id: str) -> List[Dict[str, Any]]:
+    def _post_submission(
+        self,
+        path: str,
+        payload: Dict[str, Any],
+        timeout: float,
+        idempotency_key: Optional[str],
+        supports_idempotency: Optional[bool] = None,
+    ) -> httpx.Response:
+        key = uuid.uuid4().hex if idempotency_key is None else idempotency_key
+        self.last_submission_key = key
+        uncertain = False
+        for attempt in range(
+            3,
+        ):
+            try:
+                response = self.http.post(
+                    path,
+                    json=payload,
+                    headers={"Idempotency-Key": key},
+                    timeout=timeout,
+                )
+                if response.status_code < 500:
+                    if response.is_success:
+                        return response
+                    if uncertain:
+                        raise SubmissionOutcomeUnknown(
+                            key,
+                        )
+                    self._handle_error(
+                        response,
+                    )
+                error = APIError(
+                    response.status_code,
+                    http_error_detail(
+                        response,
+                    ),
+                )
+            except httpx.TransportError as transport_error:
+                error = transport_error
+            uncertain = True
+            if supports_idempotency is None:
+                try:
+                    supports_idempotency = (
+                        self.get_job_capabilities(
+                            timeout=timeout,
+                        ).get(
+                            "submission_idempotency",
+                        )
+                        is True
+                    )
+                except MagnusError:
+                    supports_idempotency = False
+            if not supports_idempotency or attempt == 2:
+                raise SubmissionOutcomeUnknown(
+                    key,
+                ) from error
+            time.sleep(
+                2**attempt,
+            )
+        raise AssertionError(
+            "unreachable",
+        )
+
+    def get_accepted_submission(
+        self,
+        idempotency_key: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        key = quote(
+            idempotency_key,
+            safe="",
+        )
         try:
-            schema = self.get_blueprint_schema(blueprint_id)
-            return [
-                {"key": param["key"], "is_list": bool(param.get("is_list"))}
-                for param in schema
-                if param.get("type") == "file_secret"
-            ]
-        except ResourceNotFoundError:
-            return []
+            response = self.http.get(
+                f"/jobs/submissions/{key}",
+                timeout=timeout,
+            )
+            self._handle_error(
+                response,
+            )
+            return response.json()
+        except httpx.TransportError as error:
+            raise self._network_error(
+                "looking up submission",
+                error,
+            ) from error
+
+    async def get_accepted_submission_async(
+        self,
+        idempotency_key: str,
+        timeout: float = 10.0,
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self.get_accepted_submission,
+            idempotency_key,
+            timeout,
+        )
 
     def _upload_file_secret_value(
         self,
@@ -475,15 +602,43 @@ class MagnusClient:
         if value is None:
             return None
         if is_list:
-            items = value if isinstance(value, list) else [value]
+            items = (
+                value
+                if isinstance(
+                    value,
+                    list,
+                )
+                else [value]
+            )
             return [
-                item if is_file_secret(str(item)) else self._upload_file(str(item), expire_minutes, max_downloads)
+                item
+                if item is None
+                or is_file_secret(
+                    str(
+                        item,
+                    ),
+                )
+                else self._upload_file(
+                    str(
+                        item,
+                    ),
+                    expire_minutes,
+                    max_downloads,
+                )
                 for item in items
             ]
-        value_str = str(value)
-        if is_file_secret(value_str):
+        value_str = str(
+            value,
+        )
+        if is_file_secret(
+            value_str,
+        ):
             return value
-        return self._upload_file(value_str, expire_minutes, max_downloads)
+        return self._upload_file(
+            value_str,
+            expire_minutes,
+            max_downloads,
+        )
 
     def launch_blueprint(
         self,
@@ -494,44 +649,136 @@ class MagnusClient:
         expire_minutes: int = 60,
         max_downloads: Optional[int] = 1,
         timeout: float = 10.0,
+        *,
+        idempotency_key: Optional[str] = None,
+        blueprint_revision: Optional[str] = None,
     ) -> str:
-        final_args = dict(args) if args else {}
-
+        final_args = (
+            dict(
+                args,
+            )
+            if args
+            else {}
+        )
+        schema = None
         try:
-            for param in self._get_file_secret_params(blueprint_id):
-                key = param["key"]
-                if key not in final_args:
-                    continue
-                final_args[key] = self._upload_file_secret_value(
-                    final_args[key], param["is_list"], expire_minutes, max_downloads,
+            response = self.http.get(
+                f"/blueprints/{blueprint_id}/schema",
+                timeout=timeout,
+            )
+            self._handle_error(
+                response,
+            )
+            schema = response.json()
+            revision = blueprint_revision or response.headers.get(
+                "X-Magnus-Blueprint-Revision",
+            )
+            supported = (
+                response.headers.get(
+                    "X-Magnus-Submission-Idempotency",
                 )
-
+                == "1"
+            )
+            for param in schema:
+                key = param["key"]
+                if (
+                    param.get(
+                        "type",
+                    )
+                    == "file_secret"
+                    and key in final_args
+                ):
+                    final_args[key] = self._upload_file_secret_value(
+                        final_args[key],
+                        bool(
+                            param.get(
+                                "is_list",
+                            ),
+                        ),
+                        expire_minutes,
+                        max_downloads,
+                    )
             payload = {
                 "parameters": final_args,
                 "use_preference": use_preference,
                 "save_preference": save_preference,
             }
-
-            resp = self.http.post(
+            if revision is not None:
+                payload["blueprint_revision"] = revision
+            response = self._post_submission(
                 f"/blueprints/{blueprint_id}/run",
-                json=payload,
-                timeout=timeout,
+                payload,
+                timeout,
+                idempotency_key,
+                supported,
             )
-            self._handle_error(resp)
-            return resp.json()["job_id"]
-        except MagnusError as e:
+            return response.json()["job_id"]
+        except SubmissionOutcomeUnknown:
+            raise
+        except MagnusError as error:
+            if schema is not None:
+                raise MagnusError(
+                    f"{error}\n\n{_format_schema_hint(schema)}",
+                ) from error
+            raise
+        except httpx.TransportError as error:
+            raise self._network_error(
+                "preparing blueprint submission",
+                error,
+            ) from error
+
+    async def _submit_async(
+        self,
+        operation: Callable[[], str],
+        key: str,
+    ) -> str:
+        self.last_submission_key = key
+        self.last_job_id = None
+
+        async def settle():
+            # Shielded failures are reported as unhandled on newer asyncio even
+            # when a cancelled caller later retrieves them. Keep the outcome data.
             try:
-                schema = self.get_blueprint_schema(blueprint_id)
-                hint = _format_schema_hint(schema)
-                raise MagnusError(f"{e}\n\n{hint}") from e
-            except MagnusError as schema_err:
-                if schema_err.__cause__ is e:
-                    raise
-                raise e from None
-        except httpx.TimeoutException:
-            raise MagnusError("Request timed out while launching blueprint.")
-        except httpx.TransportError as e:
-            raise self._network_error("launching blueprint", e)
+                return await asyncio.to_thread(
+                    operation,
+                ), None
+            except Exception as error:
+                return None, error
+
+        task = asyncio.create_task(
+            settle(),
+        )
+        try:
+            job_id, error = await asyncio.shield(
+                task,
+            )
+        except asyncio.CancelledError as cancellation:
+            while not task.done():
+                try:
+                    await asyncio.shield(
+                        task,
+                    )
+                except asyncio.CancelledError:
+                    continue
+            self.last_submission_key = key
+            job_id, error = task.result()
+            if error is not None:
+                logger.warning(
+                    "Submission wait cancelled; check acceptance with key %s",
+                    key,
+                )
+                raise cancellation from error
+            self.last_job_id = job_id
+            logger.warning(
+                "Cancelled wait accepted Job %s (key %s); the Job was not terminated",
+                job_id,
+                key,
+            )
+            raise cancellation
+        if error is not None:
+            raise error
+        assert job_id is not None
+        return job_id
 
     async def launch_blueprint_async(
         self,
@@ -542,11 +789,25 @@ class MagnusClient:
         expire_minutes: int = 60,
         max_downloads: Optional[int] = 1,
         timeout: float = 10.0,
+        *,
+        idempotency_key: Optional[str] = None,
+        blueprint_revision: Optional[str] = None,
     ) -> str:
-        return await asyncio.to_thread(
-            self.launch_blueprint,
-            blueprint_id, args, use_preference, save_preference,
-            expire_minutes, max_downloads, timeout,
+        key = uuid.uuid4().hex if idempotency_key is None else idempotency_key
+        return await self._submit_async(
+            partial(
+                self.launch_blueprint,
+                blueprint_id,
+                args,
+                use_preference,
+                save_preference,
+                expire_minutes,
+                max_downloads,
+                timeout,
+                idempotency_key=key,
+                blueprint_revision=blueprint_revision,
+            ),
+            key,
         )
 
     # === Job Polling ===
@@ -564,11 +825,26 @@ class MagnusClient:
         self,
         data: Dict[str, Any],
         should_execute_action: bool,
+        *,
+        job_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> Optional[str]:
-        result: Optional[str] = data.get("result")
-        action: Optional[str] = data.get("action")
+        result: Optional[str] = data.get(
+            "result",
+        )
+        action: Optional[str] = data.get(
+            "action",
+        )
         if should_execute_action and action:
-            execute_action(action)
+            execute_action(
+                action,
+                client=self,
+                job_id=job_id
+                or data.get(
+                    "id",
+                ),
+                timeout=timeout,
+            )
         return result
 
     def _poll_once(self, job_id: str) -> Dict[str, Any]:
@@ -593,16 +869,22 @@ class MagnusClient:
         execute_action_flag: bool = True,
     ) -> Optional[str]:
         self.last_job_id = job_id
-        logger.info(f"Job {job_id} submitted. Waiting for completion...")
+        logger.info(
+            f"Job {job_id} submitted. Waiting for completion...",
+        )
 
-        start_time = time.time()
+        start_time = time.monotonic()
         consecutive_failures = 0
         while True:
-            if timeout and (time.time() - start_time > timeout):
-                raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
+            if timeout and (time.monotonic() - start_time > timeout):
+                raise TimeoutError(
+                    f"Job {job_id} timed out after {timeout}s",
+                )
 
             try:
-                data = self._poll_once(job_id)
+                data = self._poll_once(
+                    job_id,
+                )
                 consecutive_failures = 0
             except self._TRANSIENT_ERRORS as e:
                 consecutive_failures += 1
@@ -610,20 +892,41 @@ class MagnusClient:
                     raise MagnusError(
                         f"Lost connection to server after {consecutive_failures} consecutive failures "
                         f"(last: {e}). Job {job_id} may still be running — "
-                        f"check with: magnus job status {job_id}"
+                        f"check with: magnus job status {job_id}",
                     ) from e
-                backoff = min(poll_interval * (2 ** (consecutive_failures - 1)), self._MAX_BACKOFF)
-                logger.warning(f"Poll attempt failed ({consecutive_failures}x): {e}. Retrying in {backoff:.0f}s...")
-                time.sleep(backoff)
+                backoff = min(
+                    poll_interval * (2 ** (consecutive_failures - 1)),
+                    self._MAX_BACKOFF,
+                )
+                logger.warning(
+                    f"Poll attempt failed ({consecutive_failures}x): {e}. Retrying in {backoff:.0f}s...",
+                )
+                time.sleep(
+                    backoff,
+                )
                 continue
 
             status = data["status"]
             if status == "Success":
-                return self._process_completed_job(data, execute_action_flag)
+                return self._process_completed_job(
+                    data,
+                    execute_action_flag,
+                    job_id=job_id,
+                    timeout=max(
+                        0.0,
+                        timeout - (time.monotonic() - start_time),
+                    )
+                    if timeout
+                    else None,
+                )
             elif status in ["Failed", "Terminated"]:
-                raise ExecutionError(f"Job {job_id} ended with status: {status}")
+                raise ExecutionError(
+                    f"Job {job_id} ended with status: {status}",
+                )
 
-            time.sleep(poll_interval)
+            time.sleep(
+                poll_interval,
+            )
 
     async def _poll_job_completion_async(
         self,
@@ -633,16 +936,22 @@ class MagnusClient:
         execute_action_flag: bool = True,
     ) -> Optional[str]:
         self.last_job_id = job_id
-        logger.info(f"Job {job_id} submitted. Waiting for completion...")
+        logger.info(
+            f"Job {job_id} submitted. Waiting for completion...",
+        )
 
-        start_time = time.time()
+        start_time = time.monotonic()
         consecutive_failures = 0
         while True:
-            if timeout and (time.time() - start_time > timeout):
-                raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
+            if timeout and (time.monotonic() - start_time > timeout):
+                raise TimeoutError(
+                    f"Job {job_id} timed out after {timeout}s",
+                )
 
             try:
-                data = await self._poll_once_async(job_id)
+                data = await self._poll_once_async(
+                    job_id,
+                )
                 consecutive_failures = 0
             except self._TRANSIENT_ERRORS as e:
                 consecutive_failures += 1
@@ -650,20 +959,47 @@ class MagnusClient:
                     raise MagnusError(
                         f"Lost connection to server after {consecutive_failures} consecutive failures "
                         f"(last: {e}). Job {job_id} may still be running — "
-                        f"check with: magnus job status {job_id}"
+                        f"check with: magnus job status {job_id}",
                     ) from e
-                backoff = min(poll_interval * (2 ** (consecutive_failures - 1)), self._MAX_BACKOFF)
-                logger.warning(f"Poll attempt failed ({consecutive_failures}x): {e}. Retrying in {backoff:.0f}s...")
-                await asyncio.sleep(backoff)
+                backoff = min(
+                    poll_interval * (2 ** (consecutive_failures - 1)),
+                    self._MAX_BACKOFF,
+                )
+                logger.warning(
+                    f"Poll attempt failed ({consecutive_failures}x): {e}. Retrying in {backoff:.0f}s...",
+                )
+                await asyncio.sleep(
+                    backoff,
+                )
                 continue
 
             status = data["status"]
             if status == "Success":
-                return self._process_completed_job(data, execute_action_flag)
+                if execute_action_flag and data.get(
+                    "action",
+                ):
+                    await execute_action_async(
+                        data["action"],
+                        client=self,
+                        job_id=job_id,
+                        timeout=max(
+                            0.0,
+                            timeout - (time.monotonic() - start_time),
+                        )
+                        if timeout
+                        else None,
+                    )
+                return data.get(
+                    "result",
+                )
             elif status in ["Failed", "Terminated"]:
-                raise ExecutionError(f"Job {job_id} ended with status: {status}")
+                raise ExecutionError(
+                    f"Job {job_id} ended with status: {status}",
+                )
 
-            await asyncio.sleep(poll_interval)
+            await asyncio.sleep(
+                poll_interval,
+            )
 
     # === Blueprint: Blocking ===
 
@@ -678,6 +1014,9 @@ class MagnusClient:
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
         execute_action: bool = True,
+        *,
+        idempotency_key: Optional[str] = None,
+        blueprint_revision: Optional[str] = None,
     ) -> Optional[str]:
         job_id = self.launch_blueprint(
             blueprint_id=blueprint_id,
@@ -686,8 +1025,15 @@ class MagnusClient:
             save_preference=save_preference,
             expire_minutes=expire_minutes,
             max_downloads=max_downloads,
+            idempotency_key=idempotency_key,
+            blueprint_revision=blueprint_revision,
         )
-        return self._poll_job_completion(job_id, timeout, poll_interval, execute_action)
+        return self._poll_job_completion(
+            job_id,
+            timeout,
+            poll_interval,
+            execute_action,
+        )
 
     async def run_blueprint_async(
         self,
@@ -700,6 +1046,9 @@ class MagnusClient:
         timeout: Optional[float] = None,
         poll_interval: float = 2.0,
         execute_action: bool = True,
+        *,
+        idempotency_key: Optional[str] = None,
+        blueprint_revision: Optional[str] = None,
     ) -> Optional[str]:
         job_id = await self.launch_blueprint_async(
             blueprint_id=blueprint_id,
@@ -708,8 +1057,15 @@ class MagnusClient:
             save_preference=save_preference,
             expire_minutes=expire_minutes,
             max_downloads=max_downloads,
+            idempotency_key=idempotency_key,
+            blueprint_revision=blueprint_revision,
         )
-        return await self._poll_job_completion_async(job_id, timeout, poll_interval, execute_action)
+        return await self._poll_job_completion_async(
+            job_id,
+            timeout,
+            poll_interval,
+            execute_action,
+        )
 
     # === Job Submission ===
 
@@ -796,38 +1152,85 @@ class MagnusClient:
         tasks_per_node: Optional[int] = None,
         dockerfile: Optional[str] = None,
         execution_target: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> str:
         capabilities = None
         if execution_target is not None:
-            capabilities = self.get_job_capabilities(timeout=timeout)
-            if capabilities.get("execution_targets") is not True:
-                raise MagnusError("This server does not support execution targets; upgrade the server first")
+            capabilities = self.get_job_capabilities(
+                timeout=timeout,
+            )
+            if (
+                capabilities.get(
+                    "execution_targets",
+                )
+                is not True
+            ):
+                raise MagnusError(
+                    "This server does not support execution targets; upgrade the server first",
+                )
         if dockerfile is not None:
             if not dockerfile.strip():
-                raise MagnusError("dockerfile must not be blank")
+                raise MagnusError(
+                    "dockerfile must not be blank",
+                )
             if container_image is not None:
-                raise MagnusError("Choose either dockerfile or container_image")
-            capabilities = capabilities or self.get_job_capabilities(timeout=timeout)
-            if capabilities.get("dockerfile") is not True:
-                raise MagnusError("This server does not support Dockerfile jobs; upgrade the server first")
-            if not capabilities.get("image_build_enabled"):
-                raise MagnusError("Dockerfile builds are not enabled on this site")
+                raise MagnusError(
+                    "Choose either dockerfile or container_image",
+                )
+            capabilities = capabilities or self.get_job_capabilities(
+                timeout=timeout,
+            )
+            if (
+                capabilities.get(
+                    "dockerfile",
+                )
+                is not True
+            ):
+                raise MagnusError(
+                    "This server does not support Dockerfile jobs; upgrade the server first",
+                )
+            if not capabilities.get(
+                "image_build_enabled",
+            ):
+                raise MagnusError(
+                    "Dockerfile builds are not enabled on this site",
+                )
         payload = self._build_job_payload(
-            task_name, entry_command, repo_name, branch, commit_sha,
-            gpu_type, gpu_count, namespace, job_type, description,
-            container_image, cpu_count, memory_demand, node_count, tasks_per_node, time_limit, ephemeral_storage,
-            runner, system_entry_command,
+            task_name,
+            entry_command,
+            repo_name,
+            branch,
+            commit_sha,
+            gpu_type,
+            gpu_count,
+            namespace,
+            job_type,
+            description,
+            container_image,
+            cpu_count,
+            memory_demand,
+            node_count,
+            tasks_per_node,
+            time_limit,
+            ephemeral_storage,
+            runner,
+            system_entry_command,
             dockerfile=dockerfile,
             execution_target=execution_target,
         )
-        try:
-            resp = self.http.post("/jobs/submit", json=payload, timeout=timeout)
-            self._handle_error(resp)
-            return resp.json()["id"]
-        except httpx.TimeoutException:
-            raise MagnusError("Request timed out while submitting job.")
-        except httpx.TransportError as e:
-            raise self._network_error("submitting job", e)
+        response = self._post_submission(
+            "/jobs/submit",
+            payload,
+            timeout,
+            idempotency_key,
+            capabilities.get(
+                "submission_idempotency",
+            )
+            is True
+            if capabilities is not None
+            else None,
+        )
+        return response.json()["id"]
 
     async def submit_job_async(
         self,
@@ -854,31 +1257,37 @@ class MagnusClient:
         tasks_per_node: Optional[int] = None,
         dockerfile: Optional[str] = None,
         execution_target: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> str:
-        return await asyncio.to_thread(
-            self.submit_job,
-            task_name,
-            entry_command,
-            repo_name,
-            branch,
-            commit_sha,
-            gpu_type,
-            gpu_count,
-            namespace,
-            job_type,
-            description,
-            container_image,
-            cpu_count,
-            memory_demand,
-            time_limit,
-            ephemeral_storage,
-            runner,
-            system_entry_command,
-            timeout,
-            node_count=node_count,
-            tasks_per_node=tasks_per_node,
-            dockerfile=dockerfile,
-            execution_target=execution_target,
+        key = uuid.uuid4().hex if idempotency_key is None else idempotency_key
+        return await self._submit_async(
+            partial(
+                self.submit_job,
+                task_name,
+                entry_command,
+                repo_name,
+                branch,
+                commit_sha,
+                gpu_type,
+                gpu_count,
+                namespace,
+                job_type,
+                description,
+                container_image,
+                cpu_count,
+                memory_demand,
+                time_limit,
+                ephemeral_storage,
+                runner,
+                system_entry_command,
+                timeout,
+                node_count=node_count,
+                tasks_per_node=tasks_per_node,
+                dockerfile=dockerfile,
+                execution_target=execution_target,
+                idempotency_key=key,
+            ),
+            key,
         )
 
     def execute_job(
@@ -908,21 +1317,38 @@ class MagnusClient:
         tasks_per_node: Optional[int] = None,
         dockerfile: Optional[str] = None,
         execution_target: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Optional[str]:
         job_id = self.submit_job(
-            task_name=task_name, entry_command=entry_command,
-            repo_name=repo_name, branch=branch,
+            task_name=task_name,
+            entry_command=entry_command,
+            repo_name=repo_name,
+            branch=branch,
             commit_sha=commit_sha,
-            gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace,
-            job_type=job_type, description=description,
-            container_image=container_image, cpu_count=cpu_count,
-            memory_demand=memory_demand, node_count=node_count, tasks_per_node=tasks_per_node,
-            time_limit=time_limit, ephemeral_storage=ephemeral_storage,
-            runner=runner, system_entry_command=system_entry_command,
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
+            namespace=namespace,
+            job_type=job_type,
+            description=description,
+            container_image=container_image,
+            cpu_count=cpu_count,
+            memory_demand=memory_demand,
+            node_count=node_count,
+            tasks_per_node=tasks_per_node,
+            time_limit=time_limit,
+            ephemeral_storage=ephemeral_storage,
+            runner=runner,
+            system_entry_command=system_entry_command,
             dockerfile=dockerfile,
             execution_target=execution_target,
+            idempotency_key=idempotency_key,
         )
-        return self._poll_job_completion(job_id, timeout, poll_interval, execute_action)
+        return self._poll_job_completion(
+            job_id,
+            timeout,
+            poll_interval,
+            execute_action,
+        )
 
     async def execute_job_async(
         self,
@@ -951,21 +1377,38 @@ class MagnusClient:
         tasks_per_node: Optional[int] = None,
         dockerfile: Optional[str] = None,
         execution_target: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Optional[str]:
         job_id = await self.submit_job_async(
-            task_name=task_name, entry_command=entry_command,
-            repo_name=repo_name, branch=branch,
+            task_name=task_name,
+            entry_command=entry_command,
+            repo_name=repo_name,
+            branch=branch,
             commit_sha=commit_sha,
-            gpu_type=gpu_type, gpu_count=gpu_count, namespace=namespace,
-            job_type=job_type, description=description,
-            container_image=container_image, cpu_count=cpu_count,
-            memory_demand=memory_demand, node_count=node_count, tasks_per_node=tasks_per_node,
-            time_limit=time_limit, ephemeral_storage=ephemeral_storage,
-            runner=runner, system_entry_command=system_entry_command,
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
+            namespace=namespace,
+            job_type=job_type,
+            description=description,
+            container_image=container_image,
+            cpu_count=cpu_count,
+            memory_demand=memory_demand,
+            node_count=node_count,
+            tasks_per_node=tasks_per_node,
+            time_limit=time_limit,
+            ephemeral_storage=ephemeral_storage,
+            runner=runner,
+            system_entry_command=system_entry_command,
             dockerfile=dockerfile,
             execution_target=execution_target,
+            idempotency_key=idempotency_key,
         )
-        return await self._poll_job_completion_async(job_id, timeout, poll_interval, execute_action)
+        return await self._poll_job_completion_async(
+            job_id,
+            timeout,
+            poll_interval,
+            execute_action,
+        )
 
     # === Job Management ===
 

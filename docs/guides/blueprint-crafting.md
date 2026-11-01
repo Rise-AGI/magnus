@@ -66,7 +66,7 @@ The `blueprint` function must call `submit_job()`. Parameters are as follows:
 |------|------|------|--------|------|
 | `task_name` | `str` | **Yes** | — | Task display name |
 | `entry_command` | `str` | **Yes** | — | Shell command executed inside the container (multi-line supported) |
-| `repo_name` | `str` | **Yes** | — | GitHub repository name |
+| `repo_name` | `Optional[str]` | No | `None` | GitHub repository; defaults to Rise-AGI/magnus HEAD, resolved to a full commit SHA |
 | `branch` | `Optional[str]` | No | `None` | Git branch; when `None`, the server auto-detects the default branch |
 | `commit_sha` | `Optional[str]` | No | `None` | Git commit hash; `None` is equivalent to `"HEAD"` |
 | `gpu_type` | `str` | No | `"cpu"` | GPU model identifier, e.g. `"rtx5090"`; use `"cpu"` for pure CPU tasks |
@@ -75,10 +75,16 @@ The `blueprint` function must call `submit_job()`. Parameters are as follows:
 | `gpu_count` | `int` | No | `0` | GPU count |
 | `job_type` | `JobType` | No | `JobType.A2` | Priority (see table below) |
 | `container_image` | `Optional[str]` | No | `None` | Docker image URI; `None` uses the cluster default image |
-| `cpu_count` | `Optional[int]` | No | `None` | CPU core count; `None` uses the cluster default |
+| `cpu_count` | `Optional[int]` | No | `None` | CPUs per task; `None` uses the selected target default |
 | `memory_demand` | `Optional[str]` | No | `None` | Memory demand, e.g. `"32G"`, `"1600M"` |
 | `runner` | `Optional[str]` | No | `None` | Executing user; `None` uses the cluster default |
 | `system_entry_command` | `Optional[str]` | No | `None` | Host-side command before the container starts |
+| `dockerfile` | `Optional[str]` | No | `None` | Replaces `container_image`; mutually exclusive, empty build context independent of the repository |
+| `execution_target` | `Optional[str]` | No | `None` | Compute target ID; uses common Job admission and permissions |
+| `node_count` | `Optional[int]` | No | `None` | Node count, following the target resource contract |
+| `tasks_per_node` | `Optional[int]` | No | `None` | Tasks per node |
+| `time_limit` | `Optional[int]` | No | `None` | Scheduler runtime limit in minutes |
+| `ephemeral_storage` | `Optional[str]` | No | `None` | Temporary storage request, subject to target runtime support |
 
 **`description`, `entry_command`, and `system_entry_command` are automatically stripped of leading and trailing whitespace.**
 
@@ -291,7 +297,7 @@ def blueprint(data: InputData):
 
 Like other basic types, FileSecret naturally supports `Optional` and `List` wrappers (see Section 4).
 
-SDK/CLI special behavior: for FileSecret parameters, the SDK automatically uploads a local path as a secret; in a list, each item is uploaded one by one, and items already in `magnus-secret:` form are skipped. In CLI, use repeated flags to pass multiple files: `--batch-files a.csv --batch-files b.csv`.
+SDK/CLI special behavior: for FileSecret parameters, the SDK automatically uploads a local path as a secret; in a list, each item is uploaded one by one, and items already in `magnus-secret:` form are skipped; optional `None` items remain null. In CLI, use repeated flags to pass multiple files: `--batch-files a.csv --batch-files b.csv`.
 
 ### Web-side file output convention
 
@@ -314,14 +320,9 @@ echo "magnus receive $SECRET --output ./output" > "$MAGNUS_ACTION"
 
 Custody uses the existing `magnus-secret` protocol. Completed uploads retain their secret across backend restarts, with the original TTL and download limit. HTTP uploads are single-request transfers, so public gateway limits still apply. Offline relay jobs publish complete snapshots, which the controller imports incrementally during execution. A Job output’s TTL starts after the whole Job finishes executing, or from readiness for a later import; early downloads still count. See the [SDK file-transfer guide](sdk-and-cli.md#custody_file---put-a-file-into-custody) for the full contract.
 
-Currently the Web side does not execute arbitrary shell; it only recognizes the safe whitelist form `magnus receive ...` and maps it to a browser download.
+Web details display `MAGNUS_RESULT` / `MAGNUS_ACTION` as text; they do not execute actions or generate download buttons. Copy a command into a CLI configured for the same site; when only a receipt is present, use `magnus receive <secret> --job <job_id> --wait 600`.
 
-For backward compatibility with older Blueprints, there is an additional rule:
-
-- If `MAGNUS_ACTION` is empty, but the `MAGNUS_RESULT` text contains `magnus-secret:...`
-- The Web side will also extract the secret from the result text and provide a download button
-
-This is mainly for compatibility with old `transfer_file`-type Blueprints: when `target` is empty, they only write `MAGNUS_RESULT` without writing `MAGNUS_ACTION`.
+The updated SDK/CLI binds automatic actions to the calling client's address and credentials without changing the default profile. A `magnus receive` action without explicit `--job` / `--wait` receives the producing Job ID and a 600-second readiness wait. It waits only for that file, not every large transfer from the Job. Explicit options are preserved. The SDK Job wait deadline also bounds actions; asynchronous calls keep the event loop responsive and reap action processes on cancellation. Older SDKs remain compatible with the new server, but these client fixes require updated SDK source or a subsequent release.
 
 ---
 
@@ -574,3 +575,11 @@ When an AI Agent is asked to "integrate this project into a Magnus Blueprint", f
    - `runner`: usually exposed as a parameter for the user to fill
    - `description`: summarize this run's configuration in Markdown
 7. **Test**: paste the code into the Web editor and check that the form is generated correctly
+
+## Template scope
+
+Bundled ColliderAgent / Wolfram templates assume application repositories, images, host licenses and mounts; they are not universal acceptance examples for every compute target. The application project supplies these dependencies. Preserve the target's default `system_entry_command`; override it only with an explicit understanding of that runtime's MPI and mount contract. A Slurm site's host paths do not automatically work in Docker/local or another SSH tenant.
+
+The updated SDK preserves all existing positional parameters for `launch_blueprint` / `run_blueprint` and Job submissions, adding keyword-only `idempotency_key` (and `blueprint_revision` for Blueprints). On an uncertain reply, it retries a bounded number of times only when the server advertises support, reusing uploaded receipts, the identical body and key. Use `SubmissionOutcomeUnknown.idempotency_key` with `get_accepted_submission()` to check acceptance; a fresh upload with a different receipt is not the same request. Older servers without this capability are not automatically retried.
+
+Cancelling an asynchronous submission joins its in-flight submission thread before propagating `asyncio.CancelledError`. The client retains the attempt key in `last_submission_key` and an accepted ID in `last_job_id` (null when unknown), including when an outer `asyncio.wait_for` raises `TimeoutError`. This does not terminate an accepted Job. For concurrent submissions on one client, supply a separate explicit key per attempt rather than relying on the last-attempt convenience fields. Use key lookup after uncertainty; do not blindly submit a new Job.

@@ -159,14 +159,15 @@ function SingleFieldInput({
   }
 
   if (field.type === "select") {
+    const selectedIndex = (field.options || []).findIndex(opt => opt.value === value);
     return (
       <div className={cn("relative", disabled && "opacity-40 pointer-events-none")}>
         <SearchableSelect
-          value={String(value)}
-          onChange={onChange}
-          options={(field.options || []).map(opt => ({
+          value={selectedIndex < 0 ? "" : String(selectedIndex)}
+          onChange={index => onChange(index === "" ? undefined : field.options?.[Number(index)]?.value)}
+          options={(field.options || []).map((opt, index) => ({
             label: opt.label,
-            value: String(opt.value),
+            value: String(index),
             meta: opt.description
           }))}
           placeholder={field.placeholder || "Select option..."}
@@ -180,8 +181,8 @@ function SingleFieldInput({
     return (
       <div className={cn("relative", disabled && "opacity-40 pointer-events-none")}>
         <SearchableSelect
-          value={String(value)}
-          onChange={(val) => onChange(val === "true")}
+          value={typeof value === "boolean" ? String(value) : ""}
+          onChange={val => onChange(val === "" ? undefined : val === "true")}
           options={[
             { label: "True", value: "true" },
             { label: "False", value: "false" }
@@ -265,7 +266,7 @@ function ListField({
   return (
     <div className={cn("space-y-2", disabled && "opacity-40")}>
       {items.map((item, index) => (
-        <div key={index} className="flex items-start gap-2">
+        <div key={`${items.length}:${index}`} className="flex items-start gap-2">
           {field.is_item_optional && !disabled && (
             <button
               type="button"

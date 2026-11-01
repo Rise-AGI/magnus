@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Terminal, Loader2, Play } from "lucide-react";
 import { client } from "@/lib/api";
 import { Drawer } from "@/components/ui/drawer";
+import { FileUploadActivity } from "@/components/ui/file-secret-input";
 import { DynamicForm } from "@/components/ui/dynamic-form";
 import { FieldSchema, getFieldInitialValue, validateFieldValue } from "@/components/ui/dynamic-form/types";
 import { BlueprintPreference } from "@/types/blueprint";
@@ -31,7 +32,17 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
   const [errorField, setErrorField] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const currentHashRef = useRef<string>("");
+  const [readyBlueprint, setReadyBlueprint] = useState<string | null>(null);
+  const [hasUploads, setHasUploads] = useState(false);
+  const uploads = useRef(new Set<string>());
+  const submitting = useRef(false);
+  const revisionRef = useRef<string | null>(null);
+  const attemptRef = useRef<{ identity: string; key: string } | null>(null);
+  const reportUpload = useCallback((id: string, busy: boolean) => {
+    if (busy) uploads.current.add(id);
+    else uploads.current.delete(id);
+    setHasUploads(uploads.current.size > 0);
+  }, []);
 
   useEffect(() => {
     if (blueprint?.id) {
@@ -43,11 +54,23 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
         setErrorField(null);
         setErrorMessage(null);
         setFormValues({});
-        currentHashRef.current = "";
+        setReadyBlueprint(null);
+        setIsRunning(false);
+        submitting.current = false;
+        revisionRef.current = null;
+        attemptRef.current = null;
 
         try {
+          let signatureHeader: string | null = null;
+          let revisionHeader: string | null = null;
           const results = await Promise.allSettled([
-            client(`/api/blueprints/${blueprint.id}/schema`),
+            client(`/api/blueprints/${blueprint.id}/schema`, {
+              cache: "no-store",
+              onResponse: response => {
+                signatureHeader = response.headers.get("X-Magnus-Blueprint-Signature");
+                revisionHeader = response.headers.get("X-Magnus-Blueprint-Revision");
+              },
+            }),
             client(`/api/blueprints/${blueprint.id}/preference`, { cache: "no-store" })
           ]);
 
@@ -68,8 +91,9 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
             preference = prefResult.value as BlueprintPreference;
           }
 
-          const signatureHash = await computeStableHash(schema);
-          currentHashRef.current = signatureHash;
+          const signatureHash = signatureHeader || await computeStableHash(schema);
+          if (!isMounted) return;
+          revisionRef.current = revisionHeader;
           setParamsSchema(schema);
           
           const initial: Record<string, any> = {};
@@ -81,6 +105,7 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
           });
 
           setFormValues(initial);
+          setReadyBlueprint(blueprint.id);
 
         } catch (e: any) {
           if (isMounted) {
@@ -108,7 +133,7 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
   };
 
   const handleRun = async () => {
-    if (!blueprint) return;
+    if (!blueprint || readyBlueprint !== blueprint.id || submitting.current || uploads.current.size) return;
 
     setErrorField(null);
     setErrorMessage(null);
@@ -123,15 +148,23 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
       }
     }
 
+    submitting.current = true;
     setIsRunning(true);
+    const payload = {
+      parameters: formValues,
+      use_preference: false,
+      save_preference: true,
+      ...(revisionRef.current ? { blueprint_revision: revisionRef.current } : {}),
+    };
+    const identity = JSON.stringify([blueprint.id, payload]);
+    if (attemptRef.current?.identity !== identity) {
+      attemptRef.current = { identity, key: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("") };
+    }
     try {
       await client(`/api/blueprints/${blueprint.id}/run`, {
         method: "POST",
-        json: {
-          parameters: formValues,
-          use_preference: false,  // 前端已合并缓存，不需要后端再合并
-          save_preference: true,  // 统一由后端保存偏好
-        }
+        headers: { "Idempotency-Key": attemptRef.current.key },
+        json: payload,
       });
 
       sessionStorage.setItem('magnus_new_job', 'true');
@@ -140,6 +173,7 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
     } catch (e: any) {
       setErrorMessage(`Error: ${e.message}`);
       setIsRunning(false);
+      submitting.current = false;
     }
   };
 
@@ -166,13 +200,16 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
     >
       <div className="flex flex-col min-h-full">
         <div className="flex-1 pb-4">
+          <FileUploadActivity.Provider value={reportUpload}>
           <DynamicForm
+            key={blueprint?.id}
             schema={paramsSchema}
             values={formValues}
             onChange={handleFieldChange}
             isLoading={isLoadingSchema}
             errorField={errorField}
           />
+          </FileUploadActivity.Provider>
         </div>
 
         <div className="mt-auto pt-6 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:justify-between sm:items-center gap-4 pb-1">
@@ -196,7 +233,7 @@ export function BlueprintRunner({ blueprint, onClose }: BlueprintRunnerProps) {
             </button>
             <button
               onClick={handleRun}
-              disabled={isRunning || isLoadingSchema}
+              disabled={isRunning || isLoadingSchema || readyBlueprint !== blueprint?.id || hasUploads}
               className="flex-1 sm:flex-none px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isRunning ? (

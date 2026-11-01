@@ -236,9 +236,7 @@ ${MAGNUS_HOME}/.tmp/                         SDK file relay directory (container
 `MAGNUS_ACTION` is just a plain text file; the backend does not automatically execute it at runtime. The current behavior of each client is:
 
 - SDK / CLI: by default reads and executes `MAGNUS_ACTION`
-- Web: does not execute arbitrary shell; only maps the whitelisted form `magnus receive <secret> [--output/-o <target>]` to a browser download
-
-Therefore, in the Web scenario, the semantics of `--output/-o <target>` is not "write to a specified local path in the browser", but rather "suggested download name".
+- Web: displays result and action text without executing commands or generating download buttons. Copy retrieval commands into a CLI configured for the same site; `--output/-o` refers to that CLI's local destination.
 
 With the default `execution.container_image_mode: native`, the runtime receives
 the SIF directly. Its writable layer depends on the isolation mode:

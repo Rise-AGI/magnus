@@ -934,37 +934,11 @@ In other words:
 In the current Magnus:
 
 - The SDK / CLI client reads `MAGNUS_ACTION` and auto-executes it by default
-- The Web client does not execute arbitrary shell; it only maps a supported safe subset
+- The Web client displays result/action text without executing it
 
-#### How the Web Handles File Output
+#### Web file retrieval
 
-The Web does not directly execute the shell commands in `MAGNUS_ACTION`. It supports only a safe whitelist:
-
-```bash
-magnus receive <file-secret>
-magnus receive <file-secret> --output <target>
-magnus receive <file-secret> -o <target>
-```
-
-When a Job's `action` matches this pattern, the Web will:
-
-1. Parse `file_secret` from the action
-2. Call `/api/files/download/{token}` to trigger a browser download
-3. If the action has `--output/-o`, treat it as a **suggested download name**
-
-Notes:
-
-- The Web does not treat `target` as an absolute local path for the browser to execute
-- For the browser, `target` is only a suggested filename or relative save name
-- If `action` is not in the supported `magnus receive ...` form, the Web just shows the raw text and does not execute
-
-There is an additional compatibility rule for legacy blueprints:
-
-- If the Job did not write `MAGNUS_ACTION`
-- But `MAGNUS_RESULT` text contains `magnus-secret:...`
-- The Web will also extract the secret from the result text and provide a download button
-
-This is mainly used for compatibility with the legacy `transfer_file` blueprint: when `target` is empty, it only writes a download hint into `MAGNUS_RESULT`.
+Web details show result and action text without executing commands or generating download buttons. Copy `magnus receive ...` into a CLI configured for the same site. Use `--job <job_id> --wait 600` to wait for a particular Job artifact still being imported. See the [Blueprint guide](blueprint-crafting.md#web-side-file-output-convention) for automatic actions' client context, wait and cancellation contract.
 
 #### Large Model Post-Training Example
 

@@ -178,7 +178,7 @@ frontend 通过 `POST /api/auth/local/login` 自动初始化（返回用于 UI �
 
 `magnus local start` 会自动注册位于 `sdks/python/src/magnus/bundled/blueprints/` 中打包的 blueprint。这提供了开箱即用的体验。内置 blueprint 会在每次启动时被重新注册（幂等覆盖）。
 
-要添加内置 blueprint，将 `.py` 文件放入 `bundled/blueprints/` 目录即可。文件名（去掉 `.py`）会成为 blueprint ID。
+要添加内置 blueprint，将 `.yaml` 文件放入 `bundled/blueprints/` 目录即可。文件名（去掉 `.yaml`）会成为 blueprint ID。
 
 ## Explorer
 
@@ -191,3 +191,7 @@ Explorer（AI 助手）由配置中 `server.explorer` 的**存在**启用，而�
 - **无服务代理**：service 系统在本地模式下未经测试
 - **无抢占**：所有作业均不带基于优先级的抢占运行
 - **无临时存储强制**：使用 Docker 的可写层而不限制大小
+
+## 蓝图求值环境
+
+`magnus local start` 在启动服务前，按同一 checkout 的 `back_end/containers/blueprint-runtime.Dockerfile` 准备隔离求值镜像。Dockerfile 未变化且镜像已存在时复用；首次准备需要访问基础镜像和包源。失败则不启动服务，不降级为宿主进程执行蓝图。此环境只用于蓝图求值，应用依赖仍放在 Job 镜像中。旧 checkout 没有该 Dockerfile 时保留其原启动协议。

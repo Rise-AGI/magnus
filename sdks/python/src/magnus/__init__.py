@@ -8,6 +8,7 @@ import re
 from .exceptions import (
     MagnusError,
     UploadOutcomeUnknown,
+    SubmissionOutcomeUnknown,
     APIError,
     AuthenticationError, ForbiddenError, ResourceNotFoundError, ConflictError,
     ExecutionError,
@@ -35,6 +36,16 @@ class FileSecret(str):
             token = value
         cls._validate_token(token)
         return super().__new__(cls, cls.MAGIC_PREFIX + token)
+
+    @property
+    def token(
+        self,
+    ) -> str:
+        return self[
+            len(
+                self.MAGIC_PREFIX,
+            ) :
+        ]
 
     @staticmethod
     def _validate_token(token: str) -> None:
@@ -147,6 +158,9 @@ __all__ = [
     "set_current_site",
     "MagnusError",
     "UploadOutcomeUnknown",
+    "SubmissionOutcomeUnknown",
+    "get_accepted_submission",
+    "get_accepted_submission_async",
     "APIError",
     "AuthenticationError",
     "ForbiddenError",
@@ -172,17 +186,129 @@ def configure(token: Optional[str] = None, address: Optional[str] = None) -> Non
     default_client = MagnusClient(token=token, address=address)
 
 
-def launch_blueprint(blueprint_id: str, args: Optional[Dict[str, Any]] = None, use_preference: bool = False, save_preference: bool = True, expire_minutes: int = 60, max_downloads: Optional[int] = 1, timeout: float = 10.0) -> str:
-    return default_client.launch_blueprint(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout)
+def get_accepted_submission(
+    idempotency_key: str,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return default_client.get_accepted_submission(
+        idempotency_key,
+        timeout,
+    )
 
-async def launch_blueprint_async(blueprint_id: str, args: Optional[Dict[str, Any]] = None, use_preference: bool = False, save_preference: bool = True, expire_minutes: int = 60, max_downloads: Optional[int] = 1, timeout: float = 10.0) -> str:
-    return await default_client.launch_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout)
 
-def run_blueprint(blueprint_id: str, args: Optional[Dict[str, Any]] = None, use_preference: bool = False, save_preference: bool = True, expire_minutes: int = 60, max_downloads: Optional[int] = 1, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
-    return default_client.run_blueprint(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout, poll_interval, execute_action)
+async def get_accepted_submission_async(
+    idempotency_key: str,
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    return await default_client.get_accepted_submission_async(
+        idempotency_key,
+        timeout,
+    )
 
-async def run_blueprint_async(blueprint_id: str, args: Optional[Dict[str, Any]] = None, use_preference: bool = False, save_preference: bool = True, expire_minutes: int = 60, max_downloads: Optional[int] = 1, timeout: Optional[float] = None, poll_interval: float = 2.0, execute_action: bool = True) -> Optional[str]:
-    return await default_client.run_blueprint_async(blueprint_id, args, use_preference, save_preference, expire_minutes, max_downloads, timeout, poll_interval, execute_action)
+
+def launch_blueprint(
+    blueprint_id: str,
+    args: Optional[Dict[str, Any]] = None,
+    use_preference: bool = False,
+    save_preference: bool = True,
+    expire_minutes: int = 60,
+    max_downloads: Optional[int] = 1,
+    timeout: float = 10.0,
+    *,
+    idempotency_key: Optional[str] = None,
+    blueprint_revision: Optional[str] = None,
+) -> str:
+    return default_client.launch_blueprint(
+        blueprint_id=blueprint_id,
+        args=args,
+        use_preference=use_preference,
+        save_preference=save_preference,
+        expire_minutes=expire_minutes,
+        max_downloads=max_downloads,
+        timeout=timeout,
+        idempotency_key=idempotency_key,
+        blueprint_revision=blueprint_revision,
+    )
+
+async def launch_blueprint_async(
+    blueprint_id: str,
+    args: Optional[Dict[str, Any]] = None,
+    use_preference: bool = False,
+    save_preference: bool = True,
+    expire_minutes: int = 60,
+    max_downloads: Optional[int] = 1,
+    timeout: float = 10.0,
+    *,
+    idempotency_key: Optional[str] = None,
+    blueprint_revision: Optional[str] = None,
+) -> str:
+    return await default_client.launch_blueprint_async(
+        blueprint_id=blueprint_id,
+        args=args,
+        use_preference=use_preference,
+        save_preference=save_preference,
+        expire_minutes=expire_minutes,
+        max_downloads=max_downloads,
+        timeout=timeout,
+        idempotency_key=idempotency_key,
+        blueprint_revision=blueprint_revision,
+    )
+
+def run_blueprint(
+    blueprint_id: str,
+    args: Optional[Dict[str, Any]] = None,
+    use_preference: bool = False,
+    save_preference: bool = True,
+    expire_minutes: int = 60,
+    max_downloads: Optional[int] = 1,
+    timeout: Optional[float] = None,
+    poll_interval: float = 2.0,
+    execute_action: bool = True,
+    *,
+    idempotency_key: Optional[str] = None,
+    blueprint_revision: Optional[str] = None,
+) -> Optional[str]:
+    return default_client.run_blueprint(
+        blueprint_id=blueprint_id,
+        args=args,
+        use_preference=use_preference,
+        save_preference=save_preference,
+        expire_minutes=expire_minutes,
+        max_downloads=max_downloads,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        execute_action=execute_action,
+        idempotency_key=idempotency_key,
+        blueprint_revision=blueprint_revision,
+    )
+
+async def run_blueprint_async(
+    blueprint_id: str,
+    args: Optional[Dict[str, Any]] = None,
+    use_preference: bool = False,
+    save_preference: bool = True,
+    expire_minutes: int = 60,
+    max_downloads: Optional[int] = 1,
+    timeout: Optional[float] = None,
+    poll_interval: float = 2.0,
+    execute_action: bool = True,
+    *,
+    idempotency_key: Optional[str] = None,
+    blueprint_revision: Optional[str] = None,
+) -> Optional[str]:
+    return await default_client.run_blueprint_async(
+        blueprint_id=blueprint_id,
+        args=args,
+        use_preference=use_preference,
+        save_preference=save_preference,
+        expire_minutes=expire_minutes,
+        max_downloads=max_downloads,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        execute_action=execute_action,
+        idempotency_key=idempotency_key,
+        blueprint_revision=blueprint_revision,
+    )
 
 def submit_job(
     task_name: str,
@@ -208,30 +334,32 @@ def submit_job(
     tasks_per_node: Optional[int] = None,
     dockerfile: Optional[str] = None,
     execution_target: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> str:
     return default_client.submit_job(
-        task_name,
-        entry_command,
-        repo_name,
-        branch,
-        commit_sha,
-        gpu_type,
-        gpu_count,
-        namespace,
-        job_type,
-        description,
-        container_image,
-        cpu_count,
-        memory_demand,
-        time_limit,
-        ephemeral_storage,
-        runner,
-        system_entry_command,
-        timeout,
+        task_name=task_name,
+        entry_command=entry_command,
+        repo_name=repo_name,
+        branch=branch,
+        commit_sha=commit_sha,
+        gpu_type=gpu_type,
+        gpu_count=gpu_count,
+        namespace=namespace,
+        job_type=job_type,
+        description=description,
+        container_image=container_image,
+        cpu_count=cpu_count,
+        memory_demand=memory_demand,
+        time_limit=time_limit,
+        ephemeral_storage=ephemeral_storage,
+        runner=runner,
+        system_entry_command=system_entry_command,
+        timeout=timeout,
         node_count=node_count,
         tasks_per_node=tasks_per_node,
         dockerfile=dockerfile,
         execution_target=execution_target,
+        idempotency_key=idempotency_key,
     )
 
 async def submit_job_async(
@@ -258,30 +386,32 @@ async def submit_job_async(
     tasks_per_node: Optional[int] = None,
     dockerfile: Optional[str] = None,
     execution_target: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> str:
     return await default_client.submit_job_async(
-        task_name,
-        entry_command,
-        repo_name,
-        branch,
-        commit_sha,
-        gpu_type,
-        gpu_count,
-        namespace,
-        job_type,
-        description,
-        container_image,
-        cpu_count,
-        memory_demand,
-        time_limit,
-        ephemeral_storage,
-        runner,
-        system_entry_command,
-        timeout,
+        task_name=task_name,
+        entry_command=entry_command,
+        repo_name=repo_name,
+        branch=branch,
+        commit_sha=commit_sha,
+        gpu_type=gpu_type,
+        gpu_count=gpu_count,
+        namespace=namespace,
+        job_type=job_type,
+        description=description,
+        container_image=container_image,
+        cpu_count=cpu_count,
+        memory_demand=memory_demand,
+        time_limit=time_limit,
+        ephemeral_storage=ephemeral_storage,
+        runner=runner,
+        system_entry_command=system_entry_command,
+        timeout=timeout,
         node_count=node_count,
         tasks_per_node=tasks_per_node,
         dockerfile=dockerfile,
         execution_target=execution_target,
+        idempotency_key=idempotency_key,
     )
 
 def execute_job(
@@ -310,32 +440,34 @@ def execute_job(
     tasks_per_node: Optional[int] = None,
     dockerfile: Optional[str] = None,
     execution_target: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> Optional[str]:
     return default_client.execute_job(
-        task_name,
-        entry_command,
-        repo_name,
-        branch,
-        commit_sha,
-        gpu_type,
-        gpu_count,
-        namespace,
-        job_type,
-        description,
-        container_image,
-        cpu_count,
-        memory_demand,
-        time_limit,
-        ephemeral_storage,
-        runner,
-        system_entry_command,
-        timeout,
-        poll_interval,
-        execute_action,
+        task_name=task_name,
+        entry_command=entry_command,
+        repo_name=repo_name,
+        branch=branch,
+        commit_sha=commit_sha,
+        gpu_type=gpu_type,
+        gpu_count=gpu_count,
+        namespace=namespace,
+        job_type=job_type,
+        description=description,
+        container_image=container_image,
+        cpu_count=cpu_count,
+        memory_demand=memory_demand,
+        time_limit=time_limit,
+        ephemeral_storage=ephemeral_storage,
+        runner=runner,
+        system_entry_command=system_entry_command,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        execute_action=execute_action,
         node_count=node_count,
         tasks_per_node=tasks_per_node,
         dockerfile=dockerfile,
         execution_target=execution_target,
+        idempotency_key=idempotency_key,
     )
 
 async def execute_job_async(
@@ -364,32 +496,34 @@ async def execute_job_async(
     tasks_per_node: Optional[int] = None,
     dockerfile: Optional[str] = None,
     execution_target: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> Optional[str]:
     return await default_client.execute_job_async(
-        task_name,
-        entry_command,
-        repo_name,
-        branch,
-        commit_sha,
-        gpu_type,
-        gpu_count,
-        namespace,
-        job_type,
-        description,
-        container_image,
-        cpu_count,
-        memory_demand,
-        time_limit,
-        ephemeral_storage,
-        runner,
-        system_entry_command,
-        timeout,
-        poll_interval,
-        execute_action,
+        task_name=task_name,
+        entry_command=entry_command,
+        repo_name=repo_name,
+        branch=branch,
+        commit_sha=commit_sha,
+        gpu_type=gpu_type,
+        gpu_count=gpu_count,
+        namespace=namespace,
+        job_type=job_type,
+        description=description,
+        container_image=container_image,
+        cpu_count=cpu_count,
+        memory_demand=memory_demand,
+        time_limit=time_limit,
+        ephemeral_storage=ephemeral_storage,
+        runner=runner,
+        system_entry_command=system_entry_command,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        execute_action=execute_action,
         node_count=node_count,
         tasks_per_node=tasks_per_node,
         dockerfile=dockerfile,
         execution_target=execution_target,
+        idempotency_key=idempotency_key,
     )
 
 

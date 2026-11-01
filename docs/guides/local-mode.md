@@ -181,7 +181,7 @@ The frontend auto-initializes via `POST /api/auth/local/login` (returns user inf
 
 `magnus local start` automatically registers blueprints bundled in `sdks/python/src/magnus/bundled/blueprints/`. This provides a working out-of-the-box experience. Bundled blueprints are re-registered on each start (idempotent overwrite).
 
-To add a bundled blueprint, place a `.py` file in the `bundled/blueprints/` directory. The filename (minus `.py`) becomes the blueprint ID.
+To add a bundled blueprint, place a `.yaml` file in the `bundled/blueprints/` directory. The filename (minus `.yaml`) becomes the blueprint ID.
 
 ## Explorer
 
@@ -194,3 +194,7 @@ Explorer (AI assistant) is enabled by the **presence** of `server.explorer` in t
 - **No service proxy**: The service system is not tested in local mode
 - **No preemption**: All jobs run without priority-based preemption
 - **No ephemeral storage enforcement**: Docker's writable layer is used without size limits
+
+## Blueprint evaluation runtime
+
+Before starting the server, `magnus local start` prepares an isolated evaluator using `back_end/containers/blueprint-runtime.Dockerfile` from the same checkout. An existing image with the same Dockerfile identity is reused; first preparation needs access to its base image and package sources. Failure prevents startup, with no unisolated fallback. This image evaluates Blueprints; application dependencies still belong in Job images. Legacy checkouts without this Dockerfile retain their original startup protocol.

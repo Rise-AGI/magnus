@@ -47,6 +47,20 @@ class UploadOutcomeUnknown(MagnusError):
     """An upload may have committed; replaying it could create a second receipt."""
 
 
+class SubmissionOutcomeUnknown(MagnusError):
+    """No conclusive reply; use the key to look up acceptance before resubmitting."""
+
+    def __init__(
+        self,
+        idempotency_key: str,
+    ):
+        self.idempotency_key = idempotency_key
+        super().__init__(
+            "Submission outcome is unknown. Check the accepted submission with key "
+            f"{idempotency_key} before creating another Job.",
+        )
+
+
 class _ServerError(MagnusError):
     """5xx — transient, worth retrying. Internal marker for retry loops;
     not exported. Inherits MagnusError so that if a retry loop exhausts

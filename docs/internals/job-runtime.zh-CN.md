@@ -225,9 +225,7 @@ ${MAGNUS_HOME}/.tmp/                         SDK 文件中转目录 (容器可�
 `MAGNUS_ACTION` 只是一个普通文本文件，运行时不会在后端自动执行。当前各客户端的行为是：
 
 - SDK / CLI：默认读取并执行 `MAGNUS_ACTION`
-- Web：不执行任意 shell，只对白名单形式 `magnus receive <secret> [--output/-o <target>]` 做浏览器下载映射
-
-因此在 Web 场景里，`--output/-o <target>` 的语义不是“写入浏览器本地指定路径”，而是“建议下载名”。
+- Web：显示结果与 action 文本，不执行命令或生成下载按钮。需要取件时复制命令到配置相同站点的 CLI；`--output/-o` 是该 CLI 的本地目标路径。
 
 默认 `execution.container_image_mode: native` 将 SIF 直接交给运行时，
 可写层取决于隔离模式：

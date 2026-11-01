@@ -4,7 +4,7 @@ export type FieldType = "text" | "number" | "float" | "boolean" | "select" | "fi
 
 export interface FieldOption {
   label: string;
-  value: string | number;
+  value: string | number | boolean;
   description?: string;
 }
 
@@ -89,6 +89,7 @@ export function validateFieldValue(field: FieldSchema, value: any): string | nul
   }
 
   // List 类型：逐项校验
+  if (field.is_list && !Array.isArray(value)) return `${label} must be a list`;
   if (field.is_list && Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
       if (field.is_item_optional && value[i] === null) continue;
@@ -103,6 +104,12 @@ export function validateFieldValue(field: FieldSchema, value: any): string | nul
 
 
 function validateSingleValue(field: FieldSchema, value: any, label: string): string | null {
+  if (field.type === "select" && !field.options?.some(option => option.value === value)) {
+    return `${label} must be one of the available options`;
+  }
+  if (field.type === "boolean" && typeof value !== "boolean") {
+    return `${label} must be True or False`;
+  }
   // 必填文本
   if (field.type === "text" && field.allow_empty === false) {
     if (!value || (typeof value === "string" && !value.trim())) {
@@ -116,7 +123,7 @@ function validateSingleValue(field: FieldSchema, value: any, label: string): str
     if (str === "") return `${label} must be a valid number`;
 
     const num = Number(str);
-    if (isNaN(num)) return `${label} must be a valid number`;
+    if (!Number.isFinite(num)) return `${label} must be a valid number`;
     if (field.min != null && num < field.min) return `${label} must be ≥ ${field.min}`;
     if (field.max != null && num > field.max) return `${label} must be ≤ ${field.max}`;
   }
@@ -124,7 +131,7 @@ function validateSingleValue(field: FieldSchema, value: any, label: string): str
   // Number (int) 校验
   if (field.type === "number") {
     const num = Number(value);
-    if (isNaN(num)) return `${label} must be a valid integer`;
+    if (value === "" || !Number.isSafeInteger(num)) return `${label} must be a valid integer`;
     if (field.min != null && num < field.min) return `${label} must be ≥ ${field.min}`;
     if (field.max != null && num > field.max) return `${label} must be ≤ ${field.max}`;
   }

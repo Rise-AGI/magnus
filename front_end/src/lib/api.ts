@@ -4,14 +4,15 @@ import { API_BASE } from "./config";
 interface FetchOptions extends RequestInit {
   // 保持 RequestInit.body 的原始定义，避免 ts(2430) 错误
   // 新增 json 属性来接受原生对象，用于自动 JSON.stringify
-  json?: Record<string, any>; 
+  json?: Record<string, any>;
+  onResponse?: (response: Response) => void;
 }
 
 /**
  * 统一的 API 客户端
  * 自动注入 Bearer Token, 自动 JSON.stringify(json), 处理 401 状态
  */
-export async function client(endpoint: string, { json, body, ...customConfig }: FetchOptions = {}) {
+export async function client(endpoint: string, { json, body, onResponse, ...customConfig }: FetchOptions = {}) {
   // 1. 处理 Token
   const token = typeof window !== "undefined" ? localStorage.getItem("magnus_token") : null;
   
@@ -78,6 +79,8 @@ export async function client(endpoint: string, { json, body, ...customConfig }: 
             : `API Error: ${response.statusText}`;
       throw new Error(message);
     }
+
+    onResponse?.(response);
 
     // 返回解析后的 JSON（204 No Content 无 body）
     if (response.status === 204) return null;

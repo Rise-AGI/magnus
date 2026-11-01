@@ -932,37 +932,11 @@ echo "magnus receive $SECRET --output ./checkpoint-1200" > "$MAGNUS_ACTION"
 在当前 Magnus 中：
 
 - SDK / CLI 客户端会读取 `MAGNUS_ACTION`，并在默认情况下自动执行
-- Web 客户端不会执行任意 shell，只会对受支持的安全子集做映射
+- Web 客户端只显示 result/action 文本，不执行命令
 
-#### Web 如何处理文件输出
+#### Web 端文件取回
 
-Web 端不会直接执行 `MAGNUS_ACTION` 中的 shell 命令。它只支持一个安全白名单：
-
-```bash
-magnus receive <file-secret>
-magnus receive <file-secret> --output <target>
-magnus receive <file-secret> -o <target>
-```
-
-当 Job 的 `action` 匹配到这个模式时，Web 会：
-
-1. 从 action 中解析出 `file_secret`
-2. 调用 `/api/files/download/{token}` 触发浏览器下载
-3. 如果 action 里有 `--output/-o`，则将其视为**建议下载名**
-
-需要注意：
-
-- Web 不会把 `target` 当作浏览器本地绝对路径执行
-- 对浏览器来说，`target` 只是建议文件名或相对保存名
-- 如果 `action` 不是受支持的 `magnus receive ...` 形式，Web 只显示原始文本，不会执行
-
-兼容旧蓝图时还有一个补充规则：
-
-- 如果 Job 没有写 `MAGNUS_ACTION`
-- 但 `MAGNUS_RESULT` 文本中包含 `magnus-secret:...`
-- Web 也会从结果文本中提取 secret，并提供下载按钮
-
-这主要用于兼容旧版 `transfer_file` 蓝图：当 `target` 为空时，它只会把下载提示写进 `MAGNUS_RESULT`。
+Web 只显示结果和 action 文本，不自动执行命令或生成下载按钮。复制 `magnus receive ...` 到配置相同站点的 CLI；对于仍在导入的 Job 产物，可用 `--job <job_id> --wait 600` 等待指定文件。自动 action 的调用站点、等待和取消约定见[蓝图指南](blueprint-crafting.zh-CN.md#web-端文件输出约定)。
 
 #### 大模型后训练示例
 
