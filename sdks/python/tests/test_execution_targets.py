@@ -1,6 +1,7 @@
 """Opt-in target routing and the original positional SDK contract."""
 import asyncio
 import importlib
+import importlib.util
 import inspect
 import json
 import os
