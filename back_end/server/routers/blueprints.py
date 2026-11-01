@@ -1,174 +1,219 @@
 # back_end/server/routers/blueprints.py
-import logging
-from typing import Annotated, List, Optional, Dict, Any
+from dataclasses import replace
 from datetime import datetime, timezone
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import Header, APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from library import deserialize_json, escape_like, serialize_json
+from pydantic import BaseModel, Field
+from sqlalchemy import case, or_
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, case
 
-from .. import database
-from .. import models
-from .._resource_aliases import resolve_resource_id, exclude_shadowed_resources
+from .. import database, models
+from .._blueprint_manager import BlueprintUnavailable, blueprint_manager
+from .._blueprint_signature import code_revision, signature_hash
+from .._id_registry import assert_id_available
+from .._magnus_config import is_admin_user
+from .._resource_aliases import exclude_shadowed_resources, resolve_resource_id
+from .._submission import BlueprintRun, SubmissionContext, save_preference
 from .._user_lifecycle import lock_user_for_write
-from pydantic import BaseModel
-
 from ..schemas import (
-    BlueprintResponse,
-    BlueprintListItem,
     BlueprintCreate,
-    PagedBlueprintResponse,
+    BlueprintListItem,
     BlueprintParamSchema,
-    BlueprintPreferenceUpdate,
     BlueprintPreferenceResponse,
+    BlueprintPreferenceUpdate,
+    BlueprintResponse,
+    PagedBlueprintResponse,
     TransferRequest,
 )
-from .._blueprint_manager import blueprint_manager, BlueprintUnavailable
-from .._id_registry import assert_id_available
-from .auth import get_current_user
-from .users import _get_all_subordinate_ids
-from .jobs import create_job, enforce_field_size_limits
-from .._magnus_config import is_admin_user
 from ._authz import (
     assert_can_manage_resource,
     assert_valid_transfer_target,
     compute_can_manage,
 )
-from library import *
+from .auth import get_current_user
+from .jobs import create_job, enforce_field_size_limits
+from .users import _get_all_subordinate_ids
 
 
 class BlueprintRunRequest(BaseModel):
     """统一的 Blueprint 运行请求模型"""
+
     parameters: Dict[str, Any] = {}
-    use_preference: bool = False   # 是否合并已缓存的偏好
+    use_preference: bool = False  # 是否合并已缓存的偏好
     save_preference: bool = False  # 成功后是否保存参数为新偏好
+    blueprint_revision: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
 
-def _normalize_obj(
-    obj: Any
-)-> Any:
-    
-    if isinstance(obj, dict):
-        return {k: _normalize_obj(v) for k, v in obj.items()}
-    elif isinstance(obj, list) or isinstance(obj, tuple):
-        return [_normalize_obj(x) for x in obj]
-    elif isinstance(obj, set):
-        try:
-            return sorted([_normalize_obj(x) for x in obj], key=lambda x: str(x))
-        except Exception:
-            return sorted([str(x) for x in obj])
-    elif isinstance(obj, float):
-        if obj.is_integer():
-            return int(obj)
-        return obj
-    return obj
+def _analyze_schema(
+    code: str,
+) -> list[BlueprintParamSchema]:
+    try:
+        return blueprint_manager.analyze_signature(
+            code,
+        )
+    except BlueprintUnavailable as error:
+        raise HTTPException(
+            status_code=503,
+            detail=str(
+                error,
+            ),
+        ) from error
+    except (ValueError, NameError, TypeError) as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(
+                error,
+            ),
+        ) from error
 
 
 def _compute_signature_hash(
     code: str,
-)-> str:
-    
-    try:
-        schema_objs = blueprint_manager.analyze_signature(code)
-        schema_dicts = [s.model_dump() for s in schema_objs]
-
-        normalized_schema = _normalize_obj(schema_dicts)
-
-        canonical_json = json.dumps(
-            normalized_schema,
-            sort_keys = True,
-            separators = (',', ':'),
-            ensure_ascii = False,
-        )
-
-        final_hash = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
-
-        return final_hash
-
-    except BlueprintUnavailable as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except (ValueError, NameError, TypeError) as e:
-        logger.error(f"❌ Hash computation failed: {e}")
-        logger.error(traceback.format_exc())
-        return "invalid_signature"
+) -> str:
+    return signature_hash(
+        [
+            item.model_dump(
+                mode="json",
+            )
+            for item in _analyze_schema(
+                code,
+            )
+        ],
+    )
 
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.post(
     "/blueprints",
-    response_model =BlueprintResponse,
+    response_model=BlueprintResponse,
 )
 def create_blueprint(
     bp: BlueprintCreate,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
 ):
-    bp = bp.model_copy(update={"id": resolve_resource_id(
-        db,
+    bp = bp.model_copy(
+        update={
+            "id": resolve_resource_id(
+                db,
+                "blueprint",
+                bp.id,
+                default_target,
+            )
+        },
+    )
+    enforce_field_size_limits(
+        bp.model_dump(),
         "blueprint",
-        bp.id,
-        default_target,
-    )})
-    enforce_field_size_limits(bp.model_dump(), "blueprint")
+    )
 
-    # 1. 验证代码签名
-    try:
-        blueprint_manager.analyze_signature(bp.code)
-    except BlueprintUnavailable as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except (ValueError, NameError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # 2. 检查 ID 是否冲突（如果是新建）
-    # 注意：这里允许 overwrite (Update)，但如果是别人的蓝图则禁止覆盖
-    existing = db.query(models.Blueprint).filter(models.Blueprint.id == bp.id).first()
-
-    if not existing:
-        assert_id_available(db, bp.id)
-
-    if existing:
+    existing = (
+        db.query(
+            models.Blueprint,
+        )
+        .filter(
+            models.Blueprint.id == bp.id,
+        )
+        .first()
+    )
+    if existing is not None:
         assert_can_manage_resource(
             db,
             current_user,
             existing.user_id,
             resource_label="blueprint",
-            hint="Please verify the Blueprint ID.",
         )
-
-        # Update existing
-        existing.title = bp.title
-        existing.description = bp.description
-        existing.code = bp.code
-        existing.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(existing)
-        return existing
-
-    # Create new
-    db_bp = models.Blueprint(
-        **bp.model_dump(),
-        user_id = current_user.id,
+    else:
+        assert_id_available(
+            db,
+            bp.id,
+        )
+    _analyze_schema(
+        bp.code,
     )
+
     lock_user_for_write(
         db,
         current_user.id,
     )
-    db.add(db_bp)
+    existing = (
+        db.query(
+            models.Blueprint,
+        )
+        .filter(
+            models.Blueprint.id == bp.id,
+        )
+        .populate_existing()
+        .first()
+    )
+    if existing is not None:
+        assert_can_manage_resource(
+            db,
+            current_user,
+            existing.user_id,
+            resource_label="blueprint",
+        )
+        existing.title = bp.title
+        existing.description = bp.description
+        existing.code = bp.code
+        existing.updated_at = datetime.now(
+            timezone.utc,
+        )
+        result = existing
+    else:
+        assert_id_available(
+            db,
+            bp.id,
+        )
+        result = models.Blueprint(
+            **bp.model_dump(),
+            user_id=current_user.id,
+        )
+        db.add(
+            result,
+        )
     db.commit()
-    db.refresh(db_bp)
-    return db_bp
+    db.refresh(
+        result,
+    )
+    return result
 
 
-@router.delete("/blueprints/{blueprint_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/blueprints/{blueprint_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
 def delete_blueprint(
     blueprint_id: str,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
 ) -> None:
     """
     删除蓝图。拥有者、管理员、上司可操作。
@@ -179,24 +224,65 @@ def delete_blueprint(
         blueprint_id,
         default_target,
     )
-    bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
+    lock_user_for_write(
+        db,
+        current_user.id,
+    )
+    bp = (
+        db.query(
+            models.Blueprint,
+        )
+        .filter(
+            models.Blueprint.id == blueprint_id,
+        )
+        .first()
+    )
 
     if not bp:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Blueprint not found",
+        )
 
-    assert_can_manage_resource(db, current_user, bp.user_id, resource_label="blueprint")
+    assert_can_manage_resource(
+        db,
+        current_user,
+        bp.user_id,
+        resource_label="blueprint",
+    )
 
-    db.delete(bp)
+    db.query(
+        models.BlueprintUserPreference,
+    ).filter(
+        models.BlueprintUserPreference.blueprint_id == blueprint_id,
+    ).delete(
+        synchronize_session=False,
+    )
+    db.delete(
+        bp,
+    )
     db.commit()
 
 
-@router.post("/blueprints/{blueprint_id}/transfer", response_model=BlueprintResponse)
+@router.post(
+    "/blueprints/{blueprint_id}/transfer",
+    response_model=BlueprintResponse,
+)
 def transfer_blueprint(
     blueprint_id: str,
     body: TransferRequest,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
 ) -> models.Blueprint:
     blueprint_id = resolve_resource_id(
         db,
@@ -204,19 +290,51 @@ def transfer_blueprint(
         blueprint_id,
         default_target,
     )
-    bp = db.query(models.Blueprint).options(joinedload(models.Blueprint.user))\
-           .filter(models.Blueprint.id == blueprint_id).first()
+    lock_user_for_write(
+        db,
+        current_user.id,
+    )
+    bp = (
+        db.query(
+            models.Blueprint,
+        )
+        .options(
+            joinedload(
+                models.Blueprint.user,
+            ),
+        )
+        .filter(
+            models.Blueprint.id == blueprint_id,
+        )
+        .first()
+    )
     if not bp:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Blueprint not found",
+        )
 
-    assert_can_manage_resource(db, current_user, bp.user_id, resource_label="blueprint")
+    assert_can_manage_resource(
+        db,
+        current_user,
+        bp.user_id,
+        resource_label="blueprint",
+    )
 
-    assert_valid_transfer_target(db, current_user, body.new_owner_id)
+    assert_valid_transfer_target(
+        db,
+        current_user,
+        body.new_owner_id,
+    )
 
     bp.user_id = body.new_owner_id
-    bp.updated_at = datetime.now(timezone.utc)
+    bp.updated_at = datetime.now(
+        timezone.utc,
+    )
     db.commit()
-    db.refresh(bp)
+    db.refresh(
+        bp,
+    )
     return bp
 
 
@@ -229,14 +347,25 @@ def list_blueprints(
     limit: int = 20,
     search: Optional[str] = None,
     creator_id: Optional[str] = None,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
 ):
     """
     获取蓝图列表（支持分页、搜索、筛选）
     """
-    query = db.query(models.Blueprint)
+    query = db.query(
+        models.Blueprint,
+    )
     query = exclude_shadowed_resources(
         query,
         models.Blueprint,
@@ -246,50 +375,109 @@ def list_blueprints(
 
     # 1. 搜索逻辑 (Title, ID, Description)
     if search:
-        safe = escape_like(search)
+        safe = escape_like(
+            search,
+        )
         search_pattern = f"%{safe}%"
         query = query.filter(
             or_(
-                models.Blueprint.title.ilike(search_pattern, escape="\\"),
-                models.Blueprint.id.ilike(search_pattern, escape="\\"),
-                models.Blueprint.description.ilike(search_pattern, escape="\\"),
-            )
+                models.Blueprint.title.ilike(
+                    search_pattern,
+                    escape="\\",
+                ),
+                models.Blueprint.id.ilike(
+                    search_pattern,
+                    escape="\\",
+                ),
+                models.Blueprint.description.ilike(
+                    search_pattern,
+                    escape="\\",
+                ),
+            ),
         )
 
     # 2. 用户筛选
     if creator_id and creator_id != "all":
-        query = query.filter(models.Blueprint.user_id == creator_id)
+        query = query.filter(
+            models.Blueprint.user_id == creator_id,
+        )
 
     total = query.count()
 
-    human_first = case((models.User.user_type == "human", 0), else_=1)
-    items = query.join(models.User, models.Blueprint.user_id == models.User.id)\
-                 .options(*models.blueprint_list_load_options())\
-                 .order_by(human_first, models.Blueprint.updated_at.desc())\
-                 .offset(skip).limit(limit).all()
+    human_first = case(
+        (models.User.user_type == "human", 0),
+        else_=1,
+    )
+    items = (
+        query.join(
+            models.User,
+            models.Blueprint.user_id == models.User.id,
+        )
+        .options(
+            *models.blueprint_list_load_options(),
+        )
+        .order_by(
+            human_first,
+            models.Blueprint.updated_at.desc(),
+        )
+        .offset(
+            skip,
+        )
+        .limit(
+            limit,
+        )
+        .all()
+    )
 
-    is_admin = is_admin_user(current_user)
-    subordinate_ids = set(_get_all_subordinate_ids(db, current_user.id)) if not is_admin else set()
+    is_admin = is_admin_user(
+        current_user,
+    )
+    subordinate_ids = (
+        set(
+            _get_all_subordinate_ids(
+                db,
+                current_user.id,
+            ),
+        )
+        if not is_admin
+        else set()
+    )
     result = []
     for bp in items:
-        resp = BlueprintListItem.model_validate(bp)
-        resp.can_manage = compute_can_manage(
-            db, current_user, bp.user_id, subordinate_ids=subordinate_ids,
+        resp = BlueprintListItem.model_validate(
+            bp,
         )
-        result.append(resp)
+        resp.can_manage = compute_can_manage(
+            db,
+            current_user,
+            bp.user_id,
+            subordinate_ids=subordinate_ids,
+        )
+        result.append(
+            resp,
+        )
 
     return {"total": total, "items": result}
 
 
 @router.get(
     "/blueprints/{blueprint_id}",
-    response_model =BlueprintResponse,
+    response_model=BlueprintResponse,
 )
 def get_blueprint(
     blueprint_id: str,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
 ):
     blueprint_id = resolve_resource_id(
         db,
@@ -297,28 +485,57 @@ def get_blueprint(
         blueprint_id,
         default_target,
     )
-    blueprint = db.query(models.Blueprint)\
-        .options(joinedload(models.Blueprint.user))\
-        .filter(models.Blueprint.id == blueprint_id)\
+    blueprint = (
+        db.query(
+            models.Blueprint,
+        )
+        .options(
+            joinedload(
+                models.Blueprint.user,
+            ),
+        )
+        .filter(
+            models.Blueprint.id == blueprint_id,
+        )
         .first()
+    )
 
     if not blueprint:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Blueprint not found",
+        )
 
-    resp = BlueprintResponse.model_validate(blueprint)
-    resp.can_manage = compute_can_manage(db, current_user, blueprint.user_id)
+    resp = BlueprintResponse.model_validate(
+        blueprint,
+    )
+    resp.can_manage = compute_can_manage(
+        db,
+        current_user,
+        blueprint.user_id,
+    )
     return resp
 
 
 @router.get(
     "/blueprints/{blueprint_id}/schema",
-    response_model =List[BlueprintParamSchema],
+    response_model=List[BlueprintParamSchema],
 )
 def get_blueprint_schema(
     blueprint_id: str,
-    db: Session = Depends(database.get_db),
-    _: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    response: Response,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    _: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
 ):
     blueprint_id = resolve_resource_id(
         db,
@@ -326,136 +543,214 @@ def get_blueprint_schema(
         blueprint_id,
         default_target,
     )
-    bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
+    bp = (
+        db.query(
+            models.Blueprint,
+        )
+        .filter(
+            models.Blueprint.id == blueprint_id,
+        )
+        .first()
+    )
     if not bp:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Blueprint not found",
+        )
 
-    try:
-        return blueprint_manager.analyze_signature(bp.code)
-    except BlueprintUnavailable as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except (ValueError, NameError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=f"Invalid blueprint code: {e}")
+    schema = _analyze_schema(
+        bp.code,
+    )
+    response.headers["X-Magnus-Blueprint-Revision"] = code_revision(
+        bp.code,
+    )
+    response.headers["X-Magnus-Blueprint-Signature"] = signature_hash(
+        [
+            item.model_dump(
+                mode="json",
+            )
+            for item in schema
+        ],
+    )
+    response.headers["X-Magnus-Submission-Idempotency"] = "1"
+    return schema
 
 
-@router.post("/blueprints/{blueprint_id}/run")
+@router.post(
+    "/blueprints/{blueprint_id}/run",
+)
 def run_blueprint(
     blueprint_id: str,
     request: BlueprintRunRequest,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+        ),
+    ] = None,
 ):
-    """
-    统一的 Blueprint 运行端点。
-    - use_preference=True: 合并用户缓存的偏好参数（显式传入 > 缓存）
-    - save_preference=True: 成功运行后保存参数为新偏好
-    """
-    blueprint_id = resolve_resource_id(
-        db,
-        "blueprint",
-        blueprint_id,
+    submission = SubmissionContext.from_request(
+        idempotency_key,
+        f"blueprint:{blueprint_id}",
+        request.model_dump(
+            mode="json",
+        ),
         default_target,
     )
-    bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
-    if not bp:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
-
-
-    # 1. 构建最终参数
-    final_params = request.parameters.copy()
-
-    if request.use_preference:
-        pref = db.query(models.BlueprintUserPreference).filter(
-            models.BlueprintUserPreference.user_id == current_user.id,
-            models.BlueprintUserPreference.blueprint_id == blueprint_id,
-        ).first()
-
-        if pref:
-            current_hash = _compute_signature_hash(bp.code)
-            # 仅当 Blueprint 签名未变化时才使用缓存
-            if pref.blueprint_hash == current_hash:
-                try:
-                    cached = deserialize_json(pref.cached_params)
-                    if isinstance(cached, dict):
-                        # 优先级：显式传入 > 缓存
-                        base_params = dict(cached)
-                        base_params.update(final_params)
-                        final_params = base_params
-                except ValueError as e:
-                    logger.warning(f"Failed to merge preferences: {e}")
-
-
-    # save_preference 会把 final_params 落库到 cached_params。在执行 / 建 job 之前先护栏，
-    # 否则超限只能等 create_job 已 commit job 之后才拒，留下"job 已起但调用方收到 413"的半成品。
-    if request.save_preference:
-        enforce_field_size_limits(
-            {"cached_params": serialize_json(final_params)},
-            "blueprint preference",
-        )
-
-    # 2. 执行 Blueprint
     try:
-        job_submission = blueprint_manager.execute(bp.code, final_params)
-        job_dict = job_submission.model_dump()
-
-        blueprint_default = bp.default_execution_target
-        if blueprint_default is None:
-            blueprint_default = default_target
-        db_job = create_job(
-            job_dict,
-            current_user.id,
+        existing = submission.replay(
             db,
-            default_target=blueprint_default,
+            current_user.id,
         )
-
-
-        # 3. 保存偏好（仅在成功执行后）
-        if request.save_preference:
-            pref = db.query(models.BlueprintUserPreference).filter(
-                models.BlueprintUserPreference.user_id == current_user.id,
-                models.BlueprintUserPreference.blueprint_id == blueprint_id,
-            ).first()
-
-            current_hash = _compute_signature_hash(bp.code)
-            serialized_params = serialize_json(final_params)
-
-            if pref:
-                pref.blueprint_hash = current_hash
-                pref.cached_params = serialized_params
-                pref.updated_at = datetime.now(timezone.utc)
-            else:
-                new_pref = models.BlueprintUserPreference(
-                    user_id = current_user.id,
-                    blueprint_id = blueprint_id,
-                    blueprint_hash = current_hash,
-                    cached_params = serialized_params,
+        if existing is not None:
+            return {"job_id": existing.id}
+        blueprint_id = resolve_resource_id(
+            db,
+            "blueprint",
+            blueprint_id,
+            default_target,
+        )
+        bp = (
+            db.query(
+                models.Blueprint,
+            )
+            .filter(
+                models.Blueprint.id == blueprint_id,
+            )
+            .first()
+        )
+        if bp is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Blueprint not found",
+            )
+        revision = code_revision(
+            bp.code,
+        )
+        if request.blueprint_revision is not None and request.blueprint_revision != revision:
+            raise HTTPException(
+                status_code=409,
+                detail="Blueprint changed; reload its parameters before running",
+            )
+        schema_hash = _compute_signature_hash(
+            bp.code,
+        )
+        parameters = dict(
+            request.parameters,
+        )
+        if request.use_preference:
+            preference = (
+                db.query(
+                    models.BlueprintUserPreference,
                 )
-                db.add(new_pref)
+                .filter(
+                    models.BlueprintUserPreference.user_id == current_user.id,
+                    models.BlueprintUserPreference.blueprint_id == blueprint_id,
+                )
+                .first()
+            )
+            if preference is not None and preference.blueprint_hash == schema_hash:
+                try:
+                    cached = deserialize_json(
+                        preference.cached_params,
+                    )
+                except ValueError:
+                    cached = None
+                if isinstance(
+                    cached,
+                    dict,
+                ):
+                    parameters = {**cached, **parameters}
+        serialized = (
+            serialize_json(
+                parameters,
+            )
+            if request.save_preference
+            else None
+        )
+        if serialized is not None:
+            enforce_field_size_limits(
+                {"cached_params": serialized},
+                "blueprint preference",
+            )
+        submission = replace(
+            submission,
+            blueprint=BlueprintRun(
+                blueprint_id,
+                revision,
+                schema_hash,
+                serialized,
+            ),
+        )
+        try:
+            job_submission = blueprint_manager.execute(
+                bp.code,
+                parameters,
+            )
+            job = create_job(
+                job_submission.model_dump(),
+                current_user.id,
+                db,
+                default_target=bp.default_execution_target
+                if bp.default_execution_target is not None
+                else default_target,
+                submission=submission,
+            )
+            return {"job_id": job.id}
+        except BlueprintUnavailable as error:
+            raise HTTPException(
+                status_code=503,
+                detail=str(
+                    error,
+                ),
+            ) from error
+        except (ValueError, NameError, TypeError) as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(
+                    error,
+                ),
+            ) from error
+    except Exception:
+        existing = submission.replay_after_failure(
+            db,
+            current_user.id,
+        )
+        if existing is not None:
+            return {"job_id": existing.id}
+        raise
 
 
-        db.commit()
-        db.refresh(db_job)
-
-        logger.info(f"Blueprint {blueprint_id} launched job {db_job.id}")
-        return {"job_id": db_job.id}
-
-    except BlueprintUnavailable as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except (ValueError, NameError, TypeError) as e:
-        logger.error(f"Blueprint run failed: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    
 @router.get(
     "/blueprints/{blueprint_id}/preference",
-    response_model =BlueprintPreferenceResponse,
+    response_model=BlueprintPreferenceResponse,
 )
 def get_blueprint_preference(
     blueprint_id: str,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
 ):
     blueprint_id = resolve_resource_id(
         db,
@@ -463,32 +758,52 @@ def get_blueprint_preference(
         blueprint_id,
         default_target,
     )
-    pref = db.query(models.BlueprintUserPreference).filter(
-        models.BlueprintUserPreference.user_id == current_user.id,
-        models.BlueprintUserPreference.blueprint_id == blueprint_id,
-    ).first()
-    
+    pref = (
+        db.query(
+            models.BlueprintUserPreference,
+        )
+        .filter(
+            models.BlueprintUserPreference.user_id == current_user.id,
+            models.BlueprintUserPreference.blueprint_id == blueprint_id,
+        )
+        .first()
+    )
+
     if not pref:
-        raise HTTPException(status_code=404, detail="No preference found")
-        
+        raise HTTPException(
+            status_code=404,
+            detail="No preference found",
+        )
+
     return BlueprintPreferenceResponse(
-        blueprint_id = pref.blueprint_id,
-        blueprint_hash = pref.blueprint_hash,
-        cached_params = deserialize_json(pref.cached_params),
-        updated_at = pref.updated_at,
+        blueprint_id=pref.blueprint_id,
+        blueprint_hash=pref.blueprint_hash,
+        cached_params=deserialize_json(
+            pref.cached_params,
+        ),
+        updated_at=pref.updated_at,
     )
 
 
 @router.put(
     "/blueprints/{blueprint_id}/preference",
-    response_model =BlueprintPreferenceResponse,
+    response_model=BlueprintPreferenceResponse,
 )
 def save_blueprint_preference(
     blueprint_id: str,
     pref_update: BlueprintPreferenceUpdate,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
 ):
     blueprint_id = resolve_resource_id(
         db,
@@ -496,52 +811,91 @@ def save_blueprint_preference(
         blueprint_id,
         default_target,
     )
-    bp = db.query(models.Blueprint).filter(models.Blueprint.id == blueprint_id).first()
+    bp = (
+        db.query(
+            models.Blueprint,
+        )
+        .filter(
+            models.Blueprint.id == blueprint_id,
+        )
+        .first()
+    )
     if not bp:
-        raise HTTPException(status_code=404, detail="Blueprint not found")
-        
-    pref_update = pref_update.model_copy(update={"blueprint_id": resolve_resource_id(
-        db,
-        "blueprint",
-        pref_update.blueprint_id,
-        default_target,
-    )})
+        raise HTTPException(
+            status_code=404,
+            detail="Blueprint not found",
+        )
+
+    pref_update = pref_update.model_copy(
+        update={
+            "blueprint_id": resolve_resource_id(
+                db,
+                "blueprint",
+                pref_update.blueprint_id,
+                default_target,
+            )
+        },
+    )
     if pref_update.blueprint_id != blueprint_id:
-         raise HTTPException(status_code=400, detail="Blueprint ID mismatch")
+        raise HTTPException(
+            status_code=400,
+            detail="Blueprint ID mismatch",
+        )
 
-    current_hash = _compute_signature_hash(bp.code)
-
-    pref = db.query(models.BlueprintUserPreference).filter(
-        models.BlueprintUserPreference.user_id == current_user.id,
-        models.BlueprintUserPreference.blueprint_id == blueprint_id,
-    ).first()
-    
-    serialized_params = serialize_json(pref_update.cached_params)
-    enforce_field_size_limits({"cached_params": serialized_params}, "blueprint preference")
-
+    revision = code_revision(
+        bp.code,
+    )
+    current_hash = _compute_signature_hash(
+        bp.code,
+    )
+    serialized_params = serialize_json(
+        pref_update.cached_params,
+    )
+    enforce_field_size_limits(
+        {"cached_params": serialized_params},
+        "blueprint preference",
+    )
     lock_user_for_write(
         db,
         current_user.id,
     )
-    if pref: # Update
-        pref.blueprint_hash = current_hash
-        pref.cached_params = serialized_params
-        pref.updated_at = datetime.now(timezone.utc)
-    else: # Create
-        pref = models.BlueprintUserPreference(
-            user_id = current_user.id,
-            blueprint_id = blueprint_id,
-            blueprint_hash = current_hash,
-            cached_params = serialized_params,
+    current = (
+        db.query(
+            models.Blueprint.code,
         )
-        db.add(pref)
-    
+        .filter(
+            models.Blueprint.id == blueprint_id,
+        )
+        .first()
+    )
+    if (
+        current is None
+        or code_revision(
+            current[0],
+        )
+        != revision
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Blueprint changed; reload its parameters",
+        )
+    pref = save_preference(
+        db,
+        current_user.id,
+        blueprint_id,
+        current_hash,
+        serialized_params,
+    )
     db.commit()
-    db.refresh(pref)
-    
+    db.refresh(
+        pref,
+    )
+
     return BlueprintPreferenceResponse(
-        blueprint_id = pref.blueprint_id,
-        blueprint_hash = pref.blueprint_hash,
-        cached_params = deserialize_json(pref.cached_params),
-        updated_at = pref.updated_at,
+        blueprint_id=pref.blueprint_id,
+        blueprint_hash=pref.blueprint_hash,
+        cached_params=deserialize_json(
+            pref.cached_params,
+        ),
+        updated_at=pref.updated_at,
     )

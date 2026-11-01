@@ -1,5 +1,6 @@
 """Target grants and legacy endpoint defaults without a live scheduler."""
 import logging
+from dataclasses import replace
 from types import SimpleNamespace
 import unittest
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from test_execution_targets import configuration, targets_module
 from test_user_lifecycle import load_function, load_leaf, ns
+from test_blueprint_submission import BlueprintRun, SubmissionContext, namespace as submission_support
 
 
 context = dict(ns)
@@ -120,7 +122,7 @@ class ExecutionAccessTests(unittest.TestCase):
         self.db.add(job)
         self.db.commit()
         chosen = []
-        def create(data, user_id, db, *, default_target):
+        def create(data, user_id, db, *, default_target, submission):
             chosen.append(resolve_request(data["execution_target"], default_target))
             return job
         returned = {"execution_target": None}
@@ -130,6 +132,11 @@ class ExecutionAccessTests(unittest.TestCase):
             Depends=lambda dependency: None,
             database=SimpleNamespace(get_db=lambda: None),
             get_current_user=lambda: None,
+            SubmissionContext=SubmissionContext,
+            BlueprintRun=BlueprintRun,
+            code_revision=submission_support["code_revision"],
+            _compute_signature_hash=lambda code: "signature",
+            replace=replace,
             blueprint_manager=SimpleNamespace(execute=lambda *args: SimpleNamespace(
                 model_dump=lambda: dict(returned),
             )),
@@ -137,7 +144,7 @@ class ExecutionAccessTests(unittest.TestCase):
             logger=logging.getLogger(__name__),
         )
         run = load_function("routers/blueprints.py", "run_blueprint", boundary)
-        request = SimpleNamespace(parameters={}, use_preference=False, save_preference=False)
+        request = SimpleNamespace(parameters={}, use_preference=False, save_preference=False, blueprint_revision=None, model_dump=lambda **kwargs: {})
         for explicit in (None, "default", "selected"):
             returned["execution_target"] = explicit
             run("imported", request, self.db, self.db.get(User, "owner"), default_target="forwarded")

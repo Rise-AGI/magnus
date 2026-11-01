@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from sqlalchemy import create_engine, event, inspect
+from sqlalchemy.exc import IntegrityError
 
 
 SOURCE = Path(__file__).resolve().parents[2] / "server/_database_migrations.py"
@@ -22,6 +23,25 @@ SPEC.loader.exec_module(
 
 
 class DatabaseMigrationTests(unittest.TestCase):
+    def test_duplicate_preferences_keep_latest_row_and_enforce_uniqueness(self):
+        self.script("""
+            CREATE TABLE blueprint_user_preferences (
+                id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, blueprint_id TEXT NOT NULL,
+                blueprint_hash TEXT, cached_params TEXT, updated_at TEXT
+            );
+            INSERT INTO blueprint_user_preferences VALUES
+                (1, 'u', 'b', 'old', '{"x":1}', '2026-10-01'),
+                (2, 'u', 'b', 'new', '{"x":2}', '2026-11-01'),
+                (3, 'u', 'b', 'tie', '{"x":3}', '2026-11-01'),
+                (4, 'other', 'b', 'independent', '{}', '2026-10-01');
+        """)
+        MIGRATIONS.run_migrations(self.engine)
+        MIGRATIONS.run_migrations(self.engine)
+        self.assertEqual(self.rows("SELECT id,blueprint_hash,cached_params FROM blueprint_user_preferences ORDER BY id"), [(3, 'tie', '{"x":3}'), (4, 'independent', '{}')])
+        with self.assertRaises(IntegrityError), self.engine.begin() as connection:
+            connection.exec_driver_sql("INSERT INTO blueprint_user_preferences(id,user_id,blueprint_id) VALUES (5,'u','b')")
+        self.assertEqual(self.rows("SELECT id,result FROM jobs"), [("old", "evidence")])
+
     def setUp(
         self,
     ) -> None:

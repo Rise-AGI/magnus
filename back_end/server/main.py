@@ -419,6 +419,11 @@ app.add_middleware(
     allow_origins = magnus_config["server"]["cors_origins"],
     allow_methods = ["*"],
     allow_headers = ["*"],
+    expose_headers = [
+        "X-Magnus-Blueprint-Revision",
+        "X-Magnus-Blueprint-Signature",
+        "X-Magnus-Submission-Idempotency",
+    ],
 )
 
 

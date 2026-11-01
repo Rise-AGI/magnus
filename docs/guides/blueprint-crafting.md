@@ -108,6 +108,18 @@ submit_job(
 
 ## 4. Parameter Type System
 
+### Submission identity
+
+The existing `/api/blueprints/{id}/schema` response remains a list. Its response headers provide `X-Magnus-Blueprint-Revision` (SHA-256 of code), `X-Magnus-Blueprint-Signature` (the server's canonical form/preference hash), and `X-Magnus-Submission-Idempotency: 1`. Form consumers should use these values rather than reproducing Python's serialization in another language.
+
+`POST /api/blueprints/{id}/run` accepts optional `blueprint_revision` alongside the existing parameters/preferences flags. A stale revision returns 409 before creating a Job; callers that omit it continue to use the current Blueprint. The accepted code revision is retained with the Job's submission record even if the Blueprint is later changed or deleted.
+
+Both Blueprint run and `/api/jobs/submit` accept an optional `Idempotency-Key` header (1–128 ASCII letters, digits, `.`, `_`, `:`, `-`). Reuse the same key and request body when retrying one submission. The key is scoped to the authenticated user: successful concurrent retries return the same Job, while reusing it for a different request returns 409. Job creation, preference saving and the acceptance record commit together. Calls without a key preserve the original independent-submission behavior. A failed precheck rechecks committed acceptance, but does not wait for another request still evaluating or prechecking; after an error, query or retry with the same key.
+
+`GET /api/jobs/submissions/{key}` retrieves the accepted Job for the current user. A 404 means no committed acceptance is visible yet; it does not prove an outstanding request cannot still complete. `/api/jobs/capabilities` advertises `submission_idempotency: true`. Do not automatically retry submissions against older servers that do not advertise this capability. Acceptance records follow Job history rather than custody TTL.
+
+There is one saved preference per user and Blueprint. Upgrading a database with duplicates retains the newest preference (highest row ID breaks equal timestamps); deleting a Blueprint removes its preferences and preserves its Job history.
+
 ### 4.1 Basic Types
 
 | Python Type | Form Type | Frontend Widget |

@@ -1,7 +1,7 @@
 # back_end/server/models/_blueprint.py
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, defer, joinedload, mapped_column, relationship
 
 from ..database import Base
@@ -26,6 +26,9 @@ class Blueprint(Base):
 
 class BlueprintUserPreference(Base):
     __tablename__ = "blueprint_user_preferences"
+    __table_args__ = (
+        Index("uq_blueprint_preference_user_blueprint", "user_id", "blueprint_id", unique=True),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     blueprint_id: Mapped[str] = mapped_column(String, ForeignKey("blueprints.id"), index=True)

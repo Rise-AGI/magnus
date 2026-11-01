@@ -108,6 +108,18 @@ submit_job(
 
 ## 4. 参数类型系统
 
+### 提交身份
+
+原有 `/api/blueprints/{id}/schema` 响应仍为列表。响应头提供 `X-Magnus-Blueprint-Revision`（代码的 SHA-256）、`X-Magnus-Blueprint-Signature`（服务端计算的表单/偏好哈希）和 `X-Magnus-Submission-Idempotency: 1`。表单应使用这些值，不在另一种语言中重做 Python 序列化。
+
+`POST /api/blueprints/{id}/run` 在原参数、偏好开关之外接受可选 `blueprint_revision`。版本过时会在创建 Job 前返回 409；不传时仍使用当前蓝图。受理记录保存实际使用的代码版本，即使之后修改或删除蓝图也保留。
+
+蓝图运行和 `/api/jobs/submit` 都接受可选 `Idempotency-Key` 请求头（1–128 个 ASCII 字母、数字、`.`、`_`、`:`、`-`）。重试同一次提交时复用相同键和请求体。键按认证用户隔离：成功受理的并发重试返回同一个 Job，同一键用于不同请求则返回 409。Job、偏好和受理回执在同一事务中提交。不传键的旧调用仍按独立提交处理。预检失败前会复查已经提交的回执，但不会等待尚在求值或预检的另一请求；收到错误后仍可用同键查询或重试。
+
+`GET /api/jobs/submissions/{key}` 查询当前用户已受理的 Job。404 只表示此刻尚无已提交的受理记录，不证明一个在途请求之后不会成功。`/api/jobs/capabilities` 通过 `submission_idempotency: true` 声明支持；旧服务未声明时不可自动重试提交。受理回执跟随 Job 历史保留，不受 custody TTL 影响。
+
+每个用户、每个蓝图只有一份偏好。升级时若旧库有重复，保留时间最新的一份（时间相同时取最大行 ID）；删除蓝图会清除其偏好，保留 Job 历史。
+
 ### 4.1 基础类型
 
 | Python 类型 | 表单类型 | 前端控件 |

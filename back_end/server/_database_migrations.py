@@ -212,6 +212,37 @@ def _make_job_container_image_nullable(
         connection.close()
 
 
+def _deduplicate_blueprint_preferences(
+    engine: Engine,
+) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("blueprint_user_preferences"):
+        return
+    name = "uq_blueprint_preference_user_blueprint"
+    for index in inspector.get_indexes("blueprint_user_preferences"):
+        if index["name"] == name:
+            if not index["unique"] or index["column_names"] != ["user_id", "blueprint_id"]:
+                raise RuntimeError("Blueprint preference uniqueness index has an unexpected definition")
+            return
+    with engine.begin() as connection:
+        # Preferences are replaceable form state. Preserve the most recently
+        # saved row, using its ID to break timestamp ties deterministically.
+        connection.execute(text("""
+            DELETE FROM blueprint_user_preferences WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY user_id, blueprint_id
+                        ORDER BY COALESCE(updated_at, '') DESC, id DESC
+                    ) AS position FROM blueprint_user_preferences
+                ) WHERE position > 1
+            )
+        """))
+        connection.execute(text(
+            "CREATE UNIQUE INDEX uq_blueprint_preference_user_blueprint "
+            "ON blueprint_user_preferences (user_id, blueprint_id)"
+        ))
+
+
 def run_migrations(
     engine: Engine,
 ) -> None:
@@ -256,6 +287,7 @@ def run_migrations(
         if "default_execution_target" not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE blueprints ADD COLUMN default_execution_target TEXT"))
+    _deduplicate_blueprint_preferences(engine)
     with engine.begin() as conn:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cluster_snapshots_execution_target ON cluster_snapshots (execution_target)"))
     _repair_legacy_job_metrics_reference(

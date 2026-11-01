@@ -24,6 +24,7 @@ from .. import models
 from .._execution_access import assert_target_submission_allowed
 from .._execution_targets import requested_execution_target
 from .._user_lifecycle import lock_user_for_write
+from .._submission import SubmissionContext
 from ..models import JobStatus
 from ..schemas import JobResponse, JobSubmission, PagedJobResponse
 from .._magnus_config import magnus_config, is_admin_user, is_local_mode, apply_cluster_defaults, normalize_per_cpu_resources, validate_cluster_limits
@@ -84,70 +85,133 @@ def create_job(
     db: Session,
     *,
     default_target: str | None = None,
-)-> models.Job:
+    submission: SubmissionContext | None = None,
+) -> models.Job:
     """
     共享的 Job 创建逻辑。
     SDK /jobs/submit 和 Blueprint /run 都收敛到这里。
     负责：填充集群默认值、校验资源上限、节点可用性 precheck、创建 ORM 对象、写入数据库。
     """
-    # All submission paths, including Blueprint, share this contract.
-    job_dict = JobSubmission.model_validate(job_dict).model_dump()
-    if job_dict["dockerfile"] is not None and not magnus_config["execution"]["image_build"]["enabled"]:
-        raise HTTPException(
-            status_code = 503,
-            detail = "Dockerfile builds are not enabled on this Magnus site",
-        )
     try:
-        worker = scheduler.for_target(
-            requested_execution_target(
-                job_dict["execution_target"],
-                default_target,
-            ),
-        )
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    assert_target_submission_allowed(
-        db,
-        user_id,
-        worker.target,
-    )
-    config = worker.config
-    job_dict["execution_target"] = worker.target.id
-    apply_cluster_defaults(job_dict, config=config)
-    normalize_per_cpu_resources(job_dict, config=config)
-    validate_cluster_limits(job_dict, config=config)
-    enforce_field_size_limits(job_dict, "job")
-
-    # 节点可用性 precheck：杜绝节点全部 drain/down/reboot 期间用户提交"看似成功
-    # 但永远 PENDING"的 ghost job——前端反复点提交都返回 200、SDK 用户脚本累积一片
-    # PENDING、cluster 视图被污染。SLURM 模式下走 has_schedulable_node()；local
-    # 模式无此概念跳过。失败时 has_schedulable_node 自身 fail-open，不会引入新故障。
-    if not is_local_mode and worker.slurm_manager is not None:
-        if not worker.slurm_manager.has_schedulable_node():
+        if submission is not None:
+            existing = submission.replay(
+                db,
+                user_id,
+            )
+            if existing is not None:
+                return existing
+        # All submission paths, including Blueprint, share this contract.
+        job_dict = JobSubmission.model_validate(
+            job_dict,
+        ).model_dump()
+        if (
+            job_dict["dockerfile"] is not None
+            and not magnus_config["execution"]["image_build"]["enabled"]
+        ):
             raise HTTPException(
-                status_code = 503,
-                detail = (
-                    "No schedulable node available (all nodes are drain/down/maint/reboot). "
-                    "请等节点恢复 IDLE 后重试。"
+                status_code=503,
+                detail="Dockerfile builds are not enabled on this Magnus site",
+            )
+        try:
+            worker = scheduler.for_target(
+                requested_execution_target(
+                    job_dict["execution_target"],
+                    default_target,
                 ),
             )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(
+                    error,
+                ),
+            ) from error
+        assert_target_submission_allowed(
+            db,
+            user_id,
+            worker.target,
+        )
+        config = worker.config
+        job_dict["execution_target"] = worker.target.id
+        apply_cluster_defaults(
+            job_dict,
+            config=config,
+        )
+        normalize_per_cpu_resources(
+            job_dict,
+            config=config,
+        )
+        validate_cluster_limits(
+            job_dict,
+            config=config,
+        )
+        enforce_field_size_limits(
+            job_dict,
+            "job",
+        )
 
-    db_job = models.Job(
-        **job_dict,
-        resource_mode = resource_mode_for_execution(config["execution"]),
-        user_id = user_id,
-        status = JobStatus.PREPARING,
-    )
+        # 节点可用性 precheck：杜绝节点全部 drain/down/reboot 期间用户提交"看似成功
+        # 但永远 PENDING"的 ghost job——前端反复点提交都返回 200、SDK 用户脚本累积一片
+        # PENDING、cluster 视图被污染。SLURM 模式下走 has_schedulable_node()；local
+        # 模式无此概念跳过。失败时 has_schedulable_node 自身 fail-open，不会引入新故障。
+        if not is_local_mode and worker.slurm_manager is not None:
+            if not worker.slurm_manager.has_schedulable_node():
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "No schedulable node available (all nodes are drain/down/maint/reboot). "
+                        "请等节点恢复 IDLE 后重试。"
+                    ),
+                )
 
-    lock_user_for_write(
-        db,
-        user_id,
-    )
-    db.add(db_job)
-    db.commit()
-    db.refresh(db_job)
+        db_job = models.Job(
+            **job_dict,
+            resource_mode=resource_mode_for_execution(
+                config["execution"],
+            ),
+            user_id=user_id,
+            status=JobStatus.PREPARING,
+        )
 
-    return db_job
+        try:
+            lock_user_for_write(
+                db,
+                user_id,
+            )
+            if submission is not None:
+                existing = submission.replay(
+                    db,
+                    user_id,
+                )
+                if existing is not None:
+                    db.commit()
+                    return existing
+            db.add(
+                db_job,
+            )
+            if submission is not None:
+                submission.attach(
+                    db,
+                    db_job,
+                )
+            db.commit()
+            db.refresh(
+                db_job,
+            )
+        except BaseException:
+            db.rollback()
+            raise
+
+        return db_job
+    except Exception:
+        if submission is not None:
+            existing = submission.replay_after_failure(
+                db,
+                user_id,
+            )
+            if existing is not None:
+                return existing
+        raise
 
 
 def _read_marker_file(
@@ -196,9 +260,24 @@ def _resolve_marker_field(
 )
 def submit_job(
     job_data: JobSubmission,
-    db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user),
-    default_target: Annotated[str | None, Header(alias="X-Magnus-Default-Execution-Target")] = None,
+    db: Session = Depends(
+        database.get_db,
+    ),
+    current_user: models.User = Depends(
+        get_current_user,
+    ),
+    default_target: Annotated[
+        str | None,
+        Header(
+            alias="X-Magnus-Default-Execution-Target",
+        ),
+    ] = None,
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+        ),
+    ] = None,
 ):
     """
     提交新任务。
@@ -206,14 +285,28 @@ def submit_job(
     后续的资源准备、调度决策和 sbatch 提交由后台 _scheduler 负责。
     """
     try:
+        submission = SubmissionContext.from_request(
+            idempotency_key,
+            "job",
+            job_data.model_dump(
+                mode="json",
+            ),
+            default_target,
+        )
         db_job = create_job(
             job_data.model_dump(),
             current_user.id,
             db,
             default_target=default_target,
+            submission=submission,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=400,
+            detail=str(
+                e,
+            ),
+        )
     return db_job
 
 
@@ -265,9 +358,26 @@ def get_job_capabilities(
         "dockerfile": True,
         "execution_targets": True,
         "scheduler_observations": True,
+        "submission_idempotency": True,
         "image_build_enabled": magnus_config["execution"]["image_build"]["enabled"],
         "default_repository": {"namespace": "Rise-AGI", "repo_name": "magnus"},
     }
+
+
+@router.get("/jobs/submissions/{request_key}", response_model=JobResponse,)
+def get_accepted_submission(
+    request_key: str,
+    db: Session = Depends(database.get_db,),
+    current_user: models.User = Depends(get_current_user,),
+) -> models.Job:
+    record = db.query(models.JobAcceptance,).filter(
+        models.JobAcceptance.user_id == current_user.id,
+        models.JobAcceptance.request_key == request_key,
+    ).first()
+    job = db.get(models.Job, record.job_id,) if record is not None else None
+    if job is None:
+        raise HTTPException(status_code=404, detail="No accepted submission found for this key",)
+    return job
 
 
 @router.get("/jobs/{job_id}/build")

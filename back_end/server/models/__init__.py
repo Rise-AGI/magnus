@@ -27,6 +27,7 @@ from ._job import (
     job_metadata_load_options,
 )
 from ._blueprint import Blueprint, BlueprintUserPreference, blueprint_list_load_options
+from ._submission import JobAcceptance
 from ._service import Service
 from ._skill import Skill, SkillFile
 from ._image import CachedImage
@@ -46,6 +47,7 @@ __all__ = [
     "ScopedUserTokenAlias",
     "ResourceAlias",
     "Job",
+    "JobAcceptance",
     "JobType",
     "JobStatus",
     "ClusterSnapshot",

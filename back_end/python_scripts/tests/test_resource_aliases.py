@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from test_user_lifecycle import load_function, load_leaf, ns
+from test_blueprint_submission import namespace as submission_support
 
 
 context = dict(ns)
@@ -75,6 +76,7 @@ class ResourceAliasTests(unittest.TestCase):
             get_current_user=lambda: None,
             enforce_field_size_limits=lambda *args: None,
             blueprint_manager=SimpleNamespace(analyze_signature=lambda code: None),
+            _analyze_schema=lambda code: None,
             assert_can_manage_resource=authorize,
             datetime=datetime,
             timezone=timezone,
@@ -87,7 +89,7 @@ class ResourceAliasTests(unittest.TestCase):
             create(body, self.db, self.db.get(User, "primary-owner"), default_target="remote")
         result = create(body, self.db, self.db.get(User, "imported-owner"), default_target="remote")
         self.assertEqual(result.id, "remote-common")
-        self.assertEqual(checked, ["imported-owner", "imported-owner"])
+        self.assertEqual(checked, ["imported-owner", "imported-owner", "imported-owner"])
         self.assertEqual(self.db.get(Blueprint, "common").code, "primary-code")
         self.assertEqual(self.db.get(Blueprint, "remote-common").code, "updated-code")
         self.assertEqual(body.id, "common")
@@ -110,6 +112,8 @@ class ResourceAliasTests(unittest.TestCase):
             database=SimpleNamespace(get_db=lambda: None),
             get_current_user=lambda: None,
             _compute_signature_hash=lambda code: "frozen",
+            code_revision=submission_support["code_revision"],
+            save_preference=submission_support["save_preference"],
             serialize_json=json.dumps,
             deserialize_json=json.loads,
             enforce_field_size_limits=lambda *args: None,
