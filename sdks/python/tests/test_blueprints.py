@@ -584,7 +584,9 @@ class ActionTests(unittest.TestCase):
         node = next(
             n
             for n in ast.parse(
-                path.read_text(),
+                path.read_text(
+                    encoding="utf-8",
+                ),
             ).body
             if isinstance(
                 n,
@@ -775,7 +777,9 @@ class LocalRuntimeTests(unittest.TestCase):
             / "src/magnus/cli/_local.py"
         )
         tree = ast.parse(
-            path.read_text(),
+            path.read_text(
+                encoding="utf-8",
+            ),
         )
         helper = next(
             n
