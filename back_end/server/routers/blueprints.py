@@ -23,7 +23,7 @@ from ..schemas import (
     BlueprintPreferenceResponse,
     TransferRequest,
 )
-from .._blueprint_manager import blueprint_manager
+from .._blueprint_manager import blueprint_manager, BlueprintUnavailable
 from .._id_registry import assert_id_available
 from .auth import get_current_user
 from .users import _get_all_subordinate_ids
@@ -85,6 +85,8 @@ def _compute_signature_hash(
 
         return final_hash
 
+    except BlueprintUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except (ValueError, NameError, TypeError) as e:
         logger.error(f"❌ Hash computation failed: {e}")
         logger.error(traceback.format_exc())
@@ -116,6 +118,8 @@ def create_blueprint(
     # 1. 验证代码签名
     try:
         blueprint_manager.analyze_signature(bp.code)
+    except BlueprintUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except (ValueError, NameError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -328,6 +332,8 @@ def get_blueprint_schema(
 
     try:
         return blueprint_manager.analyze_signature(bp.code)
+    except BlueprintUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except (ValueError, NameError, TypeError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid blueprint code: {e}")
 
@@ -434,6 +440,8 @@ def run_blueprint(
         logger.info(f"Blueprint {blueprint_id} launched job {db_job.id}")
         return {"job_id": db_job.id}
 
+    except BlueprintUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except (ValueError, NameError, TypeError) as e:
         logger.error(f"Blueprint run failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))

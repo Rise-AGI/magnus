@@ -1,9 +1,7 @@
 # back_end/server/_blueprint_manager/_sandbox.py
-"""Blueprint 代码的受限编译沙箱。
+"""Compatibility scope inside the OS sandbox, not a Python security boundary."""
 
-`_compile_code(code, execution_globals)` 在受限 builtins + 单一 import 白名单
-（typing）下 exec 用户代码，要求返回的 scope 中含 `blueprint` 函数。
-"""
+import types
 from typing import Any, Dict, Optional
 
 
@@ -15,7 +13,12 @@ def _compile_code(
     # 允许导入的模块白名单
     allowed_modules = {
         "typing": __import__("typing"),
+        "__future__": __import__("__future__"),
     }
+    magnus = types.ModuleType("magnus")
+    for name in ("submit_job", "JobType", "FileSecret"):
+        setattr(magnus, name, execution_globals[name])
+    allowed_modules["magnus"] = magnus
 
     def restricted_import(
         name: str,
@@ -28,7 +31,8 @@ def _compile_code(
             return allowed_modules[name]
         raise ImportError(f"Import of '{name}' is not allowed in Blueprint")
 
-    # 受限 builtins：允许安全操作，阻止危险操作
+    # Preserve the Blueprint language surface. The worker's OS isolation is
+    # responsible for security, including access through Python reflection.
     safe_builtins: Dict[str, Any] = {
         # 常量
         "True": True,

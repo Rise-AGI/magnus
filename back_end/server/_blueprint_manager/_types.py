@@ -6,7 +6,11 @@
 - _is_*/_unwrap_*:      类型检查/拆包工具
 - _type_display_name:   错误消息里展示参数类型
 """
-from typing import Any, Annotated, Dict, Literal, Union, get_args, get_origin
+
+import re
+import types
+from math import isqrt
+from typing import Annotated, Any, Dict, Literal, Union, get_args, get_origin
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
@@ -14,7 +18,11 @@ from pydantic_core import CoreSchema, core_schema
 
 class _BlueprintCapture(Exception):
     """submit_job 劫持用内部异常，捕获用户传入的 payload"""
-    def __init__(self, payload: Dict[str, Any]):
+
+    def __init__(
+        self,
+        payload: Dict[str, Any],
+    ):
         self.payload = payload
 
 
@@ -44,55 +52,173 @@ class FileSecret(str):
         )
 
     @classmethod
-    def _validate(cls, v: str) -> "FileSecret":
-        if not v.startswith(cls.MAGIC_PREFIX):
-            raise ValueError(f"FileSecret must start with '{cls.MAGIC_PREFIX}'")
-        return cls(v)
+    def _validate(
+        cls,
+        v: str,
+    ) -> "FileSecret":
+        token = v.removeprefix(
+            cls.MAGIC_PREFIX,
+        )
+        if not v.startswith(
+            cls.MAGIC_PREFIX,
+        ):
+            raise ValueError(
+                "FileSecret must start with magnus-secret:",
+            )
+        if re.fullmatch(
+            r"relay-[0-9a-f]{32}",
+            token,
+        ):
+            return cls(
+                v,
+            )
+        if not re.fullmatch(
+            r"[0-9]{4,5}(?:-[a-z]{4,5}){3}",
+            token,
+        ):
+            raise ValueError(
+                "FileSecret must contain a valid, nonempty magnus-secret token",
+            )
+        number = int(
+            token.split(
+                "-",
+                1,
+            )[0],
+        )
+        if number < 1000 or any(
+            number % divisor == 0
+            for divisor in range(
+                2,
+                isqrt(
+                    number,
+                )
+                + 1,
+            )
+        ):
+            raise ValueError(
+                "FileSecret must contain a valid prime-word-word-word token",
+            )
+        return cls(
+            v,
+        )
 
     @property
-    def token(self) -> str:
-        return self[len(self.MAGIC_PREFIX):]
+    def token(
+        self,
+    ) -> str:
+        return self[
+            len(
+                self.MAGIC_PREFIX,
+            ) :
+        ]
 
 
-def _is_optional_type(tp) -> bool:
+def _is_optional_type(
+    tp,
+) -> bool:
     """检查类型是否是 Optional[X]，即 Union[X, None]"""
-    if get_origin(tp) is Union:
-        args = get_args(tp)
-        return type(None) in args and len(args) == 2
+    if get_origin(
+        tp,
+    ) in (Union, types.UnionType):
+        args = get_args(
+            tp,
+        )
+        return (
+            type(
+                None,
+            )
+            in args
+            and len(
+                args,
+            )
+            == 2
+        )
     return False
 
 
-def _unwrap_optional(tp):
+def _unwrap_optional(
+    tp,
+):
     """从 Optional[X] 中提取 X"""
-    if _is_optional_type(tp):
-        args = get_args(tp)
+    if _is_optional_type(
+        tp,
+    ):
+        args = get_args(
+            tp,
+        )
         for arg in args:
-            if arg is not type(None):
+            if arg is not type(
+                None,
+            ):
                 return arg
     return tp
 
 
-def _is_list_type(tp) -> bool:
+def _is_list_type(
+    tp,
+) -> bool:
     """检查类型是否是 List[X]"""
-    return get_origin(tp) is list
+    return (
+        get_origin(
+            tp,
+        )
+        is list
+    )
 
 
-def _unwrap_list(tp):
+def _unwrap_list(
+    tp,
+):
     """从 List[X] 中提取 X"""
-    if _is_list_type(tp):
-        args = get_args(tp)
+    if _is_list_type(
+        tp,
+    ):
+        args = get_args(
+            tp,
+        )
         return args[0] if args else Any
     return tp
 
 
-def _type_display_name(tp) -> str:
-    if get_origin(tp) is Annotated:
-        tp = get_args(tp)[0]
-    if _is_optional_type(tp):
+def _type_display_name(
+    tp,
+) -> str:
+    if (
+        get_origin(
+            tp,
+        )
+        is Annotated
+    ):
+        tp = get_args(
+            tp,
+        )[0]
+    if _is_optional_type(
+        tp,
+    ):
         return f"Optional[{_type_display_name(_unwrap_optional(tp))}]"
-    if _is_list_type(tp):
+    if _is_list_type(
+        tp,
+    ):
         return f"List[{_type_display_name(_unwrap_list(tp))}]"
-    if get_origin(tp) is Literal:
-        values = get_args(tp)
-        return " | ".join(repr(v) for v in values)
-    return getattr(tp, "__name__", str(tp))
+    if (
+        get_origin(
+            tp,
+        )
+        is Literal
+    ):
+        values = get_args(
+            tp,
+        )
+        return " | ".join(
+            repr(
+                v,
+            )
+            for v in values
+        )
+    return getattr(
+        tp,
+        "__name__",
+        str(
+            tp,
+        ),
+    )

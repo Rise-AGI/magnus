@@ -2,8 +2,11 @@
 """Blueprint creation / response / params / preference schemas."""
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, ConfigDict
 
+from .._blueprint_protocol import BlueprintParamOption as BlueprintParamOption
+from .._blueprint_protocol import BlueprintParamSchema as BlueprintParamSchema
 from ._user import UserInfo
 
 
@@ -38,33 +41,6 @@ class BlueprintResponse(BlueprintListItem):
 class PagedBlueprintResponse(BaseModel):
     total: int
     items: List[BlueprintListItem]
-
-
-class BlueprintParamOption(BaseModel):
-    label: str
-    value: Any
-    description: Optional[str] = None
-
-
-class BlueprintParamSchema(BaseModel):
-    key: str
-    label: str
-    type: str
-    default: Any = None
-    description: Optional[str] = None
-    scope: Optional[str] = None
-    allow_empty: bool = True
-    is_optional: bool = False
-    is_list: bool = False
-    is_item_optional: bool = False
-    min: Optional[float] = None
-    max: Optional[float] = None
-    placeholder: Optional[str] = None
-    multi_line: bool = False
-    min_lines: Optional[int] = None
-    color: Optional[str] = None
-    border_color: Optional[str] = None
-    options: Optional[List[BlueprintParamOption]] = None
 
 
 class BlueprintPreferenceUpdate(BaseModel):

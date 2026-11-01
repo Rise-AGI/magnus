@@ -41,7 +41,7 @@ That's all. The system automatically:
 
 ## 2. Implicit Imports
 
-Blueprint code **does not need, and is not allowed, to** write import statements. The following symbols are available automatically:
+Blueprint code does not need import statements. `typing`, `__future__`, and the Blueprint symbols from `magnus` may also be explicitly imported, including aliases. Other imports are rejected. The following symbols are available automatically:
 
 ```python
 # Auto-injected into the Blueprint execution environment
@@ -49,13 +49,11 @@ submit_job, JobType, FileSecret              # from magnus
 Annotated, Literal, Optional, List, Dict, Any  # from typing
 ```
 
-If you write the Blueprint file in a local IDE (rather than the Web editor), you can add a comment header to help IDE completion, and omit it when submitting to the Web side:
+The same imports can be retained in a local file and the web editor:
 
 ```python
-# ============ Omit these imports when pasting into the web editor ============
 from magnus import submit_job, JobType, FileSecret
 from typing import Annotated, Literal, Optional, List
-# =====================================================
 ```
 
 ---
@@ -183,7 +181,23 @@ The `allow_empty` of FileSecret is always `False` (required).
 
 ## 5. Sandbox Environment
 
-Blueprint code executes in a restricted sandbox.
+Blueprint code runs in a separate OS sandbox, including when saving code or requesting its form schema. Python builtins/import restrictions define the language surface; they are not the security boundary. The controller validates the returned schema and Job fields. Unknown `submit_job` fields are rejected instead of silently selecting defaults.
+
+Only synchronous functions with named parameters are supported; positional-only parameters, `*args`, `**kwargs`, generators and async functions are rejected when saving. `min`, `max`, and `allow_empty` are enforced on the server, including defaults and list items. Optional file-list items retain `None`; provided files remain `FileSecret` values with `.token` available inside the function.
+
+### Operator setup
+
+Linux uses [Bubblewrap](https://github.com/containers/bubblewrap) with unprivileged user namespaces and `libseccomp2`. Only the interpreter, libraries and evaluator code are mounted read-only; the service environment, account home, database and workspace are absent. Network, IPC and process creation are disabled. A syscall allowlist prevents changing the worker's deadline or limits.
+
+Windows/macOS, or Linux configured with `server.blueprint.backend: docker`, use Linux Docker containers. Prepare the runtime image from the same checkout before enabling Blueprints:
+
+```bash
+docker build -t magnus-blueprint-runtime:1 -f back_end/containers/blueprint-runtime.Dockerfile back_end/containers
+```
+
+The image contains the Python runtime and Pydantic; evaluator source is mounted read-only from the active checkout. The container has no network, capabilities or writable root, and runs as a non-root user. Runtime source must be readable by that user. Configure `docker_image` to use another prebuilt compatible runtime; evaluation never pulls an image implicitly.
+
+The default limits are 8 seconds of evaluation, 512 MiB of virtual address space, 4 MiB each for request and output, and four concurrent workers. Docker additionally limits memory, CPU and processes. These limits apply to Blueprint evaluation, not the resulting compute Job. They are configurable under `server.blueprint` in the [example configuration](../../configs/magnus_config.yaml.example). Saturation or unavailable isolation returns HTTP 503; invalid code/input or a resource-limit violation returns HTTP 400. There is no in-process or unisolated fallback. Workers are reclaimed before their slots can be reused.
 
 ### Available builtins
 
@@ -195,13 +209,11 @@ Blueprint code executes in a restricted sandbox.
 
 **Exceptions**: `Exception`, `ValueError`, `TypeError`, `KeyError`, `IndexError`, `AttributeError`, `RuntimeError`
 
-### Forbidden operations
+### Language and isolation boundaries
 
-- **All imports** (except `typing`)
-- File I/O (`open`, `read`, `write`)
-- Network operations
-- System calls (`os`, `subprocess`, `sys`)
-- `eval`, `exec`, `compile`
+- Application dependencies and side effects belong in the Job's `entry_command`, not Blueprint evaluation.
+- The language does not expose `open`, `eval`, `exec`, `compile` or arbitrary imports.
+- OS isolation denies access to host data, network, writable files and subprocesses even if code obtains additional Python objects through reflection.
 
 ### Runtime type conversion
 

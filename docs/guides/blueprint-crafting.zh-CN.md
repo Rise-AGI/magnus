@@ -41,7 +41,7 @@ def blueprint(
 
 ## 2. 隐式导入
 
-蓝图代码**不需要也不允许**写 import 语句。以下符号自动可用：
+蓝图代码不需要 import 语句。也可显式导入 `typing`、`__future__` 和 `magnus` 的蓝图符号，包括别名；其它 import 会被拒绝。以下符号自动可用：
 
 ```python
 # 自动注入到蓝图执行环境
@@ -49,13 +49,11 @@ submit_job, JobType, FileSecret              # from magnus
 Annotated, Literal, Optional, List, Dict, Any  # from typing
 ```
 
-如果你在本地 IDE 里编写蓝图文件（而非 Web 编辑器），可以加一段注释头帮助 IDE 补全，提交到 Web 端时忽略即可：
+本地文件和 Web 编辑器可以保留同一组导入：
 
 ```python
-# ============ 复制进 web 端时省略这些导入 ============
 from magnus import submit_job, JobType, FileSecret
 from typing import Annotated, Literal, Optional, List
-# =====================================================
 ```
 
 ---
@@ -183,7 +181,23 @@ FileSecret 的 `allow_empty` 始终为 `False`（必填）。
 
 ## 5. 沙箱环境
 
-蓝图代码在受限沙箱中执行。
+蓝图代码在独立的操作系统沙箱内执行，保存代码、读取表单 schema 时同样如此。Python builtins/import 限制定义语言接口，不承担安全边界。控制面重新校验返回的 schema 和 Job 字段；拼错的 `submit_job` 字段会被拒绝，不再静默采用默认值。
+
+只支持带命名参数的同步函数；位置专用参数、`*args`、`**kwargs`、生成器和异步函数在保存时即被拒绝。`min`、`max`、`allow_empty` 在服务端执行校验，也覆盖默认值和列表项。可选文件列表项保留 `None`；提供的文件在函数内仍为 `FileSecret`，可读取 `.token`。
+
+### 运维配置
+
+Linux 使用 [Bubblewrap](https://github.com/containers/bubblewrap)、非特权用户命名空间和 `libseccomp2`。只读挂载解释器、运行库和求值器代码，不挂载服务环境、账号 home、数据库或工作区；禁用网络、IPC 和进程创建。系统调用允许列表防止代码修改工作进程的期限或限额。
+
+Windows/macOS，或设置 `server.blueprint.backend: docker` 的 Linux，使用 Linux Docker 容器。启用蓝图前，从同一 checkout 准备运行时镜像：
+
+```bash
+docker build -t magnus-blueprint-runtime:1 -f back_end/containers/blueprint-runtime.Dockerfile back_end/containers
+```
+
+镜像包含 Python 运行时和 Pydantic；求值器源码从当前 checkout 只读挂载。容器无网络、无 capabilities、根目录只读，以非 root 用户运行，运行时源码须对该用户可读。可通过 `docker_image` 指定兼容的预制运行时；求值时不会隐式拉取镜像。
+
+默认限额为求值 8 秒、512 MiB 虚拟地址空间、请求和输出各 4 MiB、最多四个并行工作进程。Docker 另有内存、CPU 和进程数限制。这些约束用于蓝图求值，不限制生成的计算 Job。可在 `server.blueprint` 下配置，见[配置示例](../../configs/magnus_config.yaml.example)。并发满或隔离不可用返回 HTTP 503；代码、参数或资源限额违规返回 HTTP 400。没有同进程或无隔离的降级路径，工作进程回收后才释放槽位。
 
 ### 可用的 builtins
 
@@ -195,13 +209,11 @@ FileSecret 的 `allow_empty` 始终为 `False`（必填）。
 
 **异常**：`Exception`, `ValueError`, `TypeError`, `KeyError`, `IndexError`, `AttributeError`, `RuntimeError`
 
-### 禁止的操作
+### 语言和隔离边界
 
-- **所有 import**（`typing` 除外）
-- 文件 I/O（`open`、`read`、`write`）
-- 网络操作
-- 系统调用（`os`、`subprocess`、`sys`）
-- `eval`、`exec`、`compile`
+- 应用依赖和副作用应放进 Job 的 `entry_command`，不放进蓝图求值过程。
+- 语言接口不暴露 `open`、`eval`、`exec`、`compile` 或任意 import。
+- 即使代码通过反射取得额外 Python 对象，操作系统隔离仍禁止访问宿主数据、网络、可写文件和子进程。
 
 ### 运行时类型转换
 

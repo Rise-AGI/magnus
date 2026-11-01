@@ -22,6 +22,18 @@ server:
   # custody instead of inlining. defaults shown; omit to keep them.
   # max_field_bytes: 65536
   # max_large_field_bytes: 1048576
+  # Python Blueprints run outside the controller. Linux auto uses bubblewrap
+  # and libseccomp2; other platforms use a prepared Linux Docker image. See
+  # docs/guides/blueprint-crafting.md. Isolation failure never runs code locally.
+  # blueprint:
+  #   backend: auto              # auto | bubblewrap | docker
+  #   timeout_seconds: 8
+  #   memory_bytes: 536870912     # address-space limit; Docker also caps memory
+  #   max_concurrent: 4          # additional requests receive HTTP 503
+  #   max_input_bytes: 4194304
+  #   max_output_bytes: 4194304
+  #   docker_image: magnus-blueprint-runtime:1
+  #   bwrap_executable: bwrap
   # timezone the web UI renders timestamps in (IANA name). Everything is stored and
   # served as UTC instants; this only decides which wall clock they are shown on.
   # Defaults to Asia/Shanghai. Point it at the cluster's own zone so the UI agrees

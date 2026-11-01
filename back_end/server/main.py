@@ -28,6 +28,8 @@ from ._blocking_io import _run_blocking_io
 from ._lifecycle import cancel_background_tasks, lifespan_resources
 from ._database_migrations import run_migrations
 from ._upload_receive import UploadTelemetryMiddleware
+from ._blueprint_requests import BlueprintRequestLimits
+from ._blueprint_manager import blueprint_manager
 
 
 class EndpointFilter(logging.Filter):
@@ -284,6 +286,15 @@ async def run_scheduler_loop(
         await asyncio.sleep(magnus_config["server"]["scheduler"]["heartbeat_interval"])
 
 
+async def _run_blueprint_cleanup() -> None:
+    while True:
+        try:
+            await _run_blocking_io(blueprint_manager.runtime.cleanup_orphans)
+        except Exception:
+            logger.exception("Blueprint container cleanup will be retried")
+        await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(
     app: FastAPI,
@@ -365,6 +376,8 @@ async def lifespan(
             collector.start()
 
         tasks = []
+        if blueprint_manager.runtime.uses_docker:
+            cleanup.push_async_callback(_run_blocking_io, blueprint_manager.runtime.cleanup_orphans)
         cleanup.push_async_callback(
             cancel_background_tasks,
             tasks,
@@ -373,6 +386,8 @@ async def lifespan(
         tasks.append(asyncio.create_task(service_manager.start_background_loop()))
         tasks.append(asyncio.create_task(file_custody_manager.cleanup_loop()))
         tasks.append(asyncio.create_task(cleanup_uploads()))
+        if blueprint_manager.runtime.uses_docker:
+            tasks.append(asyncio.create_task(_run_blueprint_cleanup()))
 
         if not is_local_auth:
             refresh_interval = magnus_config["server"]["auth"]["feishu_client"]["refresh_interval"]
@@ -392,6 +407,12 @@ app = FastAPI(
     lifespan = lifespan,
 )
 
+
+app.add_middleware(
+    BlueprintRequestLimits,
+    max_bytes=blueprint_manager.runtime.settings.max_input_bytes,
+    max_concurrent=blueprint_manager.runtime.settings.max_concurrent,
+)
 
 app.add_middleware(
     CORSMiddleware,

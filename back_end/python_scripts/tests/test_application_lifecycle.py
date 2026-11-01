@@ -83,6 +83,7 @@ class ApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 raise ValueError("recover")
 
         self.namespace = {
+            "blueprint_manager": SimpleNamespace(runtime=SimpleNamespace(uses_docker=False)),
             **helpers,
             "asynccontextmanager": asynccontextmanager,
             "asyncio": SimpleNamespace(
@@ -133,6 +134,23 @@ class ApplicationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         async with self.lifespan(None):
             await asyncio.sleep(0)
         self.assertEqual(len(self.started), 5)
+        self.assert_shutdown_complete()
+
+    async def test_blueprint_reaper_runs_and_is_drained_before_final_cleanup(self):
+        calls = []
+        sleeping = asyncio.Event()
+        async def sleep(_seconds):
+            sleeping.set()
+            await asyncio.Event().wait()
+        self.namespace["asyncio"].sleep = sleep
+        self.namespace["blueprint_manager"] = SimpleNamespace(runtime=SimpleNamespace(
+            uses_docker=True, cleanup_orphans=lambda: calls.append("reap"),
+        ))
+        self.namespace["_run_blueprint_cleanup"] = load_function("main.py", "_run_blueprint_cleanup", self.namespace)
+        async with self.lifespan(None):
+            await asyncio.wait_for(sleeping.wait(), 1)
+            self.assertEqual(calls, ["reap"])
+        self.assertEqual(calls, ["reap", "reap"])
         self.assert_shutdown_complete()
 
     async def test_startup_failure_before_and_after_background_launch(self):

@@ -300,6 +300,13 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     _check_key(server, "max_field_bytes", int)
     server.setdefault("max_large_field_bytes", 1024 * 1024)
     _check_key(server, "max_large_field_bytes", int)
+    server.setdefault("blueprint", {})
+    _check_key(server, "blueprint", dict)
+    _warn_extra_keys(
+        server["blueprint"],
+        {"backend", "timeout_seconds", "memory_bytes", "max_concurrent", "max_input_bytes", "max_output_bytes", "docker_image", "bwrap_executable"},
+        "server.blueprint",
+    )
     _check_key(server, "cors_origins", list)
     _check_key(server, "database", dict)
     _check_key(server, "auth", dict)
@@ -317,7 +324,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         "address", "front_end_port", "back_end_port", "root", "ephemeral_root",
         "max_field_bytes", "max_large_field_bytes", "display_timezone",
         "database", "auth", "scheduler", "service_proxy", "file_custody",
-        "cors_origins",
+        "cors_origins", "blueprint",
     }
     if not is_local:
         _check_key(server, "explorer", dict)
