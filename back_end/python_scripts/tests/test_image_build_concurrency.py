@@ -27,6 +27,18 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 
 class Progress:
+    def persist(self, *arguments, **keywords):
+        pass
+
+    def set_stage(self, *arguments):
+        pass
+
+    def record_size(self, *arguments):
+        pass
+
+    def conversion_line(self, *arguments):
+        pass
+
     def set_phase(self, *arguments):
         pass
 
@@ -98,6 +110,35 @@ def cross_volume_replace(real_replace):
 
 
 class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_fast_gzip_reaches_converter(
+        self,
+    ) -> None:
+        self.manager.config["conversion_gzip_level"] = 1
+        self.finish_conversion.set()
+        await self.import_image()
+        arguments = self.conversion_arguments
+        self.assertIn("-comp gzip -Xcompression-level 1", arguments[arguments.index("--mksquashfs-args") + 1])
+
+    async def test_compression_identity_preserves_legacy_and_docker_cache(
+        self,
+    ) -> None:
+        self.manager.config["platform"] = "linux/amd64"
+        self.manager._initialize = AsyncMock()
+        self.manager._run = AsyncMock(return_value={"digest": self.docker_digest})
+        keys = []
+        for local, level in ((False, None), (False, 1), (True, None), (True, 1)):
+            self.module.is_local_mode = local
+            self.manager.config["conversion_gzip_level"] = level
+            await self.manager.ensure(f"{len(keys):016x}", "FROM scratch")
+            keys.append(self.manager._run.call_args.args[0].key)
+        legacy = self.module.hashlib.sha256(json.dumps(
+            {"version": 1, "dockerfile": "FROM scratch", "platform": "linux/amd64", "local": False},
+            sort_keys=True, ensure_ascii=True,
+        ).encode()).hexdigest()
+        self.assertEqual(keys[0], legacy)
+        self.assertNotEqual(keys[0], keys[1])
+        self.assertEqual(keys[2], keys[3])
+
     async def test_cleanup_does_not_hide_deletion_or_absence_probe_errors(
         self,
     ) -> None:

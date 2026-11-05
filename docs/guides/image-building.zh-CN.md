@@ -77,6 +77,21 @@ Rootless 限制宿主权限，但不自动提供网络隔离。RootlessKit 默�
 
 SIF 转换可用 `conversion_cpus`（默认 `2`）和 `conversion_memory`（默认 `1G`）限制 mksquashfs 的处理器数量及工作内存，同时保留 gzip 格式对旧 Singularity 的兼容。这不是整个进程或 cgroup 的硬限制，BuildKit daemon 的资源限额也不覆盖后端启动的 Apptainer 子进程；需要时另配操作系统级限额。Docker/local 仍用 `docker load`，这两个 SIF 配置项不改变 Docker 导入行为。
 
+`conversion_gzip_level` 默认为 `null`，保留现有转换命令和缓存键。管理员可显式设为
+1–9，使用 gzip（1 偏速度、9 偏体积）；只影响新的 SIF 转换，不改变 Docker/local。
+显式级别参与成品缓存身份，不覆盖旧 SIF，也不迁移数据库或批量重写磁盘。旧成品继续
+按原缓存预算和活动引用规则回收。调整前比较压缩耗时、产物体积、传输与启动总成本，
+并核验实际目标运行时；不能将本机压缩对照当作跨超算验收。
+
+构建详情 API 新增 `stage`、`stage_seconds` 和 `sizes_bytes`，原有 phase/UI 保持不变。
+阶段计量使用单调时钟，覆盖前序收尾、缓存查找/校验、排队、准备、BuildKit、转换等待、导入/解包/配置/SIF 压缩、
+校验和发布；其中 Apptainer 子阶段按已识别的 INFO 事件观察，未知版本日志只保留外层
+阶段，不影响执行成败。`buildkit` 包含导出，步骤中的 `started_at`/`finished_at` 保留
+BuildKit 原始时间用于进一步区分导出；并行步骤不能简单求和。`sizes_bytes` 在可得时
+记录 Docker archive 和成品字节数。终态后计量冻结，不包含后续 scratch 收尾耗时；
+旧诊断没有这些字段，不回填。缓存命中不会伪造一次新构建的阶段耗时。
+
+
 同盘 SIF 预置采用 rename，跨盘才复制。加载、转换、哈希和复制期间不持有缓存发布锁，因此一个配方转换时，另一个已缓存的环境仍可准备。正在写入的文件和临时 Docker tag 在发布或取消收尾完成前受到回收保护；发布、等待者使用保护与回滚保持串行。
 
 已验证的成品复用将成功容量检查合并到最多三秒的采样窗口，每次仍检查剩余空间。构建、发布、回收使旧采样失效；冷构建、转换峰值与构建监控仍做新鲜检查，失败结果不缓存为成功。

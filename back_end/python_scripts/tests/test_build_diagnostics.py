@@ -56,6 +56,92 @@ def log_event(
 
 
 class ProgressTests(unittest.TestCase):
+    def test_cancelled_snapshot_survives_transient_write_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            directory = pathlib.Path(root)
+            progress = progress_module.BuildProgress()
+            progress.set_stage("buildkit")
+            with patch.object(progress_module, "write_json", side_effect=OSError("disk failure")):
+                with self.assertRaises(OSError):
+                    progress.persist(directory, cancelled=True)
+            saved = dict(progress.pending_cancellations[str(directory)])
+            progress.set_stage("sif_pack")
+            progress.persist(directory)
+            self.assertEqual(json.loads((directory / "progress.json").read_text()), saved)
+            self.assertTrue(saved["terminal"])
+            self.assertEqual(saved["phase"], "cancelled")
+            self.assertEqual(progress.pending_cancellations, {})
+
+    def test_late_flush_cannot_advance_cancelled_waiter(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            directory = pathlib.Path(root)
+            progress = progress_module.BuildProgress()
+            progress.set_stage("buildkit")
+            progress.append("before cancellation")
+            progress.persist(directory, cancelled=True)
+            saved = (directory / "progress.json").read_bytes()
+            logs = (directory / "output.txt").read_bytes()
+            progress.set_stage("sif_pack")
+            progress.append("shared build continues")
+            progress.persist(directory)
+            self.assertEqual((directory / "progress.json").read_bytes(), saved)
+            self.assertEqual((directory / "output.txt").read_bytes(), logs)
+            self.assertIsNone(json.loads(saved)["stage"])
+            self.assertEqual(progress.snapshot()["stage"], "sif_pack")
+
+    def test_stage_durations_survive_failure_and_clock_changes(
+        self,
+    ) -> None:
+        with patch.object(progress_module.time, "monotonic", return_value=10) as clock:
+            progress = progress_module.BuildProgress()
+            self.assertEqual(progress.snapshot()["stage_seconds"], {})
+            self.assertIsNone(progress.snapshot()["stage"])
+            progress.set_stage("cache_lookup")
+            clock.return_value = 13
+            progress.set_stage("buildkit")
+            clock.return_value = 18
+            progress.set_stage("buildkit")
+            self.assertEqual(progress.snapshot()["stage_seconds"], {"cache_lookup": 3, "buildkit": 5})
+            progress.record_size("docker_archive", 123)
+            progress.set_phase("failed", "process failed")
+            clock.return_value = 200
+            result = progress.snapshot()
+            self.assertEqual(result["stage_seconds"], {"cache_lookup": 3, "buildkit": 5})
+            self.assertEqual(result["sizes_bytes"], {"docker_archive": 123})
+            self.assertIsNone(result["stage"])
+            self.assertTrue(result["terminal"])
+
+    def test_conversion_milestones_are_only_diagnostics(
+        self,
+    ) -> None:
+        progress = progress_module.BuildProgress()
+        progress.set_stage("conversion_startup")
+        progress.conversion_line("arbitrary Creating SIF file...")
+        self.assertEqual(progress.snapshot()["stage"], "conversion_startup")
+        progress.conversion_line("INFO:    Extracting OCI image...")
+        self.assertEqual(progress.snapshot()["stage"], "image_unpack")
+        progress.conversion_line("INFO:    Creating SIF file...")
+        result = progress.snapshot()
+        self.assertEqual(result["stage"], "sif_pack")
+        self.assertFalse(result["terminal"])
+        self.assertIn("Creating SIF file", result["log_tail"])
+
+    def test_vertex_timestamps_retained_for_export_duration(
+        self,
+    ) -> None:
+        progress = progress_module.BuildProgress()
+        progress.consume(json.dumps({"vertexes": [{
+            "digest": "export", "name": "exporting to docker image format",
+            "started": "2026-01-01T00:00:01Z", "completed": "2026-01-01T00:00:06Z",
+        }]}))
+        step = progress.snapshot()["steps"][0]
+        self.assertEqual(step["started_at"], "2026-01-01T00:00:01Z")
+        self.assertEqual(step["finished_at"], "2026-01-01T00:00:06Z")
+
     def test_cached_vertex_can_resume_execution(self):
         for cached in ({}, {"cached": False}):
             with self.subTest(cached=cached):

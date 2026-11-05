@@ -102,6 +102,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         "scratch_size": None,
         "conversion_cpus": 2,
         "conversion_memory": "1G",
+        "conversion_gzip_level": None,
         "conversion_command_prefix": [],
         "tls_ca": None,
         "tls_cert": None,
@@ -117,6 +118,9 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         for argument in prefix
     ):
         raise ValueError("execution.image_build.conversion_command_prefix must be an argv list")
+    level = image_build["conversion_gzip_level"]
+    if level is not None and (type(level) is not int or not 1 <= level <= 9):
+        raise ValueError("execution.image_build.conversion_gzip_level must be 1..9 or null")
     if image_build["enabled"]:
         for key in ("address", "buildctl", "platform", "cache_size", "min_free_space", "conversion_memory"):
             _check_key(image_build, key, str)

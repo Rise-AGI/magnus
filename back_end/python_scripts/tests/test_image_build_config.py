@@ -73,12 +73,21 @@ class BuildConfigurationTests(unittest.TestCase):
         self.assertEqual(build["scratch_size_bytes"], 2 * 1024**3)
         self.assertEqual(build["conversion_memory_bytes"], 1024**3)
         self.assertEqual(build["conversion_cpus"], 2)
+        self.assertIsNone(build["conversion_gzip_level"])
         self.assertIsNone(build["max_concurrent_per_user"])
         self.assertIsNone(build["max_concurrent_conversions"])
         self.assertIsNone(build["queue_timeout_seconds"])
         expected = copy.deepcopy(config)
         self.validate(config)
         self.assertEqual(config, expected)
+
+    def test_valid_compression_levels(
+        self,
+    ) -> None:
+        for level in (None, 1, 9):
+            config = self.configuration(conversion_gzip_level=level)
+            self.validate(config)
+            self.assertEqual(config["execution"]["image_build"]["conversion_gzip_level"], level)
 
     def test_explicit_scratch_and_conversion_limits(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -95,6 +104,9 @@ class BuildConfigurationTests(unittest.TestCase):
             ("scratch_size", ""), ("scratch_size", "0M"), ("scratch_size", "-1G"), ("scratch_size", True),
             ("conversion_command_prefix", "shell string"), ("conversion_command_prefix", ["wrapper", ""]),
             ("conversion_command_prefix", [True]), ("conversion_command_prefix", ["x\x00y"]),
+            ("conversion_gzip_level", True), ("conversion_gzip_level", 0),
+            ("conversion_gzip_level", 10), ("conversion_gzip_level", "1"),
+            ("conversion_gzip_level", 1.5),
             ("conversion_cpus", True), ("conversion_cpus", 0), ("conversion_cpus", 1.5),
             ("conversion_memory", "512K"), ("conversion_memory", "-1M"), ("conversion_memory", False),
             ("max_concurrent_per_user", True), ("max_concurrent_per_user", 0),

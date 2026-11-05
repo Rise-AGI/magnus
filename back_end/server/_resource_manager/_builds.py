@@ -262,8 +262,17 @@ class ImageBuildManager:
         if not self.enabled:
             raise ImageBuildError("Dockerfile builds are not enabled on this station")
         await self._initialize()
+        identity = {
+            "version": 1,
+            "dockerfile": dockerfile,
+            "platform": self.config["platform"],
+            "local": is_local_mode,
+        }
+        # Preserve existing cache keys unless conversion semantics are changed.
+        if not is_local_mode and self.config.get("conversion_gzip_level") is not None:
+            identity["conversion_gzip_level"] = self.config["conversion_gzip_level"]
         specification = json.dumps(
-            {"version": 1, "dockerfile": dockerfile, "platform": self.config["platform"], "local": is_local_mode},
+            identity,
             sort_keys=True,
             ensure_ascii=True,
         )
@@ -742,7 +751,13 @@ class ImageBuildManager:
         converting = False
         try:
             if operation.predecessor:
+                operation.progress.set_stage(
+                    "predecessor_cleanup",
+                )
                 await asyncio.gather(asyncio.shield(operation.predecessor), return_exceptions=True)
+            operation.progress.set_stage(
+                "cache_lookup",
+            )
             cached = await self._cached_result(operation)
             if cached is not None:
                 operation.progress.append("Reusing the prepared image from cache")
@@ -751,6 +766,9 @@ class ImageBuildManager:
             if self.cleanup_error is not None:
                 raise ImageBuildError(self.cleanup_error)
             await self._flush(operation)
+            operation.progress.set_stage(
+                "queue",
+            )
             try:
                 async with asyncio.timeout(self.config.get("queue_timeout_seconds")):
                     await self.admission.acquire(
@@ -761,6 +779,9 @@ class ImageBuildManager:
                     f"Image build queue wait exceeded {self.config['queue_timeout_seconds']} seconds",
                 ) from error
             admitted = True
+            operation.progress.set_stage(
+                "preparation",
+            )
             try:
                 async with asyncio.timeout(self.config["timeout_seconds"]):
                     # A result may have been published while this request was queued.
@@ -783,13 +804,23 @@ class ImageBuildManager:
                     if self.cleanup_error is not None:
                         raise ImageBuildError(self.cleanup_error)
                     operation.progress.set_phase("building")
+                    operation.progress.set_stage(
+                        "buildkit",
+                    )
                     temporary_tag = f"magnus-build/{self.namespace}:pending-{directory.name}"
                     archive = await self.client.build(
                         directory,
                         temporary_tag,
                         operation.progress.consume,
                     )
+                    operation.progress.record_size(
+                        "docker_archive",
+                        (await blocking_io(archive.stat)).st_size,
+                    )
                     operation.progress.set_phase("exporting")
+                    operation.progress.set_stage(
+                        "conversion_queue",
+                    )
                     await self.conversion_slots.acquire()
                     converting = True
                     if self.cleanup_error is not None:
@@ -975,6 +1006,9 @@ class ImageBuildManager:
                 async with self.maintenance_lock:
                     self.pending_tags.add(temporary_tag)
                 operation.progress.set_phase("loading")
+                operation.progress.set_stage(
+                    "docker_load",
+                )
                 await run_command(
                     ["docker", "load", "--input", str(archive)],
                     on_line=operation.progress.append,
@@ -999,6 +1033,9 @@ class ImageBuildManager:
                 }
             else:
                 operation.progress.set_phase("converting")
+                operation.progress.set_stage(
+                    "conversion_startup",
+                )
                 temporary_sif = directory / "image.sif"
                 environment = os.environ.copy()
                 environment["APPTAINER_CACHEDIR"] = str(directory / "apptainer-cache")
@@ -1014,16 +1051,22 @@ class ImageBuildManager:
                     f"-processors {self.config.get('conversion_cpus', 2)} "
                     f"-mem {max(1, memory // (1024 * 1024))}M"
                 )
+                level = self.config.get("conversion_gzip_level")
+                if level is not None:
+                    squashfs_arguments += f" -comp gzip -Xcompression-level {level}"
                 await run_command(
                     [
                         *self.config.get("conversion_command_prefix", []),
                         "apptainer", "build", "--mksquashfs-args", squashfs_arguments,
                         str(temporary_sif), f"docker-archive:{archive}",
                     ],
-                    on_line=operation.progress.append,
+                    on_line=operation.progress.conversion_line,
                     environment=environment,
                     timeout=self.config["timeout_seconds"],
                     process_directory=directory,
+                )
+                operation.progress.set_stage(
+                    "sif_verify",
                 )
                 await run_command(
                     [
@@ -1040,6 +1083,9 @@ class ImageBuildManager:
                     self.incoming_paths.add(incoming)
                 # Same-volume staging needs no second SIF. Cross-volume copies
                 # retain their reservation and joined cancellation semantics.
+                operation.progress.set_stage(
+                    "sif_publish",
+                )
                 await blocking_io(
                     _stage_sif,
                     temporary_sif,
@@ -1052,6 +1098,13 @@ class ImageBuildManager:
                     "sif_path": str(path),
                     "size_bytes": (await blocking_io(incoming.stat)).st_size,
                 }
+            operation.progress.record_size(
+                "prepared_image",
+                result["size_bytes"],
+            )
+            operation.progress.set_stage(
+                "cache_publish",
+            )
             # Account for the live archive, conversion scratch and incoming
             # runtime copy before cleanup, even if conversion finished between
             # monitor samples. This remains a soft, sampled station budget.

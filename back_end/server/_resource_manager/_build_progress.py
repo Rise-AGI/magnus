@@ -48,6 +48,10 @@ class BuildProgress:
     ) -> None:
         self.lock = threading.RLock()
         self.phase = "waiting"
+        self.stage: str | None = None
+        self.stage_started = time.monotonic()
+        self.stage_seconds: dict[str, float] = {}
+        self.sizes: dict[str, int] = {}
         self.started = time.time() if started_at is None else started_at
         self.updated = self.started
         self.finished: float | None = None
@@ -61,7 +65,50 @@ class BuildProgress:
         self.log_decoders: OrderedDict[tuple[str, str], codecs.IncrementalDecoder] = OrderedDict()
         self.written: dict[str, int] = {}
         self.cancelled_directories: set[str] = set()
+        self.pending_cancellations: dict[str, dict] = {}
         self.disk_lock = threading.Lock()
+
+    def set_stage(
+        self,
+        name: str | None,
+    ) -> None:
+        with self.lock:
+            if name == self.stage:
+                return
+            now = time.monotonic()
+            if self.stage is not None:
+                self.stage_seconds[self.stage] = self.stage_seconds.get(self.stage, 0.0) + max(
+                    0.0,
+                    now - self.stage_started,
+                )
+            self.stage = name
+            self.stage_started = now
+
+    def record_size(
+        self,
+        name: str,
+        size_bytes: int,
+    ) -> None:
+        with self.lock:
+            self.sizes[name] = size_bytes
+
+    def conversion_line(
+        self,
+        line: str,
+    ) -> None:
+        # These are optional observations, never readiness or success signals.
+        milestones = {
+            "Fetching OCI image...": "image_import",
+            "Extracting OCI image...": "image_unpack",
+            "Inserting Apptainer configuration...": "image_configuration",
+            "Creating SIF file...": "sif_pack",
+        }
+        message = line.strip()
+        if message.startswith("INFO:"):
+            stage = milestones.get(message[5:].strip())
+            if stage is not None:
+                self.set_stage(stage)
+        self.append(line)
 
     def set_phase(
         self,
@@ -74,6 +121,7 @@ class BuildProgress:
             self.updated = time.time()
             if phase in {"ready", "failed", "cancelled"}:
                 self.finished = self.updated
+                self.set_stage(None)
                 for decoder in self.log_decoders.values():
                     final = decoder.decode(b"", final=True)
                     if final:
@@ -138,6 +186,8 @@ class BuildProgress:
                     "id": identifier,
                     "name": str(vertex.get("name", previous.get("name", "")))[:1024],
                     # Vertex updates are complete; BuildKit omits false booleans.
+                    "started_at": str(vertex["started"])[:64] if vertex.get("started") else None,
+                    "finished_at": str(vertex["completed"])[:64] if vertex.get("completed") else None,
                     "cached": bool(vertex.get("cached", False)),
                     "completed": bool(vertex.get("completed")),
                     "error": str(vertex["error"])[:2048] if vertex.get("error") else None,
@@ -193,7 +243,16 @@ class BuildProgress:
                     break
             tail = b"".join(reversed(tail_chunks))
             finished = time.time() if cancelled else self.finished
+            stage_seconds = dict(self.stage_seconds)
+            if self.stage is not None:
+                stage_seconds[self.stage] = stage_seconds.get(self.stage, 0.0) + max(
+                    0.0,
+                    time.monotonic() - self.stage_started,
+                )
             return {
+                "stage": None if cancelled else self.stage,
+                "stage_seconds": stage_seconds,
+                "sizes_bytes": dict(self.sizes),
                 "phase": "cancelled" if cancelled else self.phase,
                 "started_at": _timestamp(self.started),
                 "updated_at": _timestamp(self.updated),
@@ -223,9 +282,13 @@ class BuildProgress:
             for path in (directory, directory / "output.txt", directory / "progress.json"):
                 if path.is_symlink() or path.is_junction():
                     raise OSError(f"Build diagnostics must not use a linked path: {path}")
-            if cancelled:
-                self.cancelled_directories.add(str(directory))
-            cancelled = str(directory) in self.cancelled_directories
+            # A monitor may have copied this waiter before it was detached.
+            # Never advance that waiter's terminal diagnostics with shared work.
+            if str(directory) in self.cancelled_directories:
+                return
+            if cancelled and str(directory) not in self.pending_cancellations:
+                self.pending_cancellations[str(directory)] = self.snapshot(cancelled=True)
+            snapshot = self.pending_cancellations.get(str(directory))
             destination = directory / "output.txt"
             with self.lock:
                 previous = self.written.get(str(directory), 0)
@@ -253,4 +316,7 @@ class BuildProgress:
                 with destination.open("ab") as stream:
                     stream.write(addition)
             self.written[str(directory)] = last_sequence
-            write_json(directory / "progress.json", self.snapshot(cancelled=cancelled))
+            write_json(directory / "progress.json", snapshot if snapshot is not None else self.snapshot())
+            if snapshot is not None:
+                self.cancelled_directories.add(str(directory))
+                self.pending_cancellations.pop(str(directory), None)

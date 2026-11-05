@@ -77,6 +77,25 @@ On POSIX, command completion includes the exit of the owned process group, not j
 
 For SIF conversion, `conversion_cpus` (default `2`) and `conversion_memory` (default `1G`) bound mksquashfs processors and working memory. They retain gzip compatibility with older Singularity consumers. They are not whole-process or cgroup limits, and the BuildKit daemon's own CPU/memory limits do not cover the backend's Apptainer subprocess. Configure operating-system limits separately where required. Docker/local still uses `docker load`; these two SIF settings do not change Docker import behavior.
 
+`conversion_gzip_level` defaults to `null`, preserving the existing conversion command and cache
+key. Administrators can select 1–9 for gzip (1 favors speed, 9 size). This only affects new SIF
+conversions, not Docker/local. Explicit levels participate in the prepared-image cache identity;
+existing SIFs are not overwritten. No database migration or bulk disk rewrite is required. Old
+artifacts retain the existing budget and active-reference eviction rules. Compare compression,
+size, transfer and startup costs and verify target runtimes before rollout; a local compression
+benchmark is not cross-cluster acceptance.
+
+Build detail diagnostics add `stage`, `stage_seconds` and `sizes_bytes` without changing existing
+phases or UI. Monotonic timings cover predecessor cleanup, cache lookup/verification, queueing, preparation, BuildKit, conversion queueing,
+import/unpack/configuration/SIF packing, verification and publication. Apptainer substages are
+observations from recognized INFO events; unfamiliar logs leave the enclosing stage intact and
+never determine execution success. `buildkit` includes export; vertex `started_at`/`finished_at`
+retain original BuildKit timestamps to distinguish exporter work. Parallel vertices cannot be
+summed as wall time. Available archive and prepared-image sizes are recorded in bytes. Timings
+freeze at terminal state, excluding subsequent scratch cleanup. Old diagnostics are not backfilled,
+and cache hits do not invent timings for a new build.
+
+
 SIF staging uses a rename on the same filesystem and copies only across filesystems. Loading, conversion, hashing and copying do not hold the cache publication lock. A cached environment can be prepared while another recipe converts. In-flight incoming files and pending Docker tags remain protected from cleanup until publication or cancellation finishes; publication, waiter pins and rollback are serialized.
 
 Verified runtime hits coalesce successful capacity checks for at most three seconds, with a fresh free-space check. Construction, publication and reclamation invalidate that sample; cold builds, conversion peaks and active-build monitoring retain fresh checks. A failed check is never cached as success.
