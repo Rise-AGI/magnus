@@ -578,18 +578,15 @@ class PreparationAdmissionTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertFalse(self.converting["second"].is_set())
         third = self.submit("third")
-        with self.assertRaisesRegex(
-            self.module.ImageBuildError,
-            "cleanup could not confirm",
-        ):
-            await asyncio.wait_for(
-                third,
-                2,
-            )
-        self.assertNotIn(
-            "third",
-            self.calls,
+        self.build_gates["third"].set()
+        self.conversion_gates["third"].set()
+        await asyncio.wait_for(
+            third,
+            2,
         )
+        self.assertIn("third", self.calls)
+        self.assertIsNone(self.manager.cleanup_error)
+        self.assertFalse(self.manager.deferred_scratch)
 
     async def test_cleanup_fault_during_admission_io_prevents_next_solve(
         self,

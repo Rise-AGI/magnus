@@ -37,7 +37,6 @@ class DockerBuildCacheTests(unittest.IsolatedAsyncioTestCase):
         self.manager.results[self.operation.key] = dict(
             self.result,
         )
-        self.manager._ensure_cached_budget = AsyncMock()
         self.module.run_command = AsyncMock()
 
     async def save_index(
@@ -84,7 +83,6 @@ class DockerBuildCacheTests(unittest.IsolatedAsyncioTestCase):
                     (self.manager.root / "index.json").read_bytes(),
                     before,
                 )
-        self.manager._ensure_cached_budget.assert_not_awaited()
 
     async def test_failed_lookup_does_not_begin_a_build(
         self,
@@ -180,7 +178,6 @@ class DockerBuildCacheTests(unittest.IsolatedAsyncioTestCase):
             self.manager.pins,
             {"job": self.result["digest"]},
         )
-        self.manager._ensure_cached_budget.assert_awaited_once()
 
     async def test_unrecognized_output_keeps_the_cache_index(
         self,

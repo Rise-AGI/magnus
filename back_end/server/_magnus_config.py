@@ -98,6 +98,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         "timeout_seconds": 3600,
         "cache_size": "40G",
         "min_free_space": "5G",
+        "reclaim_free_space": None,
         "scratch_root": None,
         "scratch_size": None,
         "conversion_cpus": 2,
@@ -136,6 +137,10 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
                 raise ValueError(f"execution.image_build.{key} must be positive or null")
             if key != "queue_timeout_seconds" and value is not None and value > image_build["max_concurrent"]:
                 raise ValueError(f"execution.image_build.{key} must not exceed max_concurrent")
+        _check_key(image_build, "reclaim_free_space", str, nullable=True)
+        if image_build["reclaim_free_space"] is not None:
+            if _parse_size_string(image_build["reclaim_free_space"]) < _parse_size_string(image_build["min_free_space"]):
+                raise ValueError("execution.image_build.reclaim_free_space must be at least min_free_space")
         for key in ("cache_size", "min_free_space"):
             if _parse_size_string(image_build[key]) <= 0:
                 raise ValueError(f"execution.image_build.{key} must be a positive size")

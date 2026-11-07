@@ -104,6 +104,7 @@ class BuildConfigurationTests(unittest.TestCase):
             ("scratch_size", ""), ("scratch_size", "0M"), ("scratch_size", "-1G"), ("scratch_size", True),
             ("conversion_command_prefix", "shell string"), ("conversion_command_prefix", ["wrapper", ""]),
             ("conversion_command_prefix", [True]), ("conversion_command_prefix", ["x\x00y"]),
+            ("reclaim_free_space", "1G"), ("reclaim_free_space", False),
             ("conversion_gzip_level", True), ("conversion_gzip_level", 0),
             ("conversion_gzip_level", 10), ("conversion_gzip_level", "1"),
             ("conversion_gzip_level", 1.5),

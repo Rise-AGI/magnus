@@ -180,3 +180,16 @@ realms supplied by registries are then fetched by the daemon, so its outbound
 network restrictions cover them too. The worker's account, process tree, network
 and storage still require OS-level isolation; rootless alone does not supply
 those policies or isolate cache mounts between mutually untrusted users.
+
+A verified, pinned runtime cache hit adds no build payload and no longer checks cold-build
+capacity or queries BuildKit storage. Identity validation and execution-stage storage checks
+remain. Cold builds still enforce budgets and `min_free_space`. Optional `reclaim_free_space`
+sets a pre-build GC headroom target at or above that floor (null retains the floor). Only unpinned
+products are evicted; reaching the target is not guaranteed and project data is never removed.
+BuildKit layers on another filesystem are not pruned to remedy local free-space shortages.
+
+Before a subsequent cold build, the manager retries scratch left by its own completed cleanup.
+Only registered detached directories with a matching owner and an idle lease, or on POSIX an
+absent child and process group, can be reclaimed. Unknown leases, live processes and foreign
+owners remain protected and block cold builds. Windows running leases still require operator
+verification. Recovery neither kills processes nor deletes scientific workspaces.

@@ -110,6 +110,85 @@ def cross_volume_replace(real_replace):
 
 
 class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    @unittest.skipUnless(os.name == "posix", "POSIX process group recovery")
+    async def test_detached_cleanup_waits_for_group_then_recovers(
+        self,
+    ) -> None:
+        (self.directory / "process.json").write_text(json.dumps({"state": "running", "pid": 42}))
+        self.manager.deferred_scratch.add(self.directory)
+        self.manager.cleanup_error = "preserved"
+        with patch.object(self.module, "_process_exists", return_value=False), patch.object(
+            self.module, "_process_group_exists", return_value=True,
+        ):
+            await self.manager._retry_deferred_scratch()
+        self.assertTrue(self.directory.exists())
+        self.assertEqual(self.manager.cleanup_error, "preserved")
+        with patch.object(self.module, "_process_exists", return_value=False), patch.object(
+            self.module, "_process_group_exists", return_value=False,
+        ):
+            await self.manager._retry_deferred_scratch()
+        self.assertFalse(self.directory.exists())
+        self.assertIsNone(self.manager.cleanup_error)
+        self.assertFalse(self.manager.deferred_scratch)
+
+    async def test_recovery_preserves_unknown_lease_and_foreign_owner(
+        self,
+    ) -> None:
+        self.manager.deferred_scratch.add(self.directory)
+        self.manager.cleanup_error = "preserved"
+        for owner, lease in (
+            ({"pid": 999999}, {"state": "idle"}),
+            ({"pid": os.getpid()}, {"state": "spawning"}),
+            ({"pid": os.getpid()}, {"state": "running", "pid": True}),
+        ):
+            (self.directory / "owner.json").write_text(json.dumps(owner))
+            (self.directory / "process.json").write_text(json.dumps(lease))
+            await self.manager._retry_deferred_scratch()
+            self.assertTrue(self.directory.exists())
+            self.assertEqual(self.manager.cleanup_error, "preserved")
+
+    async def test_retry_only_registered_detached_scratch(
+        self,
+    ) -> None:
+        self.manager.cleanup_error = "unknown failure"
+        await self.manager._retry_deferred_scratch()
+        self.assertTrue(self.directory.exists())
+        self.assertEqual(self.manager.cleanup_error, "unknown failure")
+        self.manager.deferred_scratch.add(self.directory)
+        with patch.object(self.module.shutil, "rmtree", side_effect=OSError("busy")):
+            await self.manager._retry_deferred_scratch()
+        self.assertIn(self.directory, self.manager.deferred_scratch)
+        self.assertEqual(self.manager.cleanup_error, "unknown failure")
+        await asyncio.gather(self.manager._retry_deferred_scratch(), self.manager._retry_deferred_scratch())
+        self.assertFalse(self.directory.exists())
+        self.assertIsNone(self.manager.cleanup_error)
+
+    async def test_headroom_gc_never_evicts_pinned_image(
+        self,
+    ) -> None:
+        source = self.directory / "product"
+        source.write_bytes(b"cached")
+        digest = self.module._hash_file(source)
+        source.rename(self.manager._sif_path(digest))
+        self.manager.results["key"] = {
+            "digest": digest, "sif_path": str(self.manager._sif_path(digest)),
+            "size_bytes": 6, "accessed_at": 1,
+        }
+        self.manager.free_floor = 10
+        self.manager.reclaim_free = 30
+        self.manager._usage = AsyncMock(return_value=(6, 20, 0))
+        self.manager.client.disk_usage = AsyncMock(return_value=0)
+        self.manager.pins["active"] = digest
+        await self.manager._collect_cache()
+        self.assertTrue(self.manager._sif_path(digest).exists())
+        self.manager.pins.clear()
+        # Low scratch space alone must not evict products on a healthy volume.
+        await self.manager._collect_cache()
+        self.assertTrue(self.manager._sif_path(digest).exists())
+        with patch.object(self.module.shutil, "disk_usage", return_value=types.SimpleNamespace(free=20)):
+            await self.manager._collect_cache()
+        self.assertFalse(self.manager._sif_path(digest).exists())
+
     async def test_explicit_fast_gzip_reaches_converter(
         self,
     ) -> None:
@@ -373,26 +452,8 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             copy.assert_not_called()
         self.assertEqual(source.read_bytes(), b"image")
 
-    async def test_successful_budget_sample_is_shared_only_within_window_and_generation(self):
-        self.manager.client.disk_usage = AsyncMock(return_value=0)
-        await self.manager._ensure_cached_budget()
-        await self.manager._ensure_cached_budget()
-        self.assertEqual(self.manager.client.disk_usage.await_count, 1)
-        self.manager.cached_budget_checked_at -= 4
-        await self.manager._ensure_cached_budget()
-        self.assertEqual(self.manager.client.disk_usage.await_count, 2)
-        self.manager.budget_generation += 1
-        await self.manager._ensure_cached_budget()
-        self.assertEqual(self.manager.client.disk_usage.await_count, 3)
-        self.manager.cached_budget_checked_at -= 4
-        self.manager.client.disk_usage.side_effect = self.module.ImageBuildError("unavailable")
-        with self.assertRaises(self.module.ImageBuildError):
-            await self.manager._ensure_cached_budget()
-        with self.assertRaises(self.module.ImageBuildError):
-            await self.manager._ensure_cached_budget()
-        self.assertEqual(self.manager.cached_budget_generation, -1)
 
-    async def test_repeated_runtime_hits_share_budget_but_not_content_validation(self):
+    async def test_verified_runtime_hits_ignore_cold_capacity_but_check_integrity(self):
         for local in (False, True):
             with self.subTest(local=local):
                 self.module.is_local_mode = local
@@ -406,84 +467,20 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
                 }
                 self.module.run_command = AsyncMock(return_value=digest)
                 self.manager._docker_inventory = AsyncMock(return_value={})
-                self.manager.cached_budget_generation = -1
-                self.manager.client.disk_usage = AsyncMock(return_value=0)
+                self.manager.client.disk_usage = AsyncMock(side_effect=AssertionError("No worker query on reuse"))
+                self.manager.free_floor = 10**30
                 self.assertIsNotNone(await self.manager._cached_result(self.operation))
                 self.assertIsNotNone(await self.manager._cached_result(self.operation))
-                self.assertEqual(self.manager.client.disk_usage.await_count, 1)
+                self.assertEqual(self.manager.client.disk_usage.await_count, 0)
                 if local:
                     self.assertEqual(self.module.run_command.await_count, 2)
                 else:
                     self.manager._sif_path(digest).write_bytes(b"bad!")
                     self.assertIsNone(await self.manager._cached_result(self.operation))
 
-    async def test_fresh_budget_sample_does_not_hide_a_free_space_drop(self):
-        await self.manager._ensure_cached_budget()
-        self.manager.free_floor = 100
-        with patch.object(self.module.shutil, "disk_usage", return_value=types.SimpleNamespace(free=1)):
-            with self.assertRaises(self.module._CacheBudgetError):
-                await self.manager._ensure_cached_budget()
-        self.assertEqual(self.manager.cached_budget_generation, -1)
 
-    async def test_older_success_cannot_overwrite_newer_failed_budget_check(self):
-        entered = asyncio.Event()
-        release = asyncio.Event()
-        calls = 0
-        async def usage():
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                entered.set()
-                await release.wait()
-                return 0
-            raise self.module.ImageBuildError("worker unavailable")
-        self.manager.client.disk_usage = AsyncMock(side_effect=usage)
-        earlier = asyncio.create_task(self.manager._ensure_cached_budget())
-        await entered.wait()
-        with self.assertRaises(self.module.ImageBuildError):
-            await self.manager._ensure_budget()
-        release.set()
-        await earlier
-        self.assertEqual(self.manager.cached_budget_generation, -1)
-        with self.assertRaises(self.module.ImageBuildError):
-            await self.manager._ensure_cached_budget()
-        self.assertEqual(calls, 3)
 
-    async def test_hot_budget_sample_checks_occupied_legacy_scratch_volume(self):
-        legacy = self.base / "legacy"
-        legacy.mkdir()
-        (legacy / "retained").write_bytes(b"data")
-        self.manager.legacy_temporary_root = legacy
-        await self.manager._ensure_cached_budget()
-        self.assertIn(legacy, self.manager.budget_volumes)
-        self.manager.free_floor = 100
-        real_usage = self.module.shutil.disk_usage
-        def space(path):
-            return types.SimpleNamespace(free=1) if Path(path) == legacy else real_usage(path)
-        with patch.object(self.module.shutil, "disk_usage", side_effect=space):
-            with self.assertRaises(self.module._CacheBudgetError):
-                await self.manager._ensure_cached_budget()
 
-    async def test_cancelled_budget_waiter_leaves_the_check_owner_running(self):
-        entered = asyncio.Event()
-        released = asyncio.Event()
-        async def usage():
-            entered.set()
-            await released.wait()
-            return 0
-        self.manager.client.disk_usage = AsyncMock(side_effect=usage)
-        owner = asyncio.create_task(self.manager._ensure_cached_budget())
-        await entered.wait()
-        waiter = asyncio.create_task(self.manager._ensure_cached_budget())
-        await asyncio.sleep(0)
-        waiter.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await waiter
-        self.assertFalse(owner.done())
-        released.set()
-        await owner
-        await self.manager._ensure_cached_budget()
-        self.assertEqual(self.manager.client.disk_usage.await_count, 1)
 
     async def test_low_water_collection_avoids_redundant_scans_and_index_write(self):
         self.manager._usage = AsyncMock(wraps=self.manager._usage)

@@ -217,16 +217,13 @@ class ImageBuildManager:
         self.initialized = False
         self.stopping = False
         self.cleanup_error: str | None = None
+        self.deferred_scratch: set[Path] = set()
+        self.recovery_lock = asyncio.Lock()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.initialize_lock = asyncio.Lock()
         self.maintenance_lock = asyncio.Lock()
         self.inventory_lock = asyncio.Lock()
-        self.cached_budget_lock = asyncio.Lock()
-        self.budget_generation = 0
-        self.cached_budget_generation = -1
-        self.cached_budget_checked_at = 0.0
         self.budget_check_sequence = 0
-        self.budget_volumes: tuple[Path, ...] = (self.root, self.temporary_root)
         concurrency = self.config.get("max_concurrent", 2)
         self.admission = BuildAdmission(
             capacity=concurrency,
@@ -240,6 +237,9 @@ class ImageBuildManager:
             self.config.get("scratch_size") or self.config.get("cache_size", "40G"),
         )
         self.free_floor = _parse_size_string(self.config.get("min_free_space", "5G"))
+        self.reclaim_free = _parse_size_string(
+            self.config.get("reclaim_free_space") or self.config.get("min_free_space", "5G"),
+        )
 
     def restore_pins(
         self,
@@ -736,9 +736,8 @@ class ImageBuildManager:
                             self.pins.pop(job_id, None)
                 await self._save_index()
                 return None
-        # Waiter pins (including late arrivals via operation.result) protect the
-        # selected image while collection acquires maintenance_lock itself.
-        await self._ensure_cached_budget()
+        # Reuse creates no image payload. Cold-build capacity and worker health
+        # must not reject a verified, pinned runtime; execution checks its own storage.
         return result
 
     async def _run(
@@ -763,6 +762,7 @@ class ImageBuildManager:
                 operation.progress.append("Reusing the prepared image from cache")
                 operation.progress.set_phase("ready")
                 return cached
+            await self._retry_deferred_scratch()
             if self.cleanup_error is not None:
                 raise ImageBuildError(self.cleanup_error)
             await self._flush(operation)
@@ -791,7 +791,6 @@ class ImageBuildManager:
                         return cached
                     if self.cleanup_error is not None:
                         raise ImageBuildError(self.cleanup_error)
-                    self.budget_generation += 1
                     await self._collect_cache()
                     await self._ensure_budget()
                     directory = self.temporary_root / f"build-{uuid.uuid4().hex}"
@@ -897,16 +896,68 @@ class ImageBuildManager:
                         )
                     finally:
                         if not cleaned:
+                            self.deferred_scratch.add(directory)
                             self.cleanup_error = (
                                 "Image build cleanup could not confirm released resources; "
                                 "inspect preserved scratch before restarting the backend"
                             )
             finally:
-                if directory:
-                    self.budget_generation += 1
                 with self.lock:
                     if self.operations.get(operation.key) is operation:
                         self.operations.pop(operation.key, None)
+
+    async def _retry_deferred_scratch(
+        self,
+    ) -> None:
+        # Only directories detached by this manager's joined cleanup are eligible.
+        # Never infer ownership of arbitrary directories from an absent child PID.
+        async with self.recovery_lock:
+            had_deferred = bool(self.deferred_scratch)
+            for directory in tuple(self.deferred_scratch):
+                try:
+                    cleaned = await blocking_io(
+                        self._recover_detached_directory,
+                        directory,
+                    )
+                except (OSError, ValueError, KeyError):
+                    logger.warning("Deferred build scratch recovery remains unverified: %s", directory.name)
+                    continue
+                if cleaned:
+                    self.deferred_scratch.discard(directory)
+            if had_deferred and not self.deferred_scratch:
+                self.cleanup_error = None
+
+    @staticmethod
+    def _recover_detached_directory(
+        directory: Path,
+    ) -> bool:
+        try:
+            directory.lstat()
+        except FileNotFoundError:
+            return True
+        if directory.is_symlink() or directory.is_junction():
+            return False
+        for name in ("owner.json", "process.json"):
+            if (directory / name).is_symlink():
+                return False
+        owner = json.loads((directory / "owner.json").read_text(encoding="utf-8"))
+        lease = json.loads((directory / "process.json").read_text(encoding="utf-8"))
+        if not isinstance(owner, dict) or owner.get("pid") != os.getpid() or not isinstance(lease, dict):
+            return False
+        if lease.get("state") == "running":
+            pid = lease.get("pid")
+            if type(pid) is not int or pid <= 0 or os.name != "posix":
+                return False
+            if _process_exists(pid) or _process_group_exists(pid):
+                return False
+        elif lease.get("state") != "idle":
+            return False
+        shutil.rmtree(directory)
+        try:
+            directory.lstat()
+        except FileNotFoundError:
+            return True
+        return False
 
     @staticmethod
     def _cleanup_directory(
@@ -997,7 +1048,6 @@ class ImageBuildManager:
         published_digest: str | None = None
         published_result: dict | None = None
         previous_result: dict | None = None
-        self.budget_generation += 1
         try:
             await self._ensure_budget()
             # Register ownership before Docker can install its temporary tag.
@@ -1152,7 +1202,6 @@ class ImageBuildManager:
                 temporary_tag,
             ))
             await self._join_cleanup(cleanup)
-            self.budget_generation += 1
 
     @staticmethod
     def _clear_scratch_payload(
@@ -1272,7 +1321,6 @@ class ImageBuildManager:
         size = _directory_size(self.root)
         scratch_size = 0
         free = shutil.disk_usage(self.root).free
-        volumes = [self.root]
         for root in self._scratch_roots():
             occupied = _directory_size(root)
             scratch_size += occupied
@@ -1280,10 +1328,8 @@ class ImageBuildManager:
             # move and need not meet the new scratch volume's free-space floor.
             if root == self.temporary_root or occupied:
                 free = min(free, shutil.disk_usage(root).free)
-                volumes.append(root)
             if not root.is_relative_to(self.root):
                 size += occupied
-        self.budget_volumes = tuple(volumes)
         return size, free, scratch_size
 
     async def _docker_inventory(
@@ -1400,7 +1446,6 @@ class ImageBuildManager:
     ) -> int:
         self.budget_check_sequence += 1
         sequence = self.budget_check_sequence
-        self.cached_budget_generation = -1
         local_size, free, scratch_size = await self._usage()
         if scratch_size > self.scratch_budget:
             raise _CacheBudgetError(
@@ -1442,34 +1487,6 @@ class ImageBuildManager:
         # GC thresholds only bound retained cache. Active writes require the
         # worker/scratch volumes' filesystem quota for a strict physical cap.
 
-    async def _ensure_cached_budget(
-        self,
-    ) -> None:
-        # Reuse does not add image bytes. Coalesce it within the same three-
-        # second sampling window as active-build monitoring; writes still check
-        # independently. A cancelled waiter never cancels another check owner.
-        async with self.cached_budget_lock:
-            generation = self.budget_generation
-            if (
-                self.cached_budget_generation == generation
-                and time.monotonic() - self.cached_budget_checked_at < 3
-            ):
-                roots = self.budget_volumes
-                free = await blocking_io(
-                    lambda: min(shutil.disk_usage(root).free for root in roots),
-                )
-                if (
-                    free >= self.free_floor
-                    and self.budget_generation == generation
-                    and self.cached_budget_generation == generation
-                ):
-                    return
-            self.cached_budget_generation = -1
-            sequence = await self._ensure_budget()
-            if self.budget_generation == generation and sequence == self.budget_check_sequence:
-                self.cached_budget_generation = generation
-                self.cached_budget_checked_at = time.monotonic()
-
     async def _ensure_budget(
         self,
     ) -> int:
@@ -1499,7 +1516,6 @@ class ImageBuildManager:
         self,
         protected: frozenset[str] = frozenset(),
     ) -> None:
-        self.budget_generation += 1
         local_size, free, scratch_size = await self._usage()
         if scratch_size > self.scratch_budget:
             return
@@ -1517,7 +1533,7 @@ class ImageBuildManager:
         if (
             not removed_orphans
             and local_size + worker_size <= min(self.budget, target + scratch_size)
-            and free >= self.free_floor
+            and free >= self.reclaim_free
         ):
             return
         local_size, free, scratch_size = await self._usage()
@@ -1525,8 +1541,16 @@ class ImageBuildManager:
         with self.lock:
             products = {value["digest"]: dict(value) for value in self.results.values()}
         for digest, result in sorted(products.items(), key=lambda item: item[1].get("accessed_at", 0)):
-            if local_size + worker_size <= min(self.budget, target + scratch_size) and free >= self.free_floor:
+            if local_size + worker_size <= min(self.budget, target + scratch_size) and free >= self.reclaim_free:
                 break
+            if not is_local_mode and local_size + worker_size <= min(self.budget, target + scratch_size):
+                # Deleting a SIF cannot relieve pressure on a separate scratch
+                # volume.
+                cache_free = await blocking_io(
+                    lambda: shutil.disk_usage(self.root).free,
+                )
+                if cache_free >= self.reclaim_free:
+                    break
             with self.lock:
                 if digest in protected or digest in self.pins.values():
                     continue
