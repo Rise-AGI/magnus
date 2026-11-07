@@ -463,7 +463,8 @@ class CacheAndHistoryTests(unittest.TestCase):
             return [{"id": "queued", "gpu_count": 6}, {"id": "releasing", "gpu_count": 2}, {"id": "external", "gpu_count": 4}]
         manager = SimpleNamespace(get_all_running_tasks=tasks, get_node_snapshot=lambda **kwargs: module.NodeSnapshot(16, 128, 512000, nodes=(SimpleNamespace(name="one", gpu_by_type={"a100": 16}, allocated_gpus=12),), observed_allocated_gpus=12, observed_allocated_cpus=128, observed_allocated_mem_mb=512000))
         instance = SimpleNamespace(config=config, target=SimpleNamespace(id="default"), _job_query=lambda db, *entities: db.query(*entities), slurm_manager=manager, last_snapshot_time=datetime.now(timezone.utc)-timedelta(seconds=10))
-        namespace = {"datetime": datetime, "timezone": timezone, "is_local_mode": False, "magnus_config": config, "resource_partitions": module.resource_partitions, "validate_allocation_visibility": module.validate_allocation_visibility, "SessionLocal": Session, "Job": SimpleNamespace(slurm_job_id=Field()), "ClusterSnapshot": lambda **fields: SimpleNamespace(**fields), "logger": logging.getLogger("history-test")}
+        from test_database_transactions import is_sqlite_busy, write_transaction
+        namespace = {"is_sqlite_busy": is_sqlite_busy, "Session": Session, "write_transaction": write_transaction, "datetime": datetime, "timezone": timezone, "is_local_mode": False, "magnus_config": config, "resource_partitions": module.resource_partitions, "validate_allocation_visibility": module.validate_allocation_visibility, "SessionLocal": Session, "Job": SimpleNamespace(slurm_job_id=Field()), "ClusterSnapshot": lambda **fields: SimpleNamespace(**fields), "logger": logging.getLogger("history-test")}
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
         namespace["_record_snapshot"](instance)
         self.assertEqual(len(added), 1)

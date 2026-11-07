@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, Mock
 from sqlalchemy import Enum, String, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+from test_database_transactions import write_transaction, is_sqlite_busy, busy_error
+from time import monotonic
 from test_image_cache import blocking_io
 from test_job_finalization import SERVER, JobStatus, load_method
 
@@ -109,6 +111,9 @@ class PreparationCommitTests(unittest.IsolatedAsyncioTestCase):
                 "asyncio": asyncio,
                 "json": json,
                 "SessionLocal": self.sessions,
+                "write_transaction": write_transaction,
+                "is_sqlite_busy": is_sqlite_busy,
+                "monotonic": monotonic,
                 "Job": Job,
                 "JobStatus": JobStatus,
                 "PreparationInputs": PreparationInputs,
@@ -127,6 +132,7 @@ class PreparationCommitTests(unittest.IsolatedAsyncioTestCase):
             config={"cluster": {"default_runner": "runner"}},
             _preparing_jobs_lock=threading.Lock(),
             _pinned_jobs=set(),
+            _preparation_retry_after={},
             _ensure_image_decoupled=AsyncMock(
                 return_value=(True, None),
             ),
@@ -682,3 +688,124 @@ class PreparationCommitTests(unittest.IsolatedAsyncioTestCase):
             self.actor._pinned_jobs,
             {"job"},
         )
+
+    async def test_exhausted_busy_retains_workspace_and_resumes(self):
+        self.add_job("job", build=False)
+        marker = self.root / "job" / "repository" / "retained"
+        marker.parent.mkdir(parents=True)
+        marker.write_text("prepared bytes")
+        rejected = []
+
+        def reject_revision(db):
+            job = db.get(Job, "job")
+            if job.commit_sha == "a" * 40:
+                rejected.append(1)
+                raise busy_error()
+
+        event.listen(self.sessions, "before_commit", reject_revision)
+        await self.prepare(self.actor, "job")
+        self.assertEqual(len(rejected), 3)
+        with self.sessions() as db:
+            self.assertEqual(db.get(Job, "job").status, JobStatus.PREPARING)
+        self.assertEqual(marker.read_text(), "prepared bytes")
+        self.assertGreater(self.actor._preparation_retry_after["job"], monotonic())
+        self.actor._finish_unsubmitted_job.assert_not_called()
+        event.remove(self.sessions, "before_commit", reject_revision)
+        await self.prepare(self.actor, "job")
+        with self.sessions() as db:
+            self.assertEqual(db.get(Job, "job").status, JobStatus.PENDING)
+        self.assertIn("job", self.actor._pinned_jobs)
+
+    async def test_transient_busy_does_not_repeat_repository_preparation(self):
+        self.add_job("job", build=False)
+        rejected = []
+
+        def reject_once(db):
+            if db.get(Job, "job").commit_sha == "a" * 40 and not rejected:
+                rejected.append(1)
+                raise busy_error()
+
+        event.listen(self.sessions, "before_commit", reject_once)
+        await self.prepare(self.actor, "job")
+        self.manager.ensure_repo.assert_awaited_once()
+        with self.sessions() as db:
+            self.assertEqual(db.get(Job, "job").status, JobStatus.PENDING)
+
+    async def test_busy_retry_cannot_resurrect_concurrent_termination(self):
+        from unittest.mock import patch
+        from test_database_transactions import TRANSACTIONS
+        self.add_job("job", build=False)
+        rejected = []
+
+        def reject_once(db):
+            if db.get(Job, "job").commit_sha == "a" * 40 and not rejected:
+                rejected.append(1)
+                raise busy_error()
+
+        def terminate(_):
+            with self.sessions() as db:
+                db.get(Job, "job").status = JobStatus.TERMINATED
+                db.commit()
+
+        event.listen(self.sessions, "before_commit", reject_once)
+        with patch.object(TRANSACTIONS["time"], "sleep", terminate):
+            await self.prepare(self.actor, "job")
+        with self.sessions() as db:
+            self.assertEqual(db.get(Job, "job").status, JobStatus.TERMINATED)
+        self.assertNotIn("job", self.actor._pinned_jobs)
+
+    async def test_failure_cleanup_intent_survives_followup_database_busy(self):
+        self.add_job("job", build=False)
+        self.manager.ensure_repo.return_value = (False, "repository unavailable", None)
+        self.actor._finish_unsubmitted_job.side_effect = busy_error()
+        with self.assertRaises(type(busy_error())):
+            await self.prepare(self.actor, "job")
+        with self.sessions() as db:
+            job = db.get(Job, "job")
+            self.assertEqual(job.status, JobStatus.FAILED)
+            self.assertEqual(job.finalization_status, "CLEANUP")
+        self.assertNotIn("job", self.actor._pinned_jobs)
+
+    async def test_termination_while_busy_preparer_drains_has_durable_cleanup(self):
+        self.add_job("job", build=False)
+        draining, release = asyncio.Event(), asyncio.Event()
+
+        async def environment(*args):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                draining.set()
+                await release.wait()
+            return True, None
+
+        def reject_revision(db):
+            if db.get(Job, "job").commit_sha == "a" * 40:
+                raise busy_error()
+
+        self.actor._ensure_image_decoupled = environment
+        self.actor.enabled = True
+        self.actor._submitting_jobs = set()
+        self.actor._loop = asyncio.get_running_loop()
+        self.actor._job_query = lambda db, *entities: db.query(*entities)
+        terminate = load_method(
+            "_scheduler/_core.py",
+            "terminate_job",
+            self.prepare.__globals__,
+        )
+        event.listen(self.sessions, "before_commit", reject_revision)
+        task = asyncio.create_task(self.prepare(self.actor, "job"))
+        self.actor.preparing_jobs = {"job": task}
+        try:
+            await asyncio.wait_for(draining.wait(), 3)
+            def stop():
+                with self.sessions() as db:
+                    terminate(self.actor, db, db.get(Job, "job"))
+            await asyncio.to_thread(stop)
+            with self.sessions() as db:
+                job = db.get(Job, "job")
+                self.assertEqual(job.status, JobStatus.TERMINATED)
+                self.assertEqual(job.finalization_status, "CLEANUP")
+            self.assertFalse(task.done())
+        finally:
+            release.set()
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 3)

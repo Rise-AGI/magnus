@@ -99,7 +99,10 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.success = set()
         self.marker_hook = None
         self.final_hook = None
+        from test_database_transactions import is_sqlite_busy, write_transaction
         self.namespace = {
+            "is_sqlite_busy": is_sqlite_busy,
+            "write_transaction": write_transaction,
             "__name__": __name__,
             "threading": threading,
             "open_protocol_file": open_protocol_file,
@@ -133,6 +136,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor._test_artifact_retry = {}
         actor._preparing_jobs_lock = threading.Lock()
         actor._submitting_jobs = set()
+        actor._preparation_retry_after = {}
         actor.preparing_jobs = {}
         actor._submission_cancel_events = {}
         actor._submission_stopping = False
@@ -590,6 +594,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         self.sync()
         terminate = load_method("_scheduler/_core.py", "terminate_job", self.namespace)
         self.scheduler.enabled = True
+        self.scheduler._preparation_retry_after = {}
         self.scheduler.preparing_jobs = {}
         self.scheduler._preparing_jobs_lock = threading.Lock()
         self.scheduler._loop = None
@@ -639,6 +644,7 @@ class SlurmFinalizationTests(unittest.TestCase):
         actor = SimpleNamespace(
             _job_query=lambda db, *entities: db.query(*entities),
             preparing_jobs={},
+            _preparation_retry_after={},
             _preparing_jobs_lock=threading.Lock(),
             _queue_pending_submission=lambda: None,
             _resume_paused_job=self.scheduler._resume_paused_job,

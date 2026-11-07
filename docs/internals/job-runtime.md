@@ -660,3 +660,19 @@ not multiply either per-node limit, and Docker/local accounting is unchanged.
 `GET /api/jobs/{id}/staging` returns the current preparation phase, input index when applicable, known object size, operation budget and elapsed time. Completed bytes describe successfully prepared objects, including reused images; they are not measured network traffic. Unknown directory sizes remain absent. An interrupted controller is reported explicitly.
 
 When no execution output exists, the existing logs endpoint shows this short status. Once execution output arrives its pagination stays unchanged. Snapshots contain no paths, commands or custody tokens, survive workspace cleanup, and retain the latest 4,096 inactive Jobs in a separate bounded directory. A preparation failure also retains a safe summary in the Job result.
+
+### Temporary SQLite contention during preparation
+
+Repository revision, environment readiness, and Pending publication use short,
+database-only transactions. SQLite `BUSY` (including extended busy codes) retries
+up to three times with a fresh session and rollback before backoff. Connection
+and pool timeouts remain unchanged; external preparation does not run inside the
+retry transaction. Non-busy errors are not classified by message text or retried.
+
+If contention persists, the Job retains its preparation state and workspace and
+waits at least 30 seconds before the scheduler retries preparation. This does not
+resubmit a Slurm allocation or revive an already failed/terminated Job. Existing
+Failed Jobs remain terminal. Database-only cluster snapshot retries reuse the
+same external observation and timestamp; exhausted retries skip that sample and
+keep the normal sampling interval. Retry logs identify the operation, retry attempt,
+elapsed time and SQLite error name without logging SQL parameters.

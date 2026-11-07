@@ -3,11 +3,13 @@ import os
 import json
 import asyncio
 import subprocess
+from time import monotonic
 from typing import TYPE_CHECKING, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pywheels.file_tools import guarantee_file_exist
 from ..database import SessionLocal
+from .._database_transactions import is_sqlite_busy, write_transaction
 from ..models import Job, JobStatus, CachedImage
 from .._magnus_config import is_local_mode
 from .._resource_manager import resource_manager, _image_to_sif_filename
@@ -156,6 +158,7 @@ class _ResourcesMixin(_ResourcesMixinBase):
         owns_preparation = False
         ready = False
         interrupted = False
+        deferred = False
 
         def load_inputs() -> PreparationInputs | None:
             nonlocal owns_preparation
@@ -189,7 +192,9 @@ class _ResourcesMixin(_ResourcesMixinBase):
         def persist(
             values: dict[str, str | JobStatus | None],
         ) -> bool:
-            with SessionLocal() as db:
+            def update(
+                db: Session,
+            ) -> bool:
                 changed = db.query(
                     Job,
                 ).filter(
@@ -199,9 +204,14 @@ class _ResourcesMixin(_ResourcesMixinBase):
                     values,
                     synchronize_session=False,
                 )
-                db.commit()
-            return bool(
-                changed,
+                return bool(
+                    changed,
+                )
+
+            return write_transaction(
+                SessionLocal,
+                update,
+                operation=f"prepare:{job_id}:{','.join(sorted(values))}",
             )
 
         def publish_ready() -> None:
@@ -326,18 +336,27 @@ class _ResourcesMixin(_ResourcesMixinBase):
             interrupted = True
             raise
         except Exception as error:
-            await _run_blocking_io(
-                persist,
-                {
-                    "status": JobStatus.FAILED,
-                    "result": str(
-                        error,
-                    ),
-                },
-            )
-            logger.error(
-                f"Job {job_id} preparation failed: {error}",
-            )
+            if is_sqlite_busy(error):
+                deferred = True
+            else:
+                try:
+                    await _run_blocking_io(
+                        persist,
+                        {
+                            "status": JobStatus.FAILED,
+                            "result": str(error),
+                            "finalization_status": "CLEANUP",
+                        },
+                    )
+                except Exception as failure:
+                    if not is_sqlite_busy(failure):
+                        raise
+                    deferred = True
+                logger.error(
+                    "Job %s preparation failed (%s)",
+                    job_id,
+                    type(error).__name__,
+                )
         finally:
             if not ready:
                 for task in tasks:
@@ -364,7 +383,14 @@ class _ResourcesMixin(_ResourcesMixinBase):
                         self._pinned_jobs.discard(
                             job_id,
                         )
-            if not ready or interrupted:
+            if deferred:
+                with self._preparing_jobs_lock:
+                    self._preparation_retry_after[job_id] = monotonic() + 30
+                logger.warning(
+                    "Job %s preparation deferred for 30 seconds after SQLite busy; workspace retained",
+                    job_id,
+                )
+            if (not ready or interrupted) and not deferred:
                 # Cancellation during the Pending commit may be user termination
                 # or shutdown. The cleanup guard rechecks durable state, keeping
                 # Pending for restart while finishing an already Terminated job.

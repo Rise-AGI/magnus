@@ -45,6 +45,7 @@ class _SchedulerProtocol:
     enabled: bool
     last_snapshot_time: datetime
     last_workspace_gc_time: datetime
+    _preparation_retry_after: dict[str, float]
     preparing_jobs: Dict[str, asyncio.Task[Any]]
     _preparing_jobs_lock: "threading.Lock"
     _loop: Optional[asyncio.AbstractEventLoop]

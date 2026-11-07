@@ -57,6 +57,8 @@ class PreparationDecisionTests(unittest.IsolatedAsyncioTestCase):
                         self.actor,
                     ),
                 )
+        self.namespace["monotonic"] = __import__("time").monotonic
+        self.actor._preparation_retry_after = {}
         self.actor.preparing_jobs = {}
         self.actor._prepare_job_resources = AsyncMock()
         self.actor._queue_pending_submission = Mock()
@@ -192,3 +194,20 @@ class PreparationDecisionTests(unittest.IsolatedAsyncioTestCase):
             (table / "slurm/output.txt").exists(),
         )
         self.actor._queue_pending_submission.assert_not_called()
+
+    async def test_busy_cooldown_does_not_block_other_jobs(self):
+        import time
+        self.fixture.add_job(status=fixtures.JobStatus.PREPARING)
+        with self.fixture.sessions() as db:
+            job = db.get(fixtures.Job, "job")
+            job.slurm_job_id = None
+            db.commit()
+        self.actor._preparation_retry_after["job"] = time.monotonic() + 30
+        await self.actor._make_decisions()
+        self.actor._prepare_job_resources.assert_not_awaited()
+        self.actor._queue_pending_submission.assert_called_once()
+        self.actor._preparation_retry_after["job"] = time.monotonic() - 1
+        await self.actor._make_decisions()
+        await asyncio.sleep(0)
+        self.actor._prepare_job_resources.assert_awaited_once_with("job")
+        self.assertNotIn("job", self.actor._preparation_retry_after)

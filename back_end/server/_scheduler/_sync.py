@@ -9,6 +9,8 @@ from time import monotonic
 from typing import TYPE_CHECKING, Optional
 from .._protocol_files import open_protocol_file, replace_protocol_file
 from ..database import SessionLocal
+from sqlalchemy.orm import Session
+from .._database_transactions import is_sqlite_busy, write_transaction
 from ..models import Job, JobStatus, ClusterSnapshot
 from .._magnus_config import is_local_mode
 from .._slurm_manager._resource_query import resource_partitions, validate_allocation_visibility
@@ -62,7 +64,9 @@ class _SyncMixin(_SyncMixinBase):
             allocations = {task["id"]: task["gpu_count"] for task in tasks}
 
             # Phase 2 — 写快照（短 session）
-            with SessionLocal() as db:
+            def save_snapshot(
+                db: Session,
+            ) -> int:
                 # Ownership comes from Slurm IDs, usage from actual allocations.
                 # Queued/stale DB state and CG remain owned by Magnus. Select
                 # only IDs; historical command blobs are never loaded here.
@@ -82,10 +86,27 @@ class _SyncMixin(_SyncMixinBase):
                     timestamp = now,
                 )
                 db.add(snapshot)
-                db.commit()
-                logger.debug(f"Recorded Cluster Snapshot: Total={snapshot.total_gpus}, Used={snapshot.slurm_used_gpus}, Magnus={magnus_usage}")
+                return magnus_usage
+
+            magnus_usage = write_transaction(
+                SessionLocal,
+                save_snapshot,
+                operation=f"cluster_snapshot:{self.target.id}",
+            )
+            logger.debug(
+                "Recorded Cluster Snapshot: Total=%s, Used=%s, Magnus=%s",
+                capacity.total_gpus,
+                sum(allocations.values()),
+                magnus_usage,
+            )
         except Exception as error:
-            logger.error(f"Failed to record cluster snapshot: {error}")
+            if is_sqlite_busy(error):
+                logger.warning(
+                    "Cluster snapshot target=%s skipped after SQLite busy retries",
+                    self.target.id,
+                )
+            else:
+                logger.error(f"Failed to record cluster snapshot: {error}")
 
     def _dump_docker_logs(
         self,

@@ -79,6 +79,7 @@ class MagnusScheduler(
         self.last_snapshot_time = datetime.min.replace(tzinfo=timezone.utc)
         self.last_workspace_gc_time = datetime.min.replace(tzinfo=timezone.utc)
         self.preparing_jobs: Dict[str, asyncio.Task] = {}  # job_id -> Task
+        self._preparation_retry_after: dict[str, float] = {}
         # preparing_jobs 被两类执行体并发动：调度循环（event loop，建/清 task）与
         # terminate_job（sync 端点，跑在 FastAPI 线程池）。用一把锁串起所有 dict 访问，
         # 杜绝 del 撞 pop / 迭代期被改的 KeyError/RuntimeError。_loop 在 tick 里捕获，
@@ -221,6 +222,23 @@ class MagnusScheduler(
         # Keep the execution identity until final logs and workspace cleanup
         # complete, even when Docker has already stopped synchronously.
         job.start_time = None
+        if previous_allocation is None:
+            # A cancelled preparer may already be draining after a database error.
+            # Persist cleanup with termination, guarded against a concurrent launch.
+            self._job_query(db, Job).filter(
+                Job.id == job.id,
+                Job.status.in_((
+                    JobStatus.PREPARING,
+                    JobStatus.BUILDING,
+                    JobStatus.PENDING,
+                    JobStatus.TERMINATED,
+                )),
+                Job.slurm_job_id.is_(None),
+                Job.submission_attempt.is_(None),
+            ).update(
+                {Job.finalization_status: "CLEANUP"},
+                synchronize_session=False,
+            )
         db.commit()
         db.refresh(job)
         if previous_allocation is None and job.slurm_job_id is not None:

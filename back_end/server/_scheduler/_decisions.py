@@ -8,6 +8,7 @@ SLURM one head at a time, without aggregate-only preemption or backfill.
 import asyncio
 import threading
 from typing import TYPE_CHECKING, List, Tuple
+from time import monotonic
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,7 @@ from library.fundamental.scheduling import (
     select_conservative_backfill,
 )
 from ..database import SessionLocal
+from .._database_transactions import is_sqlite_busy
 from ..models import Job, JobStatus, JobType, job_metadata_load_options
 from .._magnus_config import is_local_mode
 from .._resource_manager._helpers import _run_blocking_io
@@ -49,10 +51,20 @@ class _DecisionsMixin(_DecisionsMixinBase):
         preparing_ids, paused_ids = await _run_blocking_io(
             self._load_preparation_candidates,
         )
+        with self._preparing_jobs_lock:
+            self._preparation_retry_after = {
+                job_id: deadline
+                for job_id, deadline in self._preparation_retry_after.items()
+                if job_id in preparing_ids
+            }
         for job_id in preparing_ids:
             with self._preparing_jobs_lock:
-                if job_id in self.preparing_jobs:
+                if (
+                    job_id in self.preparing_jobs
+                    or monotonic() < self._preparation_retry_after.get(job_id, 0)
+                ):
                     continue
+                self._preparation_retry_after.pop(job_id, None)
                 self.preparing_jobs[job_id] = asyncio.create_task(
                     self._prepare_job_resources(
                         job_id,
@@ -77,6 +89,14 @@ class _DecisionsMixin(_DecisionsMixinBase):
             if task.cancelled():
                 continue
             error = task.exception()
+            if error is not None and is_sqlite_busy(error):
+                with self._preparing_jobs_lock:
+                    self._preparation_retry_after[job_id] = monotonic() + 30
+                logger.warning(
+                    "Job %s preparation database write deferred",
+                    job_id,
+                )
+                continue
             if error is not None:
                 logger.error(
                     f"Job {job_id} preparation crashed: {error}",
