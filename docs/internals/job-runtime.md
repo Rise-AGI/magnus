@@ -80,6 +80,8 @@ complete. Cancellation stops Git and its transport helpers
 before releasing the repository lock. An expired moving reference still requires a
 successful fetch; a failure never silently selects an older cached HEAD.
 
+Cache refresh fetches have a shared 600-second execution budget across at most three attempts and their backoff. Lock waiting and joined process cleanup are outside this budget. A timeout does not restart another full-budget fetch. Failure to fetch a missing cached SHA is reported as acquisition failure, not proof that the commit does not exist upstream; a successful fetch with no matching object identifies the fetched branch. Exact cached SHAs still skip the network.
+
 ### SSH staging and uncertain submissions
 
 Directory uploads use one compressed stream instead of recursive SCP. The complete tree includes `.git`, empty directories, file modes and symbolic links as link text; link targets are never copied from outside the tree. A Python 3.6+ receiver verifies the byte count and SHA-256, extracts into a private sibling directory without following links, then publishes the complete tree atomically. Packaging, connection setup and streaming share the configured transfer deadline. Temporary compressed storage is required on both ends; local/Docker execution stays unchanged. A fresh staging attempt removes stale offline inputs before preparing current custody inputs.

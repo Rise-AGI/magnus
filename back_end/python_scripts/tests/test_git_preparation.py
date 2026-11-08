@@ -560,6 +560,202 @@ class RepoPreparationTests(unittest.IsolatedAsyncioTestCase):
                 (True, self.sha, "trunk"),
             )
 
+    async def test_fetch_new_commit_reads_requested_tree_and_file(
+        self,
+    ) -> None:
+        await self.prepare()
+        (self.source / "new-source.txt").write_text(
+            "new committed source",
+        )
+        await self.command(
+            "add",
+            "new-source.txt",
+        )
+        await self.command(
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "second",
+        )
+        sha = (await self.command(
+            "rev-parse",
+            "HEAD",
+        )).decode().strip()
+        self.assertEqual(
+            await self.prepare(
+                name="fresh-sha",
+                branch="trunk",
+                commit=sha,
+            ),
+            (True, sha, "trunk"),
+        )
+        self.assertEqual(
+            (self.root / "fresh-sha/new-source.txt").read_text(),
+            "new committed source",
+        )
+
+    async def test_fetch_budget_allows_slow_success_and_timeout_stops_retries(
+        self,
+    ) -> None:
+        async def slow_fetch(
+            *arguments,
+            **keywords,
+        ):
+            await asyncio.sleep(
+                0.05,
+            )
+            return 0, b"", b""
+
+        with patch.dict(
+            self.namespace,
+            {"_run_git": slow_fetch, "GIT_FETCH_TIMEOUT_SECONDS": 0.2},
+        ):
+            self.assertEqual(
+                await self.manager._fetch_in_cache(
+                    str(
+                        self.cache,
+                    ),
+                ),
+                (True, None),
+            )
+        fetch = AsyncMock(
+            side_effect=asyncio.TimeoutError,
+        )
+        with patch.dict(
+            self.namespace,
+            {"_run_git": fetch, "GIT_FETCH_TIMEOUT_SECONDS": 0.2},
+        ):
+            ok, reason = await self.manager._fetch_in_cache(
+                str(
+                    self.cache,
+                ),
+            )
+        self.assertFalse(
+            ok,
+        )
+        self.assertIn(
+            "timed out",
+            reason,
+        )
+        fetch.assert_awaited_once()
+
+    async def test_fetch_retries_share_remaining_budget(
+        self,
+    ) -> None:
+        clock = [0.0]
+        budgets = []
+
+        async def fetch(
+            *arguments,
+            **keywords,
+        ):
+            budgets.append(
+                keywords["timeout"],
+            )
+            clock[0] += 1.0
+            return 128, b"", b"connection reset"
+
+        async def sleep(
+            seconds,
+        ):
+            clock[0] += seconds
+
+        with patch.dict(
+            self.namespace,
+            {
+                "_run_git": fetch,
+                "time": SimpleNamespace(
+                    monotonic=lambda: clock[0],
+                ),
+                "asyncio": SimpleNamespace(
+                    sleep=sleep,
+                    TimeoutError=asyncio.TimeoutError,
+                ),
+                "GIT_FETCH_TIMEOUT_SECONDS": 3.0,
+            },
+        ):
+            ok, reason = await self.manager._fetch_in_cache(
+                str(
+                    self.cache,
+                ),
+            )
+        self.assertFalse(
+            ok,
+        )
+        self.assertIn(
+            "connection interrupted",
+            reason,
+        )
+        self.assertEqual(
+            budgets,
+            [3.0, 1.0],
+        )
+        self.assertEqual(
+            clock[0],
+            3.0,
+        )
+
+    async def test_missing_cached_sha_preserves_fetch_failure_category(
+        self,
+    ) -> None:
+        await self.prepare()
+        for index, failure in enumerate(
+            ("git fetch timed out", "git fetch failed: network connection failed"),
+        ):
+            with patch.object(
+                self.manager,
+                "_fetch_in_cache",
+                AsyncMock(
+                    return_value=(False, failure),
+                ),
+            ):
+                ok, reason, _ = await self.prepare(
+                    name=f"failed-fetch-{index}",
+                    branch="trunk",
+                    commit="a" * 40,
+                )
+            self.assertFalse(
+                ok,
+            )
+            self.assertIn(
+                failure,
+                reason,
+            )
+            self.assertNotIn(
+                "not found",
+                reason,
+            )
+            self.assertIn(
+                "unable to obtain",
+                reason,
+            )
+
+    async def test_successful_fetch_with_absent_sha_reports_fetched_branch(
+        self,
+    ) -> None:
+        await self.prepare()
+        ok, reason, _ = await self.prepare(
+            name="absent-commit",
+            branch="trunk",
+            commit="a" * 40,
+        )
+        self.assertFalse(
+            ok,
+        )
+        self.assertIn(
+            "unavailable in fetched branch",
+            reason,
+        )
+        self.assertNotIn(
+            "timed out",
+            reason,
+        )
+
     async def test_expired_head_fails_closed_and_keeps_fetch_reason(
         self,
     ) -> None:

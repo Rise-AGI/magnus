@@ -266,17 +266,23 @@ class _ReposMixin(_ReposMixinBase):
         cache_path: str,
     ) -> tuple[bool, str | None]:
         failure = "git fetch failed"
+        deadline = time.monotonic() + GIT_FETCH_TIMEOUT_SECONDS
         for attempt in range(GIT_FETCH_MAX_RETRIES):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
                 returncode, _, stderr = await _run_git(
                     "fetch",
                     "origin",
                     cwd=cache_path,
-                    timeout=GIT_FETCH_TIMEOUT_SECONDS,
+                    timeout=remaining,
                     capture_stdout=False,
                 )
             except asyncio.TimeoutError:
-                failure = f"git fetch timed out after {GIT_FETCH_TIMEOUT_SECONDS}s"
+                return False, (
+                    f"git fetch timed out within {GIT_FETCH_TIMEOUT_SECONDS}s total budget"
+                )
             except GitOperationError as error:
                 return False, str(
                     error,
@@ -305,8 +311,11 @@ class _ReposMixin(_ReposMixinBase):
                 cache_path,
             )
             if attempt < GIT_FETCH_MAX_RETRIES - 1:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
                 await asyncio.sleep(
-                    2 ** attempt,
+                    min(2 ** attempt, remaining),
                 )
         return False, failure
 
@@ -529,13 +538,12 @@ class _ReposMixin(_ReposMixinBase):
                         if fetch_ok:
                             self._write_cache_fetch_ts(cache_path)
                         if not await self._cache_has_commit(cache_path, commit_sha):
-                            logger.error(
-                                f"Commit {commit_sha} not found in cache for {repo_url} "
-                                f"({fetch_error or 'fetch succeeded'})"
-                            )
+                            if not fetch_ok:
+                                return False, (
+                                    f"{fetch_error}; unable to obtain requested commit {commit_sha}"
+                                ), None
                             return False, (
-                                f"commit {commit_sha} not found in repository "
-                                f"({fetch_error or 'fetch succeeded'})"
+                                f"requested commit {commit_sha} is unavailable in fetched branch {branch!r}"
                             ), None
                 else:
                     # "HEAD" / "msg:..." / tag / branch / 短 SHA 都可能指向移动目标：

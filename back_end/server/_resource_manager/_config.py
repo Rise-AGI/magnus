@@ -62,13 +62,13 @@ REPO_FRESHNESS_TTL_SECONDS = 30
 # 的默认分支，没必要每次都打 ls-remote
 DEFAULT_BRANCH_CACHE_TTL_SECONDS = 300
 
-# git fetch 重试与超时（对齐 _resolve_default_branch 的 3 次重试 + 指数退避；
-# fetch 比 ls-remote 重，超时放宽到 30s）
+# Fetch may transfer large new blobs even when the repository is cached.
+# All attempts and backoff share this budget; process cleanup is still joined.
 GIT_FETCH_MAX_RETRIES = 3
-GIT_FETCH_TIMEOUT_SECONDS = 30
+GIT_FETCH_TIMEOUT_SECONDS = 600
 
 # 首次 clone 的重试次数（与 fetch 对齐）。clone 不设超时 —— 它要拉全量历史，
-# 大仓库的正常耗时远超 fetch 的 30s 阈值，设了会把"慢"误判成"坏"。
+# 大仓库的正常耗时可能超过 fetch 的有界预算，设了会把"慢"误判成"坏"。
 GIT_CLONE_MAX_RETRIES = 3
 
 # cache 上的本地只读 git 查询（cat-file 查对象在不在、rev-parse 验 cache 本身能不能用）
