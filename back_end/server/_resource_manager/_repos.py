@@ -24,6 +24,7 @@ from ._config import (
     FULL_SHA_PATTERN,
 )
 from ._git_process import GitOperationError, _run_git, describe_git_failure
+from ._repo_maintenance import invalidate_cache
 from ._helpers import _remove_tree, _run_blocking_io
 
 
@@ -49,6 +50,28 @@ async def _remove_cache_dir(
 
 
 class _ReposMixin(_ReposMixinBase):
+
+    async def invalidate_repo_cache(
+        self,
+        namespace: str,
+        repo_name: str,
+        branch: str,
+        dry_run: bool,
+    ) -> dict:
+        path = self._get_repo_cache_path(
+            namespace,
+            repo_name,
+            branch,
+        )
+        lock = self.repo_locks.setdefault(
+            path,
+            asyncio.Lock(),
+        )
+        return await invalidate_cache(
+            path,
+            lock,
+            dry_run,
+        )
 
     async def _resolve_default_branch(
         self,

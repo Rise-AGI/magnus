@@ -7,6 +7,10 @@ import tempfile
 import logging
 from typing import List, Dict, Any, Awaitable, Callable, TypeVar
 from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel, Field, StrictBool
+
+from .._resource_manager import resource_manager
+from .._magnus_config import is_admin_user
 
 from .. import models
 from .auth import get_current_user
@@ -226,3 +230,50 @@ async def get_commits(
         f"commits:{ns}/{repo}/{branch}",
         lambda: _git_fetch_commits(ns, repo, branch, per_page=10),
     )
+
+
+class RepositoryCacheInvalidation(BaseModel):
+    branch: str = Field(min_length=1, max_length=1024)
+    dry_run: StrictBool = True
+
+
+@router.post("/github/{ns}/{repo}/cache/invalidate")
+async def invalidate_repository_cache(
+    ns: str,
+    repo: str,
+    request: RepositoryCacheInvalidation,
+    current_user: models.User = Depends(get_current_user),
+):
+    if not is_admin_user(current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Administrator access required",
+        )
+    try:
+        result = await resource_manager.invalidate_repo_cache(
+            namespace=ns,
+            repo_name=repo,
+            branch=request.branch,
+            dry_run=request.dry_run,
+        )
+    except (OSError, ValueError):
+        logger.exception("Repository cache maintenance failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Repository cache maintenance failed; inspect server diagnostics",
+        ) from None
+    if result["status"] == "busy":
+        raise HTTPException(
+            status_code=409,
+            detail="Repository cache is busy; no changes made",
+        )
+    logger.info(
+        "Repository cache maintenance actor=%r repository=%r branch=%r dry_run=%s status=%s bytes=%s",
+        current_user.id,
+        f"{ns}/{repo}",
+        request.branch,
+        request.dry_run,
+        result["status"],
+        result["cache_bytes"],
+    )
+    return result
