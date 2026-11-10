@@ -1504,13 +1504,17 @@ class ImageBuildManager:
     ) -> int:
         # Publication already owns maintenance_lock. Recheck after acquiring it
         # so another collector can resolve pressure without duplicate pruning.
-        try:
-            return await self._check_budget()
-        except _CacheBudgetError as error:
-            if error.reason == "scratch":
-                raise
-            await self._collect_cache_locked(protected)
-            return await self._check_budget()
+        for attempt in range(3):
+            try:
+                return await self._check_budget()
+            except _CacheBudgetError as error:
+                if error.reason == "scratch" or attempt == 2:
+                    raise
+                # Conversion keeps writing while GC awaits filesystem/worker I/O.
+                # Recheck and collect again rather than treating one stale sample
+                # as proof that all remaining cache is indispensable.
+                await self._collect_cache_locked(protected)
+        raise AssertionError("Budget checks must return or raise")
 
     async def _collect_cache_locked(
         self,
@@ -1528,11 +1532,15 @@ class ImageBuildManager:
         )
         removed_orphans = await self._remove_orphans(protected)
         target = int(self.budget * 0.8)
-        # The low watermark applies to retained cache. Temporary conversion
-        # bytes must fit the total ceiling without lowering that watermark.
+        # Preserve retained-cache policy below the ceiling. Once a live writer
+        # crosses it, reclaim runtime copies with headroom instead of repeatedly
+        # stopping a few bytes below a limit the conversion is still approaching.
+        total_target = self.budget
+        if scratch_size and local_size + worker_size > self.budget:
+            total_target -= self.budget // 10
         if (
             not removed_orphans
-            and local_size + worker_size <= min(self.budget, target + scratch_size)
+            and local_size + worker_size <= min(total_target, target + scratch_size)
             and free >= self.reclaim_free
         ):
             return
@@ -1541,9 +1549,9 @@ class ImageBuildManager:
         with self.lock:
             products = {value["digest"]: dict(value) for value in self.results.values()}
         for digest, result in sorted(products.items(), key=lambda item: item[1].get("accessed_at", 0)):
-            if local_size + worker_size <= min(self.budget, target + scratch_size) and free >= self.reclaim_free:
+            if local_size + worker_size <= min(total_target, target + scratch_size) and free >= self.reclaim_free:
                 break
-            if not is_local_mode and local_size + worker_size <= min(self.budget, target + scratch_size):
+            if not is_local_mode and local_size + worker_size <= min(total_target, target + scratch_size):
                 # Deleting a SIF cannot relieve pressure on a separate scratch
                 # volume.
                 cache_free = await blocking_io(

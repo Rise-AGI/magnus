@@ -680,7 +680,7 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.manager.client.prune.assert_not_awaited()
         await self.manager._check_budget()
 
-    async def test_transient_pressure_stops_eviction_after_total_fits(
+    async def test_transient_pressure_reclaims_headroom_for_continuing_conversion(
         self,
     ) -> None:
         mib = 1024 ** 2
@@ -704,9 +704,57 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.manager.scratch_budget = 32 * mib
         await self.manager._ensure_budget()
         self.assertFalse(paths[0].exists())
-        self.assertTrue(paths[1].exists())
+        self.assertFalse(paths[1].exists())
         self.manager.client.prune.assert_not_awaited()
         await self.manager._check_budget()
+
+    async def test_conversion_growth_during_collection_retries_reclaimable_cache(
+        self,
+    ) -> None:
+        mib = 1024 ** 2
+        for character in ("c", "d", "e"):
+            digest = "sha256:" + character * 64
+            with self.manager._sif_path(digest).open("wb") as stream:
+                stream.truncate(20 * mib)
+            self.manager.results[character * 64] = {
+                "digest": digest,
+                "size_bytes": 20 * mib,
+                "accessed_at": 0,
+            }
+        with self.archive.open("wb") as stream:
+            stream.truncate(mib)
+        self.manager.budget = 100 * mib
+        self.manager.scratch_budget = 64 * mib
+        self.manager.client.size = 50 * mib
+        # BuildKit may retain every layer while a solve/export is active.
+        self.manager.client.prune = AsyncMock()
+        save_index = self.manager._save_index
+        writes = 0
+
+        async def grow_after_first_collection():
+            nonlocal writes
+            await save_index()
+            writes += 1
+            if writes == 1:
+                with self.archive.open("wb") as stream:
+                    stream.truncate(36 * mib)
+
+        self.manager._save_index = grow_after_first_collection
+        await self.manager._ensure_budget()
+        self.assertGreaterEqual(writes, 2)
+        await self.manager._check_budget()
+        self.assertEqual(self.manager.results, {})
+
+    async def test_unreclaimable_budget_retry_is_bounded(
+        self,
+    ) -> None:
+        self.manager._usage = AsyncMock(return_value=(20, 1000, 0))
+        self.manager.budget = 100
+        self.manager.client.size = 100
+        self.manager._collect_cache_locked = AsyncMock()
+        with self.assertRaises(self.module._CacheBudgetError):
+            await self.manager._ensure_budget()
+        self.assertEqual(self.manager._collect_cache_locked.await_count, 2)
 
     async def test_retained_cache_still_reclaims_to_low_watermark(
         self,

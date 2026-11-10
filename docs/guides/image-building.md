@@ -143,10 +143,14 @@ the same distinction used by managed build services such as
 [CodeBuild](https://docs.aws.amazon.com/codebuild/latest/userguide/builds-working.html).
 
 The cache's 80% reclamation target applies to retained layer/runtime data.
-Temporary exports and conversion data still count toward the full cache ceiling,
-but do not lower that retained-cache target. During temporary pressure Magnus
-reclaims only enough to fit the total ceiling, respecting active runtime pins;
-it does not discard extra ready images just to reach 80% including scratch.
+Temporary exports and conversion data still count toward the full cache ceiling.
+Below that ceiling, with the free-space target satisfied, temporary data does not
+trigger additional eviction. When scratch is present and aggregate usage exceeds
+the ceiling, runtime-copy eviction targets 10% total
+headroom so continued writes do not immediately exhaust the reclaimed space.
+Active runtime pins remain protected; worker pruning only requests the remaining
+aggregate excess. Budget checks retry reclamation a bounded number of times if
+writes race with collection; hard scratch and free-space limits still apply.
 
 ## Compatibility and acceptance
 
