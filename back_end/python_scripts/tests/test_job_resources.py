@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from pydantic import BaseModel
 from test_execution_targets import targets_module
@@ -197,6 +197,42 @@ class JobResourceIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(job.resource_mode, "slurm_per_cpu")
         self.assertFalse(hasattr(job, "resource_summary"))
+
+    def test_shared_admission_checks_resolved_gpu_partition_before_creating_job(self):
+        path = SERVER / "routers/jobs.py"
+        function = next(node for node in ast.parse(path.read_text()).body if isinstance(node, ast.FunctionDef) and node.name == "create_job")
+        config = {
+            "execution": {"image_build": {"enabled": True}, "slurm": {"partition": "cpu", "qos": "normal"}},
+            "cluster": {"gpus": [{"value": "rtx5090", "partition": "gpu"}]},
+        }
+        limits = Mock()
+        limits.validate.side_effect = ValueError("partition time limit")
+        create = Mock()
+        namespace = dict(self.namespace)
+        namespace.update(
+            requested_execution_target=targets_module.requested_execution_target,
+            assert_target_submission_allowed=lambda *args: None,
+            magnus_config=config,
+            models=SimpleNamespace(Job=create),
+            is_local_mode=False,
+            scheduler=SimpleNamespace(for_target=lambda key: SimpleNamespace(
+                target=SimpleNamespace(id="default"), config=config,
+                slurm_manager=SimpleNamespace(time_limits=limits),
+            )),
+            resolve_job_resource_target=load_resources()["resolve_job_resource_target"],
+            apply_cluster_defaults=lambda *args, **kwargs: None,
+            normalize_per_cpu_resources=lambda *args, **kwargs: None,
+            validate_cluster_limits=lambda *args, **kwargs: None,
+            enforce_field_size_limits=lambda *args: None,
+        )
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
+        with self.assertRaisesRegex(ValueError, "partition time limit"):
+            namespace["create_job"](
+                {"task_name": "long", "entry_command": "true", "gpu_count": 1, "gpu_type": "rtx5090", "time_limit": 10080},
+                "user", Mock(),
+            )
+        limits.validate.assert_called_once_with(minutes=10080, partition="gpu", qos="normal")
+        create.assert_not_called()
 
     def test_cluster_native_and_external_rows_share_actual_allocation_totals(self):
         from test_gpu_resource_query import Field, load_queries

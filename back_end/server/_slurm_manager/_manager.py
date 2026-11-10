@@ -5,6 +5,7 @@ from typing import Optional
 from .._magnus_config import magnus_config
 from ._resource_query import _ResourceQueryMixin
 from ._control import _ControlMixin
+from ._time_limits import PartitionTimeLimits
 from ._transport import _Transport, build_transport
 
 
@@ -23,6 +24,9 @@ class SlurmManager(_ResourceQueryMixin, _ControlMixin):
             transport
             if transport is not None
             else build_transport(self.config["transport"])
+        )
+        self.time_limits = PartitionTimeLimits(
+            self._transport,
         )
 
     @property

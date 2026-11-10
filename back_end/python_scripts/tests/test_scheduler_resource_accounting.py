@@ -523,6 +523,22 @@ class SubmissionTargetTests(unittest.TestCase):
                     count if expected_type is not None else 0,
                 )
 
+    def test_sbatch_rechecks_policy_before_dispatch(self):
+        module = load_accounting()
+        config = configuration()
+        config["execution"]["slurm"].update(qos="normal")
+        module["magnus_config"] = config
+        control = module["_ControlMixin"]()
+        def reject(**values):
+            self.assertEqual(values, {"minutes": 10080, "partition": "compute", "qos": "normal"})
+            raise ValueError("partition time limit")
+        control.time_limits = SimpleNamespace(validate=reject)
+        with self.assertRaisesRegex(ValueError, "partition time limit"):
+            control.submit_job_simple(
+                entry_command="python3 wrapper.py", gpus=0, job_name="fixture",
+                runner="fixture", token="fixture", time_limit=10080,
+            )
+
     def test_unspecified_partition_emits_no_partition_override(self):
         module = load_accounting()
         config = configuration()

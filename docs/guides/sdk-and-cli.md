@@ -194,6 +194,8 @@ print(job_id)
 | `time_limit` | int \| None | No | None | Max walltime in minutes (SLURM `--time`; None = partition default) |
 | `runner` | str \| None | No | None | Runner (None = cluster default) |
 
+Slurm submissions with an explicit `time_limit` are checked against the selected partition’s live `MaxTime` before creating the Job, and checked again before `sbatch`. GPU partition overrides and an implicit default partition use the same target resolution as submission. A known conflict returns HTTP 400; Magnus does not silently shorten the request or change existing Jobs. QOS `PartitionTimeLimit` overrides are respected. Policy reads are bounded to five seconds and shared for 30 seconds per target. Missing/unsupported policy or uncertain QOS keeps the existing submission path; this is not a scheduling guarantee. `None` preserves Slurm defaults, and Docker/local is unchanged.
+
 **Returns**: Job ID (str)
 
 Job list/detail responses also include `resource_summary`, with whole-job request totals and an explicit resource mode. Cluster running rows report actual SLURM allocations instead. The original request fields retain the per-task/per-node semantics above; use the summary for display, not as submission input. See [resource display semantics](../internals/job-runtime.md#slurm-submission-parameters) for formulas and historical-record handling.

@@ -63,6 +63,13 @@ class _ControlMixin:
             config = self.config,
         )
 
+        if time_limit is not None:
+            self.time_limits.validate(
+                minutes=time_limit,
+                partition=target.partition,
+                qos=slurm_config["qos"],
+            )
+
         # module_loads：在 batch script 里、exec wrapper 之前注入 `module load` 行，
         # 让租户站点先把容器运行时（singularity）等放上 PATH。module_loads
         # 为空时这段为空串，script_content 与历史字节级一致。`exec` 让 module load 后的

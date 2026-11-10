@@ -32,7 +32,10 @@ from .._scheduler import scheduler
 from .._resource_manager import resource_manager
 from .._resource_manager._build_progress import BuildProgress
 from .._protocol_files import open_protocol_file
-from .._job_resources import resource_mode_for_execution
+from .._job_resources import (
+    resolve_job_resource_target,
+    resource_mode_for_execution,
+)
 from .auth import get_current_user
 from library import escape_like
 
@@ -155,6 +158,17 @@ def create_job(
         # PENDING、cluster 视图被污染。SLURM 模式下走 has_schedulable_node()；local
         # 模式无此概念跳过。失败时 has_schedulable_node 自身 fail-open，不会引入新故障。
         if not is_local_mode and worker.slurm_manager is not None:
+            if job_dict.get("time_limit") is not None:
+                resource_target = resolve_job_resource_target(
+                    gpu_count=job_dict["gpu_count"],
+                    gpu_type=job_dict.get("gpu_type"),
+                    config=config,
+                )
+                worker.slurm_manager.time_limits.validate(
+                    minutes=job_dict["time_limit"],
+                    partition=resource_target.partition,
+                    qos=config["execution"]["slurm"]["qos"],
+                )
             if not worker.slurm_manager.has_schedulable_node():
                 raise HTTPException(
                     status_code=503,

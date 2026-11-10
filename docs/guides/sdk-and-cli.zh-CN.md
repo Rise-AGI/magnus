@@ -194,6 +194,8 @@ print(job_id)
 | `time_limit` | int \| None | 否 | None | 最大墙钟（分钟，SLURM `--time`；None = 分区默认） |
 | `runner` | str \| None | 否 | None | 运行人（None = 集群默认） |
 
+显式指定 `time_limit` 的 Slurm 提交会在创建 Job 前按实际分区的实时 `MaxTime` 校验，并在 `sbatch` 前复核。GPU 分区覆盖和未指定时的默认分区按实际提交目标解析。明确冲突返回 HTTP 400，不静默缩短时限，也不修改既有 Job；尊重 QOS 的 `PartitionTimeLimit` 例外。策略查询总预算五秒，同一执行目标共享三十秒缓存；策略不可读、不支持或 QOS 不确定时保留原提交路径，不冒称一定可调度。`None` 保留 Slurm 默认行为，Docker/local 不受影响。
+
 **返回值**：Job ID (str)
 
 Job 列表与详情响应还包含 `resource_summary`，提供全 Job 请求总量及明确的资源口径。集群运行列表则报告 SLURM 实际分配。原请求字段仍保留上表的每 task/每节点语义；摘要用于展示，不用于提交。公式与历史记录处理见[资源展示语义](../internals/job-runtime.zh-CN.md#slurm-提交参数)。
