@@ -83,6 +83,8 @@ class BuildProgress:
                 )
             self.stage = name
             self.stage_started = now
+            if name is not None:
+                self.updated = time.time()
 
     def record_size(
         self,

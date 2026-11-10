@@ -1126,6 +1126,19 @@ class ImageBuildManager:
                     process_directory=directory,
                 )
                 await self._ensure_budget()
+                operation.progress.set_stage(
+                    "conversion_cleanup",
+                )
+                # The converter and its process group have exited. Retaining the
+                # OCI archive during a cross-volume SIF copy adds avoidable disk pressure.
+                await blocking_io(
+                    self._clear_scratch_payload,
+                    directory,
+                    keep=frozenset({"image.sif"}),
+                )
+                operation.progress.set_stage(
+                    "sif_hash",
+                )
                 digest = await blocking_io(_hash_file, temporary_sif)
                 path = self._sif_path(digest)
                 incoming = self.root / f".{digest.split(':')[1]}.{uuid.uuid4().hex}.tmp"
@@ -1206,11 +1219,13 @@ class ImageBuildManager:
     @staticmethod
     def _clear_scratch_payload(
         directory: Path,
+        *,
+        keep: frozenset[str] = frozenset(),
     ) -> None:
         # Keep the ownership/process lease through the publication transaction.
         # Startup must wait for an interrupted Docker tag command before GC.
         for path in directory.iterdir():
-            if path.name in {"owner.json", "process.json"}:
+            if path.name in {"owner.json", "process.json"} or path.name in keep:
                 continue
             if path.is_dir() and not path.is_symlink() and not path.is_junction():
                 shutil.rmtree(path)

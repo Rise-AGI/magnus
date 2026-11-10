@@ -75,6 +75,8 @@ Rootless 限制宿主权限，但不自动提供网络隔离。RootlessKit 默�
 
 `scratch_size` 限制构建临时数据的总量，默认继承 `cache_size`；它包含在总缓存预算内，不是额外额度。容量检查在转换期间以及删除临时产物之前执行，因此即使最终 SIF 能放下，瞬时峰值仍可能使构建失败。这些是采样检查，物理硬上限仍需有配额的文件系统或卷。快速磁盘或有容量约束的内存卷可减少转换 I/O，但 tmpfs 同时占用宿主内存，需在 BuildKit worker 之外独立规划；Magnus 不挂载卷，也不会自动把大镜像切到内存中构建。
 
+SIF 转换与检查成功后，Magnus 在哈希和复制成品到缓存之前释放已消费的 OCI 归档和转换临时文件，所有权记录保留到发布结束。这降低跨盘发布的空间峰值，不消除前面的解包和压缩峰值。`conversion_cleanup` 与 `sif_hash` 分别记录清理和哈希耗时，不再混入检查阶段。即使没有新命令输出，阶段切换也更新 `updated_at`；该时间不是进程存活心跳。
+
 SIF 转换可用 `conversion_cpus`（默认 `2`）和 `conversion_memory`（默认 `1G`）限制 mksquashfs 的处理器数量及工作内存，同时保留 gzip 格式对旧 Singularity 的兼容。这不是整个进程或 cgroup 的硬限制，BuildKit daemon 的资源限额也不覆盖后端启动的 Apptainer 子进程；需要时另配操作系统级限额。Docker/local 仍用 `docker load`，这两个 SIF 配置项不改变 Docker 导入行为。
 
 `conversion_gzip_level` 默认为 `null`，保留现有转换命令和缓存键。管理员可显式设为

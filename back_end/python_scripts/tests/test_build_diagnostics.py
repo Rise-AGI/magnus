@@ -56,6 +56,30 @@ def log_event(
 
 
 class ProgressTests(unittest.TestCase):
+    def test_stage_transition_updates_timestamp_without_new_log_output(
+        self,
+    ) -> None:
+        with patch.object(progress_module.time, "time", return_value=10) as clock:
+            progress = progress_module.BuildProgress()
+            clock.return_value = 20
+            progress.set_stage("sif_hash")
+            self.assertEqual(progress.snapshot()["updated_at"], progress_module._timestamp(20))
+            clock.return_value = 30
+            progress.set_stage("sif_hash")
+            self.assertEqual(progress.snapshot()["updated_at"], progress_module._timestamp(20))
+
+
+    def test_terminal_stage_closure_keeps_finished_update_timestamp(
+        self,
+    ) -> None:
+        progress = progress_module.BuildProgress()
+        progress.set_stage("sif_hash")
+        with patch.object(progress_module.time, "time", side_effect=[20, 21, 22]):
+            progress.set_phase("ready")
+        result = progress.snapshot()
+        self.assertEqual(result["finished_at"], result["updated_at"])
+        self.assertEqual(result["finished_at"], progress_module._timestamp(20))
+
     def test_cancelled_snapshot_survives_transient_write_failure(
         self,
     ) -> None:

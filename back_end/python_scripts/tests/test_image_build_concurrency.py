@@ -189,6 +189,40 @@ class ImageBuildConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             await self.manager._collect_cache()
         self.assertFalse(self.manager._sif_path(digest).exists())
 
+    async def test_conversion_releases_archive_before_cross_volume_publication(
+        self,
+    ) -> None:
+        self.finish_conversion.set()
+        staged = []
+
+        def copy_to_cache(
+            source: Path,
+            destination: Path,
+        ) -> None:
+            self.assertFalse(self.archive.exists())
+            self.assertFalse((self.directory / "apptainer-tmp").exists())
+            self.assertTrue((self.directory / "owner.json").is_file())
+            self.assertTrue((self.directory / "process.json").is_file())
+            staged.append(source.read_bytes())
+            destination.write_bytes(source.read_bytes())
+
+        with patch.object(self.module, "_stage_sif", side_effect=copy_to_cache):
+            result = await self.import_image()
+        self.assertEqual(staged, [b"SIF bytes"])
+        self.assertEqual(Path(result["sif_path"]).read_bytes(), b"SIF bytes")
+        self.assertEqual(
+            {path.name for path in self.directory.iterdir()},
+            {"owner.json", "process.json"},
+        )
+
+    async def test_failed_converter_keeps_archive_for_owned_cleanup(
+        self,
+    ) -> None:
+        self.module.run_command = AsyncMock(side_effect=RuntimeError("converter failed"))
+        with self.assertRaisesRegex(RuntimeError, "converter failed"):
+            await self.import_image()
+        self.assertEqual(self.archive.read_bytes(), b"archive")
+
     async def test_explicit_fast_gzip_reaches_converter(
         self,
     ) -> None:
