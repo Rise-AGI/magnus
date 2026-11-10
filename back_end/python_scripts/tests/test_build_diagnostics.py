@@ -303,6 +303,31 @@ class ProgressTests(unittest.TestCase):
 
 
 class ClientNetworkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_proxy_is_passed_only_as_explicit_frontend_build_arguments(
+        self,
+    ) -> None:
+        for proxy in (None, "http://127.0.0.1:3128"):
+            observed = []
+
+            async def command(arguments, **kwargs):
+                observed.append(arguments)
+                (kwargs["process_directory"] / "image.tar").write_bytes(b"archive")
+
+            with tempfile.TemporaryDirectory() as directory:
+                client = buildkit.BuildKitClient({
+                    "platform": "linux/amd64",
+                    "timeout_seconds": 30,
+                    "proxy_url": proxy,
+                })
+                with patch.object(buildkit, "run_command", command):
+                    await client.build(pathlib.Path(directory), "example", lambda line: None)
+            actual = [value for value in observed[0] if value.startswith("build-arg:")]
+            expected = [] if proxy is None else [
+                f"build-arg:{name}={proxy}"
+                for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+            ]
+            self.assertEqual(actual, expected)
+
     async def test_registry_token_exchange_stays_on_the_builder(self):
         observed = []
         async def command(arguments, **kwargs):

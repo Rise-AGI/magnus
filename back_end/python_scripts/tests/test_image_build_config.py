@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import typing
 import unittest
+from urllib.parse import urlsplit
 
 
 SERVER = Path(__file__).resolve().parents[2] / "server"
@@ -16,6 +17,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 def load_validator():
     namespace = {
         "Path": Path,
+        "urlsplit": urlsplit,
         "logger": logging.getLogger("image_build_configuration_test"),
         "Type": typing.Type,
         "Set": typing.Set,
@@ -88,6 +90,17 @@ class BuildConfigurationTests(unittest.TestCase):
             config = self.configuration(conversion_gzip_level=level)
             self.validate(config)
             self.assertEqual(config["execution"]["image_build"]["conversion_gzip_level"], level)
+
+    def test_build_proxy_is_optional_and_rejects_credentials(
+        self,
+    ) -> None:
+        for value in (None, "http://127.0.0.1:3128", "http://[::1]:3128/"):
+            config = self.configuration(proxy_url=value)
+            self.validate(config)
+            self.assertEqual(config["execution"]["image_build"]["proxy_url"], value)
+        for value in (False, "", "http://user:secret@proxy:3128", "https://proxy", "http://proxy/path", "http://proxy:0", "http://proxy:65536", "http://proxy\n", "http://proxy?x=1"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.validate(self.configuration(proxy_url=value))
 
     def test_explicit_scratch_and_conversion_limits(self):
         with tempfile.TemporaryDirectory() as directory:

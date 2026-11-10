@@ -197,3 +197,14 @@ Only registered detached directories with a matching owner and an idle lease, or
 absent child and process group, can be reclaimed. Unknown leases, live processes and foreign
 owners remain protected and block cold builds. Windows running leases still require operator
 verification. Recovery neither kills processes nor deletes scientific workspaces.
+
+### Build download proxy
+
+`execution.image_build.proxy_url` optionally supplies an HTTP forward proxy via
+BuildKit's standard HTTP_PROXY/HTTPS_PROXY build arguments (including lowercase
+variants). It defaults to null, accepts no embedded credentials, and applies to
+proxy-aware Dockerfile RUN tools, not registry image pulls. No Dockerfile edits
+are required; the proxy does not become a runtime environment variable unless
+the Dockerfile explicitly persists it. Configure reachability and egress policy
+inside the builder's isolation boundary; do not use it to bypass private-network
+restrictions. The URL is not a secret and does not change Magnus's cache identity.

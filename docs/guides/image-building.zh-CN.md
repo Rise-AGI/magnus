@@ -173,3 +173,11 @@ BuildKit 容量；仍校验成品身份，并遵守执行阶段自己的空间�
 登记的脱离操作目录、匹配的 owner 和明确 idle 租约，或 POSIX 子进程及整个进程组
 均已退出，才允许回收；未知租约、活进程、外部 owner 保留并拒绝冷构建。
 Windows 的 running 租约仍需人工核验。重试不会杀进程或删除科学工作区。
+
+### 构建下载代理
+
+可选配置 `execution.image_build.proxy_url` 通过 BuildKit 标准 HTTP_PROXY/HTTPS_PROXY
+构建参数（含小写形式）传给支持代理的 Dockerfile RUN 工具，默认 null，不允许内嵌
+凭证，不影响 registry 镜像拉取。无需修改 Dockerfile；除非配方显式持久化，代理
+不会成为产物的运行时环境变量。代理的可达性与出网限制必须在构建器隔离边界内配置，
+不能借此绕过私网访问限制。该 URL 不作为秘密，也不改变 Magnus 缓存身份。

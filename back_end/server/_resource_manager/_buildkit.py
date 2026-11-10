@@ -349,9 +349,16 @@ class BuildKitClient:
         # Registry challenges supply arbitrary token realms. Keep that HTTP
         # exchange inside the builder's network boundary, not on the backend.
         environment["BUILDKIT_NO_CLIENT_TOKEN"] = "true"
+        proxy_arguments: list[str] = []
+        if proxy := self.config.get("proxy_url"):
+            # Standard frontend proxy args are build-only and excluded from the
+            # cache key/history unless the Dockerfile explicitly references them.
+            for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+                proxy_arguments.extend(["--opt", f"build-arg:{name}={proxy}"])
         await run_command(
             self.arguments(
                 "build",
+                *proxy_arguments,
                 "--frontend", "dockerfile.v0",
                 "--local", f"dockerfile={directory / 'recipe'}",
                 "--local", f"context={directory / 'context'}",

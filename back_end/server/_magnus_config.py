@@ -2,6 +2,7 @@
 import sys
 import logging
 from typing import Set, Type
+from urllib.parse import urlsplit
 from library import *
 from ._size_utils import _parse_size_string, effective_cpu_count_per_cpu, parse_memory_bytes
 from ._execution_targets import execution_targets
@@ -90,6 +91,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         "enabled": False,
         "address": None,
         "buildctl": "buildctl",
+        "proxy_url": None,
         "platform": "linux/amd64",
         "max_concurrent": 2,
         "max_concurrent_per_user": None,
@@ -113,6 +115,23 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     for key, value in build_defaults.items():
         image_build.setdefault(key, value)
     _check_key(image_build, "enabled", bool)
+    proxy = image_build["proxy_url"]
+    if proxy is not None:
+        if not isinstance(proxy, str) or any(character.isspace() for character in proxy):
+            raise ValueError("execution.image_build.proxy_url must be an HTTP proxy URL or null")
+        parsed_proxy = urlsplit(proxy)
+        if (
+            parsed_proxy.scheme != "http"
+            or not parsed_proxy.hostname
+            or parsed_proxy.username is not None
+            or parsed_proxy.password is not None
+            or parsed_proxy.path not in ("", "/")
+            or parsed_proxy.query
+            or parsed_proxy.fragment
+            or any(ord(character) < 32 for character in proxy)
+            or parsed_proxy.port == 0
+        ):
+            raise ValueError("execution.image_build.proxy_url must be an HTTP URL without credentials")
     prefix = image_build["conversion_command_prefix"]
     if not isinstance(prefix, list) or any(
         not isinstance(argument, str) or not argument.strip() or "\x00" in argument

@@ -170,6 +170,7 @@ execution:
   #   scratch_root: null                 # absolute parent; null keeps ephemeral_root/image_build_tmp
   #   scratch_size: null                 # aggregate scratch ceiling; null inherits cache_size
   #   conversion_cpus: 2                 # mksquashfs processors for local SIF conversion
+  #   proxy_url: null                  # Optional build-only HTTP(S) forward proxy; no credentials
   #   conversion_gzip_level: null        # null preserves runtime default; 1..9 selects gzip speed/size
   #   conversion_memory: 1G              # mksquashfs working-memory limit, not a process/cgroup limit
   #   tls_ca: null                       # tcp:// builders require all three mTLS files
