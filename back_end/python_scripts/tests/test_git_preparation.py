@@ -47,6 +47,8 @@ def load_repos(
             cache_root,
         ),
         "is_local_mode": True,
+        "magnus_config": {"execution": {}},
+        "github_repository_url": runpy.run_path(str(SERVER / "_repository_transport.py"))["github_repository_url"],
         "_run_git": git._run_git,
         "GitOperationError": git.GitOperationError,
         "describe_git_failure": git.describe_git_failure,
@@ -643,6 +645,38 @@ class RepoPreparationTests(unittest.IsolatedAsyncioTestCase):
             reason,
         )
         fetch.assert_awaited_once()
+
+    async def test_fetch_transport_override_preserves_cache_origin_and_refs(
+        self,
+    ) -> None:
+        await self.prepare()
+        old_origin = (await git._run_git(
+            "remote", "get-url", "origin", cwd=str(self.cache),
+        ))[1]
+        await self.command(
+            "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "second",
+        )
+        wanted = (await self.command("rev-parse", "HEAD")).strip()
+        await git._run_git(
+            "remote", "set-url", "origin", str(self.root / "unreachable"),
+            cwd=str(self.cache),
+        )
+        ok, reason = await self.manager._fetch_in_cache(
+            str(self.cache),
+            repo_url=str(self.source),
+        )
+        self.assertTrue(ok, reason)
+        code, actual, _ = await git._run_git(
+            "rev-parse", "refs/remotes/origin/trunk", cwd=str(self.cache),
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(actual.strip(), wanted)
+        _, origin, _ = await git._run_git(
+            "remote", "get-url", "origin", cwd=str(self.cache),
+        )
+        self.assertEqual(origin.strip(), str(self.root / "unreachable").encode())
+        self.assertNotEqual(origin, old_origin)
 
     async def test_fetch_retries_share_remaining_budget(
         self,

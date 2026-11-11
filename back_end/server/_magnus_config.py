@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 from library import *
 from ._size_utils import _parse_size_string, effective_cpu_count_per_cpu, parse_memory_bytes
 from ._execution_targets import execution_targets
+from ._repository_transport import validate_github_https_url
 
 
 __all__ = [
@@ -81,6 +82,9 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
         raise ValueError(f"❌ execution.backend 必须是 'slurm' 或 'local'，当前值: '{backend}'")
 
     is_local = backend == "local"
+    validate_github_https_url(
+        execution.get("github_https_url"),
+    )
 
     # Opt-in: existing sites neither need buildctl nor contact a builder.
     execution.setdefault("image_build", {})
@@ -539,7 +543,7 @@ def _prepare_and_validate_magnus_config(config: Dict[str, Any])-> None:
     if type(prepare_timeout) is not int or prepare_timeout <= 0:
         raise ValueError("execution.container_prepare_timeout_seconds must be a positive integer")
 
-    _warn_extra_keys(execution, expected_exec_keys | {"image_build", "target_id", "target_name", "targets", "allowed_users", "container_image_mode", "container_prepare_timeout_seconds"}, "execution")
+    _warn_extra_keys(execution, expected_exec_keys | {"github_https_url", "image_build", "target_id", "target_name", "targets", "allowed_users", "container_image_mode", "container_prepare_timeout_seconds"}, "execution")
 
     resource_cache = execution["resource_cache"]
     _check_key(resource_cache, "container_cache_size", str)

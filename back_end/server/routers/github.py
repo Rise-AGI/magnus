@@ -14,7 +14,8 @@ from .._magnus_config import is_admin_user
 
 from .. import models
 from .auth import get_current_user
-from .._magnus_config import is_local_mode
+from .._magnus_config import is_local_mode, magnus_config
+from .._repository_transport import github_repository_url
 
 
 router = APIRouter()
@@ -102,9 +103,12 @@ def _classify_git_error(stderr: str) -> tuple[int, str]:
 
 
 def _repo_url(ns: str, repo: str) -> str:
-    if is_local_mode:
-        return f"https://github.com/{ns}/{repo}.git"
-    return f"git@github.com:{ns}/{repo}.git"
+    return github_repository_url(
+        ns,
+        repo,
+        local=is_local_mode,
+        https_url=magnus_config["execution"].get("github_https_url"),
+    )
 
 
 async def _git_ls_remote_branches(ns: str, repo: str) -> List[Dict[str, str]]:

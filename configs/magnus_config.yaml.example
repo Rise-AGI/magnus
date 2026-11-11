@@ -146,6 +146,9 @@ server:
 #       #                                  # built-in defaults (verification code / OTP / 验证码 ... vs password / 口令)
 
 execution:
+  # Optional trusted HTTPS GitHub proxy; private repos need HTTPS Git credentials.
+  # null preserves SSH on Slurm and HTTPS on local. No credentials in this URL.
+  github_https_url: null
   backend: slurm                         # slurm | local
   container_runtime: apptainer           # apptainer | singularity (slurm) | docker (local)
   container_image_mode: native           # native | sandbox (Slurm: one read-only image per Job)

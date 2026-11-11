@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 import importlib.util
 import logging
+import runpy
 from pathlib import Path
 import sys
 import tempfile
@@ -104,6 +105,7 @@ class TargetConfigurationTests(unittest.TestCase):
     def test_complete_configuration_validates_each_target_and_connector(self):
         namespace = {name: getattr(typing, name) for name in ("Any", "Dict", "Set", "Type")}
         namespace.update(Path=Path, logger=logging.getLogger(__name__))
+        namespace["validate_github_https_url"] = runpy.run_path(str(SERVER / "_repository_transport.py"))["validate_github_https_url"]
         exec(compile((SERVER / "_size_utils.py").read_text(), "sizes", "exec"), namespace)
         tree = ast.parse((SERVER / "_magnus_config.py").read_text())
         functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {

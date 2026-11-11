@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 from library import is_disk_full_stderr, disk_full_message
 
-from .._magnus_config import is_local_mode
+from .._magnus_config import is_local_mode, magnus_config
+from .._repository_transport import github_repository_url
 from .._job_dir_access import grant_job_dir_runner_access
 from . import logger, magnus_repo_cache_path
 from ._config import (
@@ -287,9 +288,22 @@ class _ReposMixin(_ReposMixinBase):
     async def _fetch_in_cache(
         self,
         cache_path: str,
+        repo_url: str | None = None,
     ) -> tuple[bool, str | None]:
         failure = "git fetch failed"
         deadline = time.monotonic() + GIT_FETCH_TIMEOUT_SECONDS
+        fetch_arguments = ("origin",)
+        if repo_url is not None:
+            code, stdout, stderr = await _run_git(
+                "config", "--get-all", "remote.origin.fetch",
+                cwd=cache_path,
+                timeout=GIT_LOCAL_QUERY_TIMEOUT_SECONDS,
+            )
+            if code != 0 or not stdout.strip():
+                return False, "repository cache is missing its origin fetch refspec"
+            # Keep the cache's branch mapping without persisting a new origin or
+            # relying on remote.origin.url, which is a multi-valued Git setting.
+            fetch_arguments = (repo_url, *stdout.decode().splitlines())
         for attempt in range(GIT_FETCH_MAX_RETRIES):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -297,7 +311,7 @@ class _ReposMixin(_ReposMixinBase):
             try:
                 returncode, _, stderr = await _run_git(
                     "fetch",
-                    "origin",
+                    *fetch_arguments,
                     cwd=cache_path,
                     timeout=remaining,
                     capture_stdout=False,
@@ -484,12 +498,12 @@ class _ReposMixin(_ReposMixinBase):
             if os.path.exists(target_dir):
                 return False, f"leftover repository copy {target_dir} could not be removed", None
 
-        # HPC 用 SSH（服务器有部署密钥），local 用 HTTPS（用户机器未必配 SSH key）
-        # 时间紧迫下的最优解；未来应由配置项统一控制 repo URL 协议
-        if is_local_mode:
-            repo_url = f"https://github.com/{namespace}/{repo_name}.git"
-        else:
-            repo_url = f"git@github.com:{namespace}/{repo_name}.git"
+        repo_url = github_repository_url(
+            namespace,
+            repo_name,
+            local=is_local_mode,
+            https_url=magnus_config["execution"].get("github_https_url"),
+        )
 
         # branch=None: 解析仓库默认分支（带 TTL 内存缓存，fanout 里只打一次 ls-remote）
         if branch is None:
@@ -557,6 +571,11 @@ class _ReposMixin(_ReposMixinBase):
                     if not await self._cache_has_commit(cache_path, commit_sha):
                         fetch_ok, fetch_error = await self._fetch_in_cache(
                             cache_path,
+                            repo_url=(
+                                repo_url
+                                if magnus_config["execution"].get("github_https_url")
+                                else None
+                            ),
                         )
                         if fetch_ok:
                             self._write_cache_fetch_ts(cache_path)
@@ -576,6 +595,11 @@ class _ReposMixin(_ReposMixinBase):
                     if cache_age > REPO_FRESHNESS_TTL_SECONDS:
                         fetch_ok, fetch_error = await self._fetch_in_cache(
                             cache_path,
+                            repo_url=(
+                                repo_url
+                                if magnus_config["execution"].get("github_https_url")
+                                else None
+                            ),
                         )
                         if fetch_ok:
                             self._write_cache_fetch_ts(cache_path)

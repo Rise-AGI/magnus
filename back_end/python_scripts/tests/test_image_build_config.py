@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import copy
 import logging
+import runpy
 from pathlib import Path
 import tempfile
 import typing
@@ -16,6 +17,7 @@ SERVER = Path(__file__).resolve().parents[2] / "server"
 
 def load_validator():
     namespace = {
+        "validate_github_https_url": runpy.run_path(str(SERVER / "_repository_transport.py"))["validate_github_https_url"],
         "Path": Path,
         "urlsplit": urlsplit,
         "logger": logging.getLogger("image_build_configuration_test"),
